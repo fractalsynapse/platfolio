@@ -1,40 +1,10 @@
-# Project specific
-/examples/
-/context/
-.dsh-*
-.codegraph/
-
-# Environment / secrets
+# Local secrets, when used
 .env
 .env.*
 !.env.example
 
-# Node.js
-node_modules/
-dist/
-*.tsbuildinfo
-.gyp-cache/
-.npm-cache/
-.pnpm-store/
-
-# Python
-__pycache__/
-*.pyc
-*.egg-info/
-.venv/
-
-# Docker
-.docker/
-
-# OS
+# Workstation artifacts
 .DS_Store
 Thumbs.db
-
-# IDE
-.vscode/
-.idea/
 *.swp
 *.swo
-
-# Documentation 
-/docs/.astro/
