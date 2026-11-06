@@ -1,120 +1,36 @@
 ---
 name: verification-before-completion
-description: Use when about to claim work is complete, fixed, or passing, before committing or creating PRs - requires running verification commands and confirming output before making any success claims; evidence before assertions always
+description: Use before claiming that work is correct, a check passed, acceptance is met or delivery is ready.
 ---
 
-# Verification Before Completion
+# Evidence before claims
 
-## Overview
+Follow the [project instructions](../../../AGENTS.md). Identify the precise claim and
+what observation would establish it. Run or inspect the applicable check at the relevant
+revision and environment; read its actual result, scope, failures and exit status when
+available. Report the claim with supporting evidence and limitations.
 
-**Core principle:** Evidence before claims, always.
+Match verification to the artifact:
 
-**Violating the letter of this rule is violating the spirit of this rule.**
+- Documentation and guidance: inspect the diff, facts, links, consistency and relevant
+  reader/decision scenarios. Do not invent a software build for prose.
+- Behavior: verify observable acceptance and relevant lower-level checks. Reproduce a
+  reported defect where feasible and confirm the correction addresses that symptom.
+- Runnable artifacts: exercise the real entry path and assembled configuration. Imports,
+  compilation and fake collaborators alone cannot prove installation or production wiring.
+- Delivery: inspect the actual candidate, required checks, review and applicable authority.
+  Readiness for integration, integration and publication are different claims.
 
-## The Iron Law
+Tests must control relevant state and avoid altering live user resources. Distinguish
+simulation, replay, local checks, hosted checks and live observations. Never present
+one as proving another. Inspect delegated results and artifacts rather than treating
+an agent's success message as independent evidence.
 
-```
-NO COMPLETION CLAIMS WITHOUT FRESH VERIFICATION EVIDENCE
-```
+Reuse evidence whose relevant inputs and environment are unchanged. Refresh affected
+checks after edits or new uncertainty; do not rerun an unchanged full suite for every
+status message. A passing focused check supports its stated scope, not the whole project.
 
-If you haven't run the verification command in this message, you cannot claim it passes.
-
-## The Gate Function
-
-```
-BEFORE claiming any status or expressing satisfaction:
-
-1. IDENTIFY: What command proves this claim?
-2. RUN: Execute the FULL command (fresh, complete)
-3. READ: Full output, check exit code, count failures
-4. VERIFY: Does output confirm the claim?
-   - If NO: State actual status with evidence
-   - If YES: State claim WITH evidence
-5. ONLY THEN: Make the claim
-
-Skip any step = lying, not verifying
-```
-
-## Common Failures
-
-| Claim | Requires | Not Sufficient |
-|-------|----------|----------------|
-| Tests pass | Test command output: 0 failures | Previous run, "should pass" |
-| Linter clean | Linter output: 0 errors | Partial check, extrapolation |
-| Build succeeds | Build command: exit 0 | Linter passing, logs look good |
-| Bug fixed | Test original symptom: passes | Code changed, assumed fixed |
-| Regression test works | Red-green cycle verified | Test passes once |
-| Agent completed | VCS diff shows changes | Agent reports "success" |
-| Requirements met | Line-by-line checklist | Tests passing |
-
-## Red Flags - STOP
-
-- Using "should", "probably", "seems to"
-- Expressing satisfaction before verification ("Great!", "Perfect!", "Done!", etc.)
-- About to commit/push/PR without verification
-- Trusting agent success reports
-- Relying on partial verification
-- Thinking "just this once"
-- Tired and wanting work over
-- **ANY wording implying success without having run verification**
-
-## Rationalization Prevention
-
-| Excuse | Reality |
-|--------|---------|
-| "Should work now" | RUN the verification |
-| "I'm confident" | Confidence ≠ evidence |
-| "Just this once" | No exceptions |
-| "Linter passed" | Linter ≠ compiler |
-| "Agent said success" | Verify independently |
-| "I'm tired" | Exhaustion ≠ excuse |
-| "Partial check is enough" | Partial proves nothing |
-| "Different words so rule doesn't apply" | Spirit over letter |
-
-## Key Patterns
-
-**Tests:**
-```
-✅ [Run test command] [See: 34/34 pass] "All tests pass"
-❌ "Should pass now" / "Looks correct"
-```
-
-**Regression tests (TDD Red-Green):**
-```
-✅ Write → Run (pass) → Revert fix → Run (MUST FAIL) → Restore → Run (pass)
-❌ "I've written a regression test" (without red-green verification)
-```
-
-**Build:**
-```
-✅ [Run build] [See: exit 0] "Build passes"
-❌ "Linter passed" (linter doesn't check compilation)
-```
-
-**Requirements:**
-```
-✅ Re-read plan → Create checklist → Verify each → Report gaps or completion
-❌ "Tests pass, phase complete"
-```
-
-**Agent delegation:**
-```
-✅ Agent reports success → Check VCS diff → Verify changes → Report actual state
-❌ Trust agent report
-```
-
-## When To Apply
-
-**ALWAYS before:**
-- ANY variation of success/completion claims
-- ANY expression of satisfaction
-- ANY positive statement about work state
-- Committing, PR creation, task completion
-- Moving to next task
-- Delegating to agents
-
-**Rule applies to:**
-- Exact phrases
-- Paraphrases and synonyms
-- Implications of success
-- ANY communication suggesting completion/correctness
+Check acceptance individually. Report failed, skipped, interrupted, unavailable and
+inapplicable checks explicitly. Missing required evidence blocks the corresponding
+readiness claim; an inapplicable check does not. Preserve failure evidence and existing
+work while establishing a baseline. Do not erase edits or lower acceptance to claim success.
