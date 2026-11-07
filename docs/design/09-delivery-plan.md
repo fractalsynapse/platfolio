@@ -42,9 +42,9 @@ D1–D11 in [01](01-product-and-decisions.md); constraints 1–9 in
 | P1 | Written answer from Railway on platfolio's model under the AUP ("ask us **before deploying**"; `abuse@railway.com`), plus whether OAuth consent by an outside account is intended, and whether hidden-template deploys by another account work | maintainer, via email | M2 design confirmation (not M0/M1 work) |
 | P2 | Written answer from Stripe on Agentic Provisioning Protocol multi-tenant orchestration + MoR for the Railway line item, and OD1 direction | maintainer | M4 shape |
 | P3 | Migrate any existing `railway.json`/`railway.toml` in TreeDX and ArcNexus to Railway IaC — **Config as Code stops being read on 2026-12-01 (hard cutoff)** and new services cannot opt in | platform authors | everything after M0; independent of platfolio |
-| P4 | platfolio repository/remote split from the scaffold repo, plus an application change/test/release policy (builds, migrations, deploy checks) | maintainer | M1 onward |
+| P4 | **Resolved 2026-11-07:** this repository became the platfolio project — remote rewired to `fractalsynapse/platfolio`, `main` pushed, `staging` created, `README.md` and [docs/MAINTAINING.md](../MAINTAINING.md) rewritten as an application change/test/release policy, starter documents removed (maintained in the scaffold repo) | maintainer | — |
 | P5 | Test resources: a throwaway Railway project, a scratch GitHub repo/org, Stripe test mode, an Apple Developer + Windows signing decision if an installer ships | maintainer | M0, M6 |
-| P6 | **OD6 and OD7** — Cordis vendoring and toolchain boundary | maintainer | M1 (kernel wiring), everything after |
+| P6 | **Resolved 2026-11-07:** OD6 and OD7 decided — Cordis vendored at `vendor/cordis` and managed by `scripts/vendor-cordis.ts`; platfolio meets the framework only at `packages/contracts`, with a kernel shell if its surface proves unstable | maintainer | — |
 | P7 | Node version pinned in the image and in CI. Cordis loader internals are gated on Node ≥ 22 with a shape difference at 24.12.0, and HMR wants `--expose-internals` or `node-addon-require-builtin`; production must run **without** that flag ([10 R3](10-cordis-kernel-and-extension-seams.md)) | platfolio | M1 onward |
 | P8 | **Done 2026-11-07:** `vendor/cordis` at `v4.0.0-rc.12` with license preserved, `vendor/cordis.lock.json`, and `scripts/vendor-cordis.ts` (`verify` is the CI gate). See [vendor/CORDIS.md](../../vendor/CORDIS.md) | platfolio | — |
 
@@ -62,17 +62,23 @@ Purpose: let the plan be wrong cheaply. Deliverable is an evidence file, not fea
 | E6 Template handover | A platfolio template deploy lands a working stack in the *clicking* account, `manifest.json`'s `required_inputs` renders a connect form, and a HIDDEN template's cross-account behavior is recorded as fact |
 | E7 Stripe lifecycle in test mode | Checkout → `client_reference_id` → entitlement event → provisioning; duplicate, out-of-order and failed webhooks delivered on purpose; `invoice.payment_failed` → past-due → unpaid observed; `automatic_tax` location failure observed as a provisioning gate |
 | E8 Fake provider | A stub built from the introspected schema (256 mutations/164 queries, available without a token) runs the controller offline; contract tests against real Railway kept separate and clearly labeled |
-| E9 Kernel fit | The vendored Cordis core + `plugin-loader` + `plugin-include` + `plugin-server` boot a hello-world control plane **without** `--expose-internals`, on the pinned Node, under our own toolchain; provider swap by configuration demonstrated with two fake `infra.provider` implementations resolved through `inject` |
+| E9 Kernel fit | **DONE 2026-11-07 — passed.** The vendored core + `plugin-loader` + `plugin-include` boot a control plane on Node 22.22.1 **without** `--expose-internals`; provider swap demonstrated by configuration alone (two profiles, `disabled` toggling the entry, identical code), `intercept()` per-scope config layering and clean `fiber.dispose()` both confirmed. Produced two new items: **E13** (published `@cordisjs/plugin-server@1.7.0` is built against the fork `@deepseek-ai/cordis@4.1.0`, not the core we vendored) and **E14** (a malformed profile boots without error). Evidence: [spikes/e9-cordis-kernel](../../spikes/e9-cordis-kernel/README.md) |
 | E10 Contract versioning | `packages/contracts` type surface diffed in CI, with the bump classification (additive → minor, tightening/removal → major) shown on a deliberately broken example; a provider that declares an unsatisfiable range prevents startup |
 | E11 Tier-2 boundary | A capability implemented as an out-of-process worker reaches the same contract over RPC, cannot read control-plane env or DB (asserted by test), and is pinned by image digest |
 | E12 Hot-swap safety | Under `plugin-hmr` in **dev only**: dispose/re-register a provider mid-job and confirm no leaked listener or half-applied step (relies on `ctx.effect()` reversal); document that production uses blue/green, not swap |
+| **E13 Core lineage — NEW, created by E9** | Decide deliberately whether platfolio tracks upstream `cordiverse/cordis` (what is vendored, `v4.0.0-rc.12`) or the fork `@deepseek-ai/cordis@4.1.0` (which the published `@cordisjs/*` plugins are built against). Verify the fork's license, provenance and relationship to upstream before any vendoring; then either (a) stay on upstream and author our own transport/provider adapters, or (b) re-vendor to the fork via `scripts/vendor-cordis.ts`. E9 evidence: `@cordisjs/plugin-server@1.7.0` fails route definition against upstream. Blocks M1 kernel wiring |
+| **E14 Profile validation — NEW, created by E9** | Boot with a deliberately malformed profile and confirm platfolio's own validator rejects it **before** any provider is dispatched (the framework tolerated it). Add the check to the control-plane boot sequence and to CI as a fixture |
 
-**Go/no-go:** proceed to M1 if **E1 or E6** shows a viable "tenant-owned project that platfolio can
-provision" path, **and E9** shows the vendored kernel booting under our toolchain without
-`--expose-internals`. If the provider experiments fail, the product becomes "software the tenant
-installs plus a support subscription" — a smaller, still-valid product. If only E9 fails, keep the
-contracts layer and revisit OD6 (npm dependency or a thin kernel) before writing any application
-code; this is the moment that answer costs one week instead of one quarter.
+**Go/no-go:** **E9 is satisfied** (kernel boots, provider swapped by configuration, no
+`--expose-internals`), so the remaining gate for M1 is **E1 or E6** — a viable "tenant-owned project
+that platfolio can provision" path. If both fail, the product becomes "software the tenant installs
+plus a support subscription" — a smaller, still-valid product, and this is the moment that answer
+costs one week instead of one quarter.
+
+**Added by E9:** M1 kernel wiring is also gated on **E13** (which core lineage we track — upstream vs
+the fork the published plugins expect) because it determines whether `@cordisjs/*` packages are usable
+at all. HTTP transport is not blocked: it moves to a kernel-owned `node:http` adapter either way.
+E14 lands as part of M1 step 1, since "it started" is not evidence that a profile is valid.
 
 ## Milestone 1 — contracts and the manifest are real (2–3 weeks)
 

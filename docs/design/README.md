@@ -28,8 +28,10 @@ Evidence base, not restated here:
   [research/distribution-feasibility-review.md](../research/distribution-feasibility-review.md) —
   primary-source detail with per-claim verification tags.
 - `.research/` at the repo root — raw evidence (introspected GraphQL schema, published template/env
-  JSON schemas, docs corpus). Useful for re-checking a claim; delete before the first application
-  commit if it should not enter project history.
+  JSON schemas, docs corpus). Gitignored; delete whenever you like, nothing in `docs/` depends on it.
+- [spikes/e9-cordis-kernel/](../../spikes/e9-cordis-kernel/README.md) — the Milestone 0 E9 experiment as
+  run (config, evidence, limits). Reproduce with `npx -y tsx driver.ts`; conclusions are summarized in
+  [10 § E9 result](10-cordis-kernel-and-extension-seams.md).
 
 ## Status of every claim here
 

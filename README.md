@@ -1,59 +1,75 @@
-# Scaffold
+# platfolio
 
-A portable starter for project instructions and agent skills. It helps an agent
-understand the work, preserve existing decisions and verify its claims without
-selecting an application architecture, language, framework, forge or branch model.
+An open, self-hostable control plane that sells **managed hosting of standalone platforms** — without
+reselling compute and without ever holding a tenant's secrets.
 
-## Adopt the starter
+**Status: design phase.** The architecture, contracts and delivery plan are written; there is no
+application code, no deployed resource, and no written approval from Railway or Stripe yet. The most
+recent verified step is the [E9 kernel experiment](spikes/e9-cordis-kernel/README.md), which confirmed
+the framework approach and falsified two assumptions.
 
-1. Inspect the target project's existing instructions, skill locations and policies.
-   Use the [initialization skill](.agents/skills/initialize-project/SKILL.md) when
-   setup is requested; discovery alone does not authorize copying or replacement.
-2. Reconcile [AGENTS.md](AGENTS.md) with existing guidance. Preserve applicable
-   project decisions and user work rather than overwriting an instruction file.
-3. Copy selected skill directories from [.agents/skills/](.agents/skills/) into
-   the destination supported by the target's agent environment. Keep every selected
-   skill's resources and include referenced skills or reconcile their procedures/links.
-   Skills refer to the project root's AGENTS.md; the root also links back to skills.
-   Update both directions for the actual directory name and relative depth, even when
-   only the directory name changes. Check discovery using the target's agent environment.
-4. Record project facts in the project's existing canonical location. The optional
-   [configuration guide](docs/project-configuration.md) identifies useful facts;
-   it does not choose values or require a new configuration format.
-5. Verify discovery, links and representative tasks before relying on the package.
-   Installation does not authorize dependencies, an application skeleton, publication
-   or changes to branch protections. Review the diff before adopting it.
+## What it does
 
-The portable package is AGENTS.md and the selected skills. This README, the
-changelog and maintenance/validation documents describe this repository; they are
-not instructions to impose on a target project. No runtime or dependency installation
-is needed to copy the Markdown package. Preserve applicable license and attribution
-requirements when distributing material; copying guidance does not relicense a project.
+A **team** subscribes to platfolio, then hosts one or more **platforms** (TreeDX, ArcNexus, …) as
+isolated projects **in the team's own infrastructure account**. platfolio holds the intent: the
+catalog of platforms, the entitlements, the provisioning state machine, the status view and the
+operations. The team's own CI holds the privileged credentials and the secrets, so platfolio can
+operate the stack without being able to read it — and the team can leave with it running.
 
-## Skills
+Three properties carry the whole design, and everything else follows from them:
 
-Load a skill for its actual task, not simply because it is installed.
-
-| Skill | Use |
+| Property | Why it is there |
 | --- | --- |
-| [brainstorming](.agents/skills/brainstorming/SKILL.md) | Resolve material uncertainty about intent or approach. |
-| [writing-plans](.agents/skills/writing-plans/SKILL.md) | Organize an agreed outcome with meaningful dependencies. |
-| [verification-before-completion](.agents/skills/verification-before-completion/SKILL.md) | Establish evidence for a precise claim. |
-| [systematic-debugging](.agents/skills/systematic-debugging/SKILL.md) | Reproduce and diagnose a failure before correcting it. |
-| [documentation-writer](.agents/skills/documentation-writer/SKILL.md) | Write or update task-focused documentation. |
-| [doc-coauthoring](.agents/skills/doc-coauthoring/SKILL.md) | Collaborate on a substantial document with unresolved content. |
-| [writing-skills](.agents/skills/writing-skills/SKILL.md) | Maintain useful, consistent agent guidance. |
-| [find-skills](.agents/skills/find-skills/SKILL.md) | Investigate a demonstrated capability gap. |
-| [initialize-project](.agents/skills/initialize-project/SKILL.md) | Adopt guidance in a selected project without replacing its choices. |
-| [release-workflow](.agents/skills/release-workflow/SKILL.md) | Apply the project's actual change and delivery policy. |
-| [github-ops](.agents/skills/github-ops/SKILL.md) | Optional adapter for authorized GitHub operations. |
-| [gh-cli](.agents/skills/gh-cli/SKILL.md) | Optional GitHub CLI fallback when needed. |
+| **Sell management, not compute** | Provider policy forbids reselling capacity, and project ceilings cap a platfolio-owned estate at ~50–100 tenants either way |
+| **Never hold a tenant secret or credential** | A platfolio compromise must not yield tenant data; verified implementable via Railway `preserve()`, name-only GitHub Actions secrets, and tenant-held tokens |
+| **Management through the tenant's own workflows** | Hands-off operation inside the customer's existing development process, where the exit path is a revocation rather than a migration |
 
-The GitHub adapters are optional. Other skills work with available tools and project
-policies; they do not require a forge, build system or particular agent host.
+## Where things are
 
-## Maintain this repository
+| Path | Contents |
+| --- | --- |
+| [docs/design/README.md](docs/design/README.md) | **Start here.** The design set: product and decision register, architecture, manifest specification, execution plane, identity, billing and lifecycle, interfaces, distribution, the Cordis kernel, and the delivery plan |
+| [docs/platfolio-feasibility.md](docs/platfolio-feasibility.md) | Verified provider constraints the designs are built against, with the reasoning that led to them |
+| [docs/research/](docs/research/) | Primary-source evidence per claim, tagged verified/unverified |
+| [vendor/CORDIS.md](vendor/CORDIS.md) | The vendored framework: provenance, boundary rules, runtime constraints, update procedure |
+| [scripts/vendor-cordis.ts](scripts/vendor-cordis.ts) | Vendor management tool — `verify` is the CI gate, `check` flags upstream drift |
+| [spikes/](spikes/e9-cordis-kernel/README.md) | Milestone 0 experiments as actually run — configuration, evidence, limits |
+| [AGENTS.md](AGENTS.md) | Shared working policy for this repository |
+| [.agents/skills/](.agents/skills/README.md) | Agent skills: 12 inherited from the scaffold package (left untouched) plus 4 platfolio-specific |
+| [docs/MAINTAINING.md](docs/MAINTAINING.md) | This project's change, review and release policy |
+| `.research/` | Research scratch corpus; gitignored, safe to delete |
 
-Use [maintenance policy](docs/MAINTAINING.md) for this repository's own issue,
-branch and review requirements. Use the [validation checklist](docs/validation.md)
-to check the package. These maintenance choices are not portable defaults.
+## Working in this repository
+
+```bash
+npx -y tsx scripts/vendor-cordis.ts verify          # vendored tree matches its lock (CI gate)
+npx -y tsx scripts/vendor-cordis.ts check           # non-zero when an upstream tag is newer
+cd spikes/e9-cordis-kernel && npx -y tsx driver.ts  # re-run the E9 experiment
+```
+
+There is no application build yet. Two environment facts about the current machine, not project
+requirements: its Node (v22.22.1) is built without TypeScript support, so `.ts` tooling runs through
+`tsx`; and `npm` needs `npm_config_cache="$PWD/.cache/npm"` because `~/.npm` is read-only here.
+
+Branch flow, review gates and the checks each change owes are in [docs/MAINTAINING.md](docs/MAINTAINING.md).
+
+## Before any of this is buildable
+
+1. **Milestone 0 gate** — experiments E1/E6 must show that a tenant-owned project can be provisioned
+   for the tenant ([09 § Milestone 0](docs/design/09-delivery-plan.md)).
+2. **Provider answers** — a written position from Railway on the operating model, and from Stripe on
+   Agentic Provisioning Protocol orchestration; both held by the maintainer.
+3. **OD9 core lineage** — the published plugin ecosystem is built against a forked core; decide whether
+   platfolio tracks upstream or the fork ([01 § OD9](docs/design/01-product-and-decisions.md)).
+4. **OD2 license** — platfolio code has **no license granted yet**, deliberately, because that decision
+   is open. The vendored framework keeps its own MIT license and notice at `vendor/cordis/LICENSE`.
+5. **Time-critical, independent of platfolio:** Railway's Config as Code (`railway.json`/`railway.toml`)
+   **stops being read on 2026-12-01**. Any platform repository still using it needs migrating.
+
+## Origin of this repository
+
+This project began from the [scaffold](https://github.com/fractalsynapse/scaffold) starter package for
+project instructions and agent skills. That starter lives in its own repository and is meant to be
+adopted afresh for new projects, so its maintenance and validation documents were not carried over
+here. The inherited [AGENTS.md](AGENTS.md) and the 12 starter skills remain as they are; platfolio
+guidance was added alongside them rather than by editing them.

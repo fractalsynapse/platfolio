@@ -1,0 +1,18 @@
+# E9 profile B: same kernel, opposite provider — only this file differs.
+- id: timer
+  name: '@cordisjs/plugin-timer'
+- id: server
+  name: '@cordisjs/plugin-server'
+  config:
+    host: 127.0.0.1
+    port: 0
+- id: alpha
+  name: ./src/provider-alpha.ts
+  disabled: true
+- id: beta
+  name: ./src/provider-beta.ts
+- id: probe
+  name: ./src/schema-probe.ts
+  config:
+    driver: beta
+    retries: 3

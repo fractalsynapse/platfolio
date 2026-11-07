@@ -77,9 +77,12 @@ directly looks tempting; it is not taken, for the same toolchain-coupling reason
 - `plugin-include` treats `!!js` in YAML as an expression node, so **config files containing `!!js`
   are trusted first-party input only** — never generated from tenant-supplied values, never stored in
   the database.
-- Ecosystem note: this clone is not the whole published set. `@cordisjs/plugin-server@1.7.0`
-  (HTTP + WS, typed routing, peer `cordis@^4.0.0-rc.6`) exists on npm but is **not** in this tree, so
-  decide what gets vendored when the kernel is wired (verify its surface in E9).
+- Ecosystem note (settled by E9, 2026-11-07): `@cordisjs/plugin-server@1.7.0` is **not usable with this
+  tree** — it registers but fails at the first route definition because it calls
+  `Service.resolveConfig`, which exists only in the fork `@deepseek-ai/cordis@4.1.0`. Its peer range
+  `^4.0.0-rc.6` permits the broken combination, so treat any `@cordisjs/*` plugin as unverified against
+  this core until proven. platfolio's HTTP surface is a kernel-owned `node:http` adapter, and the
+  lineage question is tracked as OD9 / E13 in the design set.
 - Upstream status to track: `cordis` is a release candidate whose README says "The API is not yet
   stable and may change without notice"; official documentation is "still under construction". The
   practical consequence is the boundary rule above, not a wait.

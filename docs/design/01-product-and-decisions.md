@@ -98,29 +98,62 @@ implemented); no WYSIWYK marketing-page builder (content collections and git aut
 SOC 2 audit program (the controls listed in [06](06-billing-and-lifecycle.md) are the start, not
 the attestation); no per-customer Keycloak inside platfolio's own account.
 
-## Open decisions
+## Decision log — previously open items
 
-- **OD1 — Merchant of record:** platfolio as MoR with Stripe Tax, or Stripe Managed Payments
-  (+3.5%, Stripe files in 80+ countries, no ad-hoc invoice items). Affects the invoice pipeline
-  shape; decide before building billing.
-- **OD2 — License:** Apache-2.0 core + `/proprietary` (keeps "open source" literally true) vs
-  BUSL/FSL with change date (stronger anti-rebrand, source-available). See
-  [08](08-distribution-and-licensing.md).
-- **OD3 — Secret relay policy for the connect flow:** does platfolio ever accept a secret value
-  (browser-encrypted, ciphertext-passthrough) for convenience, or is the strictly no-value path
-  the only supported one? Recommendation: v1 = no value ever crosses platfolio; revisit only if
-  onboarding friction measurably loses customers.
-- **OD4 — Repo topology for ArcNexus:** one repo for front+back, or two. Affects whether Railway's
-  multi-repo IaC `partial` ownership is needed on day one.
-- **OD5 — Preview environments:** in or out (they multiply per-tenant cost; `sleepApplication`
-  behavior means they wake with a possible 502).
-- **OD6 — Cordis ownership: DECIDED 2026-11-07 (vendor).** Vendored at `vendor/cordis`, tag
-  `v4.0.0-rc.12`, MIT license and notice preserved, managed by `scripts/vendor-cordis.ts`
-  (`verify` is the CI gate; local changes only as `vendor/patches/*.patch`). See D15 and
-  [vendor/CORDIS.md](../../vendor/CORDIS.md).
-- **OD7 — Toolchain boundary: DECIDED 2026-11-07 (meet at contracts).** platfolio keeps its own
-  build; nothing outside `packages/kernel` imports `cordis` or `@cordisjs/*`; add the
-  anti-corruption shell if the framework surface proves unstable. See D15.
-- **OD8 — Which seams are actually multi-implemented at MVP.** Recommendation: declare all twelve,
-  implement a second only for `infra.provider`, `render.target` and `provision.flow`
-  (`import-existing`), per the rule of two ([10 § The seams](10-cordis-kernel-and-extension-seams.md)).
+**Accepted 2026-11-07.** The maintainer accepted the recommended answers to OD1, OD3, OD4, OD5, OD6a
+and OD8, and to the identity questions OI1–OI3 (now recorded as decisions in
+[05 § Identity decisions](05-identity.md)). These are decisions now, not options. Two remain open:
+**OD2 (license)** and **OD9 (core lineage, created by E9)**. The Railway and Stripe written answers
+(P1, P2) are handled directly by the maintainer; they gate milestones rather than this document.
+
+- **OD1 — Merchant of record: platfolio is the MoR.** Standard Stripe Billing, **no Connect**, flat SKUs
+  on `billing_mode=classic`, Stripe Tax with self-managed registrations plus `tax_id_collection` for EU
+  B2B reverse charge. Revisit [Stripe Managed Payments](https://docs.stripe.com/payments/managed-payments)
+  (+3.5%, Stripe files in 80+ countries, incompatible with Connect, no ad-hoc invoice items) before
+  selling into many consumer jurisdictions — harmless under D1 because platfolio never passes usage
+  through. Consequence: the invoice pipeline assumes platfolio-created subscriptions.
+- **OD3 — Secret relay: not offered.** No secret value crosses platfolio in v1 — no browser-side
+  ciphertext relay, no convenience path. Presence-by-name plus behavioral verification only.
+  Consequence: onboarding includes a checklist the tenant fills in their own systems, and support is
+  tenant-executed ([04](04-execution-plane-github-workflows.md)).
+- **OD4 — ArcNexus topology: one repository for MVP.** Railway's multi-repo `partial` ownership stays a
+  documented extension, not a day-one requirement. Revisit if frontend and backend ship independently.
+- **OD5 — Preview environments: out of MVP.** Production plus optional staging, staging sleep-by-default
+  or opt-in, because environments do not share runtime and each enabled environment doubles billable
+  footprint. Ephemeral environments are a later, priced feature.
+- **OD6a — Consuming the vendored framework: publish patched forks under our own scope** (e.g.
+  `@platfolio/cordis`) built from `vendor/cordis`, consumed by exact version. Rejected: making `vendor/`
+  a workspace member — that drags the framework toolchain into platfolio's tree, contrary to OD7. For
+  the E9 spike the published upstream `4.0.0-rc.12` artifacts stand in, which is sound **only** because
+  the vendored tree is an unpatched checkout of that tag; the moment `vendor/patches/` is non-empty the
+  spike must use our own packages. Evidence in
+  [10 § E9 result](10-cordis-kernel-and-extension-seams.md).
+- **OD8 — Seams: declare all twelve, multi-implement two.** Every seam ships an interface plus a
+  conformance-tested in-memory or local **test double** — the cheap second implementation that proves the
+  interface is not provider-shaped. A second **real** implementation ships only for `render.target`
+  (Railway IaC + Compose, both already required) and `provision.flow` (`standard-saas` +
+  `import-existing`, the path by which a tenant migrates to us). `infra.provider` keeps one real
+  implementation until a named customer needs another.
+
+**OD6 and OD7** were decided earlier and are recorded as D15 in the register above: vendored at
+`vendor/cordis` (`v4.0.0-rc.12`, MIT notice preserved, managed by `scripts/vendor-cordis.ts` with
+`verify` as the CI gate and local changes only as `vendor/patches/*.patch`), meeting the framework
+only at `packages/contracts` with an anti-corruption shell in `packages/kernel` if its surface proves
+unstable. Mechanics in [vendor/CORDIS.md](../../vendor/CORDIS.md).
+
+- **OD9 — Core lineage: OPEN, created by the E9 experiment.** E9 confirmed the vendored core boots and
+  swaps providers by configuration, but showed the published `@cordisjs/plugin-server@1.7.0` requires a
+  symbol (`Service.resolveConfig`) that exists only in the fork **`@deepseek-ai/cordis@4.1.0`**, not in
+  upstream `cordiverse/cordis`. Choose one: **(a) stay on upstream cordiverse/cordis** (what is
+  vendored today) and author platfolio's own transport and provider adapters — self-contained, no
+  inherited plugin supply chain, more code we own; or **(b) track the fork**, gaining working published
+  plugins at the cost of depending on a third party's divergence, whose license and provenance must be
+  verified **before** any vendoring change. Recommendation: **(a) for v1** — HTTP and GitHub/Stripe
+  clients are small, well-understood surfaces we would wrap anyway behind `packages/kernel`, and the
+  boundary in D15 makes the fork decision reversible later. Evidence and consequences:
+  [10 § E9 result](10-cordis-kernel-and-extension-seams.md), [E13](09-delivery-plan.md).
+
+  Provenance check (2026-11-07, informs E13): the fork is MIT-licensed, but its `repository.url` points
+  at `github.com/deepseek-ai/deepseek-harness` and `github.com/deepseek-ai/cordis` returns 404 — so
+  option (b) means tracking a framework copy maintained **inside another product's repository**, at
+  version `4.1.0` (ahead of the vendored `4.0.0-rc.12`). That strengthens the recommendation for (a).
