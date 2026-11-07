@@ -1,0 +1,46 @@
+name: Development
+# Feature branches and pull requests targeting staging. Fast gates only: documentation integrity,
+# repo-tooling types, and vendored-tree integrity. The E9 experiment is not run here — it needs a
+# package install; integration and production run it.
+on:
+  push:
+    branches-ignore:
+      - main
+      - staging
+  pull_request:
+    branches:
+      - staging
+
+permissions:
+  contents: read
+
+concurrency:
+  group: development-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  project-checks:
+    name: Project checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Documentation links, anchors and skill metadata
+        run: npx -y tsx scripts/check-project.ts
+
+      - name: Vendored tree matches its lock
+        run: npx -y tsx scripts/vendor-cordis.ts verify
+
+      - name: Type-check repository tooling
+        run: npx -y -p typescript -p @types/node tsc --noEmit --strict --target es2023 --module nodenext --moduleResolution nodenext --types node --skipLibCheck scripts/check-project.ts scripts/vendor-cordis.ts
+
+      - name: Upstream drift (informational, never blocking)
+        run: |
+          export npm_config_cache="$RUNNER_TEMP/npmcache"
+          npx -y tsx scripts/vendor-cordis.ts check --quiet \
+            && echo "vendored ref is newest upstream tag" \
+            || echo "::notice::a newer upstream tag exists; run plan/apply when convenient"

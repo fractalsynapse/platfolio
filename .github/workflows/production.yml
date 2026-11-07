@@ -1,0 +1,140 @@
+name: Production
+# Runs on every push to main (the production gate) and on release tags (v*).
+#
+# Tag rule (docs/MAINTAINING.md): a tag may not be cut on a commit that has not passed this workflow.
+# On a tag push, `release-gate` therefore requires an EARLIER successful run of this same workflow for
+# the identical commit whose ref was refs/heads/main — the tag's own run does not satisfy it.
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: production-${{ github.ref == 'refs/heads/main' && 'main' || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    name: Production checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Documentation links, anchors and skill metadata
+        run: npx -y tsx scripts/check-project.ts
+
+      - name: Vendored tree matches its lock
+        run: npx -y tsx scripts/vendor-cordis.ts verify
+
+      - name: Type-check repository tooling
+        run: npx -y -p typescript -p @types/node tsc --noEmit --strict --target es2023 --module nodenext --moduleResolution nodenext --types node --skipLibCheck scripts/check-project.ts scripts/vendor-cordis.ts
+
+  experiment-e9:
+    name: E9 kernel experiment
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - name: Install spike dependencies from its lockfile
+        working-directory: spikes/e9-cordis-kernel
+        run: npm ci --no-audit --no-fund
+      - name: Run E9
+        working-directory: spikes/e9-cordis-kernel
+        run: npx -y tsx driver.ts
+
+  release-gate:
+    name: Release tag policy
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [gate, experiment-e9]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve the tagged commit
+        id: commit
+        run: echo "sha=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Require a prior passing production run of this commit on main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.commit.outputs.sha }}
+        run: |
+          # 404 is a legitimate answer here (this workflow file was never on main for that commit),
+          # so it must fall through to the explanatory failure rather than a raw API error.
+          runs=$(gh api "repos/${{ github.repository }}/actions/workflows/production.yml/runs?head_sha=$SHA&per_page=100" \
+            --paginate --jq '[.workflow_runs[] | select(.ref == "refs/heads/main" and .event == "push" and .status == "completed" and .conclusion == "success")] | length' 2>/dev/null || echo 0)
+          case "$runs" in (''|*[!0-9]*) runs=0;; esac
+          echo "matching successful main-branch Production runs for $SHA: $runs"
+          if [ "$runs" -lt 1 ]; then
+            echo "::error::refusing to release: commit $SHA has no passing Production run on main." \
+              "Cut tags only after this workflow has succeeded for that exact commit on main."
+            exit 1
+          fi
+
+      - name: Require a license before any release identity exists
+        run: |
+          if [ ! -f LICENSE ] && [ ! -f LICENSE.md ] && [ ! -f LICENSE.txt ]; then
+            echo "::error::no license file at the repository root. Decision OD2 is open, so platfolio code" \
+              "carries no grant and nothing may be published under a release identity yet." \
+              "Decide OD2 and commit a LICENSE before tagging."
+            exit 1
+          fi
+          echo "license present: continuing"
+
+  release-notes:
+    name: Assemble release provenance
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [release-gate]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Record identity and provenance
+        run: |
+          mkdir -p out
+          {
+            echo "# Release ${{ github.ref_name }}"
+            echo
+            echo "- tag: \`${{ github.ref_name }}\`"
+            echo "- commit: \`$(git rev-parse HEAD)\`"
+            echo "- created: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "- previous release: $(git tag --list 'v*' --sort=-v:refname | sed -n 2p)"
+            echo
+            echo "## Changes since previous tag"
+            echo
+            prev=$(git tag --list 'v*' --sort=-v:refname | sed -n 2p)
+            if [ -n "$prev" ]; then git log --no-merges --pretty='- %s (%h)' "$prev..HEAD"; else git log --no-merges --pretty='- %s (%h)' -n 40; fi
+          } > out/RELEASE_NOTES.md
+          cat out/RELEASE_NOTES.md
+
+      - name: Checksum the tree contents that the tag freezes
+        run: |
+          # Deterministic manifest of tracked files at this commit; excludes dependency and scratch trees.
+          git ls-files -z | sort -z | xargs -0 sha256sum > out/SOURCE_SHA256SUMS.txt
+          { sha256sum out/SOURCE_SHA256SUMS.txt; } > out/MANIFEST_SHA256SUMS.txt
+          tail -3 out/MANIFEST_SHA256SUMS.txt
+
+      - name: Upload provenance artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-provenance-${{ github.ref_name }}
+          path: out/
+          if-no-files-found: error
+
+      - name: Publication boundary
+        run: |
+          echo "This workflow prepares and proves a release identity; it does not publish one."
+          echo "Creating a GitHub Release, uploading installers, or announcing availability are separate"
+          echo "actions requiring the maintainer's authority (docs/MAINTAINING.md)."

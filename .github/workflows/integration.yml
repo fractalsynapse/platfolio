@@ -1,0 +1,65 @@
+name: Integration
+# Pushes to staging (integration results) and pull requests targeting main (pre-production review).
+# Adds the E9 experiment to the development gates, because staging is where the candidate must be
+# proven before a human decides on main.
+on:
+  push:
+    branches:
+      - staging
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: integration-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  project-checks:
+    name: Project checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Documentation links, anchors and skill metadata
+        run: npx -y tsx scripts/check-project.ts
+
+      - name: Vendored tree matches its lock
+        run: npx -y tsx scripts/vendor-cordis.ts verify
+
+      - name: Type-check repository tooling
+        run: npx -y -p typescript -p @types/node tsc --noEmit --strict --target es2023 --module nodenext --moduleResolution nodenext --types node --skipLibCheck scripts/check-project.ts scripts/vendor-cordis.ts
+
+  experiment-e9:
+    name: E9 kernel experiment
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Install spike dependencies from its lockfile
+        working-directory: spikes/e9-cordis-kernel
+        run: npm ci --no-audit --no-fund
+
+      - name: Run E9 (boots without --expose-internals; provider selected by configuration)
+        working-directory: spikes/e9-cordis-kernel
+        run: npx -y tsx driver.ts
+
+      - name: Confirm the spike ran without privileged Node internals
+        working-directory: spikes/e9-cordis-kernel
+        run: |
+          node -e '
+            const flag = process.execArgv.includes("--expose-internals");
+            if (flag) { console.error("--expose-internals must not be present in CI"); process.exit(1); }
+            console.log("confirmed: no --expose-internals");
+          '
