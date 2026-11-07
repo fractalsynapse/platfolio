@@ -1,0 +1,88 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  # Each push to `main` gets its own group, so every commit there is built and published.
+  group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.run_id || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v6
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 26
+      - name: Install Corepack
+        run: npm install -g --force corepack@latest
+      - name: Enable Corepack
+        run: corepack enable
+      - name: Install
+        run: yarn --no-immutable
+      - name: Lint
+        run: yarn lint
+
+  build:
+    runs-on: ubuntu-latest
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v6
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 26
+      - name: Install Corepack
+        run: npm install -g --force corepack@latest
+      - name: Enable Corepack
+        run: corepack enable
+      - name: Install
+        run: yarn --no-immutable
+      - name: Build (1)
+        run: yarn build core
+      - name: Build (2)
+        run: yarn build
+      - name: Publish
+        if: >-
+          github.event_name == 'push' &&
+          contains(fromJson('["refs/heads/main"]'), github.ref)
+        run: |-
+          yarn config set npmPublishProvenance true
+          yarn config set npmRegistryServer https://registry.npmjs.org/
+          yarn yakumo publish
+
+  test:
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node-version: [24, 26]
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v6
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node-version }}
+      - name: Install Corepack
+        run: npm install -g --force corepack@latest
+      - name: Enable Corepack
+        run: corepack enable
+      - name: Install
+        run: yarn --no-immutable
+      - name: Unit Test
+        run: yarn test:json

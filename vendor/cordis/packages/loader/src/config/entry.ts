@@ -1,0 +1,195 @@
+import { Context, Fiber, Inject, ValidationError } from 'cordis'
+import { deepEqual, isNullable } from 'cosmokit'
+import { Loader } from '../index.ts'
+import { EntryGroup } from './group.ts'
+import { EntryTree, ModuleNotFoundError } from './tree.ts'
+import { evaluate, formatIssues, formatLocation, isJsExpr, relocate } from './utils.ts'
+
+export interface EntryOptions {
+  id: string
+  name: string
+  config?: any
+  group?: boolean | null
+  disabled?: boolean | null
+  inject?: Inject | null
+}
+
+function takeEntries(object: {}, keys: string[]) {
+  const result: [string, any][] = []
+  for (const key of keys) {
+    if (!(key in object)) continue
+    result.push([key, object[key]])
+    delete object[key]
+  }
+  return result
+}
+
+function sortKeys<T extends {}>(object: T, prepend = ['id', 'name'], append = ['config']): T {
+  const part1 = takeEntries(object, prepend)
+  const part2 = takeEntries(object, append)
+  const rest = takeEntries(object, Object.keys(object)).sort(([a], [b]) => a.localeCompare(b))
+  return Object.assign(object, Object.fromEntries([...part1, ...rest, ...part2]))
+}
+
+export class Entry {
+  static readonly key = Symbol.for('cordis.entry')
+
+  public ctx: Context
+  public fiber?: Fiber
+  public parent!: EntryGroup
+  // safety: call `entry.update()` immediately after creating an entry
+  public options = {} as EntryOptions
+  public subgroup?: EntryGroup
+  public subtree?: EntryTree
+
+  _initTask?: Promise<void> | undefined
+
+  constructor(public loader: Loader) {
+    this.ctx = loader.ctx.extend({ [Entry.key]: this })
+    this.context.emit('loader/entry-init', this)
+  }
+
+  static merge(target: Partial<EntryOptions>, options: Partial<EntryOptions>) {
+    for (const [key, value] of Object.entries(options)) {
+      if (isNullable(value)) {
+        delete target[key]
+      } else {
+        target[key] = value
+      }
+    }
+    return target
+  }
+
+  get context(): Context {
+    return this.ctx
+  }
+
+  get id() {
+    let id = this.options.id
+    if (this.parent.tree.ctx.fiber.entry) {
+      id = this.parent.tree.ctx.fiber.entry.id + EntryTree.sep + id
+    }
+    return id
+  }
+
+  private _resolveDisabled(options: EntryOptions): boolean {
+    return isJsExpr(options.disabled)
+      ? Boolean(this.evaluate(options.disabled.__jsExpr))
+      : Boolean(options.disabled)
+  }
+
+  get disabled() {
+    // group is always enabled
+    if (this.options.group) return false
+    let entry: Entry | undefined = this
+    do {
+      if (this._resolveDisabled(entry.options)) return true
+      entry = entry.parent.ctx.fiber.entry
+    } while (entry)
+    return false
+  }
+
+  evaluate(expr: string) {
+    return evaluate(this.ctx, expr)
+  }
+
+  private async _patchContext(diff: string[]) {
+    await this.context.waterfall('loader/patch-context', this, async () => {
+      Object.setPrototypeOf(this.ctx, this.parent.ctx)
+
+      if (this.fiber?.uid && (diff.includes('config') || this.options.group)) {
+        await this.fiber.update(this.options.config, true)
+      }
+    })
+  }
+
+  async refresh() {
+    if (this.fiber) return
+    if (this.disabled) return
+    await this.init()
+  }
+
+  async update(options: Partial<EntryOptions>, create = false, force = false) {
+    const legacy = { ...this.options }
+
+    // step 1: update options
+    if (create) {
+      this.options = options as EntryOptions
+    } else {
+      Entry.merge(this.options, options)
+    }
+    sortKeys(this.options)
+
+    // step 2: execute
+    if (this.disabled) {
+      this.fiber?.dispose()
+      return
+    }
+
+    // step 3: check if options are changed
+    if (this.fiber?.uid) {
+      const diff = Object
+        .keys({ ...this.options, ...legacy })
+        .filter(key => !deepEqual(this.options[key], legacy[key]))
+      if (!diff.length && !force) return
+      this.context.emit('loader/partial-dispose', this, legacy, true)
+      await this._patchContext(diff)
+    } else {
+      await this.init()
+    }
+  }
+
+  getLocation(path: PropertyKey[] = []) {
+    return this.parent.tree.getLocation(this.options.id, path)
+  }
+
+  getOuterStack = () => this.parent.getOuterStack(this.options.id)
+
+  traceValidation(error: ValidationError) {
+    const frames = this.getOuterStack()
+    // an entry outside any source has nothing to point to
+    if (!frames.length) return
+    const issues = error.issues.map(({ message, path }) => ({ message, path: ValidationError.normalizePath(path) }))
+    const locate = (path: PropertyKey[]) => this.getLocation(['config', ...path])
+    relocate(error, formatIssues('invalid config', issues, locate), frames)
+  }
+
+  private _reportImport(error: unknown) {
+    if (error instanceof ModuleNotFoundError) {
+      const location = this.getLocation(['name'])
+      if (location) {
+        // before Node's hints
+        const [first, ...hints] = error.message.split('\n')
+        relocate(error, [`${first} (at name, ${formatLocation(location)})`, ...hints].join('\n'), this.getOuterStack())
+      }
+    }
+    this.ctx.logger.error(error)
+  }
+
+  async init() {
+    try {
+      await (this._initTask ??= this._init())
+    } finally {
+      this._initTask = undefined
+    }
+    // failures are already reported by the fiber; we only need it to settle
+    this.fiber?.await().catch(() => {}).finally(() => {
+      if (this.loader.getTasks().length) return
+      this.ctx.reflect.notify(['loader'])
+    })
+  }
+
+  private async _init() {
+    let exports: any
+    try {
+      exports = await this.parent.tree.import(this.options.name, this.getOuterStack)
+    } catch (error) {
+      this._reportImport(error)
+      return
+    }
+    const plugin = this.loader.unwrapExports(exports)
+    await this._patchContext([])
+    this.loader.showLog(this, 'apply')
+    this.fiber = this.ctx.registry.plugin(plugin, this.options.config, this.getOuterStack)
+  }
+}

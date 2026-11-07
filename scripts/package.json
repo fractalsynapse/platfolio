@@ -1,0 +1,5 @@
+{
+  "type": "module",
+  "private": true,
+  "//": "Repository maintenance scripts are ESM-only; this file exists so tsc and Node treat *.ts in this directory as ES modules."
+}

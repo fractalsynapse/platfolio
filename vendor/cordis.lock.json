@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "upstream": "https://github.com/cordiverse/cordis",
+  "license": "MIT",
+  "licenseHolder": "Copyright (c) 2021-present Shigma",
+  "ref": "v4.0.0-rc.12",
+  "commit": "01b396240ce47cf2779c40af9bc445bb748fe112",
+  "treeHash": "0943a732ab0a834251fdaa8867dc9947a145a25ede9aad3a3222d47a8672136e",
+  "fileCount": 152,
+  "vendoredAt": "2026-11-07T20:48:07.257Z",
+  "updatedAt": "2026-11-07T20:48:36.095Z",
+  "patches": []
+}
