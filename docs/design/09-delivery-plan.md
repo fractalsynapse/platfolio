@@ -44,6 +44,9 @@ D1–D11 in [01](01-product-and-decisions.md); constraints 1–9 in
 | P3 | Migrate any existing `railway.json`/`railway.toml` in TreeDX and ArcNexus to Railway IaC — **Config as Code stops being read on 2026-12-01 (hard cutoff)** and new services cannot opt in | platform authors | everything after M0; independent of platfolio |
 | P4 | platfolio repository/remote split from the scaffold repo, plus an application change/test/release policy (builds, migrations, deploy checks) | maintainer | M1 onward |
 | P5 | Test resources: a throwaway Railway project, a scratch GitHub repo/org, Stripe test mode, an Apple Developer + Windows signing decision if an installer ships | maintainer | M0, M6 |
+| P6 | **OD6 and OD7** — Cordis vendoring and toolchain boundary | maintainer | M1 (kernel wiring), everything after |
+| P7 | Node version pinned in the image and in CI. Cordis loader internals are gated on Node ≥ 22 with a shape difference at 24.12.0, and HMR wants `--expose-internals` or `node-addon-require-builtin`; production must run **without** that flag ([10 R3](10-cordis-kernel-and-extension-seams.md)) | platfolio | M1 onward |
+| P8 | **Done 2026-11-07:** `vendor/cordis` at `v4.0.0-rc.12` with license preserved, `vendor/cordis.lock.json`, and `scripts/vendor-cordis.ts` (`verify` is the CI gate). See [vendor/CORDIS.md](../../vendor/CORDIS.md) | platfolio | — |
 
 ## Milestone 0 — provider facts and falsifiable experiments (3–5 days)
 
@@ -59,25 +62,38 @@ Purpose: let the plan be wrong cheaply. Deliverable is an evidence file, not fea
 | E6 Template handover | A platfolio template deploy lands a working stack in the *clicking* account, `manifest.json`'s `required_inputs` renders a connect form, and a HIDDEN template's cross-account behavior is recorded as fact |
 | E7 Stripe lifecycle in test mode | Checkout → `client_reference_id` → entitlement event → provisioning; duplicate, out-of-order and failed webhooks delivered on purpose; `invoice.payment_failed` → past-due → unpaid observed; `automatic_tax` location failure observed as a provisioning gate |
 | E8 Fake provider | A stub built from the introspected schema (256 mutations/164 queries, available without a token) runs the controller offline; contract tests against real Railway kept separate and clearly labeled |
+| E9 Kernel fit | The vendored Cordis core + `plugin-loader` + `plugin-include` + `plugin-server` boot a hello-world control plane **without** `--expose-internals`, on the pinned Node, under our own toolchain; provider swap by configuration demonstrated with two fake `infra.provider` implementations resolved through `inject` |
+| E10 Contract versioning | `packages/contracts` type surface diffed in CI, with the bump classification (additive → minor, tightening/removal → major) shown on a deliberately broken example; a provider that declares an unsatisfiable range prevents startup |
+| E11 Tier-2 boundary | A capability implemented as an out-of-process worker reaches the same contract over RPC, cannot read control-plane env or DB (asserted by test), and is pinned by image digest |
+| E12 Hot-swap safety | Under `plugin-hmr` in **dev only**: dispose/re-register a provider mid-job and confirm no leaked listener or half-applied step (relies on `ctx.effect()` reversal); document that production uses blue/green, not swap |
 
-**Go/no-go:** proceed to M1 if E1 or E6 shows a viable "tenant-owned project that platfolio can
-provision" path. If both fail, the product becomes "software the tenant installs plus a support
-subscription" — a smaller, still-valid product, and this is the moment that answer costs one week
-instead of one quarter.
+**Go/no-go:** proceed to M1 if **E1 or E6** shows a viable "tenant-owned project that platfolio can
+provision" path, **and E9** shows the vendored kernel booting under our toolchain without
+`--expose-internals`. If the provider experiments fail, the product becomes "software the tenant
+installs plus a support subscription" — a smaller, still-valid product. If only E9 fails, keep the
+contracts layer and revisit OD6 (npm dependency or a thin kernel) before writing any application
+code; this is the moment that answer costs one week instead of one quarter.
 
-## Milestone 1 — the manifest is a real contract (1–2 weeks)
+## Milestone 1 — contracts and the manifest are real (2–3 weeks)
 
-Boundary: `packages/manifest` public API (schema, validation, renderers) is what everything else
-depends on; freeze it deliberately and review it like an interface.
+Two boundaries are frozen in this milestone, and both are worth the review time because everything
+later depends on them: `packages/contracts` (capability interfaces, config schemas, conformance
+suites, version derivation) and `packages/manifest` (schema, validation, renderers).
 
-1. Record intent: schema draft + the two worked examples from [03 § Worked examples](03-manifest-spec.md)
-   as fixtures before writing a renderer.
-2. Schema and archetypes with validation rules, including the secret-name lint (rejects any field
+1. Kernel skeleton: vendored Cordis (OD6), our own build (OD7), pinned Node (P7), `plugin-server`
+   routes, one capability registered by name with a StandardSchema config, and the CI contract-diff
+   gate from E10 wired in on day one — before there are three providers to retrofit.
+2. Record intent: manifest schema draft + the two worked examples from
+   [03 § Worked examples](03-manifest-spec.md) as fixtures before writing a renderer.
+3. Schema and archetypes with validation rules, including the secret-name lint (rejects any field
    shaped like a value) and the domain wildcard/subdomain conflict rule.
-3. Renderer → Railway IaC (`railway.ts`) and → Compose, from one shared intermediate.
-4. CI gates as the acceptance mechanism: schema validation, `railway config plan` against the scratch
+4. Renderer → Railway IaC (`railway.ts`) and → Compose, from one shared intermediate.
+5. CI gates as the acceptance mechanism: schema validation, `railway config plan` against the scratch
    project, compose bring-up smoke test, `railway.json`-present detection.
-5. Platfolio's own stack expressed as a manifest, so every later renderer change must not break
+6. `infra.provider` interface plus the **provider conformance suite**, run against Railway as the first
+   implementation and against the E8 fake as a second — this is the seam that proves the abstraction
+   earns its cost.
+7. Platfolio's own stack expressed as a manifest, so every later renderer change must not break
    platfolio hosting itself.
 
 *Accept:* TreeDX manifest renders to both targets; the Railway plan is clean on the scratch project;

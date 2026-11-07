@@ -61,12 +61,29 @@ status publish                  commit statuses / check runs so results appear o
    - `PLATFOLIO.md` (what the workflow does, which secrets must exist, how to remove platfolio).
    The customer reviews and merges. **Branch protection is a feature here**: a human approves what
    runs with their credentials.
-3. **Connect Railway** — the customer either (a) creates a **project token per environment** in
-   their Railway project and stores each as a GitHub **environment secret** (`RAILWAY_TOKEN_STAGING`,
-   `RAILWAY_TOKEN_PRODUCTION`) with required-reviewer protection on the production environment, or
-   (b) authorizes platfolio's Railway OAuth app to one project, and platfolio stores only a refresh
-   token — used solely by *the customer's runner* via a short-lived exchange, never for
-   platfolio-initiated mutations. Option (a) is v1 (D2).
+3. **Connect Railway** — the customer creates a **project token per environment**
+   (`projectTokenCreate(projectId, environmentId)`, available on all plans) and stores each as a
+   GitHub **environment secret** (`RAILWAY_TOKEN_STAGING`, `RAILWAY_TOKEN_PRODUCTION`), with
+   required-reviewer protection on the production environment. platfolio stores **no** Railway
+   credential of any kind.
+
+   **Consistency fix, 2026-11-07 — why the obvious alternative is rejected.** An earlier draft of
+   this step offered (b) "authorize platfolio's Railway OAuth app and store a refresh token that only
+   the runner uses." That is not safe, and the reason is a verified provider fact: **Railway tokens
+   have no operation-level scopes** — an environment- or project-scoped credential can still call
+   `variables(...)` and read secret values, and OAuth consent grants a *role* (`project:admin` or
+   `project:member`), not a capability subset. So "platfolio holds a Railway token but promises not to
+   read variables" is a **policy**, not an architecture, and it contradicts decision D4. Under D4 the
+   acceptable shapes are:
+   - **token custody with the tenant's CI** (chosen for v1), or
+   - a **credential broker** service that holds the provider token and exposes a narrower protocol
+     which refuses secret-valued calls — future work, and necessarily out-of-process (Tier 2 in
+     [10](10-cordis-kernel-and-extension-seams.md)), or
+   - platfolio holding **read-only, non-secret** observability credentials, where such exist.
+
+   Railway OAuth stays useful for **P0 login** ("Login with Railway" for platfolio's own users —
+   a different concern from infrastructure access) and for a future broker, not for granting platfolio
+   mutation rights.
 4. **Set secrets** — platfolio shows the required-secret checklist from the manifest. The customer
    fills values in their Railway project (or as GitHub environment secrets that the runner writes
    with `variableUpsert`). platfolio observes only names and health.

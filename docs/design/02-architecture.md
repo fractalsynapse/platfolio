@@ -3,9 +3,13 @@
 Part of the design set: [product](01-product-and-decisions.md) ·
 [manifest](03-manifest-spec.md) · [execution plane](04-execution-plane-github-workflows.md) ·
 [identity](05-identity.md) · [billing and lifecycle](06-billing-and-lifecycle.md) ·
-[interfaces](07-interfaces-api-mcp-mobile.md) · [distribution](08-distribution-and-licensing.md).
+[interfaces](07-interfaces-api-mcp-mobile.md) · [distribution](08-distribution-and-licensing.md) ·
+[delivery plan](09-delivery-plan.md) · [Cordis kernel](10-cordis-kernel-and-extension-seams.md) ·
+[UI and pages](11-ui-components-and-page-model.md).
 
-Status: proposed. Constraints are verified in [feasibility](../platfolio-feasibility.md);
+Status: proposed. Revised 2026-11-07 for D12: the control plane is a **Cordis kernel**, and the web
+framework choice in an earlier draft of this file is superseded by `@cordisjs/plugin-server`.
+Constraints are verified in [feasibility](../platfolio-feasibility.md);
 `V`/`P`/`U` tags below carry through from it.
 
 ## The one idea
@@ -27,20 +31,35 @@ config is declared; secret values are preserved by name.
 
 ## Control plane
 
-One deployable service, plus the Astro site. pnpm monorepo:
+One deployable service, plus the Astro site. **Revised 2026-11-07 for D12: the service is a Cordis
+kernel** — a root `Context` whose capabilities are `Service` implementations registered by plugins,
+resolved by name through `inject`, configured by StandardSchema, and layered per tenant with
+`intercept`/`isolate`. Transport is `@cordisjs/plugin-server` (HTTP + WS, typed routes) rather than a
+hand-picked web framework. The full extension model, seam list and risks are in
+[10](10-cordis-kernel-and-extension-seams.md); the UI half is in
+[11](11-ui-components-and-page-model.md).
 
 ```
 apps/site            Astro: static marketing + content, SSR dashboard routes + React islands
-apps/api             Fastify/Hono service: REST API (OpenAPI), webhook ingress, job runner
-packages/manifest    zod schema, defaults, validation, renderers  ← the contract
-packages/provisioner plan/diff/attestation types, Railway client, workflow client
+apps/api             Cordis root context: plugin-server routes, webhook ingress, job fibers
+packages/contracts   capability interfaces + config schemas + conformance suites  ← API-stable layer
+packages/manifest    StandardSchema manifest, defaults, validation, renderers  ← the product contract
+packages/providers   first-party providers (railway, stripe, github, keycloak, …)  Tier 1
 packages/db          drizzle schema + migrations (Postgres)
 packages/ui          shared React components (web + future mobile)
+packages/page-schema declarative page/scene documents rendered by packages/ui
 packages/sdk         generated typed client from the OpenAPI spec
 actions/platfolio    the pinned GitHub Action(s) the customer runs (its own release train)
 templates/           platform catalog entries (manifest + generated artifacts), Apache-2.0 (OD2)
+vendor/cordis        vendored framework copy (OD6) with a sync policy
 ops/                 compose, Railway IaC for platfolio's own stack, runbooks
 ```
+
+Two boundaries are the reason the framework choice is survivable: **`packages/contracts` is the only
+API-stable layer** (Cordis is at `4.0.0-rc.12` and its README says the API may change without notice),
+and **Tier 2 extensions see only contracts plus the RPC surface**, never internal modules — so a
+third-party plugin cannot be broken by a kernel refactor, and cannot read the kernel's memory either
+([10 § two tiers](10-cordis-kernel-and-extension-seams.md)).
 
 Deliberate: `apps/api` and `actions/platfolio` are **separate artifacts with separate versions**.
 The action runs inside the customer's trust boundary and is pinned by them; shipping a control-plane

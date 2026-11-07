@@ -37,6 +37,10 @@ it is not a new choice.
 | D9 | Hosted platforms are added over time. | Platform catalog is data-driven and versioned; adding a platform must not require a platfolio code release. |
 | D10 | Mobile management app is a goal; React component portability and API/MCP interfaces matter. | API-first contract, shared component package, and an MCP surface equal to the public API (§ [07](07-interfaces-api-mcp-mobile.md)). |
 | D11 | Distribution: multi-arch OCI images + workflow/action artifacts + installer; **not** a self-contained control-plane binary. | See [08](08-distribution-and-licensing.md). |
+| D12 | The control plane is built on **Cordis** as its kernel: interface contracts at every seam, swappable providers, plugin-defined business processes, and contract diffs that derive version bumps. | Analysis, seam list and eight named risks in [10](10-cordis-kernel-and-extension-seams.md). Raises **OD6** (vendoring) and **OD7** (toolchain). |
+| D13 | Extensions come in **two tiers**: first-party plugins in-process; third-party or tenant-authored extensions out-of-process behind the same contract over RPC. | Required to keep D4 true — Cordis `isolate()` scopes service *views*, it is not a sandbox, so in-process plugins share the heap. |
+| D14 | Frontend is a **component library plus declarative page documents**; no runtime-loaded third-party React. | The security boundary, and what makes the mobile app a second renderer rather than a rewrite ([11](11-ui-components-and-page-model.md)). |
+| D15 | **OD6 decided:** Cordis is vendored at `vendor/cordis` (tag `v4.0.0-rc.12`), managed by `scripts/vendor-cordis.ts` with a lock file and replayed patches. **OD7 decided:** platfolio meets the framework **only at `packages/contracts`**; our tree keeps its own toolchain; if the framework contracts look unstable, an anti-corruption **shell** in `packages/kernel` absorbs the change so `packages/contracts` stays semver-stable. | `vendor/CORDIS.md` is authoritative for the mechanics; the boundary rules are enforceable by CI lint. |
 
 ## Who it is for
 
@@ -110,3 +114,13 @@ the attestation); no per-customer Keycloak inside platfolio's own account.
   multi-repo IaC `partial` ownership is needed on day one.
 - **OD5 — Preview environments:** in or out (they multiply per-tenant cost; `sleepApplication`
   behavior means they wake with a possible 502).
+- **OD6 — Cordis ownership: DECIDED 2026-11-07 (vendor).** Vendored at `vendor/cordis`, tag
+  `v4.0.0-rc.12`, MIT license and notice preserved, managed by `scripts/vendor-cordis.ts`
+  (`verify` is the CI gate; local changes only as `vendor/patches/*.patch`). See D15 and
+  [vendor/CORDIS.md](../../vendor/CORDIS.md).
+- **OD7 — Toolchain boundary: DECIDED 2026-11-07 (meet at contracts).** platfolio keeps its own
+  build; nothing outside `packages/kernel` imports `cordis` or `@cordisjs/*`; add the
+  anti-corruption shell if the framework surface proves unstable. See D15.
+- **OD8 — Which seams are actually multi-implemented at MVP.** Recommendation: declare all twelve,
+  implement a second only for `infra.provider`, `render.target` and `provision.flow`
+  (`import-existing`), per the rule of two ([10 § The seams](10-cordis-kernel-and-extension-seams.md)).

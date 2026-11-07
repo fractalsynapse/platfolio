@@ -75,8 +75,9 @@ infrastructure (`mcp.railway.com` with `create-project`, `list-services`, `redep
     native theme can map onto them;
   - navigation described by a route table the mobile app can reinterpret, not by `<a href>`
     assumptions;
-  - forms and validation reuse the same schema layer (`packages/manifest`, zod) so validation logic is
-    single-sourced;
+  - forms and validation reuse the same **StandardSchema** layer used by `packages/manifest` and by
+    Cordis `Plugin.Config`, so one validation implementation serves the API, the server, the web form
+    and the mobile form;
   - a `packages/ui` CI check (or lint rule) that flags direct DOM/global access — this is the check
     that keeps the promise instead of the intention.
 - The mobile v1 scope is deliberately small and reads mostly: instance list, status, recent releases,
