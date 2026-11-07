@@ -1,0 +1,6 @@
+# E9 profile C: entry-level validation, and a provider that must fail to start.
+- id: no-name
+- name: ./src/provider-alpha.ts
+- id: bad-entry
+  name: ./src/provider-alpha.ts
+  disabled: "not-a-boolean"
