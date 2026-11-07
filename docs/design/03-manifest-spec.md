@@ -1,0 +1,199 @@
+# platfolio — Platform Manifest specification (v0.1, proposed)
+
+The contract between platfolio and a hosted platform. Everything else is a rendering of it:
+Docker Compose, Railway IaC (`.railway/railway.ts`), the GitHub workflow inputs, the Stripe
+catalog, the DNS panel, the provisioning plan, and the connect-form.
+Status: **specification, not implemented.** Vocabulary follows Railway's verified IaC DSL and
+GraphQL surface; sources are in [feasibility](../platfolio-feasibility.md).
+
+## Why this document exists first
+
+Without a versioned contract, "manage a portfolio of repositories" degrades into per-platform
+copy-pasted environment lists that only work on the day they were written. The manifest is the
+product's core IP; the admin UI is derivative. It must be reviewable, diffable and machine-validated
+before any customer-facing feature depends on it.
+
+## Design rules
+
+1. **Names, never values.** No field may hold a secret value. Secrets are declared by name with a
+   `value_source` (§ Secrets). This is decision D4, enforced by the schema (`additionalProperties`
+   plus a lint that rejects anything looking like a key).
+2. **Declarative intent, no imperative steps.** The manifest says what should exist; the execution
+   plane decides how. No shell, no ordering primitives, no scripts beyond named hooks.
+3. **One vocabulary for two renderings.** Field names mirror Railway IaC (`source`, `build`, `start`,
+   `healthcheck`, `preDeployCommand`, `replicas`, `env`, `domains`, `volumeMounts`, `postgres()`)
+   so the renderer is a mapping, not a translation, and compose stays structurally equivalent.
+4. **Archetypes carry defaults** so a real manifest is short, and so an entire class of platform
+   can be validated by one fixture.
+5. **Versioned and self-describing** — the renderer refuses a manifest major it does not know.
+
+## Schema (normative sketch)
+
+```yaml
+apiVersion: platfolio.dev/v1alpha1
+kind: Platform
+metadata:
+  name: arcnexus
+  version: 0.9.2                # semver of the PLATFORM RELEASE, not of the manifest
+  title: ArcNexus
+  summary: Multi-agent architecture studio
+  archetype: full-stack-web     # api-service | full-stack-web
+  repository: https://github.com/acme/arcnexus
+  architectures: [amd64, arm64] # build targets; self-hosted runners honour this
+  changelog: CHANGELOG.md#L0-9-2
+  license: Apache-2.0           # what the CUSTOMER receives; must not be restrictive
+spec:
+  requires:
+    platfolio: ">=0.4 <1"       # renderer compatibility window
+    migration_window: 15m
+  identity:
+    mode: byo-oidc | hosted-realm | none
+    client:                     # only when the tenant gets a platfolio-hosted realm
+      protocol: openid-connect
+      redirectUris: derived     # from domains[] at render time
+      logoutUris: derived
+      userAttributeNamespace: acme.example/
+      roles: [studio-admin, studio-user]
+    requiredClaims: [sub, email, preferred_username]
+  environments:
+    production: { enabled: true,  branch: main }
+    staging:    { enabled: true,  branch: staging, cloneFrom: production }
+    preview:    { enabled: false }
+  resources:
+    database: { kind: postgres, name: arcnexus-db }       # Railway postgres() | compose service
+    cache:    { kind: redis, name: arcnexus-cache }
+    storage:  { kind: bucket,  name: arcnexus-media, region: iad }   # optional
+    volumes:  [ { name: workspace-data, mountPath: /data, sizeGB: 10, service: worker } ]
+  services:
+    frontend:
+      source: { image: ghcr.io/acme/arcnexus-web }        # digest-pinned by the release job
+      build: { repository: acme/arcnexus, rootDirectory: apps/web }  # only when not image-based
+      ports: [3000]
+      healthcheck: /api/health
+      start: node build/index.js
+      preDeployCommand: null
+      replicas: { production: 2, staging: 1 }
+      limits:   { cpu: 1, memoryGB: 0.5 }
+      domains:  [ { host: app.example.com, port: 3000 } ]
+      dependsOn: [backend]
+    backend:
+      source: { image: ghcr.io/acme/arcnexus-api }
+      ports: [8080]
+      healthcheck: /healthz
+      preDeployCommand: pnpm db:migrate          # Railway: "a failing command stops the deployment"
+      limits: { cpu: 1, memoryGB: 1 }
+      domains: [ { host: api.example.com, port: 8080 } ]
+      env:
+        LOG_LEVEL:          { valueFrom: config, default: info }
+        DATABASE_URL:       { valueFrom: resource, resource: database }     # Railway injects
+        REDIS_URL:          { valueFrom: resource, resource: cache }
+        OIDC_ISSUER:        { valueFrom: identity }                          # resolved by mode
+        OIDC_CLIENT_ID:     { valueFrom: identity }
+        OIDC_CLIENT_SECRET: { valueFrom: secret, source: preserve }          # NAME ONLY
+        STRIPE_WEBHOOK_SECRET: { valueFrom: secret, source: preserve }
+        FEATURE_FLAGS:      { valueFrom: config, default: "" }
+  secrets:                      # derived inventory; what the connect UI lists
+    - { name: OIDC_CLIENT_SECRET, service: backend, rotation: manual, requiredFor: [production] }
+  releases:
+    strategy: immutable-digest   # digest pinned per release, never :latest
+    gate: { production: required-reviewer }   # maps to a GitHub Actions environment protection rule
+  lifecycle:
+    onSuspend: scale-to-zero     # there is no archive primitive on Railway
+    onEject:   [railway-iac, compose, data-export, realm-export, secret-inventory]
+    onDelete:  { graceDays: 30, backupAgeOutDays: 90 }
+  dns:
+    ownershipVerification: txt          # Railway requires CNAME + TXT or requests 404
+    apexPolicy: cname-flattening-only   # Railway publishes no static IP; A records unsupported
+    wildcards: conflict-check           # subdomain and wildcard on one apex cannot overlap
+  observability:
+    statusEndpoint: /healthz
+    logRetentionDays: 7
+    uptimeChecks: [app.example.com/api/health, api.example.com/healthz]
+  billing:
+    sku: arcnexus-standard
+    metered: none                # D1: no infra pass-through. seat/instance counts only.
+    resourceCostHint: { minGB: 2.5, maxGB: 12 }   # internal margin visibility, not a price
+```
+
+### Archetype defaults
+
+| Archetype | Injected defaults |
+| --- | --- |
+| `api-service` (TreeDX) | one service, no public static asset handling, required `healthcheck`, `domains` limited to api/host subdomains, no frontend redirect rules, mandatory `apiAuth` block (OIDC bearer or platform-native key) |
+| `full-stack-web` (ArcNexus) | two+ services, session/cookie origin rules derived from `domains`, CSRF-safe same-site defaults, CSP report endpoint, `/health` conventions, static asset service optional |
+
+An archetype is a defaults module plus a validation rule set — not a separate format.
+
+## Secrets
+
+`value_source` is a closed enum, and it is the mechanism that keeps decision D4 true:
+
+| `source` | Meaning | Who holds the value |
+| --- | --- | --- |
+| `preserve` | Railway IaC `preserve()`: "keep the value that is already set in Railway" (**V**) | Railway, in the customer's project |
+| `shared-variable` | Railway shared variable on the environment; IaC `ctx.shared.NAME` "points at an existing shared variable … it does not define or manage" it (**V**) | Railway/customer |
+| `resource` | injected by Railway for a database/cache (e.g. `db.env.DATABASE_URL`) (**V**) | Railway |
+| `platform-internal` | generated by the platform itself on first boot (API keys it issues) | the platform |
+| `customer-held` | the customer's own secret manager, referenced by name only | customer |
+| ~~`platfolio-held`~~ | **not a valid source** | — |
+
+Consequences that must hold in the implementation:
+
+- platfolio stores and displays **names + status**, never values, and logs a redaction marker if one
+  is ever submitted (`POST /instances/:id/secrets` does not exist).
+- Verification is **behavioral**: after the customer sets the value in their Railway project, the
+  next deploy either passes its health check or it does not. platfolio records
+  `required_secret.verified_at` from a *healthy deployment*, not from reading anything.
+- Rotation is a documented runbook step plus a `rotation: manual` hint; platfolio may prompt for it
+  and may trigger a redeploy, but cannot perform it.
+- The renderer emits `preserve()` for every `source: preserve` key, so `railway config apply` from a
+  fresh clone cannot wipe customer secrets — and conversely a plan that would *delete* a preserved
+  key is a hard validation error.
+
+## Rendering targets
+
+| Target | Generated from | Notes |
+| --- | --- | --- |
+| `.railway/railway.ts` | `resources`, `services`, `environments`, `domains` | `defineRailway((ctx) => …)` with per-env overrides from `ctx.environment`; `railway config plan` output is the acceptance check (**V**) |
+| `docker-compose.yml` | same, minus Railway-only resources | local dev parity; `postgres()` → image service, buckets → MinIO optional |
+| Railway template `serializedConfig` | same | for template deploys and the 15–25% kickback path; `required_inputs[]` shape reused for the connect form (name/secret/strategy) |
+| GitHub workflow + action inputs | `releases.gate`, `architectures`, `environments.branch` | see [04](04-execution-plane-github-workflows.md) |
+| Stripe catalog | `billing.sku` → `entitlements.feature.lookup_key`, product, price | flat SKUs only (D1) |
+| DNS panel | `dns`, `services[].domains` | CNAME + TXT pairs, apex policy warnings, wildcard conflict message |
+| Identity config | `identity` | realm/client JSON for hosted mode, or a redirect-URI checklist for BYO mode |
+| Docs/onboarding | whole manifest | generated "what this platform needs from you" page |
+
+One source, many artifacts, **verified by CI**: every catalog PR runs schema validation → `railway
+config plan` against a throwaway project → compose bring-up smoke test → secret-name lint → domain
+conflict check. A manifest that cannot be rendered is not mergeable.
+
+## Versioning and release policy
+
+- `metadata.version` is the platform release; `apiVersion` is the manifest schema. Both matter: a
+  tenant pinned to `arcnexus@0.8` must not be force-rendered with `1.x` semantics.
+- `requires.platfolio` is enforced by the control plane before dispatch, with an actionable message
+  ("this platform needs platfolio renderer ≥ 0.4; your instance is running 0.3.2").
+- Migrations run via `preDeployCommand`, forward-only, with `migration_window` advisory; the release
+  record stores the git SHA, image digest and migration version so a rollback is honest about the DB.
+- Breaking changes to the *manifest schema* require a new `apiVersion` plus a renderer that supports
+  N-1 for a documented window; breaking changes to a *platform* get migration notes in `CHANGELOG`.
+- Self-hosted support policy (see [08](08-distribution-and-licensing.md)): latest minor +1,
+  security cherry-picks to the previous minor for ~6 months.
+
+## Adding a platform (D9)
+
+Adding TreeDX or any future platform is a **data PR** into `templates/<name>/<version>/` containing
+the manifest, archetype overrides, an example `.env.example` (names only), a fixture used by CI, and
+generated docs. No control-plane code change. If a new platform requires a new field, that is a
+schema change and gets its own `apiVersion` review.
+
+## Worked examples to write next
+
+1. `templates/treedx/manifest.yaml` — `api-service`, one service, Postgres, object storage of
+   repository clones, API-key auth, no identity host. Verify: can it be deployed with zero secrets
+   known to platfolio? Its AI-context generation workload needs a resource ceiling and a queue,
+   otherwise one tenant saturates its own project (and its own bill — correct under D1).
+2. `templates/arcnexus/manifest.yaml` — `full-stack-web`, Keycloak dependency already in the
+   platform, so both `hosted-realm` and `byo-oidc` modes must be exercised. Verify: realm import
+   round-trip and that ejecting leaves a working, self-contained ArcNexus with its own IdP.
+3. `ops/platfolio/manifest.yaml` — platfolio hosting itself, which is how the renderer stays honest.
