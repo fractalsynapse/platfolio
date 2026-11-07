@@ -22,13 +22,44 @@ only substantive change from the starter's policy is scope: this is now an appli
   under `Unreleased` in [CHANGELOG.md](../CHANGELOG.md) for user- or developer-visible changes.
 - Open a PR against `staging` stating problem, result, **evidence**, limitations, and a non-closing
   issue reference. Keep acceptance accurate and link the PR from the issue.
-- Agents may integrate into `staging` only when the applicable checks below, hosted CI where it
-  exists, and required review are all satisfied. Missing CI or unknown review requirements are a
-  disclosed blocker to automatic merge — not an invitation to invent infrastructure. Agents do not
-  approve PRs, merge to `main`, or publish releases.
+- Agents **may** integrate a change into `staging` when every applicable check passes and the review
+  the change warrants has happened. `staging` is integration work, not a production boundary: merging a
+  green, reviewed change there is part of doing the work, and does not need the maintainer's signature.
+- Agents **may not** merge to `main`. `main` is the production boundary: a human performs that merge,
+  unless the agent has been granted **express permission for that specific production release** — a
+  standing instruction to keep working, a green pipeline, or a prior approval for a different release
+  does not add up to that permission. Ask, and wait for an unambiguous yes.
+- Agents do not publish: creating a GitHub Release, uploading installer or package artifacts, and any
+  announcement are separate authorized actions reserved to the maintainer. The production workflow
+  prepares and proves a release identity and deliberately stops short of publishing one.
+- A tag may be cut **only** on a commit whose Production workflow run on `main` has already passed for
+  that exact commit. `production.yml` enforces this on tag pushes, alongside a license check — no
+  license is granted while **OD2** is open, so a tag cannot produce a release identity yet. Do not
+  back-date, re-point, or delete a published tag; correct through a new version.
 - After an authorized merge, delete only the task-owned branch after verifying its merge commit,
   unchanged branch head, absence of other open PRs or retained work, and worktree use. Preserve
   `staging`, `main` and unrelated branches. Record any retention reason instead of discarding work.
+
+## Branching and gating
+
+`staging` accumulates integrated work; `main` carries what has been released. Each kind of change is
+gated by a workflow under `.github/workflows/`, and all three run the same shared checks from
+`scripts/check-project.ts` rather than three private copies of the logic:
+
+| Workflow | Triggers | Adds beyond the tier below it |
+| --- | --- | --- |
+| **Development** | pushes to feature branches; PRs targeting `staging` | documentation links/anchors and skill metadata; vendored-tree `verify`; type-check of repo tooling; upstream drift reported as a notice, never a failure |
+| **Integration** | pushes to `staging`; PRs targeting `main` | the E9 kernel experiment with its locked dependencies, plus an assertion that CI ran without `--expose-internals` |
+| **Production** | pushes to `main`; tags matching `v*` | on tags: the prior-passing-production-run requirement and the license requirement, then release-notes and checksum provenance as an artifact — and no publication |
+
+Hosted results are the evidence for integration and release decisions. A check that has never run on
+the hosted runner is reported as unverified rather than assumed to work, and no tier's green status
+substitutes for the review a change actually needs.
+
+Authority to merge is defined by this file. The inherited
+[release-workflow skill](../.agents/skills/release-workflow/SKILL.md) deliberately carries no branch,
+approval or publication policy of its own — it reads the project's policy first — so these rules belong
+here and that skill stays byte-identical to the starter it came from.
 
 ## Checks by kind of change
 
@@ -45,6 +76,7 @@ unavailable or not applicable. Do not infer acceptance from a check that does no
 | Database schema | Forward-only migration test from the previous revision, plus the documented rollback story |
 | Milestone 0 experiments | A record under `spikes/` with configuration, observed results, limits, and how to re-run it; a spike is not acceptance for a product capability |
 | Vendored framework upgrade | `plan --to <ref>` report reviewed (especially boundary files), then `apply`, `verify`, and the conformance suites |
+| `.github/workflows/**` or `scripts/check-project.ts` | Local run of every command the workflow invokes **and** the resulting hosted run on the PR and on `staging`; the workflow YAML parses; permissions blocks are the narrowest that work. Syntax alone is not evidence a workflow runs |
 
 Environment notes for the current machine, not project requirements: Node is built without TypeScript
 support so `.ts` tooling runs via `tsx`; `npm` needs `npm_config_cache` pointed inside the workspace.
@@ -64,7 +96,11 @@ Integration into `staging` does not close an implementation issue. When a releas
   issue's **actual** acceptance — an empty checklist is not evidence — and flag partial
   implementations for maintainer decision rather than assuming they shipped.
 - Prepare version and changelog updates on an issue branch with a `staging` PR. Only the maintainer
-  approves and merges the release PR to `main` and authorizes publication.
+  approves and merges the release PR to `main`, and only they authorize publication. An agent may do
+  that specific production merge only on express permission for that release.
+- **Cut no tag on a commit that has not passed the Production workflow on `main`.** `production.yml`
+  enforces this and also requires a license file at the root, which does not exist while **OD2** is
+  open — so no release tag is possible until that decision lands.
 - Published tag identities are retained; corrections ship as a new version. Refresh candidate scope and
   checks when its sources change.
 - A release that includes a new platform catalog entry must satisfy that platform's manifest CI gates;
