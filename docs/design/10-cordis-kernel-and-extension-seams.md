@@ -25,7 +25,7 @@ Not a web framework — a **composability runtime**. The parts that matter here:
 | `@cordisjs/plugin-loader` — dynamic plugin entries by name, `EntryOptions{id,name,config,group,disabled,inject}`, entry/config validation with source-located errors | `loader/src/config/entry.ts`, commits `67538f6`, `1a6df96` | runtime provider selection from configuration |
 | `@cordisjs/plugin-include` — YAML config trees with patches/journal/reconcile and `!!js` expression tags | `include/src/index.ts`, primer loader section | declarative plugin sets per deployment profile |
 | `@cordisjs/plugin-hmr` — hot module reload | `hmr/src/index.ts` | dev loop |
-| `@cordisjs/plugin-server` — HTTP + WS server plugin (`path-to-regexp-typed`, `schemastery`, `ws`) | npm registry 2026-11-07: `@cordisjs/plugin-server@1.7.0`, peer `cordis@^4.0.0-rc.6` | replaces the Fastify/Hono choice in [02](02-architecture.md) |
+| `@cordisjs/plugin-server` — HTTP + WS server plugin (`path-to-regexp-typed`, `schemastery`, `ws`) | npm 2026-11-07: `1.7.0`, peer `cordis@^4.0.0-rc.6`. **E9: registers, then fails at route definition** — it calls `Service.resolveConfig`, which exists only in the fork `@deepseek-ai/cordis@4.1.0` | **not adopted**: HTTP stays a kernel-owned adapter over `node:http` ([02](02-architecture.md)) |
 
 Assessment: **the dependency-injection-by-name, config-as-schema, effect-reversal and
 intercept-isolation model is a genuinely good match** for a platform whose selling point is
@@ -97,6 +97,46 @@ implementation until someone asks to leave Railway.
 `provision.flow` deserves special note: **`import-existing`** (take over management of a Railway
 project the customer already runs, by `railway config pull` + a plan diff) is likely the single most
 important early flow, because hands-off migration is why a team would switch vendors at all.
+
+## E9 result (2026-11-07) — the kernel boots as designed, and one assumption died
+
+Experiment and full evidence: [spikes/e9-cordis-kernel](../../spikes/e9-cordis-kernel/README.md).
+Outcome: 6 assertions passed, 0 failed, 4 observations, on Node 22.22.1 **without**
+`--expose-internals`.
+
+**Confirmed, so the design can lean on it:**
+
+- The core + `plugin-loader` + `plugin-include` boot a control plane with no privileged Node flag
+  (**R3's mitigation is demonstrated, not assumed**).
+- A capability resolves by name and the **implementation is chosen entirely by configuration** — two
+  profiles differing only in which entry is `disabled` produced `alpha` vs `beta`. This is D12's core
+  claim, demonstrated.
+- `intercept()` layers provider config per scope, inner scope winning per key — the mechanism the
+  per-tenant plan limits in [06](06-billing-and-lifecycle.md) depend on.
+- Effects registered inside a plugin/fiber scope dispose cleanly (`FiberState.DISPOSED`), and a disposed
+  fiber's listener stops firing — the reversibility that makes E12 worth attempting.
+- `isolate('infra').infra` throws `cannot get property "infra" without inject`. Useful composition
+  hygiene; **still not a sandbox**, exactly as D13 assumes.
+- Capability resolution works inside a real HTTP request handler.
+
+**Falsified, and it changes the plan:**
+
+- **`@cordisjs/plugin-server@1.7.0` cannot be used against the core we vendored.** It registers, then
+  fails at the first route definition with `server[Server.resolveConfig] is not a function`. The symbol
+  exists only in the fork **`@deepseek-ai/cordis@4.1.0`** (verified in that package's `lib/utils.js`);
+  `cordiverse/cordis@4.0.0-rc.12` — and upstream `main` — have `resolveIntercept` instead. The package's
+  declared peer range `^4.0.0-rc.6` permits the broken combination, so npm installs it silently.
+  → **The published `@cordisjs/*` ecosystem is built against a forked core, not the repository we
+  vendored.** HTTP is therefore a kernel-owned adapter over `node:http`, keeping the transport choice
+  inside the boundary; and R6 is restated more sharply: what exists in the ecosystem is not necessarily
+  compatible with what we vendored.
+- **Malformed profile entries do not fail the boot.** A deliberately invalid YAML profile loaded without
+  throwing, even though `loader/src/config/tree.ts` has `validateOptions` + `EntryValidationError` on
+  the create/update path. → platfolio must **validate its own profiles at boot** (E14) and must not
+  treat "it started" as "the configuration is valid": a typo in a provider entry would otherwise present
+  as a healthy control plane with a missing capability.
+- A booted listening capability keeps the event loop alive, so shutdown must be explicit — which shapes
+  how job fibers and graceful drain are written.
 
 ## Interface contracts drive versioning (the maintainer's semver idea)
 
@@ -194,6 +234,5 @@ and it is only real if it is **mechanically enforced**. Proposal:
   twelve, conformance-test a double for each, and multi-implement only `render.target` and
   `provision.flow`.
 
-Consequences already applied elsewhere: [02](02-architecture.md) now runs on
-`@cordisjs/plugin-server` instead of Fastify/Hono, and [09](09-delivery-plan.md) carries experiments
-E9–E12 plus prerequisites P6–P8.
+Consequences already applied elsewhere: [02](02-architecture.md) keeps HTTP in a kernel-owned adapter,
+and [09](09-delivery-plan.md) carries experiments E9–E12 plus prerequisites P6–P8.

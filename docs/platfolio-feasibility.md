@@ -419,13 +419,27 @@ commit if it should not be part of the project history.
 
 ## Repo housekeeping before implementation
 
-`origin` is `git@github.com:fractalsynapse/scaffold.git` and [README.md](../README.md) /
-[docs/MAINTAINING.md](MAINTAINING.md) describe the **instruction package**, which explicitly
-scopes itself to the starter and "does not select an application architecture, language,
-framework, forge or delivery platform". platfolio app work therefore needs: its own repository
-(or a rewired remote), its own change/test/release policy covering builds, migrations and deploy
-checks, and a `.gitignore` that covers `node_modules`, `.codegraph/`, generated template JSON and
-local DB volumes. None of that is authorized by this memo; it is a decision for the maintainer.
+> **Resolved 2026-11-07.** Recorded here as written, then closed, so the reasoning stays visible.
+
+This repository was cloned from the `scaffold` starter, so `origin` pointed at
+`fractalsynapse/scaffold` and [README.md](../README.md) / [docs/MAINTAINING.md](MAINTAINING.md)
+described the **instruction package** — which scopes itself to the starter and "does not select an
+application architecture, language, framework, forge or delivery platform". platfolio application work
+therefore needed its own home, a change/test/release policy covering builds, migrations and deploy
+checks, and ignore rules for generated and dependency artifacts.
+
+Resolution taken by the maintainer: rather than creating another repository, **this one became the
+platfolio project**. `origin` was rewired to `fractalsynapse/platfolio`, `main` was pushed and a
+`staging` branch created; [README.md](../README.md) and [docs/MAINTAINING.md](MAINTAINING.md) were
+rewritten for platfolio; the starter's maintenance, validation and configuration documents were removed
+(they remain in [scaffold](https://github.com/fractalsynapse/scaffold)); and `.gitignore` now covers
+`node_modules/`, `dist/`, `coverage/`, `*.tsbuildinfo`, `.cache/` and `.research/` alongside the
+existing secret and workstation entries. The inherited `AGENTS.md` guidance and the 12 starter skills
+were left intact, with platfolio skills added beside them.
+
+One item from this list is still open and is not mine to decide: whether generated artifacts (rendered
+`railway.ts`, compose files, template JSON) are committed as reviewable outputs or produced only in CI.
+It belongs in [03 § Rendering targets](design/03-manifest-spec.md) once renderers exist.
 
 ## Method note
 
