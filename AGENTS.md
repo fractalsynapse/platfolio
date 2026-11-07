@@ -4,6 +4,26 @@ These instructions guide work in this project. Follow the agent environment's
 instruction precedence and applicable scoped project guidance. They do not select
 an architecture, language, framework, repository layout or delivery platform.
 
+## This project: platfolio
+
+Platfolio is a control plane that provides managed hosting of standalone platforms on
+infrastructure the tenant owns, without holding tenant credentials or secrets. The
+selections it has already made are recorded, not improvised:
+
+| Kind of fact | Canonical location |
+| --- | --- |
+| Accepted decisions and open ones | [docs/design/01 § Decision register](docs/design/01-product-and-decisions.md) |
+| Architecture and contracts | [docs/design/README.md](docs/design/README.md), then [02](docs/design/02-architecture.md), [03](docs/design/03-manifest-spec.md), [10](docs/design/10-cordis-kernel-and-extension-seams.md) |
+| Verified provider constraints and evidence | [docs/platfolio-feasibility.md](docs/platfolio-feasibility.md), [docs/research/](docs/research/) |
+| Vendored framework provenance and rules | [vendor/CORDIS.md](vendor/CORDIS.md) |
+| Change, review, check and release policy | [docs/MAINTAINING.md](docs/MAINTAINING.md) |
+| Project-specific procedures | [.agents/skills/README.md](.agents/skills/README.md) |
+
+Status: design phase. There is no application code, no deployed resource and no external
+provider approval yet, so do not describe planned behavior as delivered. The skills under
+`.agents/skills/` inherited from the starter package stay identical to their source; project
+guidance is added beside them, never by editing them.
+
 ## Authority and scope
 
 Work toward the user's authorized outcome. Reuse decisions and permissions already
