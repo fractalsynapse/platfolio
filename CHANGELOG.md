@@ -7,6 +7,14 @@ change; entries describe merged intent, not aspirations.
 
 ### Added
 
+- Three-stage CI/CD gating: `development.yml` (feature branches, PRs to `staging`),
+  `integration.yml` (pushes to `staging`, PRs to `main`, adds the E9 experiment) and
+  `production.yml` (pushes to `main`, `v*` tags — enforcing that a tagged commit already passed
+  production on `main`, and that a license exists). Shared checks live in
+  `scripts/check-project.ts` so the tiers do not duplicate logic.
+- Root `package.json`, `pnpm-lock.yaml` and `pnpm-workspace.yaml`: repository tooling (tsx,
+  typescript, @types/node) with `pnpm run verify` as the one gate command that CI and local runs share,
+  pnpm selected through corepack, and no dependency build script permitted to execute.
 - Design document set under `docs/design/`: product definition and decision register, architecture,
   Platform Manifest specification, execution plane (customer GitHub workflows), identity, billing and
   tenant lifecycle, interfaces (API/MCP/mobile), distribution and licensing, the Cordis kernel and
@@ -26,6 +34,9 @@ change; entries describe merged intent, not aspirations.
 
 ### Changed
 
+- Delivery policy clarified: `staging` is integration work that an agent may merge once the applicable
+  checks and required review pass; `main` is a production boundary that only a human crosses unless the
+  agent holds express permission for that specific release; publication stays with the maintainer.
 - Repository identity: this is the platfolio project. `README.md` and `docs/MAINTAINING.md` were
   rewritten for it, and the starter package's maintenance, validation and configuration documents were
   removed; that material is maintained in [scaffold](https://github.com/fractalsynapse/scaffold).

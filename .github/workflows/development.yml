@@ -1,0 +1,50 @@
+name: Development
+# Feature branches and pull requests targeting staging. Fast gates only: the shared project checks.
+# The E9 experiment installs its own dependencies, so integration and production run it, not here.
+on:
+  push:
+    branches-ignore:
+      - main
+      - staging
+  pull_request:
+    branches:
+      - staging
+
+permissions:
+  contents: read
+
+concurrency:
+  group: development-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  project-checks:
+    name: Project checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Enable pnpm (version pinned by packageManager)
+        run: corepack enable
+
+      - name: Install repository tooling
+        run: pnpm install --frozen-lockfile
+
+      - name: Documentation links, anchors and skill metadata
+        run: pnpm run check
+
+      - name: Vendored tree matches its lock
+        run: pnpm run vendor:verify
+
+      - name: Type-check repository tooling
+        run: pnpm run typecheck
+
+      - name: Upstream drift (informational, never blocking)
+        run: |
+          pnpm run vendor:check \
+            && echo "vendored ref is the newest upstream tag" \
+            || echo "::notice::a newer upstream tag exists; run vendor-cordis plan/apply when convenient"
