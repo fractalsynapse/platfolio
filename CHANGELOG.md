@@ -12,6 +12,9 @@ change; entries describe merged intent, not aspirations.
   `production.yml` (pushes to `main`, `v*` tags — enforcing that a tagged commit already passed
   production on `main`, and that a license exists). Shared checks live in
   `scripts/check-project.ts` so the tiers do not duplicate logic.
+- Root `package.json`, `pnpm-lock.yaml` and `pnpm-workspace.yaml`: repository tooling (tsx,
+  typescript, @types/node) with `pnpm run verify` as the one gate command that CI and local runs share,
+  pnpm selected through corepack, and no dependency build script permitted to execute.
 - Design document set under `docs/design/`: product definition and decision register, architecture,
   Platform Manifest specification, execution plane (customer GitHub workflows), identity, billing and
   tenant lifecycle, interfaces (API/MCP/mobile), distribution and licensing, the Cordis kernel and
