@@ -1,6 +1,19 @@
 # Example projects and context
 examples/
 
+# Research scratch: fetched provider/legal pages, schema dumps, corpus text.
+# Regenerable, large, and not a project source. The durable conclusions live in docs/.
+.research/
+
+# Tool caches (the vendored-Cordis git mirror and candidate trees)
+.cache/
+
+# Build and dependency artifacts
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
 # Local secrets, when used
 .env
 .env.*
