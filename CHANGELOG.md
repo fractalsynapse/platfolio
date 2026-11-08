@@ -5,6 +5,16 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-11-08
+
+First tagged release. It is the **contract layer**, not a running product: versioned capability
+contracts and a conformance suite, the Platform Manifest with validation and renderers, the
+framework-facing kernel, the secrets panel as validated page data, and the CI gates that hold all of
+them. Provider behaviour is recorded with its evidence, including where measurement contradicted this
+repository's earlier claims. The production workflow proves this release identity and deliberately
+stops short of publishing it; the root `package.json` carries the version, while the private workspace
+packages stay at `0.0.0` because nothing is distributed from them.
+
 ### Changed
 
 - **D24 — custody decided: managed by default, self-custody as an option, and no platfolio-run runner
