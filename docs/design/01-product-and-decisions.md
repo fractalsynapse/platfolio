@@ -192,6 +192,16 @@ unstable. Mechanics in [vendor/CORDIS.md](../../vendor/CORDIS.md).
     rather than one (the seams already assume this: `credential.broker`, `execution.plane`, `infra.provider`),
     and each tier's guarantee stated in one honest sentence.
 
+  **RESOLVED CONDITION (2026-11-08, measured with maintainer approval, 1 deploy consumed): a project token
+  deploys.** `serviceCreate` with an image source and `serviceInstanceDeploy` both succeeded on an
+  environment-scoped project token, reaching `SUCCESS`. The account token is therefore needed only by the
+  Railway CLI, and the CLI is now optional: rendered IaC becomes an ejection/handover artifact rather than
+  the runner's execution mechanism, while the runner applies state through ordinary mutations. Least
+  privilege is available exactly where it matters — a per-instance, per-environment token leaks one
+  environment of one project. **Option B's main objection has fallen; D with B as default stands
+  unconditionally.** Full table:
+  [research record](../research/railway-token-and-sealing-2026-11-08.md).
+
   **Recommendation: D with B as the default — conditional on one measurement.** If a project token can deploy
   without the CLI, B needs no account token anywhere, and the pitch becomes "least-privilege per environment,
   held by your CI, unreadable by us" at the lowest ongoing cost. If it cannot, B is forced to store an account

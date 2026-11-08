@@ -86,7 +86,37 @@ Queries used the raw GraphQL endpoint with `Authorization: Bearer` (workspace) o
 `Project-Access-Token` (project). Introspection dumps were kept in gitignored `.research/`. Sentinel
 values were generated per run and are not recorded here.
 
-### Deploy-path probe (same session) — inconclusive, and why
+### Deploy path measured (maintainer-approved): a project token deploys. No account token needed.
+
+With a real service and explicit approval to consume one deploy of the 20/day ceiling:
+
+| Step | Grant | Result |
+| --- | --- | --- |
+| `serviceCreate(source:{image:"docker.io/library/nginx:alpine"})` | env-scoped project token (`Project-Access-Token`) | created |
+| `serviceInstanceDeploy(environmentId, serviceId, latestCommit: true)` | env-scoped project token | `true` → deployment reached **`SUCCESS`** |
+| same deploy mutation | workspace token | `true` as well |
+
+**Consequences for OD10, in order of importance:**
+
+1. **An account token is not required to provision or deploy.** The full chain — create project, create
+   environment, mint environment-scoped tokens, create services, write variables, deploy — works with a
+   workspace grant plus minted project tokens. The only thing measured today that still demands an account
+   token is the **Railway CLI**, and the CLI is now an implementation choice rather than a dependency.
+2. **Config-as-code as the execution mechanism is therefore optional.** `environmentApplyChangeSet` remains
+   unproven (accepted, no observable effect), but deploys do not need it. Rendered
+   `.railway/railway.ts` becomes what it should have been all along for a control plane: an **ejection and
+   handover artifact** the tenant can apply themselves, not the thing our runner must invoke.
+3. **Least privilege is available on the deploy path**: a per-environment project token can be scoped to one
+   instance, so a leaked runner credential exposes one environment of one project rather than a workspace or
+   an account. That materially strengthens option B in OD10.
+4. The earlier `Not Authorized` for `serviceInstanceDeploy` was resource-scoping against a nonexistent
+   service id, exactly as suspected — recorded so the negative is not mistaken for a provider limit.
+
+Cleanup: the nginx probe service was deleted immediately after measurement. Remaining in the dev workspace:
+one project (`platfolio-e22`), one sourceless service (`e22-probe`) and one variable, kept only so E22b —
+what a human-set seal looks like from the API — can still be observed. **Deploys consumed: 1.**
+
+## Deploy-path probe (same session) — inconclusive, and why
 
 `serviceInstanceDeploy(environmentId, serviceId, latestCommit: true)` returned `Not Authorized` for **both**
 the workspace token and the env-scoped project token — but with a deliberately nonexistent `serviceId`, so
