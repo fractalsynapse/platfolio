@@ -88,10 +88,10 @@ async function checkDocuments(files: string[]): Promise<string[]> {
     for (const match of text.matchAll(LINK)) {
       const target = match[1];
       const anchor = match[2];
-      if (!target && anchor) {
-        // in-page anchor: validated against this document's headings below
-      }
-      if (!target || target.startsWith('/')) {
+      // An empty target with an anchor is an in-page link; it is checked against this document's
+      // headings further down. Only a leading-slash target is a real absolute path, which is what
+      // this rule exists to catch.
+      if (target && target.startsWith('/')) {
         problems.push(`${path.relative(ROOT, file)}: absolute path link "${target}"`);
         continue;
       }
