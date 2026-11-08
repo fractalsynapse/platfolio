@@ -41,8 +41,9 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           REF: ${{ github.ref }}
         run: |
-          # Pure environment variables (no ${{ }} inside the script body) so the rule is testable
-          # outside Actions as well as inside it.
+          # Deliberately env-var only: GitHub interpolates expressions inside run bodies as well, so
+          # an empty or malformed placeholder here would invalidate the whole workflow file. Using
+          # environment variables also keeps the rule testable outside Actions.
           if [ "$EVENT_NAME" != "push" ] || [ "$(printf '%s' "$REF" | cut -d/ -f1-2)" != "refs/tags" ]; then
             echo "kind=none" >> "$GITHUB_OUTPUT"
             echo "not a tag push; release jobs stay off"

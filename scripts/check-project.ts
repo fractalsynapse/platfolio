@@ -218,6 +218,15 @@ async function checkWorkflows(): Promise<string[]> {
       );
     }
     if (!jobIds.size) problems.push(`${name}: no jobs found at two-space indentation (lint assumption)`);
+
+    // GitHub interpolates expressions inside run bodies too, so an empty or unclosed placeholder
+    // invalidates the whole workflow file — and the resulting run has zero jobs and no log.
+    for (const match of text.matchAll(/\$\{\{([^{}]*)\}\}/g)) {
+      if (!match[1].trim()) problems.push(`${name}: empty expression placeholder — write "GitHub expression" in prose instead`);
+    }
+    const opens = (text.match(/\$\{\{/g) ?? []).length;
+    const closes = (text.match(/\}\}/g) ?? []).length;
+    if (opens !== closes) problems.push(`${name}: unbalanced expression placeholders: ${opens} opening, ${closes} closing`);
   }
   return problems;
 }
