@@ -215,6 +215,18 @@ importers:
         specifier: ^4.6.7
         version: 4.6.7
 
+  packages/page-schema:
+    dependencies:
+      '@platfolio/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@platfolio/manifest':
+        specifier: workspace:*
+        version: link:../manifest
+      zod:
+        specifier: ^4.6.7
+        version: 4.6.7
+
 packages:
 
   '@esbuild/aix-ppc64@0.28.2':
