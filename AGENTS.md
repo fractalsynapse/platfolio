@@ -7,7 +7,9 @@ an architecture, language, framework, repository layout or delivery platform.
 ## This project: platfolio
 
 Platfolio is a control plane that provides managed hosting of standalone platforms on
-infrastructure the tenant owns, without holding tenant credentials or secrets. The
+infrastructure the tenant owns, and without persisting tenant secret values. Where the provider
+credential lives is a disclosed tier choice (D24): managed holds one least-privilege grant and *will not*
+read secrets; self-custody holds nothing and *cannot*. The
 selections it has already made are recorded, not improvised:
 
 | Kind of fact | Canonical location |
@@ -20,8 +22,8 @@ selections it has already made are recorded, not improvised:
 | Change, review, check and release policy | [docs/MAINTAINING.md](docs/MAINTAINING.md) |
 | Project-specific procedures | [.agents/skills/README.md](.agents/skills/README.md) |
 
-Status: design phase, with the contract layer implemented. `packages/contracts`,
-`packages/manifest` and `packages/kernel` exist and are tested (56 tests); there is no service, no
+Status: design phase, with the contract layer implemented. `packages/contracts`, `packages/manifest`,
+`packages/kernel` and `packages/page-schema` exist and are tested (98 tests); there is no service, no
 deployed resource and no external provider approval yet, so do not describe planned behavior as
 delivered. Provider-specific claims need a live check, and CI substitutes for none of them.
 Run `pnpm run verify` for the whole gate set. The skills under

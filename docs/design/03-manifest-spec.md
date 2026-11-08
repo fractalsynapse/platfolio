@@ -128,6 +128,49 @@ An archetype is a defaults module plus a validation rule set — not a separate 
 
 `value_source` is a closed enum, and it is the mechanism that keeps decision D4 true:
 
+Secrets are **the hosted platform's own** requirements, declared per platform and never confused with
+platfolio's infrastructure credentials (which are governed by [04 § The tenant's experience](04-execution-plane-github-workflows.md)).
+Each declaration may carry a `delivery` hint; the default is `relay-sealed`, and platform authors pick
+per secret, not the tenant:
+
+Two per-service fields decide *where* a service runs, which then decides what gets rendered,
+dispatched and checked (D23):
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `ownership` | `maintained` | `maintained` = software the tenant develops (needs staging); `external` = an upstream image platfolio hosts but does not develop (Keycloak-class), production-only unless stated |
+| `environments` | derived from `ownership` and the platform's enabled environments | explicit list wins; a service may not name a disabled environment |
+
+Consequences the renderers and validator must honour: Railway IaC expresses this with `ctx.isEnvironment(...)`
+(documented in the SDK for per-environment logic), so an external service is *declared but attached only*
+where it exists; Compose ignores the scope because local development wants the whole stack, including
+Keycloak; the host-overlap rule is evaluated **per environment**, since a production-only host and a
+staging host are not in conflict; and the secrets checklist is filtered by environment, so a
+production-only external service never demands its secrets be filled in a staging environment that has
+no place for them. Whether `railway config plan` honours per-environment resource membership is E21 —
+the shape type-checks here, which is a weaker claim than "it deploys correctly".
+
+The default is **`tenant-side`**, not `relay-sealed` — that ordering was reversed by E18, and the panel
+renders accordingly.
+
+| `delivery` | Behaviour | Use when |
+| --- | --- | --- |
+| `relay-sealed` | tenant types the value into platfolio once; platfolio writes it **and seals it**, so it cannot be read back afterwards. **Measured unavailable on Railway (E18, 2026-11-08):** no seal setter exists in the API and sealing cannot be verified, so `sealedVariables` is `false` for this provider and the mode must not be offered | providers that genuinely support sealing (unmeasured) |
+| `relay-plain` | written, not sealed: still never persisted or logged by platfolio, but readable by the granted credential in mode B | debug instances; never the default |
+| `tenant-side` | platfolio shows the name and a deep link; the tenant enters it in their provider project | mode A, or a tenant who will not type into us |
+| `runner-side` | the tenant stores it as a CI secret and the runner writes it | mode A with CI-side custody |
+
+Sealing has hard consequences the renderer and controller must honour, all from the provider's own
+documented behaviour: a sealed value **cannot be un-sealed**, is **not copied** when an environment or
+service is duplicated, is not provided by the CLI, and is not shown in environment-sync diffs. So the
+`cloneFrom` staging bootstrap must **expect** to arrive without these values, and the checklist turns
+red for exactly that reason — which is correct behaviour, not a bug. Rotation becomes
+"set a new value, verify, then revoke the old credential" with no read-back, and the UI must say so.
+
+`team-service` is **proposed, not valid** — it is the subject of
+[OD11](01-product-and-decisions.md). Until that decision lands, the enum below is closed and a manifest
+that references another instance is rejected at parse.
+
 | `source` | Meaning | Who holds the value |
 | --- | --- | --- |
 | `preserve` | Railway IaC `preserve()`: "keep the value that is already set in Railway" (**V**) | Railway, in the customer's project |

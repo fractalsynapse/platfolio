@@ -1,27 +1,33 @@
 # platfolio
 
 An open, self-hostable control plane that sells **managed hosting of standalone platforms** — without
-reselling compute and without ever holding a tenant's secrets.
+reselling compute, and without ever persisting a tenant's secret values. Where the privileged credential
+lives is a **tier choice**, not a secret: **managed** (default) holds one least-privilege grant per team and
+*will not* read secrets; **self-custody** holds nothing and therefore *cannot*.
 
-**Status: design phase.** The architecture, contracts and delivery plan are written; there is no
-application code, no deployed resource, and no written approval from Railway or Stripe yet. The most
-recent verified step is the [E9 kernel experiment](spikes/e9-cordis-kernel/README.md), which confirmed
-the framework approach and falsified two assumptions.
+**Status: design phase, with the contract layer implemented.** `packages/contracts`, `packages/manifest`,
+`packages/kernel` and `packages/page-schema` exist and are tested (98 tests, run in CI); there is still no
+service, no deployed resource and no written approval from Railway or Stripe. Measured provider facts are
+recorded with their evidence: [E9](spikes/e9-cordis-kernel/README.md) falsified two framework assumptions,
+and [the token/sealing experiments](docs/research/railway-token-and-sealing-2026-11-08.md) falsified a
+credential claim this repository had been making.
 
 ## What it does
 
 A **team** subscribes to platfolio, then hosts one or more **platforms** (TreeDX, ArcNexus, …) as
-isolated projects **in the team's own infrastructure account**. platfolio holds the intent: the
-catalog of platforms, the entitlements, the provisioning state machine, the status view and the
-operations. The team's own CI holds the privileged credentials and the secrets, so platfolio can
-operate the stack without being able to read it — and the team can leave with it running.
+isolated projects **in the team's own infrastructure account**. platfolio holds the intent: the catalog of
+platforms, the entitlements, the provisioning state machine, the status view and the operations. The
+provider credential lives in platfolio's broker in the managed tier (we *will not* read tenant variables —
+one boundary, refused calls, audit) and in the team's own CI in the self-custody tier (we hold nothing, so
+we *cannot*). Secret values are never persisted in either tier, and the team can leave with everything
+running.
 
 Three properties carry the whole design, and everything else follows from them:
 
 | Property | Why it is there |
 | --- | --- |
 | **Sell management, not compute** | Provider policy forbids reselling capacity, and project ceilings cap a platfolio-owned estate at ~50–100 tenants either way |
-| **Never hold a tenant secret or credential** | A platfolio compromise must not yield tenant data; verified implementable via Railway `preserve()`, name-only GitHub Actions secrets, and tenant-held tokens |
+| **Never persist a tenant secret value** | No secret value in any platfolio log, cache, queue, error or database row; connection URLs come from declared resources via Railway `preserve()` and name-only references. The *credential* question is a disclosed tier choice, not an implied promise |
 | **Management through the tenant's own workflows** | Hands-off operation inside the customer's existing development process, where the exit path is a revocation rather than a migration |
 
 ## Where things are

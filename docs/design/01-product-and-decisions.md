@@ -7,8 +7,13 @@ Status: **proposed product definition**. No capability described here exists yet
 ## Thesis
 
 platfolio is a **meta-platform**: a control plane that hands a *team* managed hosting for
-standalone platforms, without platfolio owning the compute and without platfolio ever holding
-the platform's secrets. Per the accepted position: **sell management, not compute.**
+standalone platforms, without platfolio owning the compute and without platfolio ever persisting
+the platform's secret values. Per the accepted position: **sell management, not compute.**
+
+*(D24, 2026-11-08: whether platfolio holds the provider **credential** is a disclosed tier choice — managed
+default, self-custody option — not an implied promise. The sentence above was always about secret values and
+remains true; the sentence that was overreaching was "without holding tenant credentials", now corrected
+wherever it appeared, including README and AGENTS.md.)*
 
 Two sentences from the feasibility review carry the whole design:
 
@@ -27,7 +32,7 @@ it is not a new choice.
 | # | Decision | Consequence for design |
 | --- | --- | --- |
 | D1 | Sell management, not compute. | platfolio bills a software + operations subscription. Never a margin on Railway usage. |
-| D2 | Customers bring their own Railway credentials for v1. | platfolio stores **no** long-lived infrastructure credential. Onboarding = connect flow, not a pasted master token. |
+| D2 | Customers bring their own Railway credentials for v1. | *(Scope narrowed 2026-11-08 by D20: this is now mode A, still supported. Original consequence stood as written: platfolio stores **no** long-lived infrastructure credential; onboarding is a connect flow, never a pasted master token. In mode B one grant per account is held through the broker; it is never a personal account token, and never pasted per project.)* |
 | D3 | Tenant unit is a **team**; a team subscribes and may host **many platforms**. A hosted "project" is one platform instance. | `Team → Subscription → PlatformInstance(→ Railway project)`; entitlements and limits at team level, state at instance level. |
 | D4 | platfolio must not have access to hosted platform secrets. | Secrets are declared by **name** and resolved out-of-band. Enforced as the zero-secret invariant (§ [04](04-execution-plane-github-workflows.md)); a capability that needs the value is rejected by design. |
 | D5 | Manage platforms by installing and using **GitHub workflows** in the customer's repo. | The execution plane is the customer's Actions. platfolio's GitHub App gets an install-scoped, PR-reviewed workflow, then dispatch-only. Also satisfies D4 and sidesteps D2's credential custody. |
@@ -41,6 +46,11 @@ it is not a new choice.
 | D13 | Extensions come in **two tiers**: first-party plugins in-process; third-party or tenant-authored extensions out-of-process behind the same contract over RPC. | Required to keep D4 true — Cordis `isolate()` scopes service *views*, it is not a sandbox, so in-process plugins share the heap. |
 | D14 | Frontend is a **component library plus declarative page documents**; no runtime-loaded third-party React. | The security boundary, and what makes the mobile app a second renderer rather than a rewrite ([11](11-ui-components-and-page-model.md)). |
 | D18 | **OD2 decided: platfolio code and documents are licensed under Apache-2.0.** Root `LICENSE`, `Copyright 2026 Fractal Synapse Labs LCA PBC`, added 2026-11-08. | The grant exists, so a release tag is possible once `LICENSE` is on `main`. Three sub-questions inside this decision stay open (§ [08 § Remaining under D18](08-distribution-and-licensing.md)): full license text vs the short-form notice now present, the `/proprietary` boundary, and the trademark policy. |
+| D20 | **Credential model: managed (B) is the default, strict (A) is a first-class configurable mode.** One grant per tenant account — Railway OAuth `workspace:admin`, or one workspace token through the broker — and platfolio mints per-project/per-environment tokens and writes them into the tenant's GitHub environment secrets itself. | Amends the consequence of D2 ("customers bring their own Railway credentials for v1"): that becomes mode A, still supported, not the default. The seam that makes this one switch instead of a fork is the provider-credential broker + `infra.provider`; the difference between "won't read" and "can't read" is documented per mode, in this repo and on the site. |
+| D21 | **Platfolio may set a hosted platform's secret values, by default sealed.** Delivery modes: `relay-sealed` (default), `relay-plain` (opt-out, e.g. debug instances), `tenant-side` (deep link into the tenant's provider UI), `runner-side` (mode A: value enters via the tenant's CI secret). A relayed value is forwarded once and never persisted, logged, cached, queued, or returned in an error. | Amends **OD3** ("secret relay: not offered"), which was written when A was the only mode. Sealing is what makes the convenience safe: Railway states a sealed value cannot be retrieved via the API, so after delivery platfolio cannot read it back either. **Amended 2026-11-08:** the property is *capture nothing anywhere* — the value travels from a UI field through the API to Railway and exists in no platfolio log, cache, queue, error, database row or response, and there is no read-back endpoint to mistake for a view. Because `relay-sealed` depends on provider support that E18 has not confirmed, delivery **refuses** to run in that mode when the provider does not advertise the `sealed-variables` capability, rather than silently writing an unsealed secret. `isSealed` exists in the IaC SDK's `VariableConfig` and in the introspected GraphQL schema; whether `variableUpsert` honours it was to be verified live (E18), not assumed. **E18 result (2026-11-08, measured on a live workspace):** it does not, and cannot — full introspection of the v2 schema shows `isSealed` exactly once, as the readable `Variable.isSealed`; no input field anywhere accepts a seal flag, and no query returns a `Variable`, so sealing cannot be verified either. Both a workspace grant and an environment-scoped project token read a sentinel back immediately after writing it. Shipped default is therefore `tenant-side`; `relay-sealed` survives only as a provider-agnostic capability flag (`sealedVariables: false` for Railway), and the panel's refusal to render inputs without that flag became the mechanism that mattered. |
+| D24 | **Credential custody: A (managed broker) is the default tier, B (self-custody) is an option — decided by the maintainer on 2026-11-08.** Mechanism, measured the same day: a workspace grant creates the project and mints per-environment project tokens through the API, and those tokens deploy; the account token is required only by the Railway CLI, which is therefore optional. **platfolio does not operate a fleet of tenant runners** — a machine that executes a tenant's job sees that tenant's credential, which forfeits the only reason B exists while losing A's single hardenable boundary. Paid *management* of tenant-owned runners remains a possible later service. | Resolves OD10 (logged as RESOLVED below). Consequences are stated per tier and never blurred: managed = "will not read", enforced at one boundary and audited; self-custody = "cannot read", architectural. The deciding argument was the runner question, not the UX argument: see [02 § Custody](02-architecture.md) and [the measured record](../research/railway-token-and-sealing-2026-11-08.md). |
+| D23 | **Per-service deployment-environment policy.** A service declares which environments it exists in (`spec.services.<name>.environments`), defaulting from ownership: a maintained platform service runs in every enabled environment; `ownership: external` (an upstream image platfolio does not develop — Keycloak-class) is production-only unless stated otherwise. | Some hosted things are infrastructure the tenant consumes, not software under active development, and a staging copy of them costs money and attention for no signal. Renderers must honour the scope, validation must reject a service asking for a disabled environment, and the domain-overlap check must be evaluated *per environment* — a production-only host and a staging host are not in conflict. |
+: registered once per platfolio deployment through the App-manifest flow; attached per tenant by one install link; no webhooks in v1.** | Manifest flow verified in GitHub docs: one browser approval returns `id`, `pem`, `webhook_secret`, `client_secret` — so the setup wizard is "register the app → one click → back to platfolio's UI" with nothing to transcribe. Webhook-free connect (poll `GET /app/installations` after the redirect) removes the public-tunnel requirement from development entirely. The `scm.provider` seam carries two implementations from the start — App and PAT/OAuth-app — so a self-hostor who will not install an App is not a support ticket. |
 | D19 | **Release tags are bare semver** — `<major>.<minor>.<patch>`, optionally `-prerelease` or `+build`. No `v` prefix. | `production.yml` classifies every tag push against one tested rule and **fails** a `v1.2.3`-style attempt instead of quietly skipping it; provenance's "previous release" lookup reads bare semver tags. |
 | D15 | **OD6 decided:** Cordis is vendored at `vendor/cordis` (tag `v4.0.0-rc.12`), managed by `scripts/vendor-cordis.ts` with a lock file and replayed patches. **OD7 decided:** platfolio meets the framework **only at `packages/contracts`**; our tree keeps its own toolchain; if the framework contracts look unstable, an anti-corruption **shell** in `packages/kernel` absorbs the change so `packages/contracts` stays semver-stable. | `vendor/CORDIS.md` is authoritative for the mechanics; the boundary rules are enforceable by CI lint. |
 | D16 | **Repository toolchain: pnpm via corepack, pinned by `packageManager`; no dependency build scripts run.** One root manifest with `pnpm run verify` as the single gate command that CI and humans both run. | CI cannot rely on `npx -p` package trees (tsc resolves `@types` by walking to `./node_modules/@types`); a root manifest also keeps installs inside the repository — without one, `npm install` walked up and wrote into `/home/adrian/node_modules`. `strictDepBuilds: false` plus `ignoredBuiltDependencies: [esbuild]` state the posture instead of blanket-allowing scripts. |
@@ -115,10 +125,12 @@ OD3, OD4, OD5, OD6a and OD8, and to the identity questions OI1–OI3 (now record
   (+3.5%, Stripe files in 80+ countries, incompatible with Connect, no ad-hoc invoice items) before
   selling into many consumer jurisdictions — harmless under D1 because platfolio never passes usage
   through. Consequence: the invoice pipeline assumes platfolio-created subscriptions.
-- **OD3 — Secret relay: not offered.** No secret value crosses platfolio in v1 — no browser-side
-  ciphertext relay, no convenience path. Presence-by-name plus behavioral verification only.
-  Consequence: onboarding includes a checklist the tenant fills in their own systems, and support is
-  tenant-executed ([04](04-execution-plane-github-workflows.md)).
+- **OD3 — Secret relay: superseded by D21** (2026-11-08). The original answer — never accept a value —
+  assumed mode A was the only mode. Under B the tenant already grants a credential that could read
+  variables, so refusing to *write* them bought UX cost without buying much secrecy, and sealing
+  converts the write path into one whose values platfolio then cannot read back. The remaining parts of
+  the original answer stand: presence-by-name plus behavioral verification, and support is
+  tenant-executed. Relay is opt-out per secret, and the strict mode keeps the original property.
 - **OD4 — ArcNexus topology: one repository for MVP.** Railway's multi-repo `partial` ownership stays a
   documented extension, not a day-one requirement. Revisit if frontend and backend ship independently.
 - **OD5 — Preview environments: out of MVP.** Production plus optional staging, staging sleep-by-default
@@ -143,6 +155,136 @@ OD3, OD4, OD5, OD6a and OD8, and to the identity questions OI1–OI3 (now record
 `verify` as the CI gate and local changes only as `vendor/patches/*.patch`), meeting the framework
 only at `packages/contracts` with an anti-corruption shell in `packages/kernel` if its surface proves
 unstable. Mechanics in [vendor/CORDIS.md](../../vendor/CORDIS.md).
+
+- **OD11 — Team services: typed `provides`/`requires` between instances. OPEN; S2 preferred by the
+  maintainer (2026-11-08). Nothing here is implemented.**
+
+  **Why this is a decision and not a feature request.** Three of our own artifacts currently contradict
+  each other:
+
+  1. [05 § I2](05-identity.md) promises *"P1 users live in a per-team realm"* — one identity per team.
+  2. [templates/arcnexus/manifest.yaml](../../templates/arcnexus/manifest.yaml) puts `keycloak` **inside the
+     ArcNexus instance's services**, with `identity.mode: hosted-realm`. Deploy TreeDX and ArcNexus for one
+     team and the model yields two Keycloaks and two user databases — exactly what I2 forbids.
+  3. The same fixture carried `OIDC_ISSUER: placeholder-resolved-at-apply-time`, because there is no way to
+     say "this value comes from something else we run". The closed `value_source` enum is
+     `preserve | shared-variable | resource | platform-internal | customer-held`, and
+     [03](03-manifest-spec.md) forbids `platfolio-held`. A renderer would have shipped the literal string,
+     the app would have failed, and the controller would have correctly reported an unhealthy deploy.
+
+  **Ownership is not the new axis.** All services — internal, shared, external, independent — belong to the
+  **team**: one billing relationship, one management surface, one deletion authority. That is unchanged and
+  uniform. What is new is a service's **role**: whether it exists inside one instance, or
+  **provides typed outputs that other instances consume.** A "team service" is a role, not a different owner.
+
+  **Shapes considered.**
+
+  - **S1 — `spec.sharedServices` inside a manifest.** Rejected. One document would then describe resources
+    with different *roles and lifecycles*, and every instance-level answer becomes ambiguous: does ejecting
+    TreeDX include the realm and its user data; what happens when two teams' manifests both declare
+    `keycloak-host`; does suspending an app suspend what it consumes. Each answer is another flag.
+  - **S2 — a provider instance plus an explicit reference edge.** Preferred. The provider is an ordinary
+    instance of an ordinary platform (`keycloak-host`, `openbao-host`, `loki-host`), owned by the team and
+    billed like anything else; it declares outputs, and consumers declare requirements against them. The
+    model keeps its most valuable property — **one document, one lifecycle** — and the new machinery is
+    narrow and nameable.
+
+  **What S2 actually adds** (all of it still to design and build):
+
+  - `provides:` on the provider: typed outputs (`url`, `realm-client-template`, `secret-path`, `endpoint`) —
+    a contract, so a consumer cannot ask for an output that does not exist.
+  - `requires:` on the consumer, plus a new `team-service` member of the closed `value_source` enum, so
+    resolution is explicit at plan time rather than string interpolation at apply time.
+  - **Ordering** in the controller loop: a plan whose requirements are unresolved is not dispatched; provider
+    readiness is a precondition, verified by read-back like everything else.
+  - **Reference-counted deletion and suspension**: removing a provider with live consumers is refused by
+    default, with an explicit override path that states the blast radius. The team holds the authority, and
+    the consumer instance's owner can see who is blocked.
+  - **Health as a dependency state**: a consumer can be "healthy, provider degraded" rather than a misleading
+    red or green.
+
+  **Open sub-questions, before any of it is buildable:**
+
+  - Per-environment mapping: a provider's `production`/`staging` are the *provider's*, not the consumer's. If
+    the provider is production-only (D23 `ownership: external`), consumer staging has no identity source and
+    must either get its own or declare `identity.mode: none`. Needs a rule, not an assumption.
+  - Cross-project reachability is **unverified**: if the provider lives in another Railway project, can
+    consumers reach it privately, or only over a public TLS endpoint? Fine for Keycloak by design, material
+    for a log pipeline and a vault. → **E23**.
+  - Runtime versus deploy-time consumption: OpenBao is deploy-time only (the runner fetches and injects), so
+    it tolerates an outage at deploy time and nothing else. Loki is runtime-coupled, so the provider's
+    availability is on the hot path of every consumer. The contract should say which is which.
+  - Whether a provider may be a *different platform version* than its consumers pinned to, and what an
+    upgrade of a shared provider means for instances that did not consent to it.
+  - Migration of `identity.mode: hosted-realm` in [05](05-identity.md): under S2 "hosted realm" stops being a
+    thing inside an instance and becomes "the team has a `keycloak-host` provider instance". 05 now points
+    here instead of restating it.
+
+  **Decision-free fix taken alongside this record:** the manifest validator now rejects placeholder-shaped
+  literal env values (`placeholder…`, `TODO`, `changeme`, `replace_me`, `xxx`), so an unresolved reference
+  fails at parse with a located message. The ArcNexus fixture was corrected to a real issuer URL and marked as
+  *manually supplied until OD11 lands* — the fixture no longer encodes a value the system cannot produce.
+
+- **OD10 — Where the provider credential lives, and who the trusted computer is: RESOLVED by D24
+  (2026-11-08) — A as the default tier, B as a self-custody option, no platfolio-run runner fleet.**
+  What was decided with measurement rather than argument: created by
+  E15/E18/E21/E22. Blocks M2's shape; nothing further on the execution plane should be built until it is
+  chosen.** *(2026-11-08)*
+
+  **Measured premises** ([record](../research/railway-token-and-sealing-2026-11-08.md)):
+
+  1. **Any Railway grant platfolio holds can read platform secret values.**
+     `variables(projectId, environmentId, serviceId)` returned the sentinel for both a workspace token and an
+     env-scoped project token. `Environment.config` redacts values; `variables()` does not — that difference
+     is what made this look ambiguous. Stated plainly: *if we hold a grant, we can read.* Sealing does not
+     save us, because the API can neither set it nor let us verify it (E18/E22).
+  2. Grants differ in capability: the workspace token performs `projectCreate`, `environmentCreate`,
+     `projectTokenCreate`, `variableUpsert` and variable reads, but **not** `serviceCreate`; the
+     env-scoped project token (header `Project-Access-Token`) performs `serviceCreate` and variable reads.
+     `serviceInstanceDeploy` denied for both, but only against a nonexistent service id — **inconclusive**.
+  3. **The Railway CLI accepts neither token**: `config plan/apply` needs an account token, and hand-built
+     `environmentApplyChangeSet` payloads are accepted yet have no observable effect (etag unchanged). So
+     there is **no proven CLI-less config-as-code path** today.
+  4. **GitHub Actions secrets are write-only by API design** — values are never revealed, only names. A
+     Railway credential in the tenant's GitHub environment secrets is something platfolio can write and
+     provably cannot read; the same credential in platfolio's store is readable.
+
+  The real question is **which machine we are willing to call trusted**:
+
+  - **A — platfolio holds the grant** (today's D20 default). Best UX: one click, instant provisioning, no
+    runner minutes for control-plane calls. Property: *"we will not read"* — demonstrated by code, one
+    boundary, an audit log, and marketing that says exactly that. Note premise 3 still bites for deploys.
+  - **B — the tenant's CI holds the grant.** platfolio dispatches and verifies; credentials and secrets sit
+    in GitHub where we cannot read them. Property: *"we cannot read"* — the only option where invariant 1 in
+    [00](00-target-architecture.md) is literally true. Costs: runner minutes on private repos (the maintainer
+    flagged this as real money for tenants), an async dispatch UX, and — if deploys need the CLI — an
+    **account token** living in that repo, readable by anyone who can commit a workflow. Blast radius moves
+    from platfolio to the tenant.
+  - **C — platfolio-operated self-hosted runners.** Removes the per-minute cost but puts tenant secrets and
+    tenant-controlled workflow code on machines platfolio operates: the property collapses back into "will
+    not read", it adds an estate that [00](00-target-architecture.md) forbids (management, not compute), and
+    it carries a genuine remote-code surface. Against as a default; *for* as instructions a tenant runs on
+    their own machine.
+  - **D — tiered: B as default, A as an explicit "hassle-free" option.** Two conformance-tested custody modes
+    rather than one (the seams already assume this: `credential.broker`, `execution.plane`, `infra.provider`),
+    and each tier's guarantee stated in one honest sentence.
+
+  **RESOLVED CONDITION (2026-11-08, measured with maintainer approval, 1 deploy consumed): a project token
+  deploys.** `serviceCreate` with an image source and `serviceInstanceDeploy` both succeeded on an
+  environment-scoped project token, reaching `SUCCESS`. The account token is therefore needed only by the
+  Railway CLI, and the CLI is now optional: rendered IaC becomes an ejection/handover artifact rather than
+  the runner's execution mechanism, while the runner applies state through ordinary mutations. Least
+  privilege is available exactly where it matters — a per-instance, per-environment token leaks one
+  environment of one project. **Option B's main objection has fallen; D with B as default stands
+  unconditionally.** Full table:
+  [research record](../research/railway-token-and-sealing-2026-11-08.md).
+
+  **Recommendation: D with B as the default — conditional on one measurement.** If a project token can deploy
+  without the CLI, B needs no account token anywhere, and the pitch becomes "least-privilege per environment,
+  held by your CI, unreadable by us" at the lowest ongoing cost. If it cannot, B is forced to store an account
+  token in the tenant's repo, which is a **worse** posture than A holding a scoped token — and then the
+  default should be A with disclosure instead. One real deploy (1 of the 20/day ceiling) settles it; I am not
+  choosing on an inconclusive probe.
 
 - **OD9 — Core lineage: OPEN, created by the E9 experiment.** E9 confirmed the vendored core boots and
   swaps providers by configuration, but showed the published `@cordisjs/plugin-server@1.7.0` requires a

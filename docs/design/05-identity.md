@@ -21,6 +21,10 @@ base would be platfolio's regulated data. Keeping them apart also keeps the ejec
 - I1 — separate issuers: `iss` of P0 ≠ `iss` of any P1 realm; no realm hosts both platfolio clients
   and platform clients.
 - I2 — separate stores: P0 users live in platfolio's identity DB; P1 users live in a per-team realm
+  *(the realm must therefore be a **team service** that instances consume, not a service inside an
+  instance — see [OD11](01-product-and-decisions.md). `identity.mode: hosted-realm` is expected to change
+  shape when OD11 is decided; today the model cannot express it, and the TreeDX/ArcNexus fixtures
+  demonstrably produce one realm per instance instead of one per team)*
   in the team's project. No shared table, no shared subject namespace; a P0 `sub` is never a valid
   P1 subject.
 - I3 — separate cookies: platfolio session cookies are set only on platfolio's own host; nothing is

@@ -5,8 +5,70 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-11-08
+
+First tagged release. It is the **contract layer**, not a running product: versioned capability
+contracts and a conformance suite, the Platform Manifest with validation and renderers, the
+framework-facing kernel, the secrets panel as validated page data, and the CI gates that hold all of
+them. Provider behaviour is recorded with its evidence, including where measurement contradicted this
+repository's earlier claims. The production workflow proves this release identity and deliberately
+stops short of publishing it; the root `package.json` carries the version, while the private workspace
+packages stay at `0.0.0` because nothing is distributed from them.
+
+### Changed
+
+- **D24 — custody decided: managed by default, self-custody as an option, and no platfolio-run runner
+  fleet** ([#38](https://github.com/fractalsynapse/platfolio/issues/38)). The deciding argument was not UX:
+  a machine that runs a tenant's job can read that tenant's credential, so operating runners for tenants
+  would forfeit the self-custody tier's whole purpose while scattering the managed tier's single auditable
+  boundary across N hosts. Mechanism settled by measurement: workspace grant → minted per-environment
+  project tokens → deploy, with the account token needed only by the Railway CLI, which demotes rendered
+  IaC to an ejection/handover artifact. Every sentence in README, AGENTS.md, [01](docs/design/01-product-and-decisions.md)
+  and [02](docs/design/02-architecture.md) that claimed platfolio holds no tenant credential was corrected
+  the same day — the claim was about secret *values* and read as if it were about *credentials*, which after
+  E18/E22 we can no longer make.
+- **OD11 opened: team services as a role, not an ownership class.** The identity promise in
+  [05](docs/design/05-identity.md) ("one realm per team") and the ArcNexus fixture (Keycloak *inside* the
+  instance, `OIDC_ISSUER` a placeholder string) contradict the current model, which gives every service one
+  owning instance and no way to reference another. S2 is preferred: an ordinary provider instance declaring
+  typed `provides`, consumers declaring `requires`, a new `team-service` value source, plan-time resolution,
+  ordering, reference-counted deletion and "provider degraded" as a health state. Ownership stays uniform —
+  everything belongs to the team; only the role differs.
+- **Placeholder literals are now rejected by manifest validation.** `placeholder…`, `TODO`, `changeme`,
+  `replace_me` and `xxx` in an env value fail at parse with a located message, so an unresolved reference
+  cannot reach a plan. The ArcNexus fixture carries a real issuer URL, marked manually supplied until OD11.
+- **Measured against a live Railway workspace (E15/E18/E21), and the design corrected the same day.**
+  Variable sealing has no API surface at all — no input field accepts it and `Variable.isSealed` is
+  unreachable — so D21's `relay-sealed` is unimplementable on Railway and the shipped default is
+  `tenant-side`; invariant 1 now says managed mode *"will not read"* rather than borrowing sealing to
+  claim *"cannot"*. A workspace grant creates projects, environments and project tokens but cannot
+  create services, so provisioning is a two-grant sequence; and a project token authenticates only in
+  the `Project-Access-Token` header, which explains the long-standing "tokens are finicky" experience.
+  The Railway CLI (5.71.0) rejects both non-account tokens, so config-as-code must be driven through
+  `environmentApplyChangeSet` instead — filed as E22. Evidence:
+  [research/railway-token-and-sealing-2026-11-08.md](docs/research/railway-token-and-sealing-2026-11-08.md).
+
 ### Added
 
+- **`packages/page-schema` — the secrets panel as validated data.** A component registry with strict
+  prop schemas, `buildSecretsPanel()` driven by manifest + instance state + provider capabilities, and
+  a plain-text projection for SDK/MCP/mobile consumers. Write-only is enforced three ways: no `value`
+  key exists on a secret field, `findValueBearingProps()` scans the finished tree, and the builder
+  validates its own output before returning. Capability gaps change the components rather than the
+  copy — no sealing support means deep links and a warning, never an input that writes unsealed.
+- **Credential-hygiene gate.** `pnpm run check` now inspects the git index and fails if a
+  `.secrets/` path, a `*.token` file or a non-example `.env` is ever tracked — force-add included,
+  since that is the failure being prevented. Verified to bite.
+- **Custody, delivery and placement (D20–D23).** `credential-broker` gives managed mode one grant per
+  tenant that refuses the five secret-reading operations before they reach the transport, with an audit
+  trail and revocation, while strict mode holds nothing — both held to `runBrokerConformance()`.
+  `secret-delivery` implements the four modes; a relayed value reaches exactly one place (the provider
+  port), receipts and log surfaces are asserted value-free, and a provider without sealed-variable
+  support gets a visible refusal instead of an unsealed write. `scm-github` builds the App manifest,
+  registration URL with an unguessable state, state-checked callback and install link, with a PAT
+  provider behind the same interface. Manifests gain `ownership` and per-service `environments`, host
+  overlap is judged per environment, staging hosts are derived and never reused, and production-only
+  services are declared but attached only where they exist.
 - **M2 preparation.** The attestation contract (`DispatchIntent`, `Attestation`, `RunnerClaims`) with
   `verifyAttestation()` enforcing audience, issuer, repository, dispatch/instance/action/plan-hash and
   nonce binding, expiry, single-use replay, unknown-environment and production-environment gating;

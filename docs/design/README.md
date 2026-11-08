@@ -28,6 +28,10 @@ Evidence base, not restated here:
 - [platfolio feasibility review](../platfolio-feasibility.md) — verified provider constraints (limits,
   AUP, DNS, handover, tokens, rates) and the constraint set these documents are built against.
 - [research/railway-control-plane-feasibility.md](../research/railway-control-plane-feasibility.md),
+- [research/railway-token-and-sealing-2026-11-08.md](../research/railway-token-and-sealing-2026-11-08.md) —
+  **measured on a live workspace**: which grant performs which provisioning step, the header a project
+  token requires, that variable sealing has no API surface, and that the Railway CLI rejects non-account
+  tokens (E15/E18/E21; this withdrew part of D21),
   [research/billing-oss-feasibility-2025-11-06.md](../research/billing-oss-feasibility-2025-11-06.md),
   [research/distribution-feasibility-review.md](../research/distribution-feasibility-review.md) —
   primary-source detail with per-claim verification tags.

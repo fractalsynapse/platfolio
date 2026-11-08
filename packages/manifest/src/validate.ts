@@ -1,4 +1,5 @@
 import { ManifestSchema, RENDERER_VERSION, SUPPORTED_API_VERSIONS } from './schema.ts';
+import { enabledEnvironments, serviceEnvironments } from './environments.ts';
 import { satisfiesRange } from '@platfolio/contracts';
 import type { Manifest, ServiceSpec } from './schema.ts';
 
@@ -33,6 +34,7 @@ export function looksLikeCredential(key: string): boolean {
   }
   return true;
 }
+const PLACEHOLDER_VALUE = /(^|[-_.])(placeholder|todo|tbd|change[-_.]?me|replace[-_.]?me|fill[-_.]?me|your[-_.]?here|secret[-_.]?here|x{3,})([-_.]|$)/i;
 const HOST = /^(\*\.)?[a-z0-9]([a-z0-9_-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9_-]*[a-z0-9])?)+$/i;
 
 function servicesOf(m: Manifest): [string, ServiceSpec][] {
@@ -73,7 +75,14 @@ export function validateManifest(unknown: unknown): Issue[] {
       if (looksLikeCredential(key)) {
         issues.push({ path: `spec.services.${svcName}.env.${key}`, code: 'secret-value-inline', message: `"${key}" looks like a credential; declare it under secrets[] with a value source instead of assigning "${value.length > 6 ? `${value.slice(0, 3)}…` : 'a value'}"` });
       }
-      if (/^(DATABASE_URL|REDIS_URL|MONGO_URL|MYSQL_URL)$/i.test(key)) {
+        // A value we cannot resolve must not become a value we deploy. Unresolved references used to be
+      // written as placeholder strings in fixtures (see OD11); the renderer would faithfully ship them,
+      // the app would fail to start, and the controller would report an unhealthy deploy as if that were
+      // the app's fault. Reject at parse, with the path.
+      if (PLACEHOLDER_VALUE.test(value)) {
+        issues.push({ path: `spec.services.${svcName}.env.${key}`, code: 'placeholder-value', message: `"${value}" is a placeholder, not a value; resolve it from a declared resource, or supply a real value (cross-instance references are the subject of OD11)` });
+      }
+    if (/^(DATABASE_URL|REDIS_URL|MONGO_URL|MYSQL_URL)$/i.test(key)) {
         issues.push({ path: `spec.services.${svcName}.env.${key}`, code: 'resource-ref-inline', message: 'connection URLs come from declared resources; remove it and reference spec.resources' });
       }
     }
@@ -110,38 +119,61 @@ export function validateManifest(unknown: unknown): Issue[] {
     }
   }
 
-  // 3. A wildcard covers exactly its single-label children, and the provider refuses an overlap
-  // between a wildcard and a concrete host unless both belong to the same service.
-  interface ApexRecord { wildcard?: string; concrete: Map<string, string>; }
-  const apexes = new Map<string, ApexRecord>();
-  const ensure = (key: string): ApexRecord => {
-    const found = apexes.get(key) ?? { concrete: new Map<string, string>() };
-    apexes.set(key, found);
-    return found;
-  };
-  const hostEntries: { service: string; host: string }[] = [];
+  // 3. Environment scope per service (D23) and the host-overlap rule evaluated within each
+  // environment: a production-only host and a staging host are not in conflict, because they never
+  // exist in the same environment.
+  const enabled = enabledEnvironments(m);
+  const scope = new Map<string, string[]>();
   for (const [name, svc] of servicesOf(m)) {
-    for (const host of svc.domains) {
-      if (!HOST.test(host)) {
-        issues.push({ path: `spec.services.${name}.domains`, code: 'host-form', message: `"${host}" is not a valid host (no scheme, port, or path)` });
-        continue;
-      }
-      hostEntries.push({ service: name, host });
-      if (host.startsWith('*.')) ensure(host.slice(2)).wildcard = name;
+    const where = serviceEnvironments(svc, enabled);
+    scope.set(name, where);
+    for (const e of svc.environments ?? []) {
+      if (!enabled.includes(e)) issues.push({ path: `spec.services.${name}.environments`, code: 'environment-not-enabled', message: `"${e}" is used by service "${name}" but the platform does not enable it` });
+    }
+    if ((svc.environments?.length ?? 0) === 0 && svc.environments !== undefined) {
+      issues.push({ path: `spec.services.${name}.environments`, code: 'service-environments-empty', message: 'an explicit environments list may not be empty' });
+    }
+    if (svc.environments && svc.environments.length > 0 && !svc.environments.includes('production')) {
+      issues.push({ path: `spec.services.${name}.environments`, code: 'staging-only-service', message: `"${name}" would exist only outside production; a managed instance must have a production placement (or the environment should not be enabled)` });
+    }
+    if (svc.ownership === 'external' && (svc.environments?.length ?? 0) > 1 && svc.environments?.includes('staging')) {
+      issues.push({ path: `spec.services.${name}`, code: 'external-staging-cost', message: `external service "${name}" is scoped to staging as well; state it deliberately, since a staging copy of upstream software is billed` });
     }
   }
-  for (const { service, host } of hostEntries) {
-    if (host.startsWith('*.')) continue;
-    const labels = host.split('.');
-    if (labels.length < 2) continue;
-    const parent = labels.slice(1).join('.'); // the wildcard that would cover this host
-    const record = apexes.get(parent);
-    if (record?.wildcard && record.wildcard !== service) {
-      issues.push({
-        path: `spec.services.${service}.domains`,
-        code: 'wildcard-conflict',
-        message: `"${host}" is already covered by "*.${parent}" owned by service "${record.wildcard}"; the provider cannot overlap a wildcard with a concrete host on different services`,
-      });
+
+  for (const env of enabled) {
+    interface ApexRecord { wildcard?: string; }
+    const apexes = new Map<string, ApexRecord>();
+    const hostEntries: { service: string; host: string }[] = [];
+    const ensure = (key: string): ApexRecord => {
+      const found = apexes.get(key) ?? {};
+      apexes.set(key, found);
+      return found;
+    };
+    for (const [name, svc] of servicesOf(m)) {
+      if (!scope.get(name)?.includes(env)) continue;
+      for (const host of svc.domains) {
+        if (!HOST.test(host)) {
+          if (env === 'production') issues.push({ path: `spec.services.${name}.domains`, code: 'host-form', message: `"${host}" is not a valid host (no scheme, port, or path)` });
+          continue;
+        }
+        hostEntries.push({ service: name, host });
+        if (host.startsWith('*.')) ensure(host.slice(2)).wildcard = name;
+      }
+    }
+    for (const { service, host } of hostEntries) {
+      if (host.startsWith('*.')) continue;
+      const labels = host.split('.');
+      if (labels.length < 2) continue;
+      const parent = labels.slice(1).join('.');
+      const record = apexes.get(parent);
+      if (record?.wildcard && record.wildcard !== service) {
+        issues.push({
+          path: `spec.services.${service}.domains`,
+          code: 'wildcard-conflict',
+          message: `in "${env}": "${host}" is already covered by "*.${parent}" owned by service "${record.wildcard}"; the provider cannot overlap a wildcard with a concrete host on different services`,
+        });
+      }
     }
   }
 
@@ -200,10 +232,12 @@ export function validateManifest(unknown: unknown): Issue[] {
 }
 
 /** Required secrets across the platform, for the connect checklist (names only). */
-export function requiredSecrets(m: Manifest): { service: string; name: string; source: string }[] {
-  const out: { service: string; name: string; source: string }[] = [];
+export function requiredSecrets(m: Manifest): { service: string; name: string; source: string; environments: string[] }[] {
+  const enabled = enabledEnvironments(m);
+  const out: { service: string; name: string; source: string; environments: string[] }[] = [];
   for (const [service, svc] of Object.entries(m.spec.services)) {
-    for (const s of svc.secrets) out.push({ service, name: s.name, source: s.source });
+    const where = serviceEnvironments(svc, enabled);
+    for (const s of svc.secrets) out.push({ service, name: s.name, source: s.source, environments: [...where] });
   }
   return out.sort((a, b) => a.service.localeCompare(b.service) || a.name.localeCompare(b.name));
 }

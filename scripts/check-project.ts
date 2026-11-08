@@ -15,6 +15,7 @@
  * framework's own documentation (which is upstream's to validate).
  */
 
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
@@ -185,6 +186,23 @@ async function checkSkills(): Promise<{ skills: SkillCheck[]; problems: string[]
  *   - every `needs` target names a job that exists in the same file
  *   - no `needs.<job>.` dot access on a hyphenated job id, which is invalid in GitHub expressions
  */
+/**
+ * Credential-hygiene gate. A committed token would undo the project's central claim, so this is a
+ * check and not a convention. It inspects the git index rather than the working tree, because an
+ * ignored file that was force-added is exactly the mistake being prevented.
+ */
+async function checkCredentialHygiene(): Promise<string[]> {
+  const findings: string[] = [];
+  const out = spawnSync('git', ['ls-files'], { cwd: ROOT, encoding: 'utf8' });
+  if (out.status !== 0) return ['git ls-files failed; cannot verify credential hygiene'];
+  const tracked = out.stdout.split('\n').filter(Boolean);
+  for (const f of tracked) {
+    if (/(^|\/)\.?secrets\//i.test(f) || /\.token$/i.test(f)) findings.push(`tracked file looks like a credential: ${f}`);
+    if (/^\.env(\..*)?$/.test(f) && !f.endsWith('.example')) findings.push(`tracked env file: ${f}`);
+  }
+  return findings;
+}
+
 async function checkWorkflows(): Promise<string[]> {
   const problems: string[] = [];
   const dir = path.join(ROOT, '.github', 'workflows');
@@ -243,8 +261,9 @@ say(`scanning ${files.length} markdown files under ${path.relative(ROOT, ROOT) |
 const docProblems = await checkDocuments(files);
 const { skills, problems: skillProblems } = await checkSkills();
 const workflowProblems = await checkWorkflows();
+const hygieneProblems = await checkCredentialHygiene();
 
-const all = [...docProblems, ...skillProblems, ...workflowProblems];
+const all = [...docProblems, ...skillProblems, ...workflowProblems, ...hygieneProblems];
 say(`skills checked: ${skills.length} (${skills.map((s) => s.name).join(', ')})`);
 say(`workflows linted: ${workflowProblems.length === 0 ? 'clean' : `${workflowProblems.length} problem(s)`}`);
 
