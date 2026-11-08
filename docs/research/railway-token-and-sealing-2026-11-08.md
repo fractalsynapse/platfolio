@@ -86,6 +86,18 @@ Queries used the raw GraphQL endpoint with `Authorization: Bearer` (workspace) o
 `Project-Access-Token` (project). Introspection dumps were kept in gitignored `.research/`. Sentinel
 values were generated per run and are not recorded here.
 
+### Deploy-path probe (same session) — inconclusive, and why
+
+`serviceInstanceDeploy(environmentId, serviceId, latestCommit: true)` returned `Not Authorized` for **both**
+the workspace token and the env-scoped project token — but with a deliberately nonexistent `serviceId`, so
+authorization may simply be resource-scoped and the answer proves nothing. Settling it takes one real deploy
+(1 of the daily ceiling), which is why it is left open instead of recorded as a provider limit.
+
+Two earlier probes of mine looked like denials and were not, and are logged so nobody mistakes my mistakes
+for constraints: `latest:` is the wrong argument name (`latestCommit:`), and `variables(projectId,
+environmentId)` returns `{}` for service variables unless `serviceId` is supplied. Validation and scope are
+not authority.
+
 ## E22 — follow-up session (same day): can the seal be set or verified by another route?
 
 Prompted by a better proposal from the maintainer: create the secrets for the tenant, tell them to seal
