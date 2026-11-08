@@ -61,6 +61,37 @@ Consequences of that last row: the "with platfolio stopped, `git push` still dep
 for M2 cannot pass yet, and nothing here proves a hosted runner behaves as the contract assumes. That
 is the outstanding part of M2, not a detail to smooth over.
 
+## Custody tiers, and what the runner is for (D24)
+
+Two tiers, one codebase, decided by where the provider grant lives. The **managed** tier is the default.
+
+| | **Managed (default)** | **Self-custody (option)** |
+| --- | --- | --- |
+| Grant holder | platfolio's `credential.broker`: one workspace grant per team, encrypted, refused `variables` reads, audited, revocable | The tenant: a workspace grant in a reviewer-gated `bootstrap` GitHub environment; platfolio holds nothing |
+| Provisioning | synchronous: server calls `projectCreate` → `projectTokenCreate` per environment → writes the tokens into the tenant's environment secrets via the secrets API | asynchronous: a bootstrap workflow does the same inside the tenant's repo and reports names/ids back by attestation |
+| Deploys | tenant's CI on push, and platfolio dispatches for managed operations | tenant's CI only; platfolio dispatches |
+| Continuous state | server-side provider reads (build status, replicas, limits, drift, cost) plus our own HTTP health probes | **HTTP health probes plus scheduled in-CI attestations** — anything requiring a credential must come from their runner, so it arrives on a schedule, not instantly |
+| What we may say | *"we will not read tenant secrets"* — enforced at one boundary, audited | *"we cannot read tenant secrets"* — architectural |
+
+### The rule that came out of the runner question
+
+**platfolio does not operate a fleet of runners on tenants' behalf.** A machine that executes a tenant's
+job sees that tenant's credential, so a platfolio-run runner forfeits the only reason the self-custody tier
+exists while losing the managed tier's advantage: one boundary you can harden and audit, rather than the
+same exposure scattered across N ephemeral hosts. It also means executing tenant-controlled workflow code on
+our infrastructure, which needs one-runner-per-tenant isolation and an estate that
+[00](00-target-architecture.md) forbids.
+
+**Paid *management* of tenant-owned runners** (their compute, their account, lifecycle assistance) stays on
+the table as a later service — but it must be sold honestly: management access implies read access, so that
+service is a *managed*-tier guarantee delivered on customer hardware, not a way to keep the "cannot" claim.
+
+The mechanism that makes either tier possible was measured, not assumed: a workspace grant performs
+`projectCreate`, `environmentCreate` and `projectTokenCreate`; the minted per-environment token performs
+`serviceCreate` and `serviceInstanceDeploy` (reached SUCCESS). The account token is required only by the
+Railway CLI, so rendered IaC is an ejection/handover artifact rather than a runtime dependency.
+[Evidence](../research/railway-token-and-sealing-2026-11-08.md).
+
 ## The tenant's experience, counted
 
 The design goal is **setup once, create cheaply**. A step that repeats per platform instance is a bug

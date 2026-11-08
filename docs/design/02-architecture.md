@@ -20,7 +20,7 @@ Split the system into three planes with **deliberately asymmetric privileges**:
 
 | Plane | Owner | Holds | Can do | Cannot do |
 | --- | --- | --- | --- | --- |
-| **Control plane** (platfolio) | platfolio | tenant metadata, intent (manifest), entitlements, release catalog, job state, audit | decide *what* should exist; trigger work; verify outcomes; bill | hold a secret value; hold a long-lived infra credential; mutate the customer's infra directly |
+| **Control plane** (platfolio) | platfolio | tenant metadata, intent (manifest), entitlements, release catalog, job state, audit; **in the managed tier, one least-privilege provider grant per team** | decide *what* should exist; trigger work; verify outcomes; bill | hold a secret **value**; read tenant variables (policy in managed, impossible in self-custody); operate a runner on a tenant's behalf |
 | **Execution plane** (customer's GitHub Actions) | customer | per-environment Railway project tokens, platform secrets, repo | render intent → apply to Railway → attest results | be commanded by platfolio beyond triggering a pinned workflow with non-secret inputs |
 | **Data plane** (customer's Railway project) | customer | running services, DBs, volumes, domains | serve the team's end users | — |
 
