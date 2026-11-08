@@ -1,0 +1,23 @@
+apiVersion: platfolio.dev/v1alpha1
+kind: Platform
+metadata: { name: bad, version: 1.0.0, title: Bad, summary: wildcard conflict, archetype: api-service }
+spec:
+  requires: { platfolio: ">=0.1.0 <1" }
+  identity: { mode: none, clients: [] }
+  environments: { production: { enabled: true }, staging: { enabled: false }, preview: { enabled: false } }
+  resources: { volumes: [] }
+  services:
+    api:
+      image: ghcr.io/acme/api
+      digest: sha256:7777777777777777777777777777777777777777777777777777777777777777
+      port: 8080
+      env: {}
+      secrets: []
+      domains: ["*.svc.example.com"]
+    other:
+      image: ghcr.io/acme/other
+      digest: sha256:8888888888888888888888888888888888888888888888888888888888888888
+      port: 8081
+      env: {}
+      secrets: []
+      domains: ["private.svc.example.com"]

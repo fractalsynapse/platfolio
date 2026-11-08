@@ -27,3 +27,6 @@ coverage/
 Thumbs.db
 *.swp
 *.swo
+
+# Transient trees written by local gates
+.tmp-*/

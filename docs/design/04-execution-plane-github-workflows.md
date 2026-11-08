@@ -41,6 +41,22 @@ and no long-lived credential ever transits platfolio.
 - Railway IaC `railway config init|pull|plan|apply|migrate|partials` (**V**) gives the runner a
   plan-first, confirmation-gated apply model — CI-appropriate and reviewable.
 
+## Implementation status (M2 preparation, 2026-11-08)
+
+Contracts exist and are tested; nothing here talks to GitHub or Railway yet.
+
+| Piece | State | Where |
+| --- | --- | --- |
+| Dispatch intent, attestation payload, runner-claims schemas | **implemented**, `strict` so an unknown key (a smuggled secret) is refused outright | `packages/contracts/src/attestation.ts` |
+| Attestation policy checks — audience, issuer, repository, dispatch/instance/action/plan-hash/nonce binding, expiry, replay, unknown environment, production environment gating, clock sanity | **implemented** as `verifyAttestation()`, with 17 tests covering each rejection plus "malformed payload must not burn the nonce" and "no value-shaped field in the payload" | same file; `test/attestation.test.ts` |
+| Install pull request (workflow file + `PLATFOLIO.md`) | **generated and tested**: minimal `permissions:` exactly `{checks, contents:read, id-token, statuses}`, required dispatch inputs, push triggers limited to enabled environments, per-dispatch GitHub environment so production is reviewer-gated, action pinned by commit SHA, arm64-only platforms on an arm runner, no empty expression placeholder (the class of bug that took out our own workflow in #9), deterministic byte-for-byte, removal documented | `packages/manifest/src/render-install.ts` |
+| JWKS signature verification, live dispatch, live runner claims | **not implemented** | deliberately absent: signature verification belongs to the transport layer, which must pin the issuer; `verifyAttestation` accepts claims, not a raw JWT, so the boundary is explicit in the types |
+| `actions/platfolio` composite action, GitHub App registration, tenant credential custody | **not implemented** | needs a real App installation and a tenant repository: see E2/E5 in the delivery plan |
+
+Consequences of that last row: the "with platfolio stopped, `git push` still deploys" acceptance test
+for M2 cannot pass yet, and nothing here proves a hosted runner behaves as the contract assumes. That
+is the outstanding part of M2, not a detail to smooth over.
+
 ## Components
 
 ```

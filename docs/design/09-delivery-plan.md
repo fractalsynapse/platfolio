@@ -82,6 +82,17 @@ E14 lands as part of M1 step 1, since "it started" is not evidence that a profil
 
 ## Milestone 1 — contracts and the manifest are real (2–3 weeks)
 
+> **Status 2026-11-08, steps 1–3 and 6 delivered; 5 partly.** `packages/contracts` (capability
+> interface, conformance suite, in-memory double, visibly-incomplete Railway implementation),
+> `packages/manifest` (schema, validation, Compose + Railway IaC renderers, 2 valid and 5 invalid
+> fixtures), and `packages/kernel` (Cordis service resolving `ctx.infra` by name with
+> StandardSchema config and contract-range refusal) are in the tree; `pnpm run verify` runs docs lint,
+> vendored-tree check, typecheck, 26 tests, and the contract-drift baseline gate across all three CI
+> tiers. **Outstanding:** `railway config plan` against a real project needs the Railway CLI plus
+> tenant credentials, so the generated IaC is instead type-checked against Railway's published SDK in
+> CI — a strong substitute, not the same gate; and step 7 (platfolio's own stack as a manifest) is
+> not started. See `packages/manifest` § Rendering status in [03](03-manifest-spec.md).
+
 Two boundaries are frozen in this milestone, and both are worth the review time because everything
 later depends on them: `packages/contracts` (capability interfaces, config schemas, conformance
 suites, version derivation) and `packages/manifest` (schema, validation, renderers).
@@ -105,6 +116,12 @@ suites, version derivation) and `packages/manifest` (schema, validation, rendere
 *Accept:* TreeDX manifest renders to both targets; the Railway plan is clean on the scratch project;
 the compose stack comes up; a manifest with an embedded secret value fails CI with a readable error.
 *Not in scope:* any UI, any customer.
+
+> **Status 2026-11-08 — M2 prepared, not started.** The attestation contract and its policy checks,
+> and the install-PR generator (workflow + `PLATFOLIO.md`), are implemented and covered by 26 of the
+> project's tests. The live halves — composite action, GitHub App installation, real dispatch, real
+> runner claims, JWKS verification against the issuer — are unstarted and need a tenant repository and
+> credentials. See [04 § Implementation status](04-execution-plane-github-workflows.md).
 
 ## Milestone 2 — execution plane in a customer repo (1–2 weeks)
 

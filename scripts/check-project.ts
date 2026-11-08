@@ -21,7 +21,8 @@ import path from 'node:path';
 const argv = process.argv.slice(2);
 const quiet = argv.includes('--quiet');
 const rootIndex = argv.indexOf('--root');
-const ROOT = path.resolve(rootIndex === -1 ? process.cwd() : argv[rootIndex + 1]);
+const rootArg = rootIndex === -1 ? undefined : argv[rootIndex + 1];
+const ROOT = path.resolve(rootArg ?? process.cwd());
 
 const EXCLUDED_DIRS = ['node_modules', '.cache', '.research', '.git'];
 /** Vendored trees are excluded except their top-level project documents. */
@@ -42,7 +43,10 @@ function slug(heading: string): string {
 
 function headingsOf(markdown: string): Set<string> {
   const set = new Set<string>();
-  for (const match of markdown.matchAll(/^#{1,6}\s+(.+)$/gm)) set.add(slug(match[1]));
+  for (const match of markdown.matchAll(/^#{1,6}\s+(.+)$/gm)) {
+    const heading = match[1];
+    if (heading) set.add(slug(heading));
+  }
   return set;
 }
 
@@ -84,14 +88,14 @@ async function checkDocuments(files: string[]): Promise<string[]> {
     for (const match of text.matchAll(LINK)) {
       const target = match[1];
       const anchor = match[2];
-      if (!target && anchor) {
-        // in-page anchor: validated against this document's headings below
-      }
-      if (target.startsWith('/')) {
+      // An empty target with an anchor is an in-page link; it is checked against this document's
+      // headings further down. Only a leading-slash target is a real absolute path, which is what
+      // this rule exists to catch.
+      if (target && target.startsWith('/')) {
         problems.push(`${path.relative(ROOT, file)}: absolute path link "${target}"`);
         continue;
       }
-      const resolved = target ? path.resolve(path.dirname(file), target) : file;
+      const resolved = target && target.length > 0 ? path.resolve(path.dirname(file), target) : file;
       let exists = false;
       try {
         await fs.access(resolved);
@@ -150,7 +154,7 @@ async function checkSkills(): Promise<{ skills: SkillCheck[]; problems: string[]
     if (!front) {
       local.push('no YAML frontmatter block');
     } else {
-      const fields = new Map(front[1].split(/\r?\n/).map((line) => {
+      const fields = new Map((front[1] ?? '').split(/\r?\n/).map((line) => {
         const i = line.indexOf(':');
         return [line.slice(0, i).trim(), line.slice(i + 1).trim()] as [string, string];
       }));
@@ -200,17 +204,19 @@ async function checkWorkflows(): Promise<string[]> {
       if (inJobs && /^\S/.test(line)) inJobs = false;
       if (!inJobs) continue;
       const id = line.match(/^ {2}([A-Za-z0-9_-]+):\s*(?:#.*)?$/);
-      if (id) jobIds.add(id[1]);
+      const jobId = id?.[1];
+      if (jobId) jobIds.add(jobId);
     }
 
     for (const match of text.matchAll(/\bneeds:\s*\[([^\]]*)\]/g)) {
-      for (const raw of match[1].split(',')) {
+      for (const raw of (match[1] ?? '').split(',')) {
         const target = raw.trim().replace(/^['"]|['"]$/g, '');
         if (target && !jobIds.has(target)) problems.push(`${name}: needs refers to unknown job "${target}"`);
       }
     }
     for (const match of text.matchAll(/^\s+needs:\s*([A-Za-z0-9_-]+)\s*$/gm)) {
-      if (!jobIds.has(match[1])) problems.push(`${name}: needs refers to unknown job "${match[1]}"`);
+      const needsJob = match[1];
+      if (needsJob && !jobIds.has(needsJob)) problems.push(`${name}: needs refers to unknown job "${needsJob}"`);
     }
     for (const match of text.matchAll(/\bneeds\.([A-Za-z0-9_]*-[A-Za-z0-9_-]*)\./g)) {
       problems.push(
@@ -222,7 +228,7 @@ async function checkWorkflows(): Promise<string[]> {
     // GitHub interpolates expressions inside run bodies too, so an empty or unclosed placeholder
     // invalidates the whole workflow file — and the resulting run has zero jobs and no log.
     for (const match of text.matchAll(/\$\{\{([^{}]*)\}\}/g)) {
-      if (!match[1].trim()) problems.push(`${name}: empty expression placeholder — write "GitHub expression" in prose instead`);
+      if (!(match[1] ?? 'x').trim()) problems.push(`${name}: empty expression placeholder — write "GitHub expression" in prose instead`);
     }
     const opens = (text.match(/\$\{\{/g) ?? []).length;
     const closes = (text.match(/\}\}/g) ?? []).length;
