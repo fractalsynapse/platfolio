@@ -1,0 +1,11 @@
+{
+  "name": "@platfolio/manifest",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Platform Manifest: schema, archetype defaults, validation and renderers (Compose, Railway IaC).",
+  "license": "Apache-2.0",
+  "main": "./src/index.ts",
+  "exports": { ".": "./src/index.ts" },
+  "dependencies": { "@platfolio/contracts": "workspace:*", "yaml": "^2.7.0", "zod": "^4.6.7" }
+}
