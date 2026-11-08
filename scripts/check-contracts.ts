@@ -51,7 +51,11 @@ function emitSurface(): string {
     for (const raw of fs.readFileSync(abs, 'utf8').split('\n')) {
       const line = raw.trim();
       if (!line || line.startsWith('*') || line.startsWith('/*') || line.startsWith('//') || line.startsWith('import')) continue;
-      if (/^(export|declare)/.test(line)) lines.push(`${f}: ${line}`);
+      // Keep every declaration line, not just the ones that start with `export`. The original filter
+      // captured only a type's first line, so a member-level change -- a new constructor option, a
+      // renamed field on an interface -- left the baseline untouched and the gate reported "matches".
+      // A drift gate that cannot see the drift is worse than none, because it is trusted.
+      if (/^(export|declare|readonly|[a-zA-Z_$][\w$]*[?]?\s*[:({<])/.test(line)) lines.push(`${f}: ${line}`);
     }
   }
   fs.rmSync(WORK, { recursive: true, force: true });
