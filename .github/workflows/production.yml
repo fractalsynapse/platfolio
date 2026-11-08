@@ -115,6 +115,11 @@ jobs:
     if: needs.classify_tag.outputs.kind == 'release'
     runs-on: ubuntu-latest
     steps:
+      # The license check inspects the tagged tree, so this job needs it present. Without a checkout the
+      # workspace is empty and every release fails on a missing LICENSE that is in fact committed —
+      # found by the first tag whose commit satisfied the prior-run gate (run 42443489234).
+      - uses: actions/checkout@v7
+
       - name: Require a prior passing production run of this commit on main
         env:
           GH_TOKEN: ${{ github.token }}
