@@ -85,3 +85,42 @@ tenant's runner. That is the experiment that decides M2's execution-plane shape,
 Queries used the raw GraphQL endpoint with `Authorization: Bearer` (workspace) or
 `Project-Access-Token` (project). Introspection dumps were kept in gitignored `.research/`. Sentinel
 values were generated per run and are not recorded here.
+
+## E22 — follow-up session (same day): can the seal be set or verified by another route?
+
+Prompted by a better proposal from the maintainer: create the secrets for the tenant, tell them to seal
+in the dashboard, and *verify* afterwards. That turns on one question — can we read seal state at all?
+Two routes were tested against a live project (`platfolio-e22`, `52cb5333…`, one sourceless service,
+**0 deploys consumed**, still present so the remaining observation below can be made):
+
+1. **`Environment.config` is a real read surface and is *not* a leak.** `config.services.<uuid>.variables`
+   returns `{ "E22_SECRET": { "value": null, "generator": null } }` — the value is withheld even from a
+   token that can read the same variable through `variables()`. So config-as-code state is inspectable
+   without exposing secrets, which is useful for drift detection. But **no seal flag appears in it.**
+2. **The change-set route accepts a versioned graph but the seal flag has no effect.** `railway/iac`'s own
+   `defineRailway` serialises a variable as
+   `{ "type": "raw", "value": { "value": "…", "isSealed": true } }` — so the *format* carries `isSealed`.
+   Submitting that through `environmentApplyChangeSet(input: JSON)` (the `input` must be passed as a
+   GraphQL `JSON` variable, since service UUID keys cannot be GraphQL literals; `version: 1`, `edges: []`)
+   returned `status: "applying"` with a change-set id. Afterwards: the config etag was unchanged, `config`
+   showed no seal state, and **`variables(..., unrendered: true)` still returned the sentinel value.**
+   So either the flag is ignored or the apply was a no-op on shape.
+3. **Correction to this document's earlier note:** `variables(projectId, environmentId)` returns `{}` —
+   the map is **service-scoped**. Reading a service variable requires `serviceId`. My first E18 read used a
+   project-level variable, which is why it returned the value without that argument; service-level reads
+   behave the same once `serviceId` is supplied.
+
+### Where this leaves the proposal
+
+*Create, instruct, then verify the seal* is not implementable today, because nothing readable distinguishes
+a sealed variable from an unsealed one: the flag is absent from `config`, unreadable from `Variable`, and
+unaffected by the change-set. **One observation is still missing** and cannot be made from the API side: what
+a human-set seal looks like. If `variables(..., unrendered: true)` starts returning nothing for a variable
+sealed in the dashboard, then *absence of a readable value* is the verification signal — good enough to
+implement the maintainer's flow, with the caveat that a sealed value then also becomes unrecoverable to us
+(which is the point).
+
+**Open question handed to the CLI:** whether `environmentApplyChangeSet` applies our rendered IaC at all was
+not resolved. The reliable way to learn the exact payload is `railway config plan --json` (which redacts
+values unless `--show-values` is passed — never pass it), and that requires an account token, so it must be
+run by the maintainer locally rather than by the control plane.
