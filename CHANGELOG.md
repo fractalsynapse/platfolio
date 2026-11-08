@@ -7,6 +7,16 @@ change; entries describe merged intent, not aspirations.
 
 ### Added
 
+- **Custody, delivery and placement (D20–D23).** `credential-broker` gives managed mode one grant per
+  tenant that refuses the five secret-reading operations before they reach the transport, with an audit
+  trail and revocation, while strict mode holds nothing — both held to `runBrokerConformance()`.
+  `secret-delivery` implements the four modes; a relayed value reaches exactly one place (the provider
+  port), receipts and log surfaces are asserted value-free, and a provider without sealed-variable
+  support gets a visible refusal instead of an unsealed write. `scm-github` builds the App manifest,
+  registration URL with an unguessable state, state-checked callback and install link, with a PAT
+  provider behind the same interface. Manifests gain `ownership` and per-service `environments`, host
+  overlap is judged per environment, staging hosts are derived and never reused, and production-only
+  services are declared but attached only where they exist.
 - **M2 preparation.** The attestation contract (`DispatchIntent`, `Attestation`, `RunnerClaims`) with
   `verifyAttestation()` enforcing audience, issuer, repository, dispatch/instance/action/plan-hash and
   nonce binding, expiry, single-use replay, unknown-environment and production-environment gating;

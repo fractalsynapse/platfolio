@@ -33,8 +33,13 @@ test('real manifests parse with zero issues', () => {
 test('required secrets are names only, sorted and complete', () => {
   const { manifest } = parse(read('templates/arcnexus/manifest.yaml'));
   const list = requiredSecrets(manifest!);
-  assert.deepEqual(list.map((s) => s.name), ['ANTHROPIC_API_KEY', 'OIDC_CLIENT_SECRET', 'STRIPE_WEBHOOK_SECRET']);
+  // requiredSecrets sorts by service, then name: agent, api, keycloak.
+  assert.deepEqual(list.map((s) => `${s.service}/${s.name}`), ['agent/ANTHROPIC_API_KEY', 'api/OIDC_CLIENT_SECRET', 'api/STRIPE_WEBHOOK_SECRET', 'keycloak/KEYCLOAK_ADMIN_INITIAL_ACCESS']);
   assert.ok(list.every((s) => 'source' in s && !('value' in s)), 'no value may appear');
+  // D23: an external, production-only service must not demand its secrets in a staging that has no place for them.
+  const kc = list.find((s) => s.name === 'KEYCLOAK_ADMIN_INITIAL_ACCESS');
+  assert.deepEqual(kc?.environments, ['production'], 'keycloak is production-only');
+  assert.deepEqual(list.find((s) => s.name === 'OIDC_CLIENT_SECRET')?.environments, ['production', 'staging']);
 });
 
 test('rendering is deterministic across runs', () => {
@@ -76,7 +81,7 @@ test('generated Compose is accepted by docker compose config', (t) => {
 });
 
 test('generated Railway IaC type-checks against the published SDK', () => {
-  const dir = path.join(root, '.tmp-render');
+  const dir = path.join(root, '.tmp-render-manifest');
   fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(path.join(dir, '.railway'), { recursive: true });
   try {
@@ -87,7 +92,7 @@ test('generated Railway IaC type-checks against the published SDK', () => {
       execFileSync(process.execPath, ['--import', 'tsx', path.join(root, 'node_modules/typescript/bin/tsc'), '--noEmit', '--strict', '--target', 'es2023', '--module', 'nodenext', '--moduleResolution', 'nodenext', '--skipLibCheck', '--types', 'node', path.join(dir, '.railway/railway.ts')], { stdio: 'pipe', cwd: root });
     }
   } catch (error) {
-    const out = `${(error as { stdout?: Buffer }).stdout?.toString() ?? ''}${(error as { stderr?: Buffer }).stderr?.toString() ?? ''}`;
+    const out = `${(error as { stdout?: Buffer }).stdout?.toString() ?? ''}${(error as { stderr?: Buffer }).stderr?.toString() ?? ''}`.trim();
     assert.fail(`generated IaC did not type-check:\n${out.slice(0, 1200)}`);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });

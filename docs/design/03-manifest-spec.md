@@ -133,6 +133,23 @@ platfolio's infrastructure credentials (which are governed by [04 § The tenant'
 Each declaration may carry a `delivery` hint; the default is `relay-sealed`, and platform authors pick
 per secret, not the tenant:
 
+Two per-service fields decide *where* a service runs, which then decides what gets rendered,
+dispatched and checked (D23):
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `ownership` | `maintained` | `maintained` = software the tenant develops (needs staging); `external` = an upstream image platfolio hosts but does not develop (Keycloak-class), production-only unless stated |
+| `environments` | derived from `ownership` and the platform's enabled environments | explicit list wins; a service may not name a disabled environment |
+
+Consequences the renderers and validator must honour: Railway IaC expresses this with `ctx.isEnvironment(...)`
+(documented in the SDK for per-environment logic), so an external service is *declared but attached only*
+where it exists; Compose ignores the scope because local development wants the whole stack, including
+Keycloak; the host-overlap rule is evaluated **per environment**, since a production-only host and a
+staging host are not in conflict; and the secrets checklist is filtered by environment, so a
+production-only external service never demands its secrets be filled in a staging environment that has
+no place for them. Whether `railway config plan` honours per-environment resource membership is E21 —
+the shape type-checks here, which is a weaker claim than "it deploys correctly".
+
 | `delivery` | Behaviour | Use when |
 | --- | --- | --- |
 | `relay-sealed` (default) | tenant types the value into platfolio once; platfolio writes it and seals it; it cannot read it back afterwards | production credentials |

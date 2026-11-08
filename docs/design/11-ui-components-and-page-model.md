@@ -87,6 +87,18 @@ This keeps a mobile binary meaningful in App Store review (behavior is data-driv
 downloaded executable code), and keeps the security boundary honest: nothing downloaded at runtime can
 run with the user's session beyond the allowlisted component set.
 
+## Secrets panel (D21)
+
+Where a tenant sets a platform's secrets is the instance's project/environment view, not a separate
+ritual: one field per declared secret, labelled with the name from the manifest, grouped by service and
+environment, and filtered so a production-only external service (D23) shows no staging rows.
+
+Write-only by construction: the component takes no value prop to render, never displays a current value,
+and its success state is a receipt naming the secret and the environment rather than echoing anything
+back. The provider's `sealed-variables` capability decides the copy — *stored, sealed, cannot be read
+back* — and when the capability is absent the panel offers the `tenant-side` deep link instead. That is a
+visible choice, never a silent downgrade to writing an unsealed secret.
+
 ## Mobile (D10)
 
 Scope and sequencing, deliberately small:
