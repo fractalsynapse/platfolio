@@ -15,13 +15,16 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "tsx --test packages/*/test/*.test.ts",
     "contracts:check": "tsx scripts/check-contracts.ts",
-    "verify": "pnpm run check && pnpm run vendor:verify && pnpm run typecheck && pnpm run test && pnpm run contracts:check",
-    "render:example": "tsx packages/kernel/src/cli.ts render templates/treedx/manifest.yaml"
+    "verify": "pnpm run install:check && pnpm run check && pnpm run vendor:verify && pnpm run typecheck && pnpm run test && pnpm run contracts:check",
+    "render:example": "tsx packages/kernel/src/cli.ts render templates/treedx/manifest.yaml",
+    "install:check": "pnpm install --frozen-lockfile --prefer-offline"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "railway": "^3.16.0",
+    "yaml": "^2.7.0"
   },
   "license": "Apache-2.0"
 }
