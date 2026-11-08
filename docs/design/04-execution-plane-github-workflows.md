@@ -57,6 +57,23 @@ Consequences of that last row: the "with platfolio stopped, `git push` still dep
 for M2 cannot pass yet, and nothing here proves a hosted runner behaves as the contract assumes. That
 is the outstanding part of M2, not a detail to smooth over.
 
+## The tenant's experience, counted
+
+The design goal is **setup once, create cheaply**. A step that repeats per platform instance is a bug
+in this design, not a detail.
+
+| Stage | Who acts | Count | What platfolio does unattended |
+| --- | --- | --- | --- |
+| **platfolio deployment** (once per installation, not per tenant) | operator | one click | app-manifest wizard: generate manifest → operator approves in GitHub → redirect returns `code` → exchange for `id`/`pem`/`webhook_secret` → store in the deployment's own secret store; land back in platfolio's UI |
+| **Tenant onboarding** (once per team) | tenant admin | 2 clicks + 1 choice | authorize Railway OAuth (or submit one workspace token in mode B); open the App install link and pick repositories; choose the workspace. platfolio creates GitHub environments, mints per-environment provider tokens, writes them as encrypted environment secrets |
+| **New platform instance** | tenant admin | one short form | create provider project, open the install PR (workflow + desired-state file + `PLATFOLIO.md`), apply the plan, verify health, hand back a status page |
+| **Day to day** | nobody | zero | deploys on push; monitoring, limits, rotation prompts, export |
+| **Platform secrets** | tenant, once per instance | one field per secret, or zero | values are entered into platfolio's form and delivered sealed (D21); or `tenant-side`/`runner-side` delivery for mode A and security-sensitive tenants |
+
+Things deliberately **not** asked of a tenant: creating tokens, creating GitHub environments, learning
+the provider's UI, installing anything on a laptop, opening a tunnel, or repeating any of the above per
+project.
+
 ## Components
 
 ```
@@ -77,11 +94,19 @@ status publish                  commit statuses / check runs so results appear o
    - `PLATFOLIO.md` (what the workflow does, which secrets must exist, how to remove platfolio).
    The customer reviews and merges. **Branch protection is a feature here**: a human approves what
    runs with their credentials.
-3. **Connect Railway** — the customer creates a **project token per environment**
-   (`projectTokenCreate(projectId, environmentId)`, available on all plans) and stores each as a
-   GitHub **environment secret** (`RAILWAY_TOKEN_STAGING`, `RAILWAY_TOKEN_PRODUCTION`), with
-   required-reviewer protection on the production environment. platfolio stores **no** Railway
-   credential of any kind.
+3. **Connect the provider — one grant, and the tenant never handles a token.**
+   *(Rewritten 2026-11-08; the previous text made per-environment token creation a customer task,
+   which fails the "as few steps as possible" requirement and the one-time-setup requirement.)*
+   - **mode B (default)**: the tenant authorizes Railway OAuth (`workspace:admin`) or submits one
+     workspace token to the broker. platfolio then calls `projectCreate`, calls
+     `projectTokenCreate(projectId, environmentId)` for each environment, and writes the resulting
+     tokens into the tenant's GitHub environment secrets via the secrets API. GitHub environments
+     themselves are created by platfolio (`PUT /repos/{owner}/{repo}/environments/{name}`), not by
+     the tenant.
+   - **mode A (strict)**: the tenant places one workspace token in their own CI secrets and platfolio
+     holds nothing; token minting moves into the runner. Same product, one different custodian.
+   Either way: **no personal account token, ever**, and per-project tokens are an implementation
+   detail nobody sees.
 
    **Consistency fix, 2026-11-07 — why the obvious alternative is rejected.** An earlier draft of
    this step offered (b) "authorize platfolio's Railway OAuth app and store a refresh token that only

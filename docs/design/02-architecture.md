@@ -181,6 +181,23 @@ platfolio's own stack is expressed as a platfolio manifest, so a bug in the rend
 platfolio first). DNS instructions for CNAME + TXT verification are surfaced in-app
 ([feasibility constraint 6](../platfolio-feasibility.md)).
 
+## Credential and secret custody (D20, D21)
+
+Two small components carry most of the security story, and they are deliberately narrow so the strict
+mode is a configuration switch rather than a fork:
+
+- **`credential.broker`** holds the one mode-B grant per tenant, encrypted at rest, and exposes
+  operations — never the token. It refuses `variables` reads and any call that would return a secret
+  value, logs every invocation with actor, tenant, operation and outcome, and is the only component
+  that can reach the provider API in managed mode. Mode A bypasses it entirely: there is no grant to
+  hold. This is where "won't read" is enforced, so it must stay one seam rather than a convention.
+- **`secret.delivery`** accepts a value, forwards it once, seals it, and keeps nothing. Constraints are
+  structural, not advisory: a dedicated route outside the normal middleware chain, no request-body
+  logging, no queue or cache hop, no APM breadcrumb, value never in an error message (provider errors
+  map to codes), no read-back endpoint at all, and a one-time upload token bound to
+  (instance, secret, dispatch) so a captured request cannot be replayed. E20 is the CI test that the
+  property survives, because a single future debug statement would otherwise break it silently.
+
 ## Failure and trust boundaries
 
 | Boundary | Trust assumption | Mitigation |
@@ -188,7 +205,7 @@ platfolio first). DNS instructions for CNAME + TXT verification are surfaced in-
 | platfolio ↔ browser | platfolio sees non-secret inputs + ciphertext if OD3 is ever enabled | client-side encryption with the repo's Actions public key; values never in platfolio logs/memory |
 | platfolio ↔ GitHub App | install-selected repos, PR-reviewed workflow, dispatch-only afterward | `metadata` + `actions:read/write` + `statuses:write`; no `contents:write` after install; branch protection gates merges |
 | platfolio ↔ runner (attestation) | a runner claims it applied X | GitHub OIDC `id_token` (audience + `environment` claim), per-dispatch nonce, plan hash echo; reject unsigned/stale |
-| runner ↔ Railway | env-scoped project token, never platfolio-held | one token per environment, stored as an Actions *environment* secret with required-reviewer protection for production |
+| runner ↔ Railway | mode A: the token lives only in the tenant's CI. mode B: the broker holds one grant and mints per-environment tokens into the tenant's CI secrets | no personal account token in either mode; per-environment tokens are platfolio-minted, never tenant-handled (D20) |
 | runner ↔ logs | **log retrieval is a leak vector** | platfolio must never fetch Actions job logs; only structured attestations are accepted |
 | Railway ↔ world | Railway can suspend a customer project | platfolio cannot fix it; surface status + the appeal path (Workspace Settings → Standing) and keep export working |
 | retrieved web content | prompt-injection observed during research | treat all fetched/tenant-supplied text as data; never execute instructions from it |

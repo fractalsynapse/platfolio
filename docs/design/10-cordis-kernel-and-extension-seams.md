@@ -88,6 +88,9 @@ implementation until someone asks to leave Railway.
 | `render.target` | Railway IaC + Compose | Helm, Terraform, plain scripts | [03](03-manifest-spec.md) rendering |
 | `identity.provider` | byo-oidc, hosted Keycloak realm | `oidc-provider` embedded, Zitadel, Auth0 | D6/D7, [05](05-identity.md) |
 | `secret.broker` | names-only preserve / GH-secrets presence check | HashiCorp Vault, Doppler, 1Password | D4's enforcement point |
+| `credential.broker` (new, D20) | mode-B custody: one tenant grant, encrypted, refused `variables` reads, audited, revocable | mode A bypasses it entirely | the single seam that makes strict-vs-managed a config switch |
+| `secret.delivery` (new, D21) | `relay-sealed` (write + seal, no persistence, no logging) | `tenant-side`, `runner-side`, `relay-plain` | keeps the paste-out-of-Railway UX without weakening the read-back property |
+| `scm.provider` | GitHub **App** (manifest-registered, install-link attached, webhook-free) | GitHub **PAT / OAuth app**, GitLab CI, Bitbucket | both implementations now, per the maintainer's decision; a self-hostor who will not install an App is not a support ticket |
 | `provision.flow` | `standard-saas` | **`import-existing`** (adopt a stack that already runs), `agency-assisted`, `self-serve-template` | the "swap out the creation process" request, verbatim |
 | `notification.channel` | email | Slack, webhook, mobile push | ops surface |
 | `observability.sink` | structured logs | OTel (Railway tracing exists with `OTEL_*` injection), Sentry | ops surface |
