@@ -29,7 +29,7 @@ env:
   RELEASE_TAG_RE: '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'
 
 jobs:
-  classify-tag:
+  classify_tag:
     name: Classify tag
     runs-on: ubuntu-latest
     outputs:
@@ -62,8 +62,8 @@ jobs:
 
   reject-mistyped-tag:
     name: Reject mistyped release tag
-    needs: [classify-tag]
-    if: needs.classify-tag.outputs.kind == 'mistyped'
+    needs: [classify_tag]
+    if: needs.classify_tag.outputs.kind == 'mistyped'
     runs-on: ubuntu-latest
     steps:
       - name: Fail the release attempt
@@ -110,8 +110,8 @@ jobs:
 
   release-gate:
     name: Release tag policy
-    needs: [classify-tag, gate, experiment-e9]
-    if: needs.classify-tag.outputs.kind == 'release'
+    needs: [classify_tag, gate, experiment-e9]
+    if: needs.classify_tag.outputs.kind == 'release'
     runs-on: ubuntu-latest
     steps:
       - name: Require a prior passing production run of this commit on main
@@ -140,8 +140,8 @@ jobs:
 
   release-notes:
     name: Assemble release provenance
-    needs: [classify-tag, release-gate]
-    if: needs.classify-tag.outputs.kind == 'release'
+    needs: [classify_tag, release-gate]
+    if: needs.classify_tag.outputs.kind == 'release'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
