@@ -7,6 +7,11 @@ change; entries describe merged intent, not aspirations.
 
 ### Added
 
+- `docs/design/00-target-architecture.md` — the timeline-independent goal: end-state capabilities, the
+  invariants that hold at every stage (including the zero-secret rule and "security and exit are never
+  paid features"), deferrals with explicit build conditions, and what is out of the goal entirely.
+  Capabilities only; business and go-to-market material stays outside this repository. Index and
+  `AGENTS.md` point to it as the check before implementing.
 - Three-stage CI/CD gating: `development.yml` (feature branches, PRs to `staging`),
   `integration.yml` (pushes to `staging`, PRs to `main`, adds the E9 experiment) and
   `production.yml` (pushes to `main` plus tags, enforcing that a release tag's commit already passed
