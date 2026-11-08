@@ -38,7 +38,9 @@ spec:
       limits: { cpu: 1, memoryMB: 512 }
       env:
         NODE_ENV: production
-        OIDC_ISSUER: placeholder-resolved-at-apply-time
+        # Issuer supplied by hand. A team realm consumed across instances is OD11; until that lands this
+        # cannot be resolved by the system, so it is written as a real value rather than a stand-in.
+        OIDC_ISSUER: https://auth.arcnexus.example.com/realms/acme
         OIDC_CLIENT_ID: arcnexus
       domains: [app.arcnexus.example.com]
       public: true
@@ -52,7 +54,8 @@ spec:
       replicas: 2
       limits: { cpu: 1, memoryMB: 1024 }
       env:
-        OIDC_ISSUER: placeholder-resolved-at-apply-time
+        # See the note on the web service: hand-supplied until OD11.
+        OIDC_ISSUER: https://auth.arcnexus.example.com/realms/acme
         OIDC_CLIENT_ID: arcnexus
       secrets:
         - { name: OIDC_CLIENT_SECRET, source: preserve }

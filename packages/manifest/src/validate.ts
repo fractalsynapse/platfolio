@@ -34,6 +34,7 @@ export function looksLikeCredential(key: string): boolean {
   }
   return true;
 }
+const PLACEHOLDER_VALUE = /(^|[-_.])(placeholder|todo|tbd|change[-_.]?me|replace[-_.]?me|fill[-_.]?me|your[-_.]?here|secret[-_.]?here|x{3,})([-_.]|$)/i;
 const HOST = /^(\*\.)?[a-z0-9]([a-z0-9_-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9_-]*[a-z0-9])?)+$/i;
 
 function servicesOf(m: Manifest): [string, ServiceSpec][] {
@@ -74,7 +75,14 @@ export function validateManifest(unknown: unknown): Issue[] {
       if (looksLikeCredential(key)) {
         issues.push({ path: `spec.services.${svcName}.env.${key}`, code: 'secret-value-inline', message: `"${key}" looks like a credential; declare it under secrets[] with a value source instead of assigning "${value.length > 6 ? `${value.slice(0, 3)}…` : 'a value'}"` });
       }
-      if (/^(DATABASE_URL|REDIS_URL|MONGO_URL|MYSQL_URL)$/i.test(key)) {
+        // A value we cannot resolve must not become a value we deploy. Unresolved references used to be
+      // written as placeholder strings in fixtures (see OD11); the renderer would faithfully ship them,
+      // the app would fail to start, and the controller would report an unhealthy deploy as if that were
+      // the app's fault. Reject at parse, with the path.
+      if (PLACEHOLDER_VALUE.test(value)) {
+        issues.push({ path: `spec.services.${svcName}.env.${key}`, code: 'placeholder-value', message: `"${value}" is a placeholder, not a value; resolve it from a declared resource, or supply a real value (cross-instance references are the subject of OD11)` });
+      }
+    if (/^(DATABASE_URL|REDIS_URL|MONGO_URL|MYSQL_URL)$/i.test(key)) {
         issues.push({ path: `spec.services.${svcName}.env.${key}`, code: 'resource-ref-inline', message: 'connection URLs come from declared resources; remove it and reference spec.resources' });
       }
     }
