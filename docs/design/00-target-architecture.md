@@ -44,16 +44,25 @@ data** rather than bespoke code.
 | **One surface, many clients** | The public API is the only implementation path: web dashboard, mobile app, CLI, MCP tools and tenant automation are peers of it, never privileged side channels ([07](07-interfaces-api-mcp-mobile.md)). |
 | **Portability as a first-class property** | Multi-architecture images; the same stack runs in plain Docker Compose; the architecture a workload needs is a manifest field, not a packaging project. |
 | **Ejection as a capability** | The export package is tested in CI, not demoed: rendered config, data dumps with restore steps, checksummed archives, secret *inventory* with no values, and a working standalone bring-up. |
-| **Operation without access** | platfolio can run a tenant's stack well while being unable to read what runs in it. This is a design goal, not a trust promise. |
+| **Operation without access** | platfolio can run a tenant's stack well while being unable to read what runs in it. In strict mode that is architecture; in managed mode it is a refused call at one boundary plus sealing for the values that matter. Both are stated as such, never blurred into "we can't" where we only "won't". |
 
 ## 2. Invariants
 
 These hold at every stage, including the MVP, and they are the reason later stages are cheap.
 
-1. **No tenant secret or credential ever crosses platfolio.** Names only; provider-side `preserve()`;
-   presence verified by GitHub secret listing, which cannot reveal values; privileged credentials held
-   only by the tenant's runner. Enforced by the secret-name lint on manifests and the zero-secret audit
-   in [tenant-safety-check](../../.agents/skills/tenant-safety-check/SKILL.md) *(design — no code yet)*.
+1. **Platfolio never persists, displays, or logs a tenant secret value, and never holds an
+   infrastructure credential in strict mode.** *(Amended 2026-11-08 for decision D20/D21; see
+   [01](01-product-and-decisions.md).)* Two modes, one property:
+   - **strict (A)**: no platfolio-held provider credential exists at all. Values are entered tenant-side
+     or delivered by the tenant's runner; platfolio sees names only. "Cannot read" is architectural.
+   - **managed (B, default)**: the tenant grants one credential per account (Railway OAuth, or a
+     workspace token through the broker). Platfolio *could* read variables and does not — the broker
+     API refuses those calls, and the boundary is one seam, not an honour system. For secrets delivered
+     with sealing (D21), "cannot read" is again architectural: Railway states a sealed value
+     *"is never visible in the UI nor can it be retrieved via the API."*
+   Either mode: names only in manifests, no value in any log, error, cache or database row. Enforced by
+   the secret-name lint, the broker's refusal, and the zero-secret audit in
+   [tenant-safety-check](../../.agents/skills/tenant-safety-check/SKILL.md) *(design — no code yet)*.
 2. **No compute resale, no platfolio-owned tenant estate.** The system sells management; capacity is
    the tenant's contract with their provider. This is provider policy as much as preference
    ([feasibility constraint 1](../platfolio-feasibility.md)).

@@ -128,6 +128,25 @@ An archetype is a defaults module plus a validation rule set — not a separate 
 
 `value_source` is a closed enum, and it is the mechanism that keeps decision D4 true:
 
+Secrets are **the hosted platform's own** requirements, declared per platform and never confused with
+platfolio's infrastructure credentials (which are governed by [04 § The tenant's experience](04-execution-plane-github-workflows.md)).
+Each declaration may carry a `delivery` hint; the default is `relay-sealed`, and platform authors pick
+per secret, not the tenant:
+
+| `delivery` | Behaviour | Use when |
+| --- | --- | --- |
+| `relay-sealed` (default) | tenant types the value into platfolio once; platfolio writes it and seals it; it cannot read it back afterwards | production credentials |
+| `relay-plain` | written, not sealed: still never persisted or logged by platfolio, but readable by the granted credential in mode B | debug instances; never the default |
+| `tenant-side` | platfolio shows the name and a deep link; the tenant enters it in their provider project | mode A, or a tenant who will not type into us |
+| `runner-side` | the tenant stores it as a CI secret and the runner writes it | mode A with CI-side custody |
+
+Sealing has hard consequences the renderer and controller must honour, all from the provider's own
+documented behaviour: a sealed value **cannot be un-sealed**, is **not copied** when an environment or
+service is duplicated, is not provided by the CLI, and is not shown in environment-sync diffs. So the
+`cloneFrom` staging bootstrap must **expect** to arrive without these values, and the checklist turns
+red for exactly that reason — which is correct behaviour, not a bug. Rotation becomes
+"set a new value, verify, then revoke the old credential" with no read-back, and the UI must say so.
+
 | `source` | Meaning | Who holds the value |
 | --- | --- | --- |
 | `preserve` | Railway IaC `preserve()`: "keep the value that is already set in Railway" (**V**) | Railway, in the customer's project |
