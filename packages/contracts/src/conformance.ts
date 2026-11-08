@@ -19,6 +19,8 @@ export interface CaseResult {
 }
 
 export interface ConformanceReport {
+  /** 'full' uses the reference sample plan; 'reduced' means the provider cannot satisfy it yet. */
+  scope: 'full' | 'reduced';
   provider: string;
   contract: string;
   requiredRange: string;
@@ -70,7 +72,25 @@ async function guarded(run: () => Promise<CaseResult>): Promise<CaseResult> {
  * @param make fresh provider instance per case, so state cannot leak between cases
  * @param requiredRange contract range the control plane requires, e.g. "^1.0.0"
  */
-export async function runConformance(make: () => InfraProvider, requiredRange = '^1.0.0'): Promise<ConformanceReport> {
+/**
+ * A provider that cannot yet satisfy the reference sample plan may be run against a reduced fixture, but
+ * the report then carries `scope: 'reduced'` so nobody can quote it as conformance. The default stays the
+ * strict, full-capability gate.
+ */
+export interface ConformanceOptions {
+  plan?: () => InfraPlan;
+}
+
+export async function runConformance(make: () => InfraProvider, requiredRange = '^1.0.0', options: ConformanceOptions = {}): Promise<ConformanceReport> {
+  const scope: ConformanceReport['scope'] = options.plan ? 'reduced' : 'full';
+  if (options.plan) {
+    const probe = options.plan();
+    const surfaces = probe.environments.reduce((n, e) => n + e.services.length + e.domains.length, 0);
+    if (surfaces < 3) throw new Error('a reduced conformance plan must still exercise services and a domain');
+  }
+  /** Every case resolves its plan through here, so a reduced run is uniform and visible. */
+  const planFor = (overrides: Parameters<typeof samplePlan>[0] = {}): InfraPlan => (options.plan ? options.plan() : samplePlan(overrides));
+
   const results: CaseResult[] = [];
   const add = async (name: string, run: () => Promise<Omit<CaseResult, 'name'>>): Promise<void> => {
     const out = await guarded(async () => ({ name, ...(await run()) }));
@@ -97,7 +117,7 @@ export async function runConformance(make: () => InfraProvider, requiredRange = 
   );
 
   await add('validatePlan rejects a plan with an unknown resource reference', async () => {
-    const plan = samplePlan();
+    const plan = planFor();
     plan.environments[0]!.domains = [{ host: 'x.example.com', service: 'ghost', port: 1, verificationName: 'v' }];
     const issues = make().validatePlan(plan);
     return issues.length
@@ -106,7 +126,7 @@ export async function runConformance(make: () => InfraProvider, requiredRange = 
   });
 
   await add('validatePlan rejects a mutable tag instead of a digest', async () => {
-    const plan = samplePlan();
+    const plan = planFor();
     plan.environments[0]!.services[0]!.digest = 'sha256:bad';
     const issues = make().validatePlan(plan);
     return issues.length
@@ -116,7 +136,7 @@ export async function runConformance(make: () => InfraProvider, requiredRange = 
 
   await add('apply then readState shows every environment, service and domain', async () => {
     const provider = make();
-    const plan = samplePlan();
+    const plan = planFor();
     const applied = await provider.applyPlan(plan);
     if (!applied.verified) return { status: 'fail', detail: 'apply reported success without read-back verification' };
     if (applied.failures.length) return { status: 'fail', detail: `apply reported failures: ${applied.failures.map((f) => f.code).join(', ')}` };
@@ -132,7 +152,7 @@ export async function runConformance(make: () => InfraProvider, requiredRange = 
 
   await add('re-applying the same planHash is a no-op, not a duplicate', async () => {
     const provider = make();
-    const plan = samplePlan();
+    const plan = planFor();
     await provider.applyPlan(plan);
     const again = await provider.applyPlan(plan);
     if (!again.noop) return { status: 'fail', detail: 'second apply did not report noop' };
@@ -145,7 +165,7 @@ export async function runConformance(make: () => InfraProvider, requiredRange = 
 
   await add('interrupted apply converges on retry with no orphans', async () => {
     const provider = make();
-    const plan = samplePlan();
+    const plan = planFor();
     const partial = await provider.applyPlan({ ...plan, environments: [plan.environments[0]!] });
     if (partial.failures.length) return { status: 'fail', detail: 'first phase failed unexpectedly' };
     const full = await provider.applyPlan(plan);
@@ -156,7 +176,7 @@ export async function runConformance(make: () => InfraProvider, requiredRange = 
   });
 
   await add('secrets are never carried in a plan, by schema', async () => {
-    const raw = JSON.stringify(samplePlan()) as unknown;
+    const raw = JSON.stringify(planFor()) as unknown;
     const text = typeof raw === 'string' ? raw : '';
     const looksLikeValue = /"(client[_-]?secret|token|password|api[_-]?key)"\s*:\s*"[^"]{8,}"/i.test(text);
     return looksLikeValue
@@ -166,7 +186,7 @@ export async function runConformance(make: () => InfraProvider, requiredRange = 
 
   await add('deleteInstance removes everything and reports orphans honestly', async () => {
     const provider = make();
-    const plan = samplePlan();
+    const plan = planFor();
     await provider.applyPlan(plan);
     const deleted = await provider.deleteInstance(plan.instanceId);
     if (deleted.orphans.length) return { status: 'fail', detail: `orphans left behind: ${deleted.orphans.join(', ')}` };
@@ -185,6 +205,7 @@ export async function runConformance(make: () => InfraProvider, requiredRange = 
   const failed = results.filter((r) => r.status === 'fail').length;
   const unimplemented = results.filter((r) => r.status === 'not-implemented').length;
   return {
+    scope,
     provider: info.provider,
     contract: info.contract,
     requiredRange,

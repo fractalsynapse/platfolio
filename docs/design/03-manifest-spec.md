@@ -199,10 +199,13 @@ Consequences that must hold in the implementation:
 sketch it was corrected here rather than in code comments. Verified facts from
 `railway@3.16.0` (the package the generated file is type-checked against in CI):
 
-- **Resource ceilings are not expressible in Railway IaC.** `IntentServiceConfig` has no CPU/memory
-  field, so the renderer records manifest limits as comments in the generated file and notes them in
-  `Rendered.notes`. The tenant workflow applies them out of band via `serviceInstanceLimitsUpdate`.
-  Silently dropping them would have been the worse failure.
+- **Resource ceilings are not expressible in Railway IaC — but they ARE settable through the API.**
+  `IntentServiceConfig` has no CPU/memory field, so the renderer records manifest limits as comments in
+  the generated file and notes them in `Rendered.notes`. That is a limit of the *exported artifact*, not
+  of platfolio: the provider applies ceilings with `serviceInstanceLimitsUpdate` (introspected and now
+  implemented in `RailwayInfraProvider`), and reports `ceilings-not-applied` if the call fails. The
+  earlier note told tenants to apply them out of band, which was an inference from the IaC type
+  surfacing generalized into a provider limit; corrected 2026-11-08.
 - **Resource references go through `.env`.** The SDK exposes `ReferencableDatabaseNode.env`, so the
   generated code emits `db.env.DATABASE_URL`; `db.DATABASE_URL` does not type-check.
 - **Bucket regions are an allowlist, not a cast.** `BucketRegion = "sjc" | "iad" | "ams" | "sin"`, and
