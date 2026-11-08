@@ -5,6 +5,12 @@ packages:
 # strictDepBuilds=false keeps that report a notice so `pnpm install --frozen-lockfile` succeeds in CI,
 # while ignoredBuiltDependencies names the one skipped script. Nothing is allow-listed for execution.
 # If a dependency ever genuinely needs a build step, move its name to onlyBuiltDependencies.
+# Do not let `pnpm run <script>` silently install first. It masked a stale lockfile locally (CI
+# failed on it) and it heals away negative tests of the lock gate. CI runs an explicit frozen install.
+verifyDepsBeforeRun: false
+
 strictDepBuilds: false
 ignoredBuiltDependencies:
   - esbuild
+allowBuilds:
+  esbuild: set this to true or false
