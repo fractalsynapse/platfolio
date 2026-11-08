@@ -152,7 +152,7 @@ export class MintingRailwayCredentials implements RailwayCredentialSource {
     const data = await this.transport.graphql<{ projectTokenCreate: string }>({
       operation: 'projectTokenCreate',
       credential: this.workspaceCredential,
-      query: 'mutation ($input: ProjectTokenCreateInput!) { projectTokenCreate(input: $input) }',
+      query: 'mutation ($input: ProjectTokenCreateInput!) { projectTokenCreate(input: $input) }',  // String!, no selection
       variables: { input: { projectId, environmentId, name: `${this.tokenName}-${environment}` } },
     });
     this.cache.set(key, data.projectTokenCreate);

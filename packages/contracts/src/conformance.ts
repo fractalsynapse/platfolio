@@ -85,8 +85,14 @@ export async function runConformance(make: () => InfraProvider, requiredRange = 
   const scope: ConformanceReport['scope'] = options.plan ? 'reduced' : 'full';
   if (options.plan) {
     const probe = options.plan();
-    const surfaces = probe.environments.reduce((n, e) => n + e.services.length + e.domains.length, 0);
-    if (surfaces < 3) throw new Error('a reduced conformance plan must still exercise services and a domain');
+    // What must be present is a *service* and a *domain* -- not an arbitrary count, which once rejected a
+    // legitimate single-environment plan while a bloated one would have passed.
+    const services = probe.environments.reduce((n, e) => n + e.services.length, 0);
+    const domains = probe.environments.reduce((n, e) => n + e.domains.length, 0);
+    const environments = probe.environments.length;
+    if (services < 1 || domains < 1 || environments < 1) {
+      throw new Error(`a reduced conformance plan must still exercise a service and a domain (got ${services} services, ${domains} domains)`);
+    }
   }
   /** Every case resolves its plan through here, so a reduced run is uniform and visible. */
   const planFor = (overrides: Parameters<typeof samplePlan>[0] = {}): InfraPlan => (options.plan ? options.plan() : samplePlan(overrides));

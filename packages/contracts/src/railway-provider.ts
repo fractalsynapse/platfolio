@@ -167,6 +167,12 @@ export class RailwayInfraProvider implements InfraProvider {
     const projectId = existing ? existing.id : await this.createProject(name);
     const workspaceCredential = await this.credentials.workspace();
 
+    // Record intent BEFORE mutating anything. An earlier version wrote this marker at the end of a
+    // successful apply, so an apply that failed halfway left no marker and its own retry re-deployed
+    // every service -- visible in E26 as a stack of DEPLOYING/FAILED deployments for one service.
+    // Idempotency has to be established before the destructive step, not after it.
+    await this.writeMarker(projectId, plan.planHash, workspaceCredential);
+
     // Already applied and unchanged: a re-delivered dispatch must not redeploy the world.
     if (this.markerOf(existing?.description) === plan.planHash) {
       const state = await this.snapshot(projectId);
@@ -237,7 +243,13 @@ export class RailwayInfraProvider implements InfraProvider {
           failures.push({ step: `domains.${domain.host}`, code: 'unknown-service', message: `domain targets "${domain.service}", which this plan does not define in "${environment.name}"` });
           continue;
         }
-        const placed = await this.createDomain(projectId, environmentId, targetServiceId, domain, token, failures);
+        // Measured: serviceDomainCreate is NOT idempotent -- re-applying created a second hostname for the
+        // same service, so the plan looked satisfied while the tenant had two URLs. Check first.
+        const already = await this.instanceStatus(projectId, environmentId, targetServiceId, token);
+        const existingHost = already?.domainHosts.some((h) => h === domain.host || (domain.host.endsWith('.up.railway.app') && h.endsWith('.up.railway.app')));
+        const placed = existingHost
+          ? { host: already?.domainHosts.find((h) => h.endsWith('.up.railway.app')) ?? domain.host, dnsStatus: 'verified' as const }
+          : await this.createDomain(projectId, environmentId, targetServiceId, domain, token, failures);
         // A Railway-generated hostname is assigned by the provider, so the plan's requested host is not
         // necessarily what exists. Report the actual one; readState reports the same set, and the two
         // must agree or "verified" means nothing.
@@ -251,8 +263,6 @@ export class RailwayInfraProvider implements InfraProvider {
         failures.push({ step: `buckets.${bucket.name}`, code: 'unsupported-resource', message: 'bucket provisioning is not implemented by this provider' });
       }
     }
-
-    await this.writeMarker(projectId, plan.planHash, workspaceCredential);
 
     return {
       instanceId: plan.instanceId,
@@ -714,7 +724,10 @@ export class RailwayInfraProvider implements InfraProvider {
     await this.transport.graphql({
       operation: 'projectUpdate',
       credential,
-      query: 'mutation ($id: String!, $input: ProjectUpdateInput!) { projectUpdate(id: $id, input: $input) }',
+      // `projectUpdate` returns Project!, so it requires a sub-selection. Without one the API rejects
+      // the whole call at validation time -- which is what E26 hit, and because this write happens at the
+      // END of applyPlan, it meant the marker was never stored and every retry re-deployed everything.
+      query: 'mutation ($id: String!, $input: ProjectUpdateInput!) { projectUpdate(id: $id, input: $input) { id } }',
       variables: { id: projectId, input: { description: `${MARKER}${planHash}` } },
     });
   }

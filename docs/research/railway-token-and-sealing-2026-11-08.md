@@ -228,3 +228,40 @@ Until that is settled, the honest status of the Railway provider is: transport a
 against the live API, mutation paths partly verified (create project/environment/service, variable upsert,
 single deploy to SUCCESS, project delete, token mint/revoke), and **repeated-deploy behaviour unresolved**.
 Full-scope conformance still fails, by design, because databases and buckets are unimplemented.
+
+## E27 — overlapping deploys: my hypothesis was wrong, and the real cause was one missing `{ id }`
+
+**Test A** — two `serviceInstanceDeploy` calls fired back to back on one image service produced **a single
+deployment**, which reached `SUCCESS`. Railway coalesces immediate duplicates, so "overlapping deploys fail"
+is false as stated. **Test B** — one deploy after the previous settled: also `SUCCESS`. Two deploys
+consumed, project deleted, token revoked.
+
+**The actual cause, found by re-running the suite with attribution:**
+
+```
+railway projectUpdate: Field "projectUpdate" of type "Project!" must have a selection of subfields.
+```
+
+`projectUpdate` returns an object, and my marker write asked for nothing — so the call was rejected at
+validation. It sat at the **end** of `applyPlan`, which meant the marker was never stored, so every
+subsequent apply re-deployed everything. The grouped attribution the runner printed after the fix made it
+obvious at a glance: `platfolio-e26/production/web: DEPLOYING, FAILED, FAILED, SUCCESS` — one service, four
+deployments, all of them mine. The same run also showed **two service domains** on one service, because
+`serviceDomainCreate` is not idempotent and nothing checked for an existing hostname.
+
+Three changes came out of it:
+
+1. `projectUpdate(id, input) { id }` — the missing selection.
+2. **The idempotency marker is written before any mutating call.** Not a performance tweak: with the
+   marker written last, a partially-applied plan made its own retry destructive, which is the exact failure
+   mode the controller loop exists to avoid.
+3. Domains are checked for an existing hostname before `serviceDomainCreate`.
+
+And one tooling fix, because the mock had agreed with the bug: `railway-mock` now rejects any mutation whose
+object-returning field lacks a sub-selection. The first version of that guard matched the *mutation's* own
+parentheses (`mutation (…) {`), so it could never fail — caught by breaking a query on purpose and watching
+the suite stay green. It now reports 2 failures when a selection is removed, and 101/101 when restored.
+
+**Status of E26 after these fixes: unverified live.** The suite has not been re-run against Railway since
+the marker fix; ~14 of the tenant's 20 daily deploys are accounted for, so the confirming run (≈3 deploys)
+is waiting on the maintainer's go-ahead rather than being spent unilaterally.
