@@ -161,8 +161,12 @@ jobs:
       - name: Record identity and provenance
         run: |
           mkdir -p out
-          # Bare semver release tags only, newest first; the second-to-newest is the previous release.
-          prev=$(git tag --list | grep -E "$RELEASE_TAG_RE" | sort -V | tail -n 2 | head -n 1)
+          # Previous release = a bare semver tag reachable from THIS commit, excluding this tag.
+          # "second-to-newest tag in the repo" is wrong: it ignores the tagged commit, so a first
+          # release reports itself and a tag on an older commit can report a newer release (#20).
+          # Ambiguity acknowledged: two release tags on the same commit have no ordering between them;
+          # the changelog guard below already skips the range when prev equals the current tag.
+          prev=$(git tag --merged HEAD --list | grep -E "$RELEASE_TAG_RE" | grep -vx "${GITHUB_REF_NAME}" | sort -V | tail -n 1)
           {
             echo "# Release ${GITHUB_REF_NAME}"
             echo
