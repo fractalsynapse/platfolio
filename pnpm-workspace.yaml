@@ -1,10 +1,10 @@
-# Repository tooling runs no dependency build scripts.
-# pnpm 12 fails the install when a script is skipped under its default strict policy. esbuild (via tsx)
-# is explicitly listed as ignored here because the gates provably run without its install script, and
-# strictDepBuilds is turned off so that deliberate skip is not an error. Nothing is allow-listed for
-# execution. If a future dependency truly needs a build step, add it to onlyBuiltDependencies by name.
+packages:
+  - packages/*
+
+# Repository tooling runs no dependency build scripts. pnpm blocks them by default and reports it;
+# strictDepBuilds=false keeps that report a notice so `pnpm install --frozen-lockfile` succeeds in CI,
+# while ignoredBuiltDependencies names the one skipped script. Nothing is allow-listed for execution.
+# If a dependency ever genuinely needs a build step, move its name to onlyBuiltDependencies.
 strictDepBuilds: false
 ignoredBuiltDependencies:
   - esbuild
-allowBuilds:
-  esbuild: set this to true or false
