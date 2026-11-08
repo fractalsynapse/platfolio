@@ -82,7 +82,7 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
 
     // The measured authorization split. Getting this wrong is how a provider "works" against a fake and
     // fails on the first real call.
-    const needsProject = ['serviceCreate', 'serviceInstanceUpdate', 'serviceInstanceLimitsUpdate', 'variableUpsert', 'serviceInstanceDeploy', 'serviceInstances', 'environment.config', 'serviceDomainCreate', 'customDomainCreate'];
+    const needsProject = ['serviceCreate', 'serviceInstanceUpdate', 'serviceInstanceLimitsUpdate', 'variableUpsert', 'serviceInstanceDeploy', 'environment.serviceInstances', 'environment.config', 'serviceDomainCreate', 'customDomainCreate'];
     const needsWorkspace = ['projects', 'project', 'projectCreate', 'projectUpdate', 'projectDelete', 'project.environments', 'environmentCreate', 'project.services', 'projectTokenCreate', 'projectTokens', 'projectTokenDelete', 'serviceDelete', 'project.buckets'];
     if (needsProject.includes(operation) && credential.kind !== 'project') {
       this.denied.push(operation);
@@ -178,11 +178,12 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
         return { serviceInstanceUpdate: true } as T;
       }
       case 'serviceInstanceLimitsUpdate': {
-        const key = `${v.environmentId}:${v.serviceId}`;
+        const lim = v.input as { environmentId: string; serviceId: string };
+        const key = `${lim.environmentId}:${lim.serviceId}`;
         const instance = this.instances.get(key);
         if (!instance) throw new Error('railway serviceInstanceLimitsUpdate: no instance [NOT_FOUND]');
-        const input = v.input as { memoryMegabytes?: number; cpuCount?: number };
-        instance.limits = { cpu: input.cpuCount ?? 0, memoryMB: input.memoryMegabytes ?? 0 };
+        const input = v.input as { memoryGB?: number; vCPUs?: number };
+        instance.limits = { cpu: input.vCPUs ?? 0, memoryMB: Math.round((input.memoryGB ?? 0) * 1024) };
         return { serviceInstanceLimitsUpdate: true } as T;
       }
       case 'variableUpsert': {
@@ -211,22 +212,32 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
         instance.status = 'DEPLOYING';
         return { serviceInstanceDeploy: true } as T;
       }
-      case 'serviceInstances': {
-        const key = `${v.environmentId}:${v.serviceId}`;
-        const instance = this.instances.get(key);
-        if (!instance) return { serviceInstances: { edges: [] } } as T;
-        instance.polls += 1;
-        if (instance.status === 'DEPLOYING' && instance.polls > this.options.settleAfter) instance.status = this.options.outcome;
-        if (instance.status === null) instance.status = 'PENDING';
-        const node = {
-          id: instance.instanceId,
-          serviceId: v.serviceId as string,
-          numReplicas: instance.numReplicas,
-          source: { image: instance.image },
-          latestDeployment: { status: instance.status },
-          domains: { edges: instance.domains.map((domain) => ({ node: { domain } })) },
-        };
-        return { serviceInstances: { edges: [{ node }] } } as T;
+      case 'environment.serviceInstances': {
+        const environmentId = v.environmentId as string;
+        const nodes: unknown[] = [];
+        for (const [key, instance] of this.instances) {
+          if (!key.startsWith(`${environmentId}:`)) continue;
+          instance.polls += 1;
+          if (instance.status === 'DEPLOYING' && instance.polls > this.options.settleAfter) instance.status = this.options.outcome;
+          if (instance.status === null) instance.status = 'PENDING';
+          const svc = this.services.get(key.split(':')[1]!);
+          nodes.push({
+            node: {
+              id: instance.instanceId,
+              serviceId: key.split(':')[1],
+              numReplicas: instance.numReplicas,
+              source: { image: instance.image },
+              latestDeployment: { status: instance.status },
+              // Mirrors the measured API: custom status is an object, service syncStatus an enum.
+              domains: {
+                customDomains: instance.domains.filter((d) => !d.endsWith('.up.railway.app')).map((domain) => ({ domain, status: { verified: false, certificateStatus: 'CERTIFICATE_STATUS_TYPE_VALIDATING_OWNERSHIP' } })),
+                serviceDomains: instance.domains.filter((d) => d.endsWith('.up.railway.app')).map((domain) => ({ domain, syncStatus: 'ACTIVE' })),
+              },
+            },
+          });
+          void svc;
+        }
+        return { environment: { serviceInstances: { edges: nodes } } } as T;
       }
       case 'serviceDomainCreate': {
         const input = v.input as { environmentId: string; serviceId: string };

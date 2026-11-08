@@ -35,7 +35,7 @@ export interface ConformanceReport {
 export function samplePlan(overrides: Partial<InfraPlan> = {}): InfraPlan {
   const service = (name: string, replicas: number) => ({
     name,
-    image: `ghcr.io/acme/${name}`,
+    image: `ghcr.io/acme/${name}:1.4.0`,
     digest: `sha256:${'a'.repeat(64)}`,
     port: 3000,
     healthPath: '/healthz',

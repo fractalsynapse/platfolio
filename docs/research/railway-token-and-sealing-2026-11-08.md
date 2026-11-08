@@ -179,3 +179,52 @@ implement the maintainer's flow, with the caveat that a sealed value then also b
 not resolved. The reliable way to learn the exact payload is `railway config plan --json` (which redacts
 values unless `--show-values` is passed — never pass it), and that requires an account token, so it must be
 run by the maintainer locally rather than by the control plane.
+
+## E26 — the conformance suite against the live API: what it broke, what it proved
+
+Run with `scripts/railway-live-conformance.ts` (one project, `docker.io/library/nginx` pinned by digest,
+one service per environment, everything deleted afterwards; the dev workspace is empty again and the
+minted project token died with the project). Approximate deploy accounting for the session: **~8 of the
+20/day ceiling** — the Railway dashboard is authoritative, not this estimate.
+
+Five findings, all of which the mock either missed or actively contradicted:
+
+1. **`repo@sha256:…` is accepted and never deploys.** A tagless digest reference left a deployment in
+   `DEPLOYING` for 20+ minutes; `repo:tag@sha256:…` reached `SUCCESS` in ~20 seconds, and Railway stores
+   the string verbatim. Digest pinning is a platfolio invariant, so the tag has to travel with it:
+   validation now rejects an untagged image in both the manifest (`image-tag-missing`) and the provider's
+   `validatePlan`. **This was invisible offline** — a mock happily deploys whatever string it is given.
+2. **`CustomDomain.status` is an object**, not a string: `{ verified, certificateStatus, dnsRecords, … }`
+   with `certificateStatus` an enum (`…_VALID`, `…_ISSUING`, `…_VALIDATING_OWNERSHIP`,
+   `…_ISSUE_FAILED`). My query asked for a scalar and the API rejected the whole selection set, which is
+   how a provider "passes" against a fake and fails on contact.
+3. **There is no root `serviceInstances` query.** Instances hang off `Environment`; a field I had
+   invented was being answered by my own mock.
+4. **A workspace allows one project creation per 30 seconds** (`You are creating projects too quickly`).
+   That is a provisioning-queue constraint, not a detail: it bounds how fast a tenant can be onboarded
+   and how the conformance suite has to be sequenced.
+5. **No per-request deadline can hang an apply indefinitely.** One run sat on an unanswered call for
+   20+ minutes while the deployment it was polling had already finished. `HttpRailwayTransport` now
+   aborts at 25s by default and the runner has a wall-clock cap; a timeout is an error the controller can
+   retry, whereas a hang is a silent stall.
+
+`DeploymentStatus` in full, from introspection: `BUILDING, CRASHED, DEPLOYING, FAILED, INITIALIZING,
+NEEDS_APPROVAL, QUEUED, REMOVED, REMOVING, SKIPPED, SLEEPING, SUCCESS, WAITING`. The provider's map was
+missing `NEEDS_APPROVAL` — the one state that must reach the tenant as an action rather than look like a
+slow deploy — plus `WAITING`, `REMOVING` and `SKIPPED`; unknown values now produce an
+`unknown-deployment-status` note instead of being flattened.
+
+**Unresolved, and deliberately not chased further today.** The suite reached the apply stage and then
+produced two `FAILED` deployments with `diagnosis: null` alongside a `SUCCESS`, from repeated
+`serviceInstanceDeploy(latestCommit: true)` calls on the same image service across cases. The likely
+cause is overlapping deploys — the suite re-applies, and the plan marker that makes a re-apply a no-op is
+written at the *end* of a successful apply, so a case that failed mid-way leaves no marker and the next
+case deploys again. That is a plausible mechanism, not a measured one: the focused probe is whether a
+second `serviceInstanceDeploy` while one is in flight is inherently `FAILED` or merely discouraged, and
+whether `deploymentCancel` should precede it. It also exposed a design point worth recording: **idempotency
+must be established before the mutating call, not after**, or a partial apply makes the retry destructive.
+
+Until that is settled, the honest status of the Railway provider is: transport and read paths verified
+against the live API, mutation paths partly verified (create project/environment/service, variable upsert,
+single deploy to SUCCESS, project delete, token mint/revoke), and **repeated-deploy behaviour unresolved**.
+Full-scope conformance still fails, by design, because databases and buckets are unimplemented.

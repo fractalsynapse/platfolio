@@ -45,10 +45,12 @@ export interface RailwayTransport {
 export class HttpRailwayTransport implements RailwayTransport {
   private readonly endpoint: string;
   private readonly fetchImpl: typeof fetch;
+  private readonly requestTimeoutMs: number;
 
-  constructor(options: { endpoint?: string; fetch?: typeof fetch } = {}) {
+  constructor(options: { endpoint?: string; fetch?: typeof fetch; requestTimeoutMs?: number } = {}) {
     this.endpoint = options.endpoint ?? RAILWAY_ENDPOINT;
     this.fetchImpl = options.fetch ?? fetch;
+    this.requestTimeoutMs = options.requestTimeoutMs ?? 30_000;
   }
 
   async graphql<T>(args: { query: string; variables?: Record<string, unknown>; credential: RailwayCredential; operation: string }): Promise<T> {
@@ -59,14 +61,18 @@ export class HttpRailwayTransport implements RailwayTransport {
 
     let response: Response;
     try {
+      // A request with no deadline can hang an apply forever -- a live run stalled exactly this way,
+      // sitting on one unanswered call while the caller waited on a "deployment" that had already
+      // finished. The timeout turns that into an error the controller can retry or report.
       response = await this.fetchImpl(this.endpoint, {
         method: 'POST',
         headers,
         body: JSON.stringify({ query: args.query, ...(args.variables ? { variables: args.variables } : {}) }),
+        signal: AbortSignal.timeout(this.requestTimeoutMs),
       });
     } catch (error) {
       // Network text can echo the request; keep the message free of anything caller-supplied.
-      throw new Error(`railway transport: ${args.operation} failed to reach the API (${(error as Error).name})`);
+      throw new Error(`railway transport: ${args.operation} failed to reach the API (${(error as Error).name}: ${(error as Error).message.slice(0, 120)})`);
     }
     const body = (await response.json().catch(() => null)) as GraphQLResponse<T> | null;
     if (!body) throw new Error(`railway transport: ${args.operation} returned a non-JSON body (HTTP ${response.status})`);

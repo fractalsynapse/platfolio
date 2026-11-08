@@ -216,6 +216,11 @@ sketch it was corrected here rather than in code comments. Verified facts from
 - **Secrets render as `preserve()` in IaC and `"$${NAME:-}"` in Compose** — names in both, values never.
 - Comments are language-appropriate per target: sharing a `#` header with the Compose output made the
   generated TypeScript fail to parse.
+- **`image` must carry a tag alongside the digest.** Measured in E26: Railway accepts
+  `repo@sha256:…` and then never deploys it — the deployment sat in `DEPLOYING` for over 20 minutes,
+  while `repo:tag@sha256:…` reached `SUCCESS` in about 20 seconds, and the reference is stored verbatim.
+  Digest pinning is the invariant; the tag is how the provider is told *which* manifest to resolve.
+  Validation rejects it with `image-tag-missing` in the manifest and again in `RailwayInfraProvider`.
 
 The fixture suite in `packages/manifest/test/` is the executable form of § Validation gates: two real
 platform manifests render and validate clean, and five negative fixtures each produce a specific code
