@@ -150,6 +150,32 @@ Consequences that must hold in the implementation:
   fresh clone cannot wipe customer secrets — and conversely a plan that would *delete* a preserved
   key is a hard validation error.
 
+## Rendering status (implementation note, 2026-11-08)
+
+`packages/manifest` implements a subset of this specification, and where reality differed from the
+sketch it was corrected here rather than in code comments. Verified facts from
+`railway@3.16.0` (the package the generated file is type-checked against in CI):
+
+- **Resource ceilings are not expressible in Railway IaC.** `IntentServiceConfig` has no CPU/memory
+  field, so the renderer records manifest limits as comments in the generated file and notes them in
+  `Rendered.notes`. The tenant workflow applies them out of band via `serviceInstanceLimitsUpdate`.
+  Silently dropping them would have been the worse failure.
+- **Resource references go through `.env`.** The SDK exposes `ReferencableDatabaseNode.env`, so the
+  generated code emits `db.env.DATABASE_URL`; `db.DATABASE_URL` does not type-check.
+- **Bucket regions are an allowlist, not a cast.** `BucketRegion = "sjc" | "iad" | "ams" | "sin"`, and
+  validation rejects anything else with `unknown-region` rather than generating `as never`.
+- **Compose needs different values than IaC for the same reference.** Pre-substituting Railway syntax
+  into Compose produced `$$`-escape and invalid-interpolation errors from `docker compose config`;
+  the intermediate therefore carries structured refs (`resource-ref` entries) resolved per target.
+- **Secrets render as `preserve()` in IaC and `"$${NAME:-}"` in Compose** — names in both, values never.
+- Comments are language-appropriate per target: sharing a `#` header with the Compose output made the
+  generated TypeScript fail to parse.
+
+The fixture suite in `packages/manifest/test/` is the executable form of § Validation gates: two real
+platform manifests render and validate clean, and five negative fixtures each produce a specific code
+(`secret-value-inline`, `wildcard-conflict`, `mutable-tag`, `unknown-dependency`,
+`renderer-version-window`).
+
 ## Rendering targets
 
 | Target | Generated from | Notes |

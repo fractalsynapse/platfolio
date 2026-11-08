@@ -1,0 +1,11 @@
+{
+  "name": "@platfolio/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "API-stable capability contracts for platfolio: interfaces, config schemas and conformance suites. The only surface provider implementations are written against.",
+  "license": "Apache-2.0",
+  "main": "./src/index.ts",
+  "exports": { ".": "./src/index.ts" },
+  "dependencies": { "zod": "^4.6.7" }
+}

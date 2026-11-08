@@ -7,6 +7,15 @@ change; entries describe merged intent, not aspirations.
 
 ### Added
 
+- **M1 contract layer.** `packages/contracts` defines the `infra.provider` capability with a
+  conformance suite, an in-memory test double and a deliberately-incomplete Railway implementation;
+  `packages/manifest` implements the Platform Manifest as a zod/StandardSchema definition with
+  archetype and semantic validation (secrets by name only, wildcard/subdomain overlap, digest
+  pinning, provider region allowlist, renderer version window) plus Compose and Railway IaC renderers
+  exercised by two real platform fixtures and five negative fixtures; `packages/kernel` resolves the
+  capability through the vendored framework by name and refuses to boot on an unsatisfiable contract
+  range. `pnpm run verify` now covers all of it, including a contract-drift baseline in
+  `api/contracts.api.md`.
 - `docs/design/00-target-architecture.md` — the timeline-independent goal: end-state capabilities, the
   invariants that hold at every stage (including the zero-secret rule and "security and exit are never
   paid features"), deferrals with explicit build conditions, and what is out of the goal entirely.

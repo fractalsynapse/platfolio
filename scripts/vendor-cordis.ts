@@ -145,7 +145,8 @@ function git(args: string[], opts: { text?: boolean } = {}): { status: number; o
   if (r.error) die(`git ${args.join(' ')} failed to start: ${r.error.message}`);
   const out = typeof r.stdout === 'string' ? r.stdout : (r.stdout?.toString('utf8') ?? '');
   const err = typeof r.stderr === 'string' ? r.stderr : (r.stderr?.toString('utf8') ?? '');
-  return { status: r.status ?? 1, out, err, buf: typeof r.stdout === 'string' ? undefined : r.stdout };
+  const buf = typeof r.stdout === 'string' ? undefined : r.stdout;
+  return buf === undefined ? { status: r.status ?? 1, out, err } : { status: r.status ?? 1, out, err, buf };
 }
 
 function requireGit(): void {
@@ -248,7 +249,7 @@ async function currentLock(ref: string, commit: string, note?: string): Promise<
     vendoredAt: existing?.vendoredAt ?? now,
     updatedAt: now,
     patches: (await listPatches()).map((p) => path.basename(p)),
-    note,
+    ...(note === undefined ? {} : { note }),
   };
 }
 

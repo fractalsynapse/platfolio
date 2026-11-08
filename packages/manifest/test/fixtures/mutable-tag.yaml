@@ -1,0 +1,16 @@
+apiVersion: platfolio.dev/v1alpha1
+kind: Platform
+metadata: { name: bad, version: 1.0.0, title: Bad, summary: mutable tag, archetype: api-service }
+spec:
+  requires: { platfolio: ">=0.1.0 <1" }
+  identity: { mode: none, clients: [] }
+  environments: { production: { enabled: true }, staging: { enabled: false }, preview: { enabled: false } }
+  resources: { volumes: [] }
+  services:
+    api:
+      image: ghcr.io/acme/api:latest
+      digest: sha256:9999999999999999999999999999999999999999999999999999999999999999
+      port: 8080
+      env: {}
+      secrets: []
+      domains: []

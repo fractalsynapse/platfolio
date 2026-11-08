@@ -31,10 +31,10 @@ jobs:
       - name: Enable pnpm (version pinned by packageManager)
         run: corepack enable
 
-      - name: Install repository tooling
+      - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Full gate set (documentation, vendored tree, types)
+      - name: Full gate set (docs lint, vendored tree, types, tests, contract drift)
         run: pnpm run verify
 
   experiment-e9:
