@@ -43,3 +43,53 @@ test('disposal is complete: the capability is gone after teardown', async () => 
   await disposeKernel(ctx);
   assert.throws(() => ctx.infra.describe(), /.*/, 'capability must be gone after teardown');
 });
+
+test('custody mode is configuration, and strict refuses to hold a grant', async () => {
+  const strict = await createKernel({ custody: 'strict' });
+  try {
+    assert.equal(strict.custody.mode, 'strict');
+    assert.equal(strict.custody.broker.audit('t1').length, 0);
+    await assert.rejects(() => strict.custody.broker.grant({ tenantId: 't1', kind: 'oauth', workspaceId: 'w1', token: 'a-sentinel-value' }, 'tester'), /stores no provider credential/);
+  } finally { await disposeKernel(strict); }
+
+  const managed = await createKernel({ custody: 'managed' });
+  try {
+    assert.equal(managed.custody.mode, 'managed');
+    const receipt = await managed.custody.broker.grant({ tenantId: 't1', kind: 'workspace-token', workspaceId: 'w1', token: 'a-sentinel-value' }, 'tester');
+    assert.ok(!JSON.stringify(receipt).includes('a-sentinel-value'), 'the receipt must not echo the credential');
+    await assert.rejects(() => managed.custody.broker.call('t1', 'variables', {}, 'tester'), /cannot read tenant secrets/);
+  } finally { await disposeKernel(managed); }
+});
+
+test('delivery writes to the provider and nowhere else, through the kernel', async () => {
+  const written: string[] = [];
+  const logged: string[] = [];
+  const ctx = await createKernel({
+    custody: 'managed',
+    ports: {
+      variable: { supportsSealing: () => true, upsert: async (i) => { written.push(`${i.name}=${i.value}:sealed=${i.sealed}`); } },
+      sinks: { log: (l) => logged.push(...l), record: () => {} },
+    },
+  });
+  try {
+    const receipt = await ctx.custody.deliverSecret(
+      { instanceId: 'i1', tenantId: 't1', environment: 'production', service: 'api', name: 'OIDC_CLIENT_SECRET' },
+      'sentinel-do-not-log');
+    assert.equal(written.length, 1, 'exactly one provider write');
+    assert.match(written[0]!, /sealed=true/);
+    assert.ok(!JSON.stringify(receipt).includes('sentinel-do-not-log'), 'receipt clean');
+    assert.ok(!logged.some((l) => l.includes('sentinel-do-not-log')), `log leaked: ${logged.join(' | ')}`);
+  } finally { await disposeKernel(ctx); }
+});
+
+test('an unattached port degrades sealing visibly and fails loudly on a write', async () => {
+  const ctx = await createKernel({ custody: 'managed' });
+  const target = { instanceId: 'i1', tenantId: 't1', environment: 'production', service: 'api', name: 'OIDC_CLIENT_SECRET' };
+  // relay-sealed cannot prove sealing, so it must refuse the write and say why -- not swallow it.
+  const degraded = await ctx.custody.deliverSecret(target, 'v', 'relay-sealed');
+  assert.equal(degraded.mode, 'tenant-side', JSON.stringify(degraded));
+  assert.match(degraded.degraded ?? '', /refusing to write an unsealed secret/);
+  // A mode that does write must hit the unattached port's loud error.
+  await assert.rejects(() => ctx.custody.deliverSecret(target, 'v', 'relay-plain'), /no provider variable port/);
+  await disposeKernel(ctx);
+});

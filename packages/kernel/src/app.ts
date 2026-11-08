@@ -1,9 +1,14 @@
 import { Context } from 'cordis';
+import { CustodyService, CustodyConfigSchema } from './custody.ts';
 import { InfraService, ProviderConfigSchema } from './infra-provider.ts';
+import type { VariablePort, RedactionSinks } from '@platfolio/contracts';
 
 export interface KernelOptions {
   provider?: 'fake' | 'railway';
   contract?: string;
+  custody?: 'managed' | 'strict';
+  delivery?: 'relay-sealed' | 'relay-plain' | 'tenant-side' | 'runner-side';
+  ports?: { variable?: VariablePort; sinks?: RedactionSinks };
 }
 
 /**
@@ -16,8 +21,11 @@ export async function createKernel(options: KernelOptions = {}): Promise<Context
     contract: options.contract ?? '^1.0.0',
     features: [],
   });
+  const custody = CustodyConfigSchema.parse({ mode: options.custody ?? 'strict', delivery: options.delivery ?? 'relay-sealed' });
   const ctx = new Context();
   await ctx.plugin(InfraService, config);
+  await ctx.plugin(CustodyService, custody);
+  ctx.custody.attachPorts({ ...(options.ports?.variable ? { variable: options.ports.variable } : {}), ...(options.ports?.sinks ? { sinks: options.ports.sinks } : {}) });
   return ctx;
 }
 
