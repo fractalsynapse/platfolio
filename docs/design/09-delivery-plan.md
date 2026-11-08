@@ -198,7 +198,7 @@ checkable rather than asserted.
 
 ## Pending decisions before M4
 
-OD1 (merchant of record) and OD2 (license) must be settled; OD3 (secret relay) has a recommended
-answer in [01](01-product-and-decisions.md) and only needs ratification; OD4/OD5 (ArcNexus repo
-topology, preview environments) can wait until M5/M6; OI1 (identity host at MVP or after) should be
-ratified now because it changes the M3–M5 ordering.
+No billing decision blocks M1: OD1, OD3, OD4, OD5 and OI1–OI3 are accepted, and **OD2 is decided
+(D18, Apache-2.0)**. What remains before a release is not a decision but three details inside D18
+(§ Remaining under D18 in [08](08-distribution-and-licensing.md)): full license text, the
+`/proprietary` boundary, and the trademark policy — plus **OD9**, the core-lineage choice from E9.

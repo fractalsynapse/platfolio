@@ -31,6 +31,7 @@ Three properties carry the whole design, and everything else follows from them:
 | [docs/design/README.md](docs/design/README.md) | **Start here.** The design set: product and decision register, architecture, manifest specification, execution plane, identity, billing and lifecycle, interfaces, distribution, the Cordis kernel, and the delivery plan |
 | [docs/platfolio-feasibility.md](docs/platfolio-feasibility.md) | Verified provider constraints the designs are built against, with the reasoning that led to them |
 | [docs/research/](docs/research/) | Primary-source evidence per claim, tagged verified/unverified |
+| [LICENSE](LICENSE) | Apache-2.0 grant for platfolio code and documents |
 | [vendor/CORDIS.md](vendor/CORDIS.md) | The vendored framework: provenance, boundary rules, runtime constraints, update procedure |
 | [scripts/vendor-cordis.ts](scripts/vendor-cordis.ts) | Vendor management tool — `verify` is the CI gate, `check` flags upstream drift |
 | [spikes/](spikes/e9-cordis-kernel/README.md) | Milestone 0 experiments as actually run — configuration, evidence, limits |
@@ -61,8 +62,10 @@ Branch flow, review gates and the checks each change owes are in [docs/MAINTAINI
    Agentic Provisioning Protocol orchestration; both held by the maintainer.
 3. **OD9 core lineage** — the published plugin ecosystem is built against a forked core; decide whether
    platfolio tracks upstream or the fork ([01 § OD9](docs/design/01-product-and-decisions.md)).
-4. **OD2 license** — platfolio code has **no license granted yet**, deliberately, because that decision
-   is open. The vendored framework keeps its own MIT license and notice at `vendor/cordis/LICENSE`.
+4. **License is granted** — Apache-2.0 at the root (`LICENSE`, `Copyright 2026 Fractal Synapse Labs LCA
+   PBC`), decided as D18. It exists on `staging` and must reach `main` before any release tag can pass
+   the production license guard. The vendored framework keeps its own MIT license and notice at
+   `vendor/cordis/LICENSE`.
 5. **Time-critical, independent of platfolio:** Railway's Config as Code (`railway.json`/`railway.toml`)
    **stops being read on 2026-12-01**. Any platform repository still using it needs migrating.
 

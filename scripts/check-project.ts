@@ -174,18 +174,77 @@ async function checkSkills(): Promise<{ skills: SkillCheck[]; problems: string[]
   return { skills, problems };
 }
 
+/**
+ * Workflow linting that a YAML parser cannot do. GitHub's expression language has rules a
+ * syntactically valid file can still violate, and the failure mode is a run with zero jobs and no log.
+ * Targeted at this repository's workflow style (job ids at two-space indentation under `jobs:`):
+ *   - every `needs` target names a job that exists in the same file
+ *   - no `needs.<job>.` dot access on a hyphenated job id, which is invalid in GitHub expressions
+ */
+async function checkWorkflows(): Promise<string[]> {
+  const problems: string[] = [];
+  const dir = path.join(ROOT, '.github', 'workflows');
+  let names: string[];
+  try {
+    names = (await fs.readdir(dir)).filter((n) => /\.(yml|yaml)$/.test(n)).sort();
+  } catch {
+    return [];
+  }
+
+  for (const name of names) {
+    const text = await fs.readFile(path.join(dir, name), 'utf8');
+    const jobIds = new Set<string>();
+    let inJobs = false;
+    for (const line of text.split(/\r?\n/)) {
+      if (/^jobs:\s*$/.test(line)) { inJobs = true; continue; }
+      if (inJobs && /^\S/.test(line)) inJobs = false;
+      if (!inJobs) continue;
+      const id = line.match(/^ {2}([A-Za-z0-9_-]+):\s*(?:#.*)?$/);
+      if (id) jobIds.add(id[1]);
+    }
+
+    for (const match of text.matchAll(/\bneeds:\s*\[([^\]]*)\]/g)) {
+      for (const raw of match[1].split(',')) {
+        const target = raw.trim().replace(/^['"]|['"]$/g, '');
+        if (target && !jobIds.has(target)) problems.push(`${name}: needs refers to unknown job "${target}"`);
+      }
+    }
+    for (const match of text.matchAll(/^\s+needs:\s*([A-Za-z0-9_-]+)\s*$/gm)) {
+      if (!jobIds.has(match[1])) problems.push(`${name}: needs refers to unknown job "${match[1]}"`);
+    }
+    for (const match of text.matchAll(/\bneeds\.([A-Za-z0-9_]*-[A-Za-z0-9_-]*)\./g)) {
+      problems.push(
+        `${name}: "needs.${match[1]}." is invalid GitHub expression syntax — hyphenated job ids cannot use dot access; name the job with '_' or write needs['${match[1]}']`,
+      );
+    }
+    if (!jobIds.size) problems.push(`${name}: no jobs found at two-space indentation (lint assumption)`);
+
+    // GitHub interpolates expressions inside run bodies too, so an empty or unclosed placeholder
+    // invalidates the whole workflow file — and the resulting run has zero jobs and no log.
+    for (const match of text.matchAll(/\$\{\{([^{}]*)\}\}/g)) {
+      if (!match[1].trim()) problems.push(`${name}: empty expression placeholder — write "GitHub expression" in prose instead`);
+    }
+    const opens = (text.match(/\$\{\{/g) ?? []).length;
+    const closes = (text.match(/\}\}/g) ?? []).length;
+    if (opens !== closes) problems.push(`${name}: unbalanced expression placeholders: ${opens} opening, ${closes} closing`);
+  }
+  return problems;
+}
+
 const files = await markdownFiles(ROOT);
 say(`scanning ${files.length} markdown files under ${path.relative(ROOT, ROOT) || ROOT}`);
 
 const docProblems = await checkDocuments(files);
 const { skills, problems: skillProblems } = await checkSkills();
+const workflowProblems = await checkWorkflows();
 
-const all = [...docProblems, ...skillProblems];
+const all = [...docProblems, ...skillProblems, ...workflowProblems];
 say(`skills checked: ${skills.length} (${skills.map((s) => s.name).join(', ')})`);
+say(`workflows linted: ${workflowProblems.length === 0 ? 'clean' : `${workflowProblems.length} problem(s)`}`);
 
 if (all.length) {
   console.error(`\n${all.length} problem(s):`);
   for (const p of all) console.error(` - ${p}`);
   process.exit(1);
 }
-say('project checks passed: all local links and anchors resolve; skill metadata is consistent.');
+say('project checks passed: links and anchors resolve, skill metadata is consistent, workflows lint clean.');
