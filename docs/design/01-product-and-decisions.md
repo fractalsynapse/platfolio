@@ -150,6 +150,55 @@ OD3, OD4, OD5, OD6a and OD8, and to the identity questions OI1–OI3 (now record
 only at `packages/contracts` with an anti-corruption shell in `packages/kernel` if its surface proves
 unstable. Mechanics in [vendor/CORDIS.md](../../vendor/CORDIS.md).
 
+- **OD10 — Where the provider credential lives, and who the trusted computer is: OPEN, created by
+  E15/E18/E21/E22. Blocks M2's shape; nothing further on the execution plane should be built until it is
+  chosen.** *(2026-11-08)*
+
+  **Measured premises** ([record](../research/railway-token-and-sealing-2026-11-08.md)):
+
+  1. **Any Railway grant platfolio holds can read platform secret values.**
+     `variables(projectId, environmentId, serviceId)` returned the sentinel for both a workspace token and an
+     env-scoped project token. `Environment.config` redacts values; `variables()` does not — that difference
+     is what made this look ambiguous. Stated plainly: *if we hold a grant, we can read.* Sealing does not
+     save us, because the API can neither set it nor let us verify it (E18/E22).
+  2. Grants differ in capability: the workspace token performs `projectCreate`, `environmentCreate`,
+     `projectTokenCreate`, `variableUpsert` and variable reads, but **not** `serviceCreate`; the
+     env-scoped project token (header `Project-Access-Token`) performs `serviceCreate` and variable reads.
+     `serviceInstanceDeploy` denied for both, but only against a nonexistent service id — **inconclusive**.
+  3. **The Railway CLI accepts neither token**: `config plan/apply` needs an account token, and hand-built
+     `environmentApplyChangeSet` payloads are accepted yet have no observable effect (etag unchanged). So
+     there is **no proven CLI-less config-as-code path** today.
+  4. **GitHub Actions secrets are write-only by API design** — values are never revealed, only names. A
+     Railway credential in the tenant's GitHub environment secrets is something platfolio can write and
+     provably cannot read; the same credential in platfolio's store is readable.
+
+  The real question is **which machine we are willing to call trusted**:
+
+  - **A — platfolio holds the grant** (today's D20 default). Best UX: one click, instant provisioning, no
+    runner minutes for control-plane calls. Property: *"we will not read"* — demonstrated by code, one
+    boundary, an audit log, and marketing that says exactly that. Note premise 3 still bites for deploys.
+  - **B — the tenant's CI holds the grant.** platfolio dispatches and verifies; credentials and secrets sit
+    in GitHub where we cannot read them. Property: *"we cannot read"* — the only option where invariant 1 in
+    [00](00-target-architecture.md) is literally true. Costs: runner minutes on private repos (the maintainer
+    flagged this as real money for tenants), an async dispatch UX, and — if deploys need the CLI — an
+    **account token** living in that repo, readable by anyone who can commit a workflow. Blast radius moves
+    from platfolio to the tenant.
+  - **C — platfolio-operated self-hosted runners.** Removes the per-minute cost but puts tenant secrets and
+    tenant-controlled workflow code on machines platfolio operates: the property collapses back into "will
+    not read", it adds an estate that [00](00-target-architecture.md) forbids (management, not compute), and
+    it carries a genuine remote-code surface. Against as a default; *for* as instructions a tenant runs on
+    their own machine.
+  - **D — tiered: B as default, A as an explicit "hassle-free" option.** Two conformance-tested custody modes
+    rather than one (the seams already assume this: `credential.broker`, `execution.plane`, `infra.provider`),
+    and each tier's guarantee stated in one honest sentence.
+
+  **Recommendation: D with B as the default — conditional on one measurement.** If a project token can deploy
+  without the CLI, B needs no account token anywhere, and the pitch becomes "least-privilege per environment,
+  held by your CI, unreadable by us" at the lowest ongoing cost. If it cannot, B is forced to store an account
+  token in the tenant's repo, which is a **worse** posture than A holding a scoped token — and then the
+  default should be A with disclosure instead. One real deploy (1 of the 20/day ceiling) settles it; I am not
+  choosing on an inconclusive probe.
+
 - **OD9 — Core lineage: OPEN, created by the E9 experiment.** E9 confirmed the vendored core boots and
   swaps providers by configuration, but showed the published `@cordisjs/plugin-server@1.7.0` requires a
   symbol (`Service.resolveConfig`) that exists only in the fork **`@deepseek-ai/cordis@4.1.0`**, not in
