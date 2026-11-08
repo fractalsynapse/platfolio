@@ -10,6 +10,9 @@ and the pre-plan reasoning behind them.
 Evidence lives in the three research reports it links. Claims here are marked:
 **V** verified against a primary source, **P** partially verified, **U** unverified/open.
 
+- [Railway token behaviour and variable sealing](research/railway-token-and-sealing-2026-11-08.md) —
+  live measurements (E15/E18/E21): workspace-vs-project token authority, the `Project-Access-Token`
+  header, sealing having no API surface, the CLI requiring an account token
 - [Railway control-plane feasibility](research/railway-control-plane-feasibility.md) — API
   inventory from the live public GraphQL schema, tokens, limits, handover, templates, DNS.
 - [Billing and open-source licensing](research/billing-oss-feasibility-2025-11-06.md) — Stripe

@@ -150,9 +150,12 @@ production-only external service never demands its secrets be filled in a stagin
 no place for them. Whether `railway config plan` honours per-environment resource membership is E21 —
 the shape type-checks here, which is a weaker claim than "it deploys correctly".
 
+The default is **`tenant-side`**, not `relay-sealed` — that ordering was reversed by E18, and the panel
+renders accordingly.
+
 | `delivery` | Behaviour | Use when |
 | --- | --- | --- |
-| `relay-sealed` (default) | tenant types the value into platfolio once; platfolio writes it and seals it; it cannot read it back afterwards | production credentials |
+| `relay-sealed` | tenant types the value into platfolio once; platfolio writes it **and seals it**, so it cannot be read back afterwards. **Measured unavailable on Railway (E18, 2026-11-08):** no seal setter exists in the API and sealing cannot be verified, so `sealedVariables` is `false` for this provider and the mode must not be offered | providers that genuinely support sealing (unmeasured) |
 | `relay-plain` | written, not sealed: still never persisted or logged by platfolio, but readable by the granted credential in mode B | debug instances; never the default |
 | `tenant-side` | platfolio shows the name and a deep link; the tenant enters it in their provider project | mode A, or a tenant who will not type into us |
 | `runner-side` | the tenant stores it as a CI secret and the runner writes it | mode A with CI-side custody |

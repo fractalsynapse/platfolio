@@ -5,6 +5,19 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+### Changed
+
+- **Measured against a live Railway workspace (E15/E18/E21), and the design corrected the same day.**
+  Variable sealing has no API surface at all — no input field accepts it and `Variable.isSealed` is
+  unreachable — so D21's `relay-sealed` is unimplementable on Railway and the shipped default is
+  `tenant-side`; invariant 1 now says managed mode *"will not read"* rather than borrowing sealing to
+  claim *"cannot"*. A workspace grant creates projects, environments and project tokens but cannot
+  create services, so provisioning is a two-grant sequence; and a project token authenticates only in
+  the `Project-Access-Token` header, which explains the long-standing "tokens are finicky" experience.
+  The Railway CLI (5.71.0) rejects both non-account tokens, so config-as-code must be driven through
+  `environmentApplyChangeSet` instead — filed as E22. Evidence:
+  [research/railway-token-and-sealing-2026-11-08.md](docs/research/railway-token-and-sealing-2026-11-08.md).
+
 ### Added
 
 - **`packages/page-schema` — the secrets panel as validated data.** A component registry with strict

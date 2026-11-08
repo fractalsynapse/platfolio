@@ -117,6 +117,10 @@ Write-only by construction: the component takes no value prop to render, never d
 and its success state is a receipt naming the secret and the environment rather than echoing anything
 back. The provider's `sealed-variables` capability decides the copy — *stored, sealed, cannot be read
 back* — and when the capability is absent the panel offers the `tenant-side` deep link instead. That is a
+**E18 measured `sealedVariables: false` for Railway** (no seal setter exists in the API, and sealing
+cannot be verified), so the panel today renders deep links and no input fields at all: the gating is
+load-bearing, not decorative. It is also why the flag must come from provider measurement rather than
+from a manifest author's hope. That is a
 visible choice, never a silent downgrade to writing an unsealed secret.
 
 ## Mobile (D10)
