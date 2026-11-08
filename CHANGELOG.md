@@ -7,6 +7,16 @@ change; entries describe merged intent, not aspirations.
 
 ### Changed
 
+- **OD11 opened: team services as a role, not an ownership class.** The identity promise in
+  [05](docs/design/05-identity.md) ("one realm per team") and the ArcNexus fixture (Keycloak *inside* the
+  instance, `OIDC_ISSUER` a placeholder string) contradict the current model, which gives every service one
+  owning instance and no way to reference another. S2 is preferred: an ordinary provider instance declaring
+  typed `provides`, consumers declaring `requires`, a new `team-service` value source, plan-time resolution,
+  ordering, reference-counted deletion and "provider degraded" as a health state. Ownership stays uniform —
+  everything belongs to the team; only the role differs.
+- **Placeholder literals are now rejected by manifest validation.** `placeholder…`, `TODO`, `changeme`,
+  `replace_me` and `xxx` in an env value fail at parse with a located message, so an unresolved reference
+  cannot reach a plan. The ArcNexus fixture carries a real issuer URL, marked manually supplied until OD11.
 - **Measured against a live Railway workspace (E15/E18/E21), and the design corrected the same day.**
   Variable sealing has no API surface at all — no input field accepts it and `Variable.isSealed` is
   unreachable — so D21's `relay-sealed` is unimplementable on Railway and the shipped default is

@@ -167,6 +167,10 @@ service is duplicated, is not provided by the CLI, and is not shown in environme
 red for exactly that reason — which is correct behaviour, not a bug. Rotation becomes
 "set a new value, verify, then revoke the old credential" with no read-back, and the UI must say so.
 
+`team-service` is **proposed, not valid** — it is the subject of
+[OD11](01-product-and-decisions.md). Until that decision lands, the enum below is closed and a manifest
+that references another instance is rejected at parse.
+
 | `source` | Meaning | Who holds the value |
 | --- | --- | --- |
 | `preserve` | Railway IaC `preserve()`: "keep the value that is already set in Railway" (**V**) | Railway, in the customer's project |

@@ -150,6 +150,75 @@ OD3, OD4, OD5, OD6a and OD8, and to the identity questions OI1–OI3 (now record
 only at `packages/contracts` with an anti-corruption shell in `packages/kernel` if its surface proves
 unstable. Mechanics in [vendor/CORDIS.md](../../vendor/CORDIS.md).
 
+- **OD11 — Team services: typed `provides`/`requires` between instances. OPEN; S2 preferred by the
+  maintainer (2026-11-08). Nothing here is implemented.**
+
+  **Why this is a decision and not a feature request.** Three of our own artifacts currently contradict
+  each other:
+
+  1. [05 § I2](05-identity.md) promises *"P1 users live in a per-team realm"* — one identity per team.
+  2. [templates/arcnexus/manifest.yaml](../../templates/arcnexus/manifest.yaml) puts `keycloak` **inside the
+     ArcNexus instance's services**, with `identity.mode: hosted-realm`. Deploy TreeDX and ArcNexus for one
+     team and the model yields two Keycloaks and two user databases — exactly what I2 forbids.
+  3. The same fixture carried `OIDC_ISSUER: placeholder-resolved-at-apply-time`, because there is no way to
+     say "this value comes from something else we run". The closed `value_source` enum is
+     `preserve | shared-variable | resource | platform-internal | customer-held`, and
+     [03](03-manifest-spec.md) forbids `platfolio-held`. A renderer would have shipped the literal string,
+     the app would have failed, and the controller would have correctly reported an unhealthy deploy.
+
+  **Ownership is not the new axis.** All services — internal, shared, external, independent — belong to the
+  **team**: one billing relationship, one management surface, one deletion authority. That is unchanged and
+  uniform. What is new is a service's **role**: whether it exists inside one instance, or
+  **provides typed outputs that other instances consume.** A "team service" is a role, not a different owner.
+
+  **Shapes considered.**
+
+  - **S1 — `spec.sharedServices` inside a manifest.** Rejected. One document would then describe resources
+    with different *roles and lifecycles*, and every instance-level answer becomes ambiguous: does ejecting
+    TreeDX include the realm and its user data; what happens when two teams' manifests both declare
+    `keycloak-host`; does suspending an app suspend what it consumes. Each answer is another flag.
+  - **S2 — a provider instance plus an explicit reference edge.** Preferred. The provider is an ordinary
+    instance of an ordinary platform (`keycloak-host`, `openbao-host`, `loki-host`), owned by the team and
+    billed like anything else; it declares outputs, and consumers declare requirements against them. The
+    model keeps its most valuable property — **one document, one lifecycle** — and the new machinery is
+    narrow and nameable.
+
+  **What S2 actually adds** (all of it still to design and build):
+
+  - `provides:` on the provider: typed outputs (`url`, `realm-client-template`, `secret-path`, `endpoint`) —
+    a contract, so a consumer cannot ask for an output that does not exist.
+  - `requires:` on the consumer, plus a new `team-service` member of the closed `value_source` enum, so
+    resolution is explicit at plan time rather than string interpolation at apply time.
+  - **Ordering** in the controller loop: a plan whose requirements are unresolved is not dispatched; provider
+    readiness is a precondition, verified by read-back like everything else.
+  - **Reference-counted deletion and suspension**: removing a provider with live consumers is refused by
+    default, with an explicit override path that states the blast radius. The team holds the authority, and
+    the consumer instance's owner can see who is blocked.
+  - **Health as a dependency state**: a consumer can be "healthy, provider degraded" rather than a misleading
+    red or green.
+
+  **Open sub-questions, before any of it is buildable:**
+
+  - Per-environment mapping: a provider's `production`/`staging` are the *provider's*, not the consumer's. If
+    the provider is production-only (D23 `ownership: external`), consumer staging has no identity source and
+    must either get its own or declare `identity.mode: none`. Needs a rule, not an assumption.
+  - Cross-project reachability is **unverified**: if the provider lives in another Railway project, can
+    consumers reach it privately, or only over a public TLS endpoint? Fine for Keycloak by design, material
+    for a log pipeline and a vault. → **E23**.
+  - Runtime versus deploy-time consumption: OpenBao is deploy-time only (the runner fetches and injects), so
+    it tolerates an outage at deploy time and nothing else. Loki is runtime-coupled, so the provider's
+    availability is on the hot path of every consumer. The contract should say which is which.
+  - Whether a provider may be a *different platform version* than its consumers pinned to, and what an
+    upgrade of a shared provider means for instances that did not consent to it.
+  - Migration of `identity.mode: hosted-realm` in [05](05-identity.md): under S2 "hosted realm" stops being a
+    thing inside an instance and becomes "the team has a `keycloak-host` provider instance". 05 now points
+    here instead of restating it.
+
+  **Decision-free fix taken alongside this record:** the manifest validator now rejects placeholder-shaped
+  literal env values (`placeholder…`, `TODO`, `changeme`, `replace_me`, `xxx`), so an unresolved reference
+  fails at parse with a located message. The ArcNexus fixture was corrected to a real issuer URL and marked as
+  *manually supplied until OD11 lands* — the fixture no longer encodes a value the system cannot produce.
+
 - **OD10 — Where the provider credential lives, and who the trusted computer is: OPEN, created by
   E15/E18/E21/E22. Blocks M2's shape; nothing further on the execution plane should be built until it is
   chosen.** *(2026-11-08)*
