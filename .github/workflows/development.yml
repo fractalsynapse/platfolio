@@ -31,17 +31,11 @@ jobs:
       - name: Enable pnpm (version pinned by packageManager)
         run: corepack enable
 
-      - name: Install repository tooling
+      - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Documentation links, anchors and skill metadata
-        run: pnpm run check
-
-      - name: Vendored tree matches its lock
-        run: pnpm run vendor:verify
-
-      - name: Type-check repository tooling
-        run: pnpm run typecheck
+      - name: Full gate set (docs lint, vendored tree, types, tests, contract drift)
+        run: pnpm run verify
 
       - name: Upstream drift (informational, never blocking)
         run: |
