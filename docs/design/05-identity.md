@@ -125,15 +125,18 @@ to expose a human-facing console later.
 - Cross-tenant authorization tests in CI: a token from team A's realm must be rejected by team B's
   instance; a P0 token must be rejected by every P1 endpoint.
 
-## Open identity questions
+## Identity decisions (accepted 2026-11-07)
 
-- **OI1** — Does the identity host ship at MVP, or as the first post-MVP feature? Recommendation:
-  ship `none` + `byo-oidc` at MVP, `hosted-realm` immediately after, because it needs realm
-  lifecycle + backup + upgrade sequencing that must not be built while provisioning is still
-  unproven.
-- **OI2** — Which IdP is the `embedded` provider for self-hosted installs? Recommendation:
-  `oidc-provider` behind an interface, with a documented decision record; avoid AGPL entanglement
-  (Zitadel) unless OD2 lands on a permissive core anyway.
-- **OI3** — Realm-per-team vs realm-per-instance default. Recommendation: realm-per-team with
-  client-per-instance, because that is what "share the same user system" means, and it keeps the
-  Keycloak service count at one per team.
+The three questions raised here were accepted as recommended, and are decisions rather than options.
+See the decision log in [01](01-product-and-decisions.md).
+
+- **OI1 — Identity host ships after MVP.** MVP supports `none` and `byo-oidc`; `hosted-realm` lands in
+  M5, because realm lifecycle, backup and upgrade sequencing must not be built while provisioning is
+  still unproven. Consequence: ArcNexus runs against its own Keycloak service or the tenant's issuer at
+  MVP, and the shared-realm payoff is the first post-MVP feature.
+- **OI2 — `oidc-provider` behind an interface for the `embedded` mode**, with its own decision record.
+  Zitadel's AGPL-3.0 is avoided unless OD2 lands on a permissive core anyway. Ory Hydra is excluded as
+  the embedded answer because it is headless (no user store or login UI).
+- **OI3 — Realm-per-team, client-per-instance.** That is what "the team's applications share one user
+  system" means, it keeps the Keycloak service count at one per team, and it makes SSO across platforms
+  the default rather than a migration.

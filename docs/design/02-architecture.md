@@ -8,7 +8,9 @@ Part of the design set: [product](01-product-and-decisions.md) ·
 [UI and pages](11-ui-components-and-page-model.md).
 
 Status: proposed. Revised 2026-11-07 for D12: the control plane is a **Cordis kernel**, and the web
-framework choice in an earlier draft of this file is superseded by `@cordisjs/plugin-server`.
+framework choice in an earlier draft of this file is superseded — but by our **own** HTTP adapter, not
+by `@cordisjs/plugin-server`, which E9 showed cannot define routes against the core we vendored
+([10 § E9 result](10-cordis-kernel-and-extension-seams.md)).
 Constraints are verified in [feasibility](../platfolio-feasibility.md);
 `V`/`P`/`U` tags below carry through from it.
 
@@ -34,14 +36,16 @@ config is declared; secret values are preserved by name.
 One deployable service, plus the Astro site. **Revised 2026-11-07 for D12: the service is a Cordis
 kernel** — a root `Context` whose capabilities are `Service` implementations registered by plugins,
 resolved by name through `inject`, configured by StandardSchema, and layered per tenant with
-`intercept`/`isolate`. Transport is `@cordisjs/plugin-server` (HTTP + WS, typed routes) rather than a
-hand-picked web framework. The full extension model, seam list and risks are in
+`intercept`/`isolate`. Transport is a thin HTTP/WS adapter in `packages/kernel` over `node:http`
+(E9: `@cordisjs/plugin-server@1.7.0` registers but fails at route definition against
+`cordis@4.0.0-rc.12`), so the web-framework choice stays inside the boundary and is swappable. The
+full extension model, seam list and risks are in
 [10](10-cordis-kernel-and-extension-seams.md); the UI half is in
 [11](11-ui-components-and-page-model.md).
 
 ```
 apps/site            Astro: static marketing + content, SSR dashboard routes + React islands
-apps/api             Cordis root context: plugin-server routes, webhook ingress, job fibers
+apps/api             Cordis root context + kernel HTTP adapter: routes, webhook ingress, job fibers
 packages/contracts   capability interfaces + config schemas + conformance suites  ← API-stable layer
 packages/manifest    StandardSchema manifest, defaults, validation, renderers  ← the product contract
 packages/providers   first-party providers (railway, stripe, github, keycloak, …)  Tier 1

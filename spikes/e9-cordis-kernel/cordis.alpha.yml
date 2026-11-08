@@ -1,0 +1,18 @@
+# E9 profile A: the alpha infra provider is selected here, not in code.
+- id: timer
+  name: '@cordisjs/plugin-timer'
+- id: server
+  name: '@cordisjs/plugin-server'
+  config:
+    host: 127.0.0.1
+    port: 0
+- id: alpha
+  name: ./src/provider-alpha.ts
+- id: beta
+  name: ./src/provider-beta.ts
+  disabled: true
+- id: probe
+  name: ./src/schema-probe.ts
+  config:
+    driver: alpha
+    retries: 3

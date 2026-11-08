@@ -1,0 +1,23 @@
+{
+  "name": "platfolio",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "platfolio control plane. Design phase: this manifest exists to make repository tooling and CI gates reproducible, not to publish a package.",
+  "packageManager": "pnpm@12.4.2",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "check": "tsx scripts/check-project.ts",
+    "vendor:verify": "tsx scripts/vendor-cordis.ts verify",
+    "vendor:check": "tsx scripts/vendor-cordis.ts check",
+    "typecheck": "tsc --noEmit --strict --target es2023 --module nodenext --moduleResolution nodenext --types node --skipLibCheck scripts/check-project.ts scripts/vendor-cordis.ts",
+    "verify": "pnpm run check && pnpm run vendor:verify && pnpm run typecheck"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

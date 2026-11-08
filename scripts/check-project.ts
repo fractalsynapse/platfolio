@@ -1,0 +1,191 @@
+#!/usr/bin/env node
+/**
+ * Project-level documentation and skill checks, shared by the three CI workflows so the gate is one
+ * command and not three copies of the same logic.
+ *
+ *   npx -y tsx scripts/check-project.ts [--quiet] [--root <dir>]
+ *
+ * Checks
+ *   1. every local (non-http) link in project Markdown resolves to an existing file
+ *   2. every cross-file `#anchor` targets a heading that exists in the target document
+ *   3. every skill has frontmatter whose `name` matches its directory and a non-empty `description`
+ *   4. every reference inside a skill resolves
+ *
+ * Scope excludes dependency and scratch trees: node_modules, .cache, .research, and the vendored
+ * framework's own documentation (which is upstream's to validate).
+ */
+
+import fs from 'node:fs/promises';
+import path from 'node:path';
+
+const argv = process.argv.slice(2);
+const quiet = argv.includes('--quiet');
+const rootIndex = argv.indexOf('--root');
+const ROOT = path.resolve(rootIndex === -1 ? process.cwd() : argv[rootIndex + 1]);
+
+const EXCLUDED_DIRS = ['node_modules', '.cache', '.research', '.git'];
+/** Vendored trees are excluded except their top-level project documents. */
+const VENDOR_TOP_LEVEL = ['vendor/CORDIS.md'];
+
+const say = (...lines: string[]): void => {
+  if (!quiet) console.log(lines.join('\n'));
+};
+
+/** GitHub-style heading slug, applied identically here and in CI. */
+function slug(heading: string): string {
+  return heading
+    .trim()
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\- ]/gu, '')
+    .replace(/ +/g, '-');
+}
+
+function headingsOf(markdown: string): Set<string> {
+  const set = new Set<string>();
+  for (const match of markdown.matchAll(/^#{1,6}\s+(.+)$/gm)) set.add(slug(match[1]));
+  return set;
+}
+
+function isExcluded(relative: string): boolean {
+  const parts = relative.split(path.sep);
+  if (parts.some((p) => EXCLUDED_DIRS.includes(p))) return true;
+  if (relative.startsWith(`vendor${path.sep}`) && !VENDOR_TOP_LEVEL.includes(relative.replace(/\\/g, '/'))) return true;
+  return false;
+}
+
+async function markdownFiles(dir: string, acc: string[] = []): Promise<string[]> {
+  let entries;
+  try {
+    entries = await fs.readdir(dir, { withFileTypes: true });
+  } catch {
+    return acc;
+  }
+  for (const entry of entries.sort((a, b) => (a.name < b.name ? -1 : 1))) {
+    const abs = path.join(dir, entry.name);
+    const rel = path.relative(ROOT, abs);
+    if (entry.isDirectory()) {
+      if (!isExcluded(rel)) await markdownFiles(abs, acc);
+    } else if (entry.isFile() && entry.name.endsWith('.md') && !isExcluded(rel)) {
+      acc.push(abs);
+    }
+  }
+  return acc;
+}
+
+/** `#` stays out of the path group so `[text](#anchor)` is recognised as an in-page link. */
+const LINK = /\]\((?!https?:\/\/|mailto:)([^)\s#]*)(#[^)]*)?\)/g;
+
+async function checkDocuments(files: string[]): Promise<string[]> {
+  const problems: string[] = [];
+  const cache = new Map<string, Set<string>>();
+
+  for (const file of files) {
+    const text = await fs.readFile(file, 'utf8');
+    for (const match of text.matchAll(LINK)) {
+      const target = match[1];
+      const anchor = match[2];
+      if (!target && anchor) {
+        // in-page anchor: validated against this document's headings below
+      }
+      if (target.startsWith('/')) {
+        problems.push(`${path.relative(ROOT, file)}: absolute path link "${target}"`);
+        continue;
+      }
+      const resolved = target ? path.resolve(path.dirname(file), target) : file;
+      let exists = false;
+      try {
+        await fs.access(resolved);
+        exists = true;
+      } catch {
+        exists = false;
+      }
+      if (!exists) {
+        problems.push(`${path.relative(ROOT, file)}: missing link target "${target || '.'}"`);
+        continue;
+      }
+      if (!anchor) continue;
+      const stat = await fs.stat(resolved);
+      let headings: Set<string>;
+      if (stat.isDirectory()) continue;
+      if (resolved.endsWith('.md')) {
+        if (!cache.has(resolved)) cache.set(resolved, headingsOf(await fs.readFile(resolved, 'utf8')));
+        headings = cache.get(resolved)!;
+        if (!headings.has(anchor.slice(1))) {
+          problems.push(`${path.relative(ROOT, file)}: missing anchor "${anchor}" in ${path.relative(ROOT, resolved)}`);
+        }
+      }
+    }
+  }
+  return problems;
+}
+
+interface SkillCheck {
+  file: string;
+  problems: string[];
+  name: string;
+}
+
+async function checkSkills(): Promise<{ skills: SkillCheck[]; problems: string[] }> {
+  const problems: string[] = [];
+  const skills: SkillCheck[] = [];
+  const base = path.join(ROOT, '.agents', 'skills');
+  let entries;
+  try {
+    entries = await fs.readdir(base, { withFileTypes: true });
+  } catch {
+    return { skills, problems: [`${path.relative(ROOT, base)}: no skills directory found`] };
+  }
+
+  for (const entry of entries.filter((e) => e.isDirectory()).sort((a, b) => (a.name < b.name ? -1 : 1))) {
+    const file = path.join(base, entry.name, 'SKILL.md');
+    let text: string;
+    try {
+      text = await fs.readFile(file, 'utf8');
+    } catch {
+      problems.push(`skill "${entry.name}": missing SKILL.md`);
+      continue;
+    }
+    const local: string[] = [];
+    const front = text.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+    if (!front) {
+      local.push('no YAML frontmatter block');
+    } else {
+      const fields = new Map(front[1].split(/\r?\n/).map((line) => {
+        const i = line.indexOf(':');
+        return [line.slice(0, i).trim(), line.slice(i + 1).trim()] as [string, string];
+      }));
+      const name = fields.get('name') ?? '';
+      const description = fields.get('description') ?? '';
+      if (name !== entry.name) local.push(`frontmatter name "${name}" does not match directory "${entry.name}"`);
+      if (!description) local.push('frontmatter description is empty');
+      if (description.length > 400) local.push(`frontmatter description is ${description.length} chars (>400)`);
+      skills.push({ file: path.relative(ROOT, file), name: name || entry.name, problems: local });
+    }
+    for (const match of text.matchAll(LINK)) {
+      const resolved = path.resolve(path.dirname(file), match[1] || '.');
+      try {
+        await fs.access(resolved);
+      } catch {
+        local.push(`missing link target "${match[1]}"`);
+      }
+    }
+    problems.push(...local.map((p) => `skill "${entry.name}": ${p}`));
+  }
+  return { skills, problems };
+}
+
+const files = await markdownFiles(ROOT);
+say(`scanning ${files.length} markdown files under ${path.relative(ROOT, ROOT) || ROOT}`);
+
+const docProblems = await checkDocuments(files);
+const { skills, problems: skillProblems } = await checkSkills();
+
+const all = [...docProblems, ...skillProblems];
+say(`skills checked: ${skills.length} (${skills.map((s) => s.name).join(', ')})`);
+
+if (all.length) {
+  console.error(`\n${all.length} problem(s):`);
+  for (const p of all) console.error(` - ${p}`);
+  process.exit(1);
+}
+say('project checks passed: all local links and anchors resolve; skill metadata is consistent.');

@@ -1,5 +1,8 @@
-# Example projects and context
+# Reference clones kept for context, not project source (e.g. examples/scaffold)
 examples/
+
+# Tool scratch (agent/code-index artifacts for this workspace)
+.codegraph/
 
 # Research scratch: fetched provider/legal pages, schema dumps, corpus text.
 # Regenerable, large, and not a project source. The durable conclusions live in docs/.
