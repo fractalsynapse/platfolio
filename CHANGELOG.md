@@ -9,9 +9,9 @@ change; entries describe merged intent, not aspirations.
 
 - Three-stage CI/CD gating: `development.yml` (feature branches, PRs to `staging`),
   `integration.yml` (pushes to `staging`, PRs to `main`, adds the E9 experiment) and
-  `production.yml` (pushes to `main`, `v*` tags — enforcing that a tagged commit already passed
-  production on `main`, and that a license exists). Shared checks live in
-  `scripts/check-project.ts` so the tiers do not duplicate logic.
+  `production.yml` (pushes to `main` plus tags, enforcing that a release tag's commit already passed
+  production on `main`). Shared checks live in `scripts/check-project.ts` so the tiers do not
+  duplicate logic.
 - Root `package.json`, `pnpm-lock.yaml` and `pnpm-workspace.yaml`: repository tooling (tsx,
   typescript, @types/node) with `pnpm run verify` as the one gate command that CI and local runs share,
   pnpm selected through corepack, and no dependency build script permitted to execute.
@@ -34,6 +34,14 @@ change; entries describe merged intent, not aspirations.
 
 ### Changed
 
+- **Release tags are bare semver** (`0.1.0`, not `v0.1.0`) per D19. `production.yml` triggers on every
+  tag push and classifies it with one tested rule: valid release tags proceed, `v1.2.3`-style tags fail
+  loudly rather than silently skipping, unrelated tags are noted and ignored. Provenance now derives the
+  "previous release" from bare semver tags.
+- **OD2 decided (D18): Apache-2.0** for platfolio code and documents, with the root `LICENSE` added on
+  `staging`. `package.json` declares the SPDX id; the delivery policy and design set stop asserting that
+  no license exists, and record the three details still open inside the decision (full license text,
+  the `/proprietary` boundary, the trademark policy).
 - Delivery policy clarified: `staging` is integration work that an agent may merge once the applicable
   checks and required review pass; `main` is a production boundary that only a human crosses unless the
   agent holds express permission for that specific release; publication stays with the maintainer.
@@ -50,7 +58,8 @@ change; entries describe merged intent, not aspirations.
 
 ### Open decisions
 
-- **OD2** — license for platfolio code. No license is granted yet, deliberately.
+- **OD2 — decided 2026-11-08: Apache-2.0** at the root `LICENSE` (D18); the narrower items inside it remain.
+- Release tags standardized on bare `<major>.<minor>.<patch>` (D19); `production.yml` now classifies tags and rejects the retired `v` prefix loudly instead of skipping it.
 - **OD9** — core lineage: upstream `cordiverse/cordis` versus the fork the published plugins expect.
 
 ### Earlier history

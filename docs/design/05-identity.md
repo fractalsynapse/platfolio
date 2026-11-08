@@ -135,7 +135,7 @@ See the decision log in [01](01-product-and-decisions.md).
   still unproven. Consequence: ArcNexus runs against its own Keycloak service or the tenant's issuer at
   MVP, and the shared-realm payoff is the first post-MVP feature.
 - **OI2 — `oidc-provider` behind an interface for the `embedded` mode**, with its own decision record.
-  Zitadel's AGPL-3.0 is avoided unless OD2 lands on a permissive core anyway. Ory Hydra is excluded as
+  Zitadel's AGPL-3.0 is avoided now that D18 fixes the core at Apache-2.0 — mixing an AGPL component into an Apache-2.0 core would import copyleft obligations the decision was meant to avoid. Ory Hydra is excluded as
   the embedded answer because it is headless (no user store or login UI).
 - **OI3 — Realm-per-team, client-per-instance.** That is what "the team's applications share one user
   system" means, it keeps the Keycloak service count at one per team, and it makes SSO across platforms

@@ -61,17 +61,34 @@ service"; Redis is RSALv2/SSPLv1/**or** AGPLv3; HashiCorp BUSL-1.1 defines "comp
 date and an explicit trademark clause; AWS renamed Elasticsearch Service to OpenSearch because the
 **name**, not the code, was the scarce asset.
 
-**OD2 options:**
+**OD2 options (decided — see D18: option A adopted, 2026-11-08):**
 
 | Option | Control plane | Customer-shipped artifacts | Tradeoff |
 | --- | --- | --- | --- |
 | **A — permissive core + `/proprietary`** (recommended) | Apache-2.0, with a documented `/proprietary` (or `.ee.`) directory for enterprise features (SSO/SCIM, audit export, white-label, multi-region) | Apache-2.0 | "open source" stays literally true, community-friendly, weakest anti-rebrand |
 | B — BUSL/FSL with change date | source-available, e.g. 24 months → Apache-2.0, Additional Use Grant explicitly permitting internal use, self-hosting your own workloads, and agency work for client workloads | Apache-2.0 | strongest anti-hyperscaler; **not OSI open source**, so the README and marketing must say "source-available" |
 
-Recommendation: **A**, because under D1/D2 the resale threat that restrictive licenses exist to fight
-is already blocked by *provider policy* — Railway's AUP forbids reselling compute, and platfolio's
-value is the catalog plus operations, not the right to forbid self-hosting. Revisit only if someone
-actually rebrands it. Either way, non-negotiables:
+**Decision (D18): A**, for the reason argued below — under D1/D2 the resale threat that restrictive
+licenses exist to fight is already blocked by *provider policy* (Railway's AUP forbids reselling
+compute), and platfolio's value is the catalog plus operations, not the right to forbid self-hosting.
+The root `LICENSE` now carries the Apache-2.0 notice, `Copyright 2026 Fractal Synapse Labs LCA PBC`.
+
+### Remaining under D18
+
+Deciding "Apache-2.0" settles the grant, not the three details the option table assumed:
+
+1. **Short-form vs full text.** The current `LICENSE` is Apache-2.0's 13-line boilerplate notice, which
+   is the form Apache recommends for per-source headers. A file named `LICENSE` at the root
+   conventionally carries the complete terms plus the Appendix; tools and SPDX expectations assume that.
+   Expanding it is a legal-text change and the maintainer's call, so it was left exactly as written.
+2. **The `/proprietary` boundary.** Option A's shape includes a documented directory or file suffix for
+   enterprise features (SSO/SCIM, audit export, white-label, multi-region). That boundary is not drawn
+   yet and nothing is gated today; it should be decided before the first such feature lands, not after.
+3. **Trademark policy.** Option A leans on brand rather than license for protection, so the GitLab-style
+   policy described below is the load-bearing piece and does not exist yet.
+
+`package.json` declares `"license": "Apache-2.0"` for tooling and SPDX hygiene. Either way,
+non-negotiables:
 
 - Everything a **customer ships** (templates, `railway.ts`, workflow files, SDK, their realm exports) is
   Apache-2.0/MIT, directory-declared, so an ejected stack carries no encumbrance.

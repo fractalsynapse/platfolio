@@ -32,10 +32,13 @@ only substantive change from the starter's policy is scope: this is now an appli
 - Agents do not publish: creating a GitHub Release, uploading installer or package artifacts, and any
   announcement are separate authorized actions reserved to the maintainer. The production workflow
   prepares and proves a release identity and deliberately stops short of publishing one.
+- **Release tags are bare `<major>.<minor>.<patch>`** — `0.1.0`, `1.2.3-rc.1` (D19). The `v` prefix is
+  retired: `production.yml` classifies every tag push and **fails** a `v1.2.3`-style attempt rather
+  than quietly skipping it, so a mistyped release cannot look like a successful release.
 - A tag may be cut **only** on a commit whose Production workflow run on `main` has already passed for
-  that exact commit. `production.yml` enforces this on tag pushes, alongside a license check — no
-  license is granted while **OD2** is open, so a tag cannot produce a release identity yet. Do not
-  back-date, re-point, or delete a published tag; correct through a new version.
+  that exact commit. `production.yml` enforces this on tag pushes, alongside a license check that now
+  passes: the root `LICENSE` (Apache-2.0, decision D18) must be present in the tagged tree — note it
+  reaches `main` only with the next production integration.
 - After an authorized merge, delete only the task-owned branch after verifying its merge commit,
   unchanged branch head, absence of other open PRs or retained work, and worktree use. Preserve
   `staging`, `main` and unrelated branches. Record any retention reason instead of discarding work.
@@ -50,7 +53,7 @@ gated by a workflow under `.github/workflows/`, and all three run the same share
 | --- | --- | --- |
 | **Development** | pushes to feature branches; PRs targeting `staging` | documentation links/anchors and skill metadata; vendored-tree `verify`; type-check of repo tooling; upstream drift reported as a notice, never a failure |
 | **Integration** | pushes to `staging`; PRs targeting `main` | the E9 kernel experiment with its locked dependencies, plus an assertion that CI ran without `--expose-internals` |
-| **Production** | pushes to `main`; tags matching `v*` | on tags: the prior-passing-production-run requirement and the license requirement, then release-notes and checksum provenance as an artifact — and no publication |
+| **Production** | pushes to `main`; every tag push, classified — release jobs run only for bare semver tags (D19) | on tags: the prior-passing-production-run requirement and the license requirement, then release-notes and checksum provenance as an artifact — and no publication |
 
 Hosted results are the evidence for integration and release decisions. A check that has never run on
 the hosted runner is reported as unverified rather than assumed to work, and no tier's green status
@@ -99,15 +102,20 @@ Integration into `staging` does not close an implementation issue. When a releas
   approves and merges the release PR to `main`, and only they authorize publication. An agent may do
   that specific production merge only on express permission for that release.
 - **Cut no tag on a commit that has not passed the Production workflow on `main`.** `production.yml`
-  enforces this and also requires a license file at the root, which does not exist while **OD2** is
-  open — so no release tag is possible until that decision lands.
+  enforces this and also requires a root license file (D18: present on `staging`, reaches `main` with
+  the next production integration).
 - Published tag identities are retained; corrections ship as a new version. Refresh candidate scope and
   checks when its sources change.
 - A release that includes a new platform catalog entry must satisfy that platform's manifest CI gates;
   a release that changes a capability contract states the derived bump and why.
-- No public license is granted for platfolio code until decision **OD2** is made
-  ([design/01](design/01-product-and-decisions.md)); do not add a `LICENSE` file as a side effect of
-  tooling work, and do not disturb `vendor/cordis/LICENSE`, which must travel with the vendored source.
+- platfolio code and documents are **licensed under Apache-2.0** (D18). `LICENSE` at the root is that
+  grant: never edit, move, or replace it as a side effect of tooling work, and treat any change to it
+  as a maintainer decision. `vendor/cordis/LICENSE` (MIT, © 2021–present Shigma) is a third party's
+  notice and must travel unmodified with the vendored source.
+- Because the grant is Apache-2.0 while the vendored tree is MIT, keep both files distinct and do not
+  relicense `vendor/cordis` content — including in patches — and confirm the inherited scaffold skills
+  need no attribution file: `fractalsynapse/scaffold` publishes no LICENSE of its own (verified 404 on
+  2026-11-08), so no notice is owed for those files.
 
 ## Documentation currency
 
