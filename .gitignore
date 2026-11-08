@@ -30,3 +30,7 @@ Thumbs.db
 
 # Transient trees written by local gates
 .tmp-*/
+
+# Local development credentials: never committed, never logged, never pasted into chat
+.secrets/
+*.token
