@@ -28,18 +28,33 @@ import {
 /** Written into the project description so an apply can recognise its own last plan. */
 const MARKER = 'platfolio:plan=';
 
+/**
+ * The complete `DeploymentStatus` enum, introspected live (BUILDING, CRASHED, DEPLOYING, FAILED,
+ * INITIALIZING, NEEDS_APPROVAL, QUEUED, REMOVED, REMOVING, SKIPPED, SLEEPING, SUCCESS, WAITING). An
+ * earlier map guessed at values and omitted NEEDS_APPROVAL -- the exact state a workspace approval gate
+ * produces, and the one docs/design/06 says must surface to the tenant rather than look like a slow
+ * deploy. Unknown values now map to 'pending' *and* are reported, so a provider change cannot silently
+ * flatten a new state into "still starting".
+ */
 const STATUS_MAP: Record<string, ServiceStateStatus> = {
   SUCCESS: 'live',
   FAILED: 'failed',
   CRASHED: 'crashed',
-  BUILD_ERROR: 'failed',
   DEPLOYING: 'deploying',
-  PENDING: 'pending',
-  INITIALIZING: 'pending',
+  BUILDING: 'building',
+  INITIALIZING: 'deploying',
   QUEUED: 'pending',
-  REMOVED: 'removed',
+  WAITING: 'pending',
+  PENDING: 'pending',
+  NEEDS_APPROVAL: 'awaiting-approval',
   SLEEPING: 'sleeping',
+  REMOVED: 'removed',
+  REMOVING: 'removed',
+  SKIPPED: 'removed',
 };
+
+/** Statuses the controller may keep polling on; anything else is terminal for a wait. */
+const IN_FLIGHT: ReadonlySet<ServiceStateStatus> = new Set(['pending', 'building', 'deploying']);
 
 type ServiceStateStatus = StateSnapshot['services'][number]['status'];
 
@@ -61,7 +76,7 @@ export interface RailwayProviderOptions {
 interface ServiceNode { id: string; name: string }
 interface EnvironmentNode { id: string; name: string }
 interface ProjectNode { id: string; name: string; description?: string }
-interface InstanceInfo { instanceId: string; status: ServiceStateStatus; image: string; numReplicas: number; domains: string[] }
+interface InstanceInfo { instanceId: string; rawStatus?: string | undefined; status: ServiceStateStatus; image: string; numReplicas: number; domainHosts: string[]; customDomainStatus: Record<string, string>; serviceDomainSync: Record<string, string> }
 
 export class RailwayInfraProvider implements InfraProvider {
   readonly contract = '1.0.0';
@@ -106,6 +121,16 @@ export class RailwayInfraProvider implements InfraProvider {
       issues.push({ path: ['provider'], code: 'unknown-provider', message: `railway provider asked to plan for "${plan.provider}"` });
     }
     for (const env of parsed.data.environments) {
+      for (const service of env.services) {
+        // Measured 2026-11-08: a tagless digest reference (`repo@sha256:…`) is accepted by the API and
+        // then never deploys -- the deployment sat in DEPLOYING for 20+ minutes while `repo:tag@sha256:…`
+        // reached SUCCESS in ~20 seconds. Digest pinning is a platfolio invariant, so the tag has to
+        // travel with it rather than being discovered as a stuck deploy at 3am.
+        const lastSlash = service.image.lastIndexOf('/');
+        if (!service.image.slice(lastSlash + 1).includes(':')) {
+          issues.push({ path: ['environments', env.name, 'services', service.name, 'image'], code: 'image-tag-missing', message: `Railway needs "repo:tag@digest"; "${service.image}" has no tag and will hang` });
+        }
+      }
       if (env.name.length > 64) issues.push({ path: ['environments', env.name], code: 'provider-name-limit', message: 'environment names are limited to 64 characters' });
       if (env.cloneFrom && env.cloneFrom === env.name) issues.push({ path: ['environments', env.name, 'cloneFrom'], code: 'self-clone', message: 'an environment cannot clone itself' });
       for (const d of env.domains) {
@@ -182,8 +207,11 @@ export class RailwayInfraProvider implements InfraProvider {
             await this.transport.graphql({
               operation: 'serviceInstanceLimitsUpdate',
               credential: token,
-              query: 'mutation ($environmentId: String!, $serviceId: String!, $input: ServiceInstanceLimitsInput!) { serviceInstanceLimitsUpdate(environmentId: $environmentId, serviceId: $serviceId, input: $input) }',
-              variables: { environmentId, serviceId, input: { memoryMegabytes: service.limits.memoryMB, cpuCount: service.limits.cpu } },
+              query: 'mutation ($input: ServiceInstanceLimitsUpdateInput!) { serviceInstanceLimitsUpdate(input: $input) }',
+              // Introspected 2026-11-08: the input is { environmentId, serviceId, memoryGB, vCPUs }. An
+              // earlier draft guessed memoryMegabytes/cpuCount, which would have failed on the first live
+              // call; a plan states MB and cores, so the conversion happens here.
+              variables: { input: { environmentId, serviceId, memoryGB: service.limits.memoryMB / 1024, vCPUs: service.limits.cpu } },
             });
           } catch (error) {
             failures.push({ step: `services.${service.name}.limits`, code: 'ceilings-not-applied', message: `${(error as Error).message.slice(0, 120)} — the plan asks for cpu ${service.limits.cpu} / ${service.limits.memoryMB}MB and this is not enforced` });
@@ -191,7 +219,7 @@ export class RailwayInfraProvider implements InfraProvider {
         }
 
         const deployed = await this.deploy(serviceId, environmentId, token, failures);
-        const outcome = deployed ? await this.awaitDeployment(environmentId, serviceId, token, failures) : { status: 'pending' as const, instanceId: serviceId };
+        const outcome = deployed ? await this.awaitDeployment(projectId, environmentId, serviceId, token, failures, notes) : { status: 'pending' as const, instanceId: serviceId };
         services.push({
           name: service.name,
           environment: environment.name,
@@ -531,17 +559,22 @@ export class RailwayInfraProvider implements InfraProvider {
     return true;
   }
 
-  private async awaitDeployment(environmentId: string, serviceId: string, credential: RailwayCredential, failures: ApplyResult['failures']): Promise<{ status: ServiceStateStatus; instanceId: string }> {
+  private async awaitDeployment(projectId: string, environmentId: string, serviceId: string, credential: RailwayCredential, failures: ApplyResult['failures'], notes: NonNullable<ApplyResult['notes']>): Promise<{ status: ServiceStateStatus; instanceId: string }> {
     const deadline = Date.now() + this.deployTimeoutMs;
     let last: ServiceStateStatus = 'pending';
     let instanceId = serviceId;
     while (Date.now() < deadline) {
-      const seen = await this.instanceInfo(this.workspaceId, environmentId, serviceId, credential);
+      const seen = await this.instanceStatus(projectId, environmentId, serviceId, credential);
       last = seen ? seen.status : 'pending';
       instanceId = seen?.instanceId ?? instanceId;
-      if (last === 'live' || last === 'failed' || last === 'crashed') {
-        if (last !== 'live') failures.push({ step: `service:${serviceId}`, code: 'deployment-unhealthy', message: `deployment settled as ${last}` });
+      if (!IN_FLIGHT.has(last)) {
+        // awaiting-approval is terminal too: it needs a human in the provider UI, and reporting it as
+        // "still deploying" would hide exactly the condition the tenant has to act on.
+        if (last !== 'live') failures.push({ step: `service:${serviceId}`, code: last === 'awaiting-approval' ? 'deployment-awaiting-approval' : 'deployment-unhealthy', message: `deployment settled as ${last}` });
         return { status: last, instanceId };
+      }
+      if (seen?.rawStatus && !(seen.rawStatus in STATUS_MAP)) {
+        notes.push({ step: `service:${serviceId}`, code: 'unknown-deployment-status', message: `provider reported "${seen.rawStatus}", which this build does not map; treated as in flight` });
       }
       await this.sleep(this.pollIntervalMs);
     }
@@ -549,21 +582,48 @@ export class RailwayInfraProvider implements InfraProvider {
     return { status: last, instanceId };
   }
 
-  private async instances(environmentId: string, serviceId: string, credential: RailwayCredential) {
-    const data = await this.transport.graphql<{ serviceInstances: { edges: { node: Record<string, unknown> }[] } | null }>({
-      operation: 'serviceInstances',
+  /**
+   * Instance state per environment. There is **no root `serviceInstances` query** -- an earlier draft of
+   * this method invented one, which is the kind of thing a mock will happily answer and a real API will
+   * reject. Instances hang off `Environment`, so one query per environment serves every service in it,
+   * keyed by service id.
+   */
+  private async environmentInstances(projectId: string, environmentId: string, credential: RailwayCredential): Promise<Map<string, InstanceInfo>> {
+    const data = await this.transport.graphql<{ environment: { serviceInstances: { edges: { node: Record<string, unknown> }[] } | null } | null }>({
+      operation: 'environment.serviceInstances',
       credential,
-      query: 'query ($environmentId: String!, $serviceId: String!) { serviceInstances(environmentId: $environmentId, serviceId: $serviceId) { edges { node { id serviceId numReplicas source { image } latestDeployment { status } domains { edges { node { domain } } } } } } }',
-      variables: { environmentId, serviceId },
+      // `CustomDomain.status` is an OBJECT (verified + certificateStatus enum), not a scalar -- a mock
+      // that accepted a string here hid it for a whole test cycle. Measured 2026-11-08.
+      query: 'query ($projectId: String!, $environmentId: String!) { environment(projectId: $projectId, id: $environmentId) { serviceInstances { edges { node { id serviceId numReplicas source { image } latestDeployment { status } domains { customDomains { domain status { verified certificateStatus } } serviceDomains { domain syncStatus } } } } } } }',
+      variables: { projectId, environmentId },
     });
-    return (data.serviceInstances?.edges ?? []).map((e) => e.node);
+    const out = new Map<string, InstanceInfo>();
+    for (const edge of data.environment?.serviceInstances?.edges ?? []) {
+      const node = edge.node;
+      const serviceId = typeof node.serviceId === 'string' ? node.serviceId : '';
+      if (!serviceId) continue;
+      const deployment = node.latestDeployment as { status?: string } | null;
+      const source = node.source as { image?: string } | null;
+      const domains = node.domains as {
+        customDomains?: { domain: string; status?: { verified?: boolean; certificateStatus?: string } | null }[];
+        serviceDomains?: { domain: string; syncStatus?: string | null }[];
+      } | null;
+      out.set(serviceId, {
+        instanceId: typeof node.id === 'string' ? node.id : serviceId,
+        rawStatus: typeof deployment?.status === 'string' ? deployment.status : undefined,
+        status: STATUS_MAP[deployment?.status ?? ''] ?? 'pending',
+        image: source?.image ?? 'unknown',
+        numReplicas: typeof node.numReplicas === 'number' ? node.numReplicas : 0,
+        domainHosts: [...(domains?.serviceDomains ?? []).map((d) => d.domain), ...(domains?.customDomains ?? []).map((d) => d.domain)],
+        customDomainStatus: Object.fromEntries((domains?.customDomains ?? []).map((d) => [d.domain, d.status?.verified ? 'VERIFIED' : (d.status?.certificateStatus ?? '') === 'CERTIFICATE_STATUS_TYPE_ISSUE_FAILED' ? 'FAILED' : 'PENDING'])),
+        serviceDomainSync: Object.fromEntries((domains?.serviceDomains ?? []).map((d) => [d.domain, d.syncStatus ?? 'CREATING'])),
+      });
+    }
+    return out;
   }
 
-  private async instanceStatus(environmentId: string, serviceId: string, credential: RailwayCredential): Promise<ServiceStateStatus> {
-    const [node] = await this.instances(environmentId, serviceId, credential);
-    if (!node) return 'pending';
-    const deployment = node.latestDeployment as { status?: string } | null;
-    return STATUS_MAP[deployment?.status ?? ''] ?? 'pending';
+  private async instanceStatus(projectId: string, environmentId: string, serviceId: string, credential: RailwayCredential): Promise<InstanceInfo | null> {
+    return (await this.environmentInstances(projectId, environmentId, credential)).get(serviceId) ?? null;
   }
 
   private async createDomain(projectId: string, environmentId: string, serviceId: string, domain: { host: string; port: number }, credential: RailwayCredential, failures: ApplyResult['failures']): Promise<{ host: string; dnsStatus: 'pending' | 'verified' | 'failed' }> {
@@ -602,36 +662,31 @@ export class RailwayInfraProvider implements InfraProvider {
     const domains: StateSnapshot['domains'] = [];
     for (const environment of environments) {
       const token = await this.credentials.forEnvironment(projectId, environment.name).catch(() => credential);
+      const instances = await this.environmentInstances(projectId, environment.id, token);
       for (const service of services) {
-        const info = await this.instanceInfo(projectId, environment.id, service.id, token);
+        const info = instances.get(service.id);
         if (!info) continue;
-        // Railway services are project-level; the *instance* is the per-environment thing that
-        // exists and gets deployed, so it is the identity readState must report to stay unique.
+        // Railway services are project-level; the instance is the thing that exists per environment, so
+        // it is the identity readState reports -- using the service id here duplicated one identity across
+        // two environments and the conformance suite called it a duplicate.
         out.push({ name: service.name, environment: environment.name, externalId: info.instanceId, status: info.status, image: info.image, numReplicas: info.numReplicas });
-        for (const host of info.domains) {
-          // Same rule as the apply path: Railway's own hostnames are issued; a custom domain waits on
-          // DNS the tenant controls, which the checklist surfaces rather than hiding.
-          const issued = host.endsWith('.up.railway.app');
-          domains.push({ host: host as StateSnapshot['domains'][number]['host'], dnsStatus: issued ? 'verified' : 'pending', certificateStatus: issued ? 'issued' : 'pending', targetService: service.name });
+        for (const host of info.domainHosts) {
+          const custom = info.customDomainStatus[host];
+          const isRailwayHost = host.endsWith('.up.railway.app');
+          // Railway's own hostnames are issued by definition once the domain exists; a custom domain
+          // reports the provider's real verification and certificate state, which may legitimately be
+          // pending on DNS the tenant still owns.
+          const verified = isRailwayHost || custom === 'VERIFIED';
+          domains.push({
+            host: host as StateSnapshot['domains'][number]['host'],
+            dnsStatus: verified ? 'verified' : custom === 'FAILED' ? 'failed' : 'pending',
+            certificateStatus: verified ? 'issued' : custom === 'FAILED' ? 'failed' : 'pending',
+            targetService: service.name,
+          });
         }
       }
     }
     return { services: out, domains };
-  }
-
-  private async instanceInfo(_scope: string, environmentId: string, serviceId: string, credential: RailwayCredential): Promise<InstanceInfo | null> {
-    const [node] = await this.instances(environmentId, serviceId, credential);
-    if (!node) return null;
-    const deployment = node.latestDeployment as { status?: string } | null;
-    const source = node.source as { image?: string } | null;
-    const domains = node.domains as { edges?: { node: { domain: string } }[] } | null;
-    return {
-      instanceId: typeof node.id === 'string' ? node.id : serviceId,
-      status: STATUS_MAP[deployment?.status ?? ''] ?? 'pending',
-      image: source?.image ?? 'unknown',
-      numReplicas: typeof node.numReplicas === 'number' ? node.numReplicas : 0,
-      domains: (domains?.edges ?? []).map((e) => e.node.domain),
-    };
   }
 
   private async buckets(projectId: string, credential: RailwayCredential): Promise<string[]> {

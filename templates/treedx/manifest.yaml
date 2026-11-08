@@ -27,7 +27,7 @@ spec:
       - { name: index-cache, service: worker, mountPath: /var/cache/treedx, sizeGB: 20 }
   services:
     api:
-      image: ghcr.io/fractalsynapse/treedx-api
+      image: ghcr.io/fractalsynapse/treedx-api:1.4.0
       digest: sha256:1111111111111111111111111111111111111111111111111111111111111111
       port: 8080
       healthPath: /healthz
@@ -42,7 +42,7 @@ spec:
       domains: [api.treedx.example.com]
       public: true
     worker:
-      image: ghcr.io/fractalsynapse/treedx-worker
+      image: ghcr.io/fractalsynapse/treedx-worker:1.4.0
       digest: sha256:2222222222222222222222222222222222222222222222222222222222222222
       port: 9090
       healthPath: /ready

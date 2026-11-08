@@ -29,6 +29,18 @@ change; entries describe merged intent, not aspirations.
 
 ### Changed
 
+- **E26 ran the conformance suite against the live Railway API, and it overturned four assumptions the
+  mock had been happily agreeing to.** A tagless `repo@sha256:…` reference is accepted and then
+  **never deploys** (20+ minutes in `DEPLOYING`; the tagged `repo:tag@sha256:…` form reached `SUCCESS` in
+  ~20s), so `image` now requires a tag alongside the digest in both validators. `CustomDomain.status` is
+  an object, not a string. There is no root `serviceInstances` query — instances hang off `Environment`.
+  A workspace allows **one project creation per 30 seconds**, which bounds onboarding throughput and had
+  to be respected in the runner. And an HTTP request with no deadline hung a whole run, so the transport
+  aborts at 25s by default. `DeploymentStatus` was mapped exhaustively from introspection, which exposed
+  that `NEEDS_APPROVAL` — the state that must reach a tenant as an action — was missing. Repeated
+  overlapping deploys produced `FAILED` with `diagnosis: null`, recorded as **E27** rather than guessed
+  at, along with the design lesson that an idempotency marker has to be written *before* the mutating
+  call. Evidence: [research record](docs/research/railway-token-and-sealing-2026-11-08.md).
 - **Two claims corrected, both generalized from the wrong artifact.** Resource ceilings are not
   un-settable in Railway — they are unexpressible in the **IaC graph**, and the API sets them, so the
   provider now does ([03](docs/design/03-manifest-spec.md)). And Railway services are project-level while

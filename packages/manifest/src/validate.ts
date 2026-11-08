@@ -112,7 +112,16 @@ export function validateManifest(unknown: unknown): Issue[] {
   };
   walk(unknown, '');
 
-  // 2. Images are pinned by digest.
+  // 2. Images are pinned by digest, and carry a tag alongside it. Railway requires `repo:tag@digest`:
+  // a tagless digest reference is accepted by the API and then never deploys (measured 2026-11-08).
+  for (const [name, svc] of servicesOf(m)) {
+    const lastSlash = svc.image.lastIndexOf('/');
+    if (!svc.image.slice(lastSlash + 1).includes(':')) {
+      issues.push({ path: `spec.services.${name}.image`, code: 'image-tag-missing', message: `"${svc.image}" has no tag; pin as "repo:tag@sha256:…", because a tagless digest reference never deploys on Railway` });
+    }
+  }
+
+  // 2b. Mutable tags are still refused even when a digest is present.
   for (const [name, svc] of servicesOf(m)) {
     if (/:(latest|main|stable|edge|next)$/.test(svc.image)) {
       issues.push({ path: `spec.services.${name}.image`, code: 'mutable-tag', message: `refusing mutable tag on ${svc.image}; pin by digest` });
