@@ -74,6 +74,7 @@ Purpose: let the plan be wrong cheaply. Deliverable is an evidence file, not fea
 | **E15 — PASS (measured 2026-11-08)** | Workspace grant performs `projectCreate`, `environmentCreate`, `projectTokenCreate`, `variableUpsert` and variable reads; **not** `serviceCreate`. Project tokens authenticate only via `Project-Access-Token`. Sourceless `serviceCreate` consumed **0 deploys**. [Record](../research/railway-token-and-sealing-2026-11-08.md) |
 | **E18 — NEGATIVE (measured 2026-11-08)** | No seal setter exists anywhere in the v2 API and `Variable.isSealed` is unreachable, so `relay-sealed` is unimplementable on Railway and sealing cannot be verified. Both grants read values back. Default delivery stays `tenant-side`; D21 and invariant 1 corrected the same day |
 | **E21 — BLOCKED (measured 2026-11-08)** | `railway` CLI 5.71.0 rejects workspace and project tokens outright (`Invalid RAILWAY_TOKEN`), consistent with its account-scoped validation — so the runner cannot use `railway config plan/apply` without violating D20. The API surface exists (`environmentApplyChangeSet`, `Environment.configEtag`, `iacPartials`, partial release/transfer) and becomes **E22** |
+| **E24 CLI-less config-as-code — OPEN** | `environmentApplyChangeSet` accepts a versioned graph and returns a change-set id but produced no observable effect (etag unchanged). Whether our rendered IaC can be applied through the API at all — and if not, whether the runner should use per-service mutations instead, with IaC kept purely as an ejection artifact (the current D24 assumption) |
 | **E23 Cross-project reachability — NEW, created by OD11** | When a provider instance (Keycloak, OpenBao, Loki) lives in a different Railway project from its consumers, is it reachable over private networking or only via a public TLS endpoint? Decide the answer per consumption mode (deploy-time vs runtime), because it changes what a team service may be used for |
 | **E22b Seal verification by differential — NEW, needs one dashboard click** | Seal `E22_SECRET` on service `e22-probe` in project `platfolio-e22` by hand, then re-read `variables(..., unrendered: true, serviceId)`. If the value disappears, absence is the verification signal the maintainer's create-then-instruct-then-verify flow needs; if it does not, sealing is unverifiable by us and the flow cannot be built honestly |
 | **E22 Config-as-code without the CLI — PARTIAL** | Can an environment-scoped project token drive `environmentApplyChangeSet` for our rendered `.railway/railway.ts` (compiled client-side via the `railway/iac` SDK), and does per-environment resource scoping survive that path? This decides M2's execution plane: CLI + account token is unacceptable, an API-driven apply with a project token is. Also re-measure per-environment placement here, since E21 could not |
@@ -127,7 +128,13 @@ suites, version derivation) and `packages/manifest` (schema, validation, rendere
 the compose stack comes up; a manifest with an embedded secret value fails CI with a readable error.
 *Not in scope:* any UI, any customer.
 
-> **Status 2026-11-08 — M2 prepared, not started.** The attestation contract and its policy checks,
+> **Status 2026-11-08 — M2 prepared, not started; custody decided (D24).** M2's execution plane now has a
+> decided shape: managed custody by default (broker holds one workspace grant per team, mints per-environment
+> tokens, writes them into tenant CI), self-custody as an option, and no platfolio-run runner fleet. The
+> build order follows from that: `credential.broker` in the managed mode is already implemented and
+> conformance-tested, so the next piece is the dispatch/attestation round trip against a real repository,
+> not more offline contracts.
+ The attestation contract and its policy checks,
 > the install-PR generator, credential custody (D20), secret delivery (D21), the SCM seam (D22),
 > environment placement (D23) and the secrets panel as page data (`packages/page-schema`) are
 > implemented and covered by 95 of the project's tests. A development Railway workspace exists

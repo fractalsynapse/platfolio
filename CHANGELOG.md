@@ -7,6 +7,16 @@ change; entries describe merged intent, not aspirations.
 
 ### Changed
 
+- **D24 — custody decided: managed by default, self-custody as an option, and no platfolio-run runner
+  fleet** ([#38](https://github.com/fractalsynapse/platfolio/issues/38)). The deciding argument was not UX:
+  a machine that runs a tenant's job can read that tenant's credential, so operating runners for tenants
+  would forfeit the self-custody tier's whole purpose while scattering the managed tier's single auditable
+  boundary across N hosts. Mechanism settled by measurement: workspace grant → minted per-environment
+  project tokens → deploy, with the account token needed only by the Railway CLI, which demotes rendered
+  IaC to an ejection/handover artifact. Every sentence in README, AGENTS.md, [01](docs/design/01-product-and-decisions.md)
+  and [02](docs/design/02-architecture.md) that claimed platfolio holds no tenant credential was corrected
+  the same day — the claim was about secret *values* and read as if it were about *credentials*, which after
+  E18/E22 we can no longer make.
 - **OD11 opened: team services as a role, not an ownership class.** The identity promise in
   [05](docs/design/05-identity.md) ("one realm per team") and the ArcNexus fixture (Keycloak *inside* the
   instance, `OIDC_ISSUER` a placeholder string) contradict the current model, which gives every service one

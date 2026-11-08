@@ -86,7 +86,20 @@ Queries used the raw GraphQL endpoint with `Authorization: Bearer` (workspace) o
 `Project-Access-Token` (project). Introspection dumps were kept in gitignored `.research/`. Sentinel
 values were generated per run and are not recorded here.
 
-### Deploy path measured (maintainer-approved): a project token deploys. No account token needed.
+#### Self-hosted runner cost — maintainer-attested, not source-verified
+
+The decision on custody tiers turned partly on runner cost, so the facts here are recorded with their
+confidence level. GitHub's [runner pricing](https://docs.github.com/en/billing/reference/actions-runner-pricing)
+lists hosted Linux at $0.002/min (1-core) and $0.006/min (2-core), and its billing page lists self-hosted
+runners among usage that "remains free independently". Third-party sources reported a $0.002/min platform
+charge for self-hosted runners on private repos starting 2026-03-01; the **maintainer states that charge was
+announced and then cancelled after customer backlash, and runs three self-hosted runners on private
+repositories without it.** That is treated as authoritative for current behaviour and *not* as a durable
+assumption: a pricing policy that reversed once can reverse again, so no design may depend on self-hosted
+runner minutes remaining free. Marked unverified at source because I could not resolve the contradiction
+from the documentation alone.
+
+## Deploy path measured (maintainer-approved): a project token deploys. No account token needed.
 
 With a real service and explicit approval to consume one deploy of the 20/day ceiling:
 
