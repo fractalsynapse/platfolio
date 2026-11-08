@@ -92,6 +92,16 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
       this.denied.push(operation);
       throw new Error(`railway ${operation}: Not Authorized [INTERNAL_SERVER_ERROR]`);
     }
+    // Guard the class of bug E26 exposed: mutations returning an OBJECT are rejected by the real API
+    // unless they select a subfield. The mock used to accept the query and never notice.
+    const objectReturning = ['projectCreate', 'environmentCreate', 'serviceCreate', 'projectUpdate', 'serviceDomainCreate', 'customDomainCreate'];
+    // Match the *field's* own closing paren, not the mutation's variable list -- a first version used
+    // `/\)\s*\{/`, which the outer `mutation (...) {` always satisfied, so the guard could not fail.
+    const fieldSelection = new RegExp(`${operation}\\s*\\([^)]*\\)\\s*\\{`);
+    if (objectReturning.includes(operation) && !fieldSelection.test(args.query)) {
+      throw new Error(`railway ${operation}: Field must have a selection of subfields (the real API rejects this at validation)`);
+    }
+
     if (operation === 'variables' || operation === 'variables.unrendered') {
       throw new Error('railway mock: variables() returns secret values and must never be called by a provider');
     }

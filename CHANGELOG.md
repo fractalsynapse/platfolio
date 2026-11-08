@@ -29,6 +29,14 @@ change; entries describe merged intent, not aspirations.
 
 ### Changed
 
+- **E27: the overlapping-deploy theory was wrong, and the truth was smaller and worse.** Back-to-back
+  `serviceInstanceDeploy` calls coalesce into one deployment on Railway; the stack of `FAILED`
+  deployments was mine — `projectUpdate` returns `Project!` and my call had no sub-selection, so the plan
+  marker was never written and every apply re-deployed the world. Fixed: the selection, the marker written
+  **before** mutating (a partially-applied plan must not make its own retry destructive), and a hostname
+  check because `serviceDomainCreate` is not idempotent. The mock had agreed with the bug; it now rejects
+  selection-less mutations — and the first version of *that* guard matched the wrong parentheses and could
+  never fail, caught only by breaking a query on purpose and watching the suite stay green.
 - **E26 ran the conformance suite against the live Railway API, and it overturned four assumptions the
   mock had been happily agreeing to.** A tagless `repo@sha256:…` reference is accepted and then
   **never deploys** (20+ minutes in `DEPLOYING`; the tagged `repo:tag@sha256:…` form reached `SUCCESS` in
