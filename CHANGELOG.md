@@ -7,6 +7,15 @@ change; entries describe merged intent, not aspirations.
 
 ### Added
 
+- **`packages/page-schema` — the secrets panel as validated data.** A component registry with strict
+  prop schemas, `buildSecretsPanel()` driven by manifest + instance state + provider capabilities, and
+  a plain-text projection for SDK/MCP/mobile consumers. Write-only is enforced three ways: no `value`
+  key exists on a secret field, `findValueBearingProps()` scans the finished tree, and the builder
+  validates its own output before returning. Capability gaps change the components rather than the
+  copy — no sealing support means deep links and a warning, never an input that writes unsealed.
+- **Credential-hygiene gate.** `pnpm run check` now inspects the git index and fails if a
+  `.secrets/` path, a `*.token` file or a non-example `.env` is ever tracked — force-add included,
+  since that is the failure being prevented. Verified to bite.
 - **Custody, delivery and placement (D20–D23).** `credential-broker` gives managed mode one grant per
   tenant that refuses the five secret-reading operations before they reach the transport, with an audit
   trail and revocation, while strict mode holds nothing — both held to `runBrokerConformance()`.

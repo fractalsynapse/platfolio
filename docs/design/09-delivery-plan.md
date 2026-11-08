@@ -122,8 +122,11 @@ the compose stack comes up; a manifest with an embedded secret value fails CI wi
 *Not in scope:* any UI, any customer.
 
 > **Status 2026-11-08 — M2 prepared, not started.** The attestation contract and its policy checks,
-> the install-PR generator, credential custody (D20), secret delivery (D21), the SCM seam (D22) and
-> environment placement (D23) are implemented and covered by 83 of the project's tests. The live halves — composite action, GitHub App installation, real dispatch, real
+> the install-PR generator, credential custody (D20), secret delivery (D21), the SCM seam (D22),
+> environment placement (D23) and the secrets panel as page data (`packages/page-schema`) are
+> implemented and covered by 95 of the project's tests. A development Railway workspace exists
+> (`82ba4aff-61f3-4b19-b863-8b650ebb66b2`, Pro plan) but **no credential for it has been provided to
+> this repository** — deliberately, see the custody note below — so E15/E18/E19/E21 remain unrun. The live halves — composite action, GitHub App installation, real dispatch, real
 > runner claims, JWKS verification against the issuer — are unstarted and need a tenant repository and
 > credentials. See [04 § Implementation status](04-execution-plane-github-workflows.md).
 

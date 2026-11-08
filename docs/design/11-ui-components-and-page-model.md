@@ -87,7 +87,27 @@ This keeps a mobile binary meaningful in App Store review (behavior is data-driv
 downloaded executable code), and keeps the security boundary honest: nothing downloaded at runtime can
 run with the user's session beyond the allowlisted component set.
 
-## Secrets panel (D21)
+## Secrets panel (D21) — implemented as data
+
+`packages/page-schema` implements the panel as a validated page tree, not as markup: a component
+registry (`page`, `heading`, `notice`, `badge`, `secret-group`, `secret-field`, `link-field`,
+`instructions`, `action-button`) with strict prop schemas, `buildSecretsPanel(manifest, instance,
+capabilities)` producing it from a Platform Manifest plus instance state, and a plain-text projection
+that the SDK, an MCP tool response and a mobile client can consume without a browser.
+
+The write-only guarantee is enforced in three places, because one of them will eventually be
+misunderstood by someone: the `secret-field` prop schema has no `value` key (so a caller that tries to
+carry one fails with `unrecognized_keys` naming it), `findValueBearingProps()` walks the finished tree
+rejecting any value-shaped key, and the builder runs both before returning — a malformed panel cannot
+be built, only failed to build. Capability state changes the *components*, not just the copy: without
+`sealedVariables` there is no input field at all, only a deep link and a warning notice; strict custody
+renders instructions routed to the tenant CI. D23 filtering is visible in the output — a
+production-only external service has no staging rows, and the group says why.
+
+A React/Astro renderer over this schema is still to come (it lands with E12's framework wiring); what
+exists is the definition, the builder, the projection and the tests.
+
+
 
 Where a tenant sets a platform's secrets is the instance's project/environment view, not a separate
 ritual: one field per declared secret, labelled with the name from the manifest, grouped by service and
