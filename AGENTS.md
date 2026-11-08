@@ -21,8 +21,9 @@ selections it has already made are recorded, not improvised:
 | Project-specific procedures | [.agents/skills/README.md](.agents/skills/README.md) |
 
 Status: design phase, with the contract layer implemented. `packages/contracts`,
-`packages/manifest` and `packages/kernel` exist and are tested; there is no service, no deployed
-resource and no external provider approval yet, so do not describe planned behavior as delivered.
+`packages/manifest` and `packages/kernel` exist and are tested (56 tests); there is no service, no
+deployed resource and no external provider approval yet, so do not describe planned behavior as
+delivered. Provider-specific claims need a live check, and CI substitutes for none of them.
 Run `pnpm run verify` for the whole gate set. The skills under
 `.agents/skills/` inherited from the starter package stay identical to their source; project
 guidance is added beside them, never by editing them.

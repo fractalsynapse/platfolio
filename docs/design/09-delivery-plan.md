@@ -117,6 +117,12 @@ suites, version derivation) and `packages/manifest` (schema, validation, rendere
 the compose stack comes up; a manifest with an embedded secret value fails CI with a readable error.
 *Not in scope:* any UI, any customer.
 
+> **Status 2026-11-08 — M2 prepared, not started.** The attestation contract and its policy checks,
+> and the install-PR generator (workflow + `PLATFOLIO.md`), are implemented and covered by 26 of the
+> project's tests. The live halves — composite action, GitHub App installation, real dispatch, real
+> runner claims, JWKS verification against the issuer — are unstarted and need a tenant repository and
+> credentials. See [04 § Implementation status](04-execution-plane-github-workflows.md).
+
 ## Milestone 2 — execution plane in a customer repo (1–2 weeks)
 
 Depends on E1/E2/E5/E6.

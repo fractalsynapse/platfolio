@@ -7,6 +7,13 @@ change; entries describe merged intent, not aspirations.
 
 ### Added
 
+- **M2 preparation.** The attestation contract (`DispatchIntent`, `Attestation`, `RunnerClaims`) with
+  `verifyAttestation()` enforcing audience, issuer, repository, dispatch/instance/action/plan-hash and
+  nonce binding, expiry, single-use replay, unknown-environment and production-environment gating;
+  strict schemas refuse unknown keys so no secret value can ride along. The install pull request is
+  generated and tested for minimal `permissions:`, per-dispatch GitHub environments, SHA-pinned
+  actions, architecture-appropriate runners, a documented removal path, and the absence of empty
+  expression placeholders (the bug that invalidated our own workflow file).
 - **M1 contract layer.** `packages/contracts` defines the `infra.provider` capability with a
   conformance suite, an in-memory test double and a deliberately-incomplete Railway implementation;
   `packages/manifest` implements the Platform Manifest as a zod/StandardSchema definition with
