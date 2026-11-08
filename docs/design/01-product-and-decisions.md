@@ -40,6 +40,8 @@ it is not a new choice.
 | D12 | The control plane is built on **Cordis** as its kernel: interface contracts at every seam, swappable providers, plugin-defined business processes, and contract diffs that derive version bumps. | Analysis, seam list and eight named risks in [10](10-cordis-kernel-and-extension-seams.md). Raises **OD6** (vendoring) and **OD7** (toolchain). |
 | D13 | Extensions come in **two tiers**: first-party plugins in-process; third-party or tenant-authored extensions out-of-process behind the same contract over RPC. | Required to keep D4 true — Cordis `isolate()` scopes service *views*, it is not a sandbox, so in-process plugins share the heap. |
 | D14 | Frontend is a **component library plus declarative page documents**; no runtime-loaded third-party React. | The security boundary, and what makes the mobile app a second renderer rather than a rewrite ([11](11-ui-components-and-page-model.md)). |
+| D18 | **OD2 decided: platfolio code and documents are licensed under Apache-2.0.** Root `LICENSE`, `Copyright 2026 Fractal Synapse Labs LCA PBC`, added 2026-11-08. | The grant exists, so a release tag is possible once `LICENSE` is on `main`. Three sub-questions inside this decision stay open (§ [08 § Remaining under D18](08-distribution-and-licensing.md)): full license text vs the short-form notice now present, the `/proprietary` boundary, and the trademark policy. |
+| D19 | **Release tags are bare semver** — `<major>.<minor>.<patch>`, optionally `-prerelease` or `+build`. No `v` prefix. | `production.yml` classifies every tag push against one tested rule and **fails** a `v1.2.3`-style attempt instead of quietly skipping it; provenance's "previous release" lookup reads bare semver tags. |
 | D15 | **OD6 decided:** Cordis is vendored at `vendor/cordis` (tag `v4.0.0-rc.12`), managed by `scripts/vendor-cordis.ts` with a lock file and replayed patches. **OD7 decided:** platfolio meets the framework **only at `packages/contracts`**; our tree keeps its own toolchain; if the framework contracts look unstable, an anti-corruption **shell** in `packages/kernel` absorbs the change so `packages/contracts` stays semver-stable. | `vendor/CORDIS.md` is authoritative for the mechanics; the boundary rules are enforceable by CI lint. |
 | D16 | **Repository toolchain: pnpm via corepack, pinned by `packageManager`; no dependency build scripts run.** One root manifest with `pnpm run verify` as the single gate command that CI and humans both run. | CI cannot rely on `npx -p` package trees (tsc resolves `@types` by walking to `./node_modules/@types`); a root manifest also keeps installs inside the repository — without one, `npm install` walked up and wrote into `/home/adrian/node_modules`. `strictDepBuilds: false` plus `ignoredBuiltDependencies: [esbuild]` state the posture instead of blanket-allowing scripts. |
 
@@ -101,10 +103,10 @@ the attestation); no per-customer Keycloak inside platfolio's own account.
 
 ## Decision log — previously open items
 
-**Accepted 2026-11-07.** The maintainer accepted the recommended answers to OD1, OD3, OD4, OD5, OD6a
-and OD8, and to the identity questions OI1–OI3 (now recorded as decisions in
-[05 § Identity decisions](05-identity.md)). These are decisions now, not options. Two remain open:
-**OD2 (license)** and **OD9 (core lineage, created by E9)**. The Railway and Stripe written answers
+**Accepted 2026-11-07; extended 2026-11-08.** The maintainer accepted the recommended answers to OD1,
+OD3, OD4, OD5, OD6a and OD8, and to the identity questions OI1–OI3 (now recorded as decisions in
+[05 § Identity decisions](05-identity.md)). **OD2 is now decided** — Apache-2.0, recorded as D18.
+**One remains open: OD9** (core lineage, created by E9). The Railway and Stripe written answers
 (P1, P2) are handled directly by the maintainer; they gate milestones rather than this document.
 
 - **OD1 — Merchant of record: platfolio is the MoR.** Standard Stripe Billing, **no Connect**, flat SKUs

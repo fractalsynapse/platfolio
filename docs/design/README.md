@@ -14,7 +14,7 @@ Read in order the first time; otherwise jump straight to the boundary you are to
 | [05](05-identity.md) | Identity | Three identity planes and the six invariants that keep platfolio users away from tenant users; the identity host; TreeDX/ArcNexus specifics |
 | [06](06-billing-and-lifecycle.md) | Billing and lifecycle | Entitlements, the state machine with Stripe's verified numbers, suspend/delete/eject, abuse, merchant of record, data-protection posture |
 | [07](07-interfaces-api-mcp-mobile.md) | Interfaces | API-first rules, auth grants, the MCP surface, and what makes the mobile app cheap instead of a rewrite |
-| [08](08-distribution-and-licensing.md) | Distribution and licensing | Artifacts that ship, the reframed binaries promise, provenance, OD2 options, self-hosted support policy |
+| [08](08-distribution-and-licensing.md) | Distribution and licensing | Artifacts that ship, the reframed binaries promise, provenance, the D18 license decision and what remains under it, self-hosted support policy |
 | [09](09-delivery-plan.md) | Delivery plan | Milestone 0 experiments with pass criteria (E1–E12), M1–M6 with observable acceptance, prerequisites P1–P8, standing risks, pending decisions |
 | [10](10-cordis-kernel-and-extension-seams.md) | Cordis kernel and extension seams | What Cordis actually is (read from source), where it fits, the two-tier extension model that keeps the zero-secret invariant true, twelve capability seams, contract-derived versioning, eight named risks, OD6–OD7 |
 | [11](11-ui-components-and-page-model.md) | UI components and page model | Cordis is not the frontend answer; the component-library rules that make mobile cheap; pages as data with one deliberate escape hatch; app-store prerequisites |

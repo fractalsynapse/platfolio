@@ -1,17 +1,21 @@
 name: Production
-# Runs on every push to main (the production gate) and on release tags (v*).
+# Runs on every push to main (the production gate) and on every tag push, because GitHub's tag
+# filters cannot express semver. A tag is treated as a release ONLY when it matches bare
+# <major>.<minor>.<patch>, optionally with -prerelease or +build metadata (decision D19).
 #
-# Tag rule (docs/MAINTAINING.md): a tag may be cut only on a commit that has already passed this
-# workflow on main. On a tag push, release-gate therefore requires an EARLIER successful run of this
-# same workflow for the identical commit whose ref was refs/heads/main — the tag's own run does not
-# satisfy it. It also requires a license file, which does not exist while OD2 is open.
+# A tag that looks like an old-style `v1.2.3` attempt fails loudly rather than quietly skipping:
+# silent no-op is the worst outcome for a release attempt. Unrelated tags are noted and ignored.
+#
+# Tag rule (docs/MAINTAINING.md): a tag may be cut only on a commit that already passed this workflow
+# on main. release-gate requires an EARLIER successful run of this same workflow for the identical
+# commit whose ref was refs/heads/main — the tag's own run does not satisfy it.
 # Nothing here publishes a release.
 on:
   push:
     branches:
       - main
     tags:
-      - 'v*'
+      - '*'
 
 permissions:
   contents: read
@@ -21,7 +25,53 @@ concurrency:
   group: production-${{ github.ref == 'refs/heads/main' && 'main' || github.ref }}
   cancel-in-progress: false
 
+env:
+  RELEASE_TAG_RE: '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'
+
 jobs:
+  classify_tag:
+    name: Classify tag
+    runs-on: ubuntu-latest
+    outputs:
+      kind: ${{ steps.classify.outputs.kind }}
+    steps:
+      - name: "Classify ${{ github.ref_name }}"
+        id: classify
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+        run: |
+          # Deliberately env-var only: GitHub interpolates expressions inside run bodies as well, so
+          # an empty or malformed placeholder here would invalidate the whole workflow file. Using
+          # environment variables also keeps the rule testable outside Actions.
+          if [ "$EVENT_NAME" != "push" ] || [ "$(printf '%s' "$REF" | cut -d/ -f1-2)" != "refs/tags" ]; then
+            echo "kind=none" >> "$GITHUB_OUTPUT"
+            echo "not a tag push; release jobs stay off"
+            exit 0
+          fi
+          tag="${GITHUB_REF_NAME}"
+          if printf '%s' "$tag" | grep -qE "$RELEASE_TAG_RE"; then
+            echo "kind=release" >> "$GITHUB_OUTPUT"
+            echo "release tag accepted: $tag"
+          elif printf '%s' "$tag" | grep -qE '^v[0-9]'; then
+            echo "kind=mistyped" >> "$GITHUB_OUTPUT"
+            echo "::error::tag '$tag' uses the retired 'v' prefix. Release tags are bare <major>.<minor>.<patch> (e.g. 0.1.0). Delete the tag and re-cut it without the prefix; never rename a published tag."
+          else
+            echo "kind=other" >> "$GITHUB_OUTPUT"
+            echo "::notice::tag '$tag' is not a release tag; release jobs are skipped."
+          fi
+
+  reject-mistyped-tag:
+    name: Reject mistyped release tag
+    needs: [classify_tag]
+    if: needs.classify_tag.outputs.kind == 'mistyped'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail the release attempt
+        run: |
+          echo "::error::release tags must be bare semver such as 0.1.0 — see docs/MAINTAINING.md (decision D19)"
+          exit 1
+
   gate:
     name: Production checks
     runs-on: ubuntu-latest
@@ -61,8 +111,8 @@ jobs:
 
   release-gate:
     name: Release tag policy
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [gate, experiment-e9]
+    needs: [classify_tag, gate, experiment-e9]
+    if: needs.classify_tag.outputs.kind == 'release'
     runs-on: ubuntu-latest
     steps:
       - name: Require a prior passing production run of this commit on main
@@ -84,15 +134,15 @@ jobs:
       - name: Require a license before any release identity exists
         run: |
           if [ ! -f LICENSE ] && [ ! -f LICENSE.md ] && [ ! -f LICENSE.txt ]; then
-            echo "::error::no license file at the repository root. Decision OD2 is open, so platfolio code carries no grant and nothing may be published under a release identity yet. Decide OD2 and commit a LICENSE before tagging."
+            echo "::error::no license file at the repository root on this commit. platfolio code may not be distributed under a release identity without one."
             exit 1
           fi
           echo "license present: continuing"
 
   release-notes:
     name: Assemble release provenance
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [release-gate]
+    needs: [classify_tag, release-gate]
+    if: needs.classify_tag.outputs.kind == 'release'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -102,7 +152,8 @@ jobs:
       - name: Record identity and provenance
         run: |
           mkdir -p out
-          prev=$(git tag --list 'v*' --sort=-v:refname | sed -n 2p)
+          # Bare semver release tags only, newest first; the second-to-newest is the previous release.
+          prev=$(git tag --list | grep -E "$RELEASE_TAG_RE" | sort -V | tail -n 2 | head -n 1)
           {
             echo "# Release ${GITHUB_REF_NAME}"
             echo
@@ -111,9 +162,13 @@ jobs:
             echo "- created: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
             echo "- previous release: ${prev:-none}"
             echo
-            echo "## Changes since previous tag"
+            echo "## Changes since previous release"
             echo
-            if [ -n "$prev" ]; then git log --no-merges --pretty='- %s (%h)' "$prev..HEAD"; else git log --no-merges --pretty='- %s (%h)' -n 40; fi
+            if [ -n "$prev" ] && [ "$prev" != "${GITHUB_REF_NAME}" ]; then
+              git log --no-merges --pretty='- %s (%h)' "${prev}..HEAD"
+            else
+              git log --no-merges --pretty='- %s (%h)' -n 40
+            fi
           } > out/RELEASE_NOTES.md
           cat out/RELEASE_NOTES.md
 
