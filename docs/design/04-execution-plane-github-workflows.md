@@ -109,6 +109,14 @@ status publish                  commit statuses / check runs so results appear o
      the tenant.
    - **mode A (strict)**: the tenant places one workspace token in their own CI secrets and platfolio
      holds nothing; token minting moves into the runner. Same product, one different custodian.
+   **E15 result (2026-11-08, measured):** two corrections apply. A workspace grant performs
+   `projectCreate`, `environmentCreate` and `projectTokenCreate` but **not** `serviceCreate` — service-level
+   work needs the environment-scoped project token, so provisioning is a **two-grant sequence**. And a
+   project token authenticates **only** in the `Project-Access-Token` header; presented as
+   `Authorization: Bearer` it returns `Not Authorized` on every call, which is very likely the "tokens are
+   finicky" experience that prompted the measurement. See
+   [the research record](../research/railway-token-and-sealing-2026-11-08.md).
+
    Either way: **no personal account token, ever**, and per-project tokens are an implementation
    detail nobody sees.
 

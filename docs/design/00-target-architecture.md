@@ -44,7 +44,7 @@ data** rather than bespoke code.
 | **One surface, many clients** | The public API is the only implementation path: web dashboard, mobile app, CLI, MCP tools and tenant automation are peers of it, never privileged side channels ([07](07-interfaces-api-mcp-mobile.md)). |
 | **Portability as a first-class property** | Multi-architecture images; the same stack runs in plain Docker Compose; the architecture a workload needs is a manifest field, not a packaging project. |
 | **Ejection as a capability** | The export package is tested in CI, not demoed: rendered config, data dumps with restore steps, checksummed archives, secret *inventory* with no values, and a working standalone bring-up. |
-| **Operation without access** | platfolio can run a tenant's stack well while being unable to read what runs in it. In strict mode that is architecture; in managed mode it is a refused call at one boundary plus sealing for the values that matter. Both are stated as such, never blurred into "we can't" where we only "won't". |
+| **Operation without access** | platfolio can run a tenant's stack well while refusing to read what runs in it. In strict mode that is architecture; in managed mode it is a refused call at one boundary, audited — and per E18 the two are never conflated in code, docs or marketing. |
 
 ## 2. Invariants
 
@@ -57,9 +57,13 @@ These hold at every stage, including the MVP, and they are the reason later stag
      or delivered by the tenant's runner; platfolio sees names only. "Cannot read" is architectural.
    - **managed (B, default)**: the tenant grants one credential per account (Railway OAuth, or a
      workspace token through the broker). Platfolio *could* read variables and does not — the broker
-     API refuses those calls, and the boundary is one seam, not an honour system. For secrets delivered
-     with sealing (D21), "cannot read" is again architectural: Railway states a sealed value
-     *"is never visible in the UI nor can it be retrieved via the API."*
+     API refuses those calls, and the boundary is one seam, not an honour system. **Corrected 2026-11-08
+     by measurement** ([research](../research/railway-token-and-sealing-2026-11-08.md)): an earlier
+     revision of this bullet claimed sealing made the managed property architectural too. It does not —
+     Railway's live API exposes no seal setter and no way to verify one, and both a workspace grant and an
+     environment-scoped project token read a written value straight back. So managed mode is *"will not
+     read"*, enforced at one boundary and audited, and is never described as impossible. Only strict mode
+     is architectural, and only because nothing readable is held.
    Either mode: names only in manifests, no value in any log, error, cache or database row. Enforced by
    the secret-name lint, the broker's refusal, and the zero-secret audit in
    [tenant-safety-check](../../.agents/skills/tenant-safety-check/SKILL.md) *(design — no code yet)*.
