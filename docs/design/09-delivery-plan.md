@@ -67,6 +67,7 @@ Purpose: let the plan be wrong cheaply. Deliverable is an evidence file, not fea
 | E11 Tier-2 boundary | A capability implemented as an out-of-process worker reaches the same contract over RPC, cannot read control-plane env or DB (asserted by test), and is pinned by image digest |
 | E12 Hot-swap safety | Under `plugin-hmr` in **dev only**: dispose/re-register a provider mid-job and confirm no leaked listener or half-applied step (relies on `ctx.effect()` reversal); document that production uses blue/green, not swap |
 | **E13 Core lineage — NEW, created by E9** | Decide deliberately whether platfolio tracks upstream `cordiverse/cordis` (what is vendored, `v4.0.0-rc.12`) or the fork `@deepseek-ai/cordis@4.1.0` (which the published `@cordisjs/*` plugins are built against). Verify the fork's license, provenance and relationship to upstream before any vendoring; then either (a) stay on upstream and author our own transport/provider adapters, or (b) re-vendor to the fork via `scripts/vendor-cordis.ts`. E9 evidence: `@cordisjs/plugin-server@1.7.0` fails route definition against upstream. Blocks M1 kernel wiring |
+| **E21 Per-environment resource scoping — NEW, created by D23** | Does `railway config plan` honour a service declared but attached only under `ctx.isEnvironment("production")` — i.e. staging genuinely does not get it, and removal from a later plan does not delete the production one? The generated file type-checks; whether the provider compiles it as intended is a live question |
 | **E18 Sealed-variable behaviour — NEW, created by D21** | Does `variableUpsert` honour `isSealed` (present in the introspected schema and the IaC SDK's `VariableConfig`), and is a sealed value then really unretrievable through our own granted credential? Confirm the documented non-copying on environment duplication by cloning a staging environment and observing which values arrive. **Blocks shipping `relay-sealed` as the default** — until then the mode is `tenant-side` |
 | **E19 Manifest-flow round trip — NEW, created by D22** | Register a throwaway App through the wizard: browser approval → redirect with `code` → conversion returns `id`/`pem`/`webhook_secret` → stored without a single copy-paste, and the UI returns to the right page. Verify install-link round trip and `GET /app/installations` reconciliation with **no webhook receiver running** |
 | **E20 Relay redaction proof — NEW, created by D21** | Post a sentinel value through the delivery path, then grep structured logs, error payloads, crash dumps, queue records, DB rows and APM breadcrumbs for it. The test must be part of CI, because the property is "never persisted or logged" and one future debug statement breaks it silently |
@@ -121,8 +122,8 @@ the compose stack comes up; a manifest with an embedded secret value fails CI wi
 *Not in scope:* any UI, any customer.
 
 > **Status 2026-11-08 — M2 prepared, not started.** The attestation contract and its policy checks,
-> and the install-PR generator (workflow + `PLATFOLIO.md`), are implemented and covered by 26 of the
-> project's tests. The live halves — composite action, GitHub App installation, real dispatch, real
+> the install-PR generator, credential custody (D20), secret delivery (D21), the SCM seam (D22) and
+> environment placement (D23) are implemented and covered by 83 of the project's tests. The live halves — composite action, GitHub App installation, real dispatch, real
 > runner claims, JWKS verification against the issuer — are unstarted and need a tenant repository and
 > credentials. See [04 § Implementation status](04-execution-plane-github-workflows.md).
 

@@ -60,6 +60,20 @@ spec:
       dependsOn: [web]
       domains: [api.arcnexus.example.com]
       public: true
+    keycloak:
+      image: quay.io/keycloak/keycloak
+      digest: sha256:6666666666666666666666666666666666666666666666666666666666666666
+      port: 8080
+      healthPath: /realms/master
+      start: start-server --http-port=8080
+      ownership: external
+      limits: { cpu: 1, memoryMB: 1024 }
+      env:
+        KC_HOSTNAME_STRICT: "false"
+      secrets:
+        - { name: KEYCLOAK_ADMIN_INITIAL_ACCESS, source: preserve }
+      domains: [auth.arcnexus.example.com]
+      public: true
     agent:
       image: ghcr.io/fractalsynapse/arcnexus-agent
       digest: sha256:5555555555555555555555555555555555555555555555555555555555555555

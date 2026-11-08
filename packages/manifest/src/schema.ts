@@ -25,6 +25,10 @@ const Service = z.object({
   env: z.record(z.string(), z.string()).default({}),
   /** Secret NAMES only, with where the value is resolved from. */
   secrets: z.array(z.object({ name: Name, source: z.enum(['preserve', 'shared-variable', 'customer-held']) }).strict()).default([]),
+  /** Which environments this service exists in (D23). Defaults from `ownership`. */
+  environments: z.array(z.enum(['production', 'staging'])).optional(),
+  /** `external` = an upstream image platfolio hosts but does not develop; production-only by default. */
+  ownership: z.enum(['maintained', 'external']).default('maintained'),
   domains: z.array(z.string().min(1)).default([]),
   dependsOn: z.array(Name).default([]),
   public: z.boolean().default(false),
@@ -65,7 +69,15 @@ export const ManifestSchema = z.object({
     }).strict(),
     resources: Resources.default({ volumes: [] } as never),
     services: z.record(z.string(), Service),
-    dns: z.object({ ownershipVerification: z.enum(['txt']).default('txt'), apexPolicy: z.enum(['cname-flattening-only', 'forbidden']).default('cname-flattening-only') }).strict().optional(),
+    dns: z.object({
+      ownershipVerification: z.enum(['txt']).default('txt'),
+      apexPolicy: z.enum(['cname-flattening-only', 'forbidden']).default('cname-flattening-only'),
+      /**
+       * How a staging host is derived from a declared production host. Rendered explicitly rather than
+       * left to provider magic: a service present in both environments cannot claim the same host twice.
+       */
+      stagingPrefix: z.string().min(1).default('staging-'),
+    }).strict().optional(),
     lifecycle: z.object({
       onSuspend: z.enum(['scale-to-zero']).default('scale-to-zero'),
       onEject: z.array(z.enum(['railway-iac', 'compose', 'data-export', 'realm-export', 'secret-inventory'])).default(['railway-iac', 'compose', 'data-export', 'secret-inventory']),

@@ -1,0 +1,101 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { test } from 'node:test';
+import { enabledEnvironments, parse, renderCompose, renderRailwayIaC, serviceEnvironments, stagingHost, validateManifest } from '../src/index.ts';
+import type { Manifest } from '../src/index.ts';
+
+const root = path.resolve(new URL('.', import.meta.url).pathname, '../../..');
+function load(p: string): Manifest {
+  const r = parse(fs.readFileSync(path.join(root, p), 'utf8'));
+  assert.equal(r.issues.length, 0, JSON.stringify(r.issues));
+  return r.manifest!;
+}
+const arcnexus = load('templates/arcnexus/manifest.yaml');
+
+test('external services default to production-only, maintained ones to every enabled environment', () => {
+  const enabled = enabledEnvironments(arcnexus);
+  assert.deepEqual(enabled, ['production', 'staging']);
+  assert.deepEqual(serviceEnvironments(arcnexus.spec.services.keycloak!, enabled), ['production']);
+  assert.deepEqual(serviceEnvironments(arcnexus.spec.services.web!, enabled), ['production', 'staging']);
+});
+
+test('staging hosts are derived, never reused', () => {
+  assert.equal(stagingHost('app.example.com', 'staging-'), 'staging-app.example.com');
+  assert.equal(stagingHost('*.auth.example.com', 'staging-'), '*.staging-auth.example.com');
+  const iac = renderRailwayIaC(arcnexus).files['.railway/railway.ts']!;
+  assert.ok(iac.includes(`'staging-app.arcnexus.example.com'`), 'staging must get its own host');
+  assert.ok(!/domains: \[\{ domain: 'app\.arcnexus\.example\.com', port: 3000 \}\],\n/.test(iac), 'a host may not be claimed by both environments unconditionally');
+});
+
+test('a production-only service is declared but attached only where it exists', () => {
+  const iac = renderRailwayIaC(arcnexus).files['.railway/railway.ts']!;
+  assert.ok(/let keycloak: ReturnType<typeof service> | undefined;/.test(iac), 'scoped service needs a guarded declaration');
+  assert.ok(/if \(ctx\.isEnvironment\('production'\)\) \{/.test(iac), 'guard must use the documented context helper');
+  assert.ok(/keycloak \?\? null/.test(iac) && /\.filter\(\(r\)/.test(iac), 'staging must not receive it');
+  // keycloak's own domain is production-only, so no ternary is needed on it
+  assert.ok(/domains: \[\{ domain: 'auth\.arcnexus\.example\.com', port: 8080 \}\],/.test(iac));
+});
+
+test('the Compose rendering keeps external services for local development', () => {
+  const compose = renderCompose(arcnexus).files['docker-compose.yml']!;
+  assert.ok(compose.includes('  keycloak:'), 'local dev needs Keycloak present even when staging does not');
+});
+
+test('generated IaC with per-environment placement still type-checks against the published SDK', () => {
+  const dir = path.join(root, '.tmp-render-policy');
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(path.join(dir, '.railway'), { recursive: true });
+  try {
+    fs.writeFileSync(path.join(dir, '.railway/railway.ts'), renderRailwayIaC(arcnexus).files['.railway/railway.ts']!);
+    execFileSync(process.execPath, ['--import', 'tsx', path.join(root, 'node_modules/typescript/bin/tsc'), '--noEmit', '--strict', '--target', 'es2023', '--module', 'nodenext', '--moduleResolution', 'nodenext', '--skipLibCheck', '--types', 'node', path.join(dir, '.railway/railway.ts')], { stdio: 'pipe', cwd: root });
+  } catch (error) {
+    const out = `${(error as { stdout?: Buffer }).stdout?.toString() ?? ''}${(error as { stderr?: Buffer }).stderr?.toString() ?? ''}`.trim();
+    assert.fail(`scoped IaC did not type-check:\n${out.slice(0, 900)}`);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a service may not name an environment the platform does not enable', () => {
+  const bad = structuredClone(arcnexus) as Manifest;
+  bad.spec.services.web!.environments = ['production', 'staging'];
+  bad.spec.environments.staging.enabled = false;
+  const { issues } = { issues: validateWith(bad) };
+  assert.ok(issues.some((i) => i.code === 'environment-not-enabled'), JSON.stringify(issues));
+});
+
+test('a staging-only placement is refused', () => {
+  const bad = structuredClone(arcnexus) as Manifest;
+  bad.spec.services.agent!.environments = ['staging'];
+  assert.ok(validateWith(bad).some((i) => i.code === 'staging-only-service'));
+});
+
+test('host overlap is reported per environment, and same-service overlap stays allowed', () => {
+  // The provider rule: a wildcard and a concrete host may not overlap unless both belong to the
+  // same service. Assert both halves, and that the report names the environment it was found in.
+  const clash = structuredClone(arcnexus) as Manifest;
+  clash.spec.services.keycloak!.domains = ['*.svc.example.com'];
+  clash.spec.services.keycloak!.environments = ['production'];
+  clash.spec.services.api!.domains = ['private.svc.example.com'];
+  const found = validateWith(clash).filter((i) => i.code === 'wildcard-conflict');
+  assert.equal(found.length, 1, JSON.stringify(found));
+  assert.match(found[0]!.message, /in "production"/, found[0]!.message);
+  assert.match(found[0]!.message, /keycloak/, 'the message should name the wildcard owner');
+
+  const sameService = structuredClone(arcnexus) as Manifest;
+  sameService.spec.services.keycloak!.domains = ['*.svc.example.com', 'private.svc.example.com'];
+  assert.ok(!validateWith(sameService).some((i) => i.code === 'wildcard-conflict'), JSON.stringify(validateWith(sameService)));
+
+  // A production-only service's hosts must not be duplicated into a staging it does not exist in.
+  const iac = renderRailwayIaC(arcnexus).files['.railway/railway.ts']!;
+  const kc = iac.slice(iac.indexOf("service('keycloak'"), iac.indexOf("service('keycloak'") + 900);
+  assert.ok(/domains: \[\{ domain: 'auth\.arcnexus\.example\.com', port: 8080 \}\],/.test(kc), 'scoped service keeps a plain production host list');
+  assert.ok(!kc.includes('staging-auth'), 'no staging host should be invented for a service with no staging placement');
+});
+
+/** Validation through the package entry point, so tests exercise the same path the product does. */
+function validateWith(m: Manifest) {
+  return validateManifest(m);
+}
