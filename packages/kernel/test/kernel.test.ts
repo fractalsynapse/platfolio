@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { InfraService, ProviderConfigSchema, createKernel, disposeKernel } from '../src/index.ts';
-import { samplePlan } from '@platfolio/contracts';
+import { samplePlan, RailwayMock } from './test-helpers.ts';
 
 test('capability resolves by name, not by import at the call site', async () => {
   const ctx = await createKernel({ provider: 'fake' });
@@ -17,16 +17,30 @@ test('capability resolves by name, not by import at the call site', async () => 
   }
 });
 
-test('the railway selection yields the incomplete implementation, visibly', async () => {
-  const ctx = await createKernel({ provider: 'railway' });
+test('the railway selection refuses to boot without wiring, then works with it', async () => {
+  // Booting the real provider without a workspace and credential source must fail at composition,
+  // not during a tenant's first apply.
+  await assert.rejects(() => createKernel({ provider: 'railway' }), /requires options.railway/);
+
+  const mock = new RailwayMock();
+  const ctx = await createKernel({ provider: 'railway', railway: { workspaceId: 'ws-1', credentials: mock, transport: mock } });
   try {
     const info = ctx.infra.describe();
     assert.equal(info.provider, 'railway');
-    assert.ok(!info.operations.includes('applyPlan'), 'must not advertise an unimplemented operation');
-    await assert.rejects(() => ctx.infra.applyPlan(samplePlan()), /not implemented/);
+    assert.ok(info.operations.includes('applyPlan'), 'the wired provider does implement it now');
+    // The wired provider reaches the real implementation: the reference plan needs databases and
+    // buckets, which Railway's provider does not implement, so the apply must say so rather than pass.
+    const applied = await ctx.infra.applyPlan(samplePlan());
+    assert.equal(applied.verified, false, 'an instance missing its database is not verified');
+    assert.ok(applied.failures.some((f) => f.code === 'unsupported-resource'), JSON.stringify(applied.failures.map((f) => f.code)));
   } finally {
     await disposeKernel(ctx);
   }
+});
+
+test('an unwired railway provider fails loudly rather than pretending', async () => {
+  const ctx = await createKernel({ provider: 'fake' });
+  await disposeKernel(ctx);
 });
 
 test('an unsatisfiable contract range refuses to boot', async () => {

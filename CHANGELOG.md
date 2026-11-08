@@ -5,6 +5,38 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+### Added
+
+- **The Railway provider is real now.** `packages/contracts/src/railway-transport.ts` carries the
+  credential model the measurements forced: a workspace grant for project/environment/token creation, an
+  environment-scoped token for service work, and the `Project-Access-Token` header chosen by credential
+  **kind** rather than by the caller. It also holds `HttpRailwayTransport` — Railway answers
+  authorization denials as HTTP 200 with `errors[]`, so anything that is not `data` is treated as an error
+  — and `MintingRailwayCredentials`, which mints per-environment tokens and can revoke what it created.
+  `RailwayInfraProvider` implements `applyPlan` / `readState` / `deleteInstance`: idempotent by
+  `planHash` through a marker in the project description, per-environment instance placement, service and
+  custom domains with certificate state reported as the provider sees it, configuration written with
+  `skipDeploys` so a variable write never triggers an unintended redeploy, secrets verified by **name
+  presence** through the value-redacting `Environment.config` and never through `variables()` (which is
+  the call that would actually return them), ceilings applied via `serviceInstanceLimitsUpdate`, and a
+  hard per-instance deploy budget reflecting the tenant's daily ceiling. `packages/kernel` wires the
+  selection through the Cordis boundary and refuses to boot a Railway provider with no workspace or
+  credential source.
+- **`ApplyResult.notes`**, so an observation cannot masquerade as a failure: the first revision recorded a
+  placement fallback as a failure and made a correct apply report itself unverified. The conformance suite
+  gained a **`scope`** field (`full` / `reduced`) plus a guard that rejects a reduced plan too small to
+  exercise the surface, so a reduced run can never be quoted as conformance.
+
+### Changed
+
+- **Two claims corrected, both generalized from the wrong artifact.** Resource ceilings are not
+  un-settable in Railway — they are unexpressible in the **IaC graph**, and the API sets them, so the
+  provider now does ([03](docs/design/03-manifest-spec.md)). And Railway services are project-level while
+  the deployed thing is the per-environment **instance**: an apply that updated without ensuring placement
+  silently stopped configuring the second environment, and readState must report instance identity while
+  domain calls take service identity. Which call the real API wants for cross-environment placement is
+  now **E25**, with **E26** running the conformance suite live.
+
 ## [0.1.0] - 2026-11-08
 
 First tagged release. It is the **contract layer**, not a running product: versioned capability

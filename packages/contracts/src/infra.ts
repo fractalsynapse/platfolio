@@ -150,6 +150,11 @@ export const ApplyResultSchema = z.object({
   services: z.array(ServiceStateSchema),
   domains: z.array(DomainStateSchema),
   failures: z.array(z.object({ step: z.string().min(1), code: NameSchema, message: z.string().min(1) })),
+  // Informational observations that do not contradict the plan. Kept separate from failures
+  // on purpose: the first revision of the Railway provider recorded a placement fallback as a
+  // failure, which made a correct apply report itself unverified. Notes must never downgrade a
+  // claim quietly, and failures must never be demoted to notes to buy a green.
+  notes: z.array(z.object({ step: z.string().min(1), code: NameSchema, message: z.string().min(1) })).optional(),
   noop: z.boolean(),
 });
 
