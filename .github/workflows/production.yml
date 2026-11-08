@@ -120,10 +120,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           SHA: ${{ github.sha }}
         run: |
-          # A 404 is a legitimate answer here: this workflow file may never have existed on main for
-          # that commit. It must fall through to the explanatory failure, not a raw API error.
+          # The run-list endpoint has no `ref` field — only `head_branch`, which is "main" for a branch
+          # push and the tag name for a tag push. Filtering on `.ref` silently matches nothing and would
+          # block every real release (found by the #7 tag experiment). A 404 is also legitimate here (no
+          # such workflow history for that commit) and must fall through to the explanatory failure.
+          # --paginate emits one count per page, so the counts are summed rather than case-tested.
           runs=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/production.yml/runs?head_sha=$SHA&per_page=100" \
-            --paginate --jq '[.workflow_runs[] | select(.ref == "refs/heads/main" and .event == "push" and .status == "completed" and .conclusion == "success")] | length' 2>/dev/null || echo 0)
+            --paginate --jq '[.workflow_runs[] | select(.head_branch == "main" and .event == "push" and .status == "completed" and .conclusion == "success")] | length' 2>/dev/null \
+            | awk '{s+=$1} END {print s+0}')
           case "$runs" in (''|*[!0-9]*) runs=0;; esac
           echo "successful main-branch Production runs for $SHA: $runs"
           if [ "$runs" -lt 1 ]; then
