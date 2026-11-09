@@ -91,3 +91,31 @@ for "bring your own domain", and purchasing through platfolio is out of scope.
   provider) — unchanged from the earlier feasibility research, still not tested by us.
 - `probe.fractalsynapse.com` remains attached to `platfolio-iac-sample` as `CREATING`; deleting it or
   publishing the CNAME is the maintainer's call.
+
+## Live progression, measured after the maintainer published DNS
+
+Timeline for `probe.fractalsynapse.com` on project `platfolio-iac-sample` (service created but **never
+deployed**, so the routed host answers nothing — HTTP 000 — while the domain machinery still runs):
+
+| When | Observed |
+| --- | --- |
+| attach, no DNS at all | `syncStatus: CREATING`, `verified: false`, `certificateStatus: VALIDATING_OWNERSHIP`, `dnsRecords[0] = CNAME required=1ggsepht.up.railway.app current="" REQUIRES_UPDATE TRAFFIC_ROUTE` |
+| after the CNAME was published | `syncStatus: **ACTIVE**`, record `currentValue: 1ggsepht.up.railway.app`, `status: **PROPAGATED**` — **but still `verified: false`, `VALIDATING_OWNERSHIP`** |
+
+So the traffic route and the certificate are genuinely **two independent states**, which is what D25's
+two-axis design is for: a tenant can have a working host pointing at nothing while ownership is pending,
+and a UI that merged those into one green would be describing two different failures.
+
+And the ownership check needs its own record, which is **not in `dnsRecords`**: Railway discloses
+`verificationDnsHost: _railway-verify.probe` and `verificationToken: railway-verify=<64 hex>` separately,
+and `verified` stays false until that TXT exists (`dig TXT _railway-verify.probe.fractalsynapse.com` is
+empty). That is exactly the shape the provider now maps into the same record list with
+`purpose: 'ownership'` — a checklist built only from `dnsRecords` would have told the tenant they were
+done after the CNAME, and the certificate would never arrive.
+
+**Open**: whether `VALIDATING_OWNERSHIP → ISSUING → VALID` completes unaided once the TXT is published,
+and how long it takes. A watcher polls `domains(...)` every 60s for up to 45 minutes
+(`.research/domain-watch.sh`, no deploys, logs each change) and its output goes here when it terminates.
+Also unexplained and worth noting: through `domains(...)`, `CustomDomain.status.syncStatus` returned
+`null` while `domains(...).customDomains[].syncStatus` returned `ACTIVE` — the *top-level* field is the
+one that carries the value, so a provider that selected `status { syncStatus }` would silently lose it.
