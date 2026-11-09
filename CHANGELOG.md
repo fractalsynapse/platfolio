@@ -5,6 +5,16 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+### Added
+
+- **OD13: a private PostgreSQL created and deployed through the API.** `templateDeployV2` with
+  `templateId` **plus a caller-supplied `serializedConfig` read from the template** reached `SUCCESS` on the
+  real service image, asynchronously (`operationId`/`workflowId`). The argument type is
+  `TemplateDeployV2Input` — the similarly named `TemplateDeployInput` is a different type, and aiming at it
+  is what made the earlier probes look like a capability limit. Remaining: plan-controlled naming (it
+  arrived as the template's own `Postgres`), password seeding, `${{Service.VAR}}` wiring, and modelling
+  deploy as a job.
+
 ### Changed
 
 - **"Databases cannot be created" is retracted -- they can, and the provider has to do it.**

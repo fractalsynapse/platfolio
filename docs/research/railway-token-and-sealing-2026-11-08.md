@@ -514,3 +514,51 @@ with a template was, and I never tried it. The `postgres-ssl` image that the IaC
 None of this is verified beyond creation, and nothing here is a claim that the provider works. The claim is
 narrower and more important: **databases are creatable through the API, so "discover and wire, never create"
 was the wrong answer to propose, and the provider has to do the creating.**
+
+## OD13 SOLVED (the create+deploy half): `templateDeployV2` with a supplied `serializedConfig`
+
+The path was neither `serviceCreate` alone, nor the change set. The mutation's argument type is
+`TemplateDeployV2Input` -- **not** `TemplateDeployInput`, which also exists and which my first introspection
+read, so I spent attempts against the wrong shape:
+
+```
+templateDeployV2(input: {
+  templateId:       <Template.id>            # e.g. c27544e8-... for code "postgresql"
+  serializedConfig: <Template.serializedConfig>   # read from the template, supplied by the caller
+  projectId, environmentId, workspaceId
+}) -> TemplateDeployPayload { operationId, workflowId, projectId }     # asynchronous
+```
+
+`serializedConfig.services` holds the full recipe -- for this template one service, image
+`ghcr.io/ncontiero/postgres-ssl:18.6`, with `PGDATA`/`PGHOST`/`PGPORT`/`PGUSER` and the password variable
+declared with descriptions and defaults. The caller supplies that config; the server does not fetch it from
+the template id. That is why my earlier probe (`templateId` only, or `templateCode`) returned the same opaque
+"Problem processing request" as everything else: **the message means "your input did not deserialize", and it
+has no shape sensitivity whatsoever** -- the same failure mode documented above for change sets.
+
+Measured result, workspace grant, project `platfolio-iac-sample`, production environment:
+
+```
+deploy -> { operationId: 62cff224-..., workflowId: deployTemplate/project/c521ed54-.../m2WRti }
++45 s  -> services: ["Postgres", "web"]
+          instances: nginx SUCCESS, ghcr.io/ncontiero/postgres-ssl:18.6 SUCCESS
+```
+
+A private PostgreSQL **created and deployed successfully through the API**, with no dashboard step and no
+manual pre-creation. Which is what the maintainer said all along, and what I should have found by reading
+the argument type properly instead of concluding impossibility from three endpoints that I had aimed badly.
+
+Open, in order:
+
+1. **Naming.** It arrived as `Postgres` -- the template's service name, not the `app-db` I asked for, and
+   `services` is not a field of this input at all. So the provider must rename via `serviceUpdate`, or
+   compose the `serializedConfig` with the plan's name (the config is caller-supplied, so this should be
+   possible -- untested).
+2. **Seeding.** Whether Railway generated the password value itself, and whether `variables()` on the new
+   service returns it -- which must **not** be read into platfolio. Names only from here on.
+3. **Wiring.** Railway's own templates use `${{RAILWAY_PRIVATE_DOMAIN}}`, so a `${{Service.VAR}}` style
+   reference in the app service's `DATABASE_URL` is the likely mechanism. If it works, the URL crosses as an
+   *expression* and the value never enters platfolio at all -- strictly better than the custody design so far.
+4. **Async.** `operationId`/`workflowId` means provisioning a database is a job with a status, not a call
+   that returns a resource. Our `applyPlan` has to poll or accept partial state, and `ServiceInstanceStatus`
+   may need a "provisioning" affordance rather than pretending the service exists the moment we return.
