@@ -110,6 +110,17 @@ Things deliberately **not** asked of a tenant: creating tokens, creating GitHub 
 the provider's UI, installing anything on a laptop, opening a tunnel, or repeating any of the above per
 project.
 
+## Domain and certificate state (measured against the schema)
+
+Attachment is an API operation, not a configuration one — Railway's CLI rejects custom-domain
+*registration* inside `.railway/railway.ts`, so the renderer records hosts as comments and the provider
+creates them. State is then read back rather than assumed: `serviceDomains.syncStatus`
+(`ACTIVE`/`CREATING`/…) for generated hosts and `customDomains.status` (`verified`, `certificateStatus` ∈
+`VALID`/`ISSUING`/`VALIDATING_OWNERSHIP`/`ISSUE_FAILED`) for custom ones, which is what lets the tenant
+see *waiting on your DNS records* instead of a false green. `customDomainIssueCertificate(id)` is exposed
+as a provider-specific `retryCertificate(domainId)` using Railway's own id; it is deliberately not part of
+the five-operation `infra.provider` contract.
+
 ## Components
 
 ```

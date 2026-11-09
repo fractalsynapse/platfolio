@@ -29,6 +29,17 @@ change; entries describe merged intent, not aspirations.
 
 ### Added
 
+- **Domain state is read, not inferred, and failed certificates can be nudged.** Generated service
+  domains now report `syncStatus` (CREATING reads as pending even for a `*.up.railway.app` host, which the
+  previous hostname inference would have called issued) and custom domains report
+  `status.verified`/`certificateStatus` (VALID / ISSUING / VALIDATING_OWNERSHIP / ISSUE_FAILED). Apply-time
+  domain status re-reads the provider instead of assuming issuance follows creation, since a custom domain
+  waits on DNS the tenant still owns. `retryCertificate(domainId)` calls `customDomainIssueCertificate`
+  using the id Railway issued — kept outside the five-operation contract deliberately, so no provider can
+  be assumed to have it.
+
+### Added
+
 - **`graphql:check` — every GraphQL document we write is validated against Railway's live schema**
   (committed introspection snapshot, 697 types) and runs in all three CI tiers. It catches the four bug
   classes we hit this week by name: a root field that doesn't exist, a guessed input-type name, an
