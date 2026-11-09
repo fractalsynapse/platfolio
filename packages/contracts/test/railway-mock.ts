@@ -39,6 +39,8 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
   /** Hosts the availability check refuses, so a test can prove the create is never attempted. */
   readonly takenDomains = new Set<string>();
   readonly domainCreates: string[] = [];
+  /** Template deploys recorded so tests can assert the composed name and the grant used. */
+  readonly templateDeploys: { templateId: string; serviceName: string; credentialKind: string }[] = [];
 
   deploys = 0;
   readonly operations: string[] = [];
@@ -231,6 +233,46 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
         const input = v.input as { memoryGB?: number; vCPUs?: number };
         instance.limits = { cpu: input.vCPUs ?? 0, memoryMB: Math.round((input.memoryGB ?? 0) * 1024) };
         return { serviceInstanceLimitsUpdate: true } as T;
+      }
+      case 'template': {
+        const id = v.id as string;
+        if (id !== 'c27544e8-a7e7-450d-9314-bdaa25c734aa') throw new Error('railway template: not found [NOT_FOUND]');
+        return {
+          template: {
+            serializedConfig: {
+              services: {
+                '36d08c1e-1bcb-4de6-a199-3749dc83dff3': {
+                  name: 'Postgres',
+                  source: { image: 'ghcr.io/ncontiero/postgres-ssl:18.6', type: 'image' },
+                  variables: { POSTGRES_PASSWORD: { isSensitive: true, generateValue: true } },
+                },
+              },
+            },
+          },
+        } as T;
+      }
+      case 'templateDeployV2': {
+        // Measured: a workspace-grant operation that provisions asynchronously.
+        if (credential.kind !== 'workspace') throw new Error('railway templateDeployV2: Bad Access [UNPROCESSABLE]');
+        const input = v.input as { templateId: string; serializedConfig: { services: Record<string, { name?: string; source?: { image?: string }; variables?: Record<string, unknown> }> }; projectId: string; environmentId: string };
+        const spec = Object.values(input.serializedConfig.services)[0]!;
+        const name = spec.name ?? 'Postgres';
+        this.templateDeploys.push({ templateId: input.templateId, serviceName: name, credentialKind: credential.kind });
+        if (!this.projects.has(input.projectId)) throw new Error('railway templateDeployV2: project not found [NOT_FOUND]');
+        const serviceId = `svc-${this.sequence++}`;
+        this.services.set(serviceId, { id: serviceId, name, projectId: input.projectId });
+        // Measured: a template deploy provisions AND deploys on its own -- the instance came up
+        // DEPLOYING and reached SUCCESS without any serviceInstanceDeploy call from us.
+        this.instances.set(`${input.environmentId}:${serviceId}`, {
+          instanceId: `inst-${this.sequence++}`,
+          status: 'DEPLOYING',
+          image: spec.source?.image ?? '',
+          numReplicas: 1,
+          domains: [],
+          polls: 0,
+          variables: new Set(Object.keys(spec.variables ?? {})),
+        });
+        return { templateDeployV2: { operationId: `op-${name}`, workflowId: `deployTemplate/${input.projectId}/mock` } } as T;
       }
       case 'customDomainAvailable': {
         const domain = v.domain as string;

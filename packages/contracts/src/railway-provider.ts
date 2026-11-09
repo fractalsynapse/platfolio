@@ -62,6 +62,8 @@ export interface RailwayProviderOptions {
   credentials: RailwayCredentialSource;
   transport?: RailwayTransport;
   workspaceId: string;
+  /** Engine kind -> Railway Template id used to provision managed databases (OD13). */
+  databaseTemplates?: Record<string, string>;
   /**
    * Deploys this provider instance may trigger. The execution plane treats the tenant's daily ceiling as
    * external and hard, so the guard lives here instead of in the caller's memory.
@@ -101,6 +103,8 @@ export class RailwayInfraProvider implements InfraProvider {
   private readonly deployTimeoutMs: number;
   private readonly pollIntervalMs: number;
   private readonly sleep: (ms: number) => Promise<void>;
+  /** Engine kind -> Railway Template id; ids are Railway's own, looked up not guessed (OD13). */
+  private readonly templateIds: Record<string, string>;
 
   /** Deploys consumed so far; the caller reports this against the tenant's daily ceiling. */
   deploymentsUsed = 0;
@@ -109,6 +113,7 @@ export class RailwayInfraProvider implements InfraProvider {
     this.credentials = options.credentials;
     this.transport = options.transport ?? new HttpRailwayTransport();
     this.workspaceId = options.workspaceId;
+    this.templateIds = { postgres: 'c27544e8-a7e7-450d-9314-bdaa25c734aa', ...options.databaseTemplates };
     this.deployBudget = options.deployBudget ?? 4;
     this.deployTimeoutMs = options.deployTimeoutMs ?? 180_000;
     this.pollIntervalMs = options.pollIntervalMs ?? 5_000;
@@ -294,20 +299,9 @@ export class RailwayInfraProvider implements InfraProvider {
       }
 
       for (const database of environment.databases) {
-        // E28 open: templateDeployV2 with a PostgreSQL template returns "Problem processing request"
-        // with no detail, and no other creation path was found. Reported as missing rather than
-        // approximated, because a stateless service without its database is worse than a failed apply.
-        // NOT a Railway limitation. Measured 2026-11-09: serviceCreate(input:{ projectId, environmentId,
-        // name, templateId }) creates a PostgreSQL service from Railway's own template, so databases are
-        // creatable through the API and this provider MUST do it -- an earlier comment here claimed they
-        // were unreachable, which came from probing the wrong endpoints (templateDeployV2, change sets).
-        // What is unresolved is making the created service deploy (serviceInstanceDeploy answered
-        // "Problem processing request"; candidates are serviceConnect, serviceInstanceDeployV2, or seeding
-        // its variables first) and wiring its URL through Railway's own reference syntax so the value never
-        // crosses platfolio. Until both work this fails closed: a service that comes up "healthy" without
-        // its database is the worst outcome this contract can produce.  OD13.
-        failures.push({ step: `databases.${database.name}`, code: 'database-not-provisioned', message: `${database.kind} is not provisioned by this build yet: template-created services do not deploy through the path tried so far (OD13), and the instance is incomplete without it` });
+        await this.provisionDatabase(projectId, environmentId, environment.name, database, environment, token, serviceIds, failures, notes);
       }
+
       for (const bucket of environment.buckets) {
         // E28: bucketCreate works, but only with the workspace grant -- an environment-scoped project
         // token is answered with "Bad Access", which is why this call cannot go through `token`.
@@ -879,6 +873,92 @@ export class RailwayInfraProvider implements InfraProvider {
 
   /** Recorded so a retry can find the project without the caller repeating the mapping. */
   private lastProjectId = '';
+
+  /**
+   * Provision a managed database through the template path (OD13). Measured 2026-11-09:
+   * `templateDeployV2({ templateId, serializedConfig, projectId, environmentId, workspaceId })` created AND
+   * deployed a private PostgreSQL to SUCCESS with no dashboard step. Two details make it work where earlier
+   * probes failed: the input type is `TemplateDeployV2Input` (a different, similarly named type exists), and
+   * `serializedConfig` is supplied by the caller -- read from the Template itself. Wrong shapes get the same
+   * opaque "Problem processing request" that change sets emit, so that message means "could not deserialize",
+   * never "cannot be done".
+   *
+   * The input has no services field and the deploy arrives under the template's own service name, so the
+   * config is fetched, renamed to the plan's name, and sent back. Provisioning is asynchronous
+   * (operationId/workflowId), so success is observed by reading the deployment back, not by the mutation
+   * returning. A database that does not reach SUCCESS fails the apply: a service reported healthy without
+   * its database is the worst outcome this contract can produce.
+   */
+  private async provisionDatabase(projectId: string, environmentId: string, envName: string, database: { name: string; kind: string }, environment: { name: string; services: ServicePlan[]; databases: { name: string; kind: string }[] }, token: RailwayCredential, serviceIds: Map<string, string>, failures: ApplyResult['failures'], notes: NonNullable<ApplyResult['notes']>): Promise<void> {
+    const step = `databases.${database.name}`;
+    const templateId = this.templateIds[database.kind];
+    if (!templateId) {
+      failures.push({ step, code: 'unknown-database-kind', message: `${database.kind} has no template configured on this provider` });
+      return;
+    }
+
+    try {
+      const fetched = await this.transport.graphql<{ template: { serializedConfig?: { services?: Record<string, Record<string, unknown>> } | null } }>({
+        operation: 'template',
+        credential: token,
+        query: 'query ($id: String!) { template(id: $id) { serializedConfig } }',
+        variables: { id: templateId },
+      });
+      const config = fetched.template.serializedConfig;
+      const services = config?.services ?? {};
+      const keys = Object.keys(services);
+      if (keys.length !== 1 || !config) {
+        failures.push({ step, code: 'template-config-unexpected', message: `template ${templateId} exposed ${String(keys.length)} services; this provider composes exactly one` });
+        return;
+      }
+      const key = keys[0]!;
+      const composedConfig = { ...config, services: { [key]: { ...services[key]!, name: database.name } } };
+
+      const workspaceCredential = await this.credentials.workspace();
+      const deployed = await this.transport.graphql<{ templateDeployV2: { operationId?: string | null; workflowId?: string | null } }>({
+        operation: 'templateDeployV2',
+        credential: workspaceCredential,
+        query: 'mutation ($input: TemplateDeployV2Input!) { templateDeployV2(input: $input) { operationId workflowId } }',
+        variables: { input: { templateId, serializedConfig: composedConfig, projectId, environmentId, workspaceId: this.workspaceId } },
+      });
+      // Template provisioning is a deployment in everything but the call we made, so the budget has to see it.
+      this.deploymentsUsed += 1;
+      notes.push({ step, code: 'database-provisioning-started', message: `template deploy accepted (operation ${deployed.templateDeployV2.operationId ?? 'unreported'}); provisioning is asynchronous` });
+
+      const listed = await this.listServices(projectId, workspaceCredential);
+      const created = listed.find((s) => s.name === database.name) ?? listed.find((s) => (s.name ?? '').toLowerCase().includes(database.kind));
+      if (!created) {
+        failures.push({ step, code: 'database-service-missing', message: `the ${database.kind} template deploy did not surface a service in ${envName}` });
+        return;
+      }
+      serviceIds.set(`${envName}/${database.name}`, created.id);
+
+      const outcome = await this.awaitDeployment(projectId, environmentId, created.id, token, failures, notes);
+      if (outcome.status !== 'live') {
+        failures.push({ step, code: 'database-not-deployed', message: `${database.kind} reached ${outcome.status} instead of success` });
+        return;
+      }
+
+      // Wire every service in this environment that references the database, using Railway's own reference
+      // expression so the credential is resolved by the provider: platfolio writes an expression and never
+      // sees the value it stands for.
+      // Wire every service in this environment that references the database. The value written is Railway's
+      // reference expression, not a credential: the provider resolves it at deploy time, so the secret never
+      // crosses platfolio -- which is invariant 1 satisfied by the mechanism rather than by policy alone.
+      for (const service of environment.services) {
+        for (const reference of service.references ?? []) {
+          if (reference.database !== database.name) continue;
+          const target = serviceIds.get(`${envName}/${service.name}`);
+          if (!target) continue;
+          const expression = '$' + `{{${database.name}.${reference.output ?? 'DATABASE_URL'}}}`;
+          await this.upsertVariable(projectId, environmentId, target, reference.variable, expression, token);
+        }
+      }
+
+    } catch (error) {
+      failures.push({ step, code: 'database-provision-failed', message: (error as Error).message.slice(0, 240) });
+    }
+  }
 
   private async buckets(projectId: string, credential: RailwayCredential): Promise<string[]> {
     try {
