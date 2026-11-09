@@ -84,6 +84,37 @@ test('a volume targeting an undeclared service is rejected before any resource i
   assert.equal(mock.projects.size, 0, 'no project was created for an invalid plan');
 });
 
+test('a slow database delete is retried and the orphan goes away (#80)', async () => {
+  // Measured live: serviceDelete on a template-created database timed out at the transport deadline and left
+  // an orphan; ordinary services deleted inside the window. The double fails the first attempt; the retry succeeds.
+  const mock = new RailwayMock({ templateDeleteFailures: 1 });
+  const provider = new RailwayInfraProvider({ credentials: mock, transport: mock, workspaceId: 'ws-1', deployBudget: 20, deployTimeoutMs: 4_000, pollIntervalMs: 1, sleep: async () => {} });
+  const p = plan((x) => {
+    x.environments[0]!.databases = [{ name: 'app-db', kind: 'postgres' }];
+    x.environments[1]!.databases = [];
+    x.environments[1]!.volumes = [];
+  });
+  await provider.applyPlan(p);
+  const deleted = await provider.deleteInstance(p.instanceId);
+  assert.deepEqual(deleted.orphans, [], JSON.stringify(deleted));
+  assert.ok(deleted.removed.some((r) => r.includes('app-db')), JSON.stringify(deleted.removed));
+});
+
+test('when both delete attempts fail the orphan is reported with its reason (#80)', async () => {
+  // The retry is two attempts; exceeding that must produce an orphan AND a reason, never silence.
+  const mock = new RailwayMock({ templateDeleteFailures: 5 });
+  const provider = new RailwayInfraProvider({ credentials: mock, transport: mock, workspaceId: 'ws-1', deployBudget: 20, deployTimeoutMs: 4_000, pollIntervalMs: 1, sleep: async () => {} });
+  const p = plan((x) => {
+    x.environments[0]!.databases = [{ name: 'app-db', kind: 'postgres' }];
+    x.environments[1]!.databases = [];
+    x.environments[1]!.volumes = [];
+  });
+  await provider.applyPlan(p);
+  const deleted = await provider.deleteInstance(p.instanceId);
+  assert.ok(deleted.orphans.some((o) => o.includes('app-db')), JSON.stringify(deleted));
+  assert.ok(deleted.failures?.some((f) => /TimeoutError|serviceDelete/.test(f.message)), JSON.stringify(deleted.failures ?? []));
+});
+
 test('a refused database delete is reported WITH the reason, not as a bare orphan (#80)', async () => {
   const mock = new RailwayMock({ refuseTemplateServiceDelete: true });
   const provider = new RailwayInfraProvider({ credentials: mock, transport: mock, workspaceId: 'ws-1', deployBudget: 20, deployTimeoutMs: 4_000, pollIntervalMs: 1, sleep: async () => {} });

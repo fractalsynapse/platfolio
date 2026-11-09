@@ -377,12 +377,7 @@ export class RailwayInfraProvider implements InfraProvider {
     for (const environment of environments) {
       for (const service of services) {
         try {
-          await this.transport.graphql({
-            operation: 'serviceDelete',
-            credential,
-            query: 'mutation ($environmentId: String!, $id: String!) { serviceDelete(environmentId: $environmentId, id: $id) }',
-            variables: { environmentId: environment.id, id: service.id },
-          });
+          await this.deleteServiceWithRetry(project.id, environment, service, credential);
           removed.push(`service:${environment.name}/${service.name}`);
         } catch (error) {
           // The empty catch was a bug in the family we keep chasing: the intent was "absent in this
@@ -1094,6 +1089,31 @@ export class RailwayInfraProvider implements InfraProvider {
       failures.push({ step, code: 'volume-create-failed', message: (error as Error).message.slice(0, 240) });
     }
   }
+
+    /**
+     * serviceDelete is slow for template-created services: measured live, deleting the provisioned database
+     * exceeded the transport's 25s request deadline and timed out, leaving an orphan, while ordinary services
+     * deleted inside the window. One retry with a short pause keeps the surface honest -- if both attempts
+     * fail, the reason still lands in DeleteResult.failures rather than in an empty catch.
+     */
+    private async deleteServiceWithRetry(projectId: string, environment: EnvironmentNode, service: ServiceNode, credential: RailwayCredential): Promise<void> {
+      let lastError: unknown;
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          await this.transport.graphql({
+            operation: 'serviceDelete',
+            credential,
+            query: 'mutation ($environmentId: String!, $id: String!) { serviceDelete(environmentId: $environmentId, id: $id) }',
+            variables: { environmentId: environment.id, id: service.id },
+          });
+          return;
+        } catch (error) {
+          lastError = error;
+          if (attempt === 0) await this.sleep(2_000);
+        }
+      }
+      throw lastError instanceof Error ? lastError : new Error('serviceDelete failed');
+    }
 
   private async listVolumes(projectId: string, credential: RailwayCredential): Promise<{ id: string; name: string }[]> {
     const data = await this.transport.graphql<{ project: { volumes?: { edges: { node: { id: string; name?: string } }[] } | null } | null }>({

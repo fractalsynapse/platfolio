@@ -28,6 +28,8 @@ export interface MockOptions {
   templateNeverReveals?: boolean;
   /** Refuse serviceDelete for template-created services, modelling #80's survivor. */
   refuseTemplateServiceDelete?: boolean;
+  /** Fail the first N serviceDelete calls for template services, to test the retry. */
+  templateDeleteFailures?: number;
 }
 
 interface MockService { id: string; projectId: string; name: string }
@@ -52,6 +54,7 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
   /** Services hidden until read N times, so single-shot lookups fail as they do live (#77). */
   private readonly hiddenServices = new Map<string, number>();
   readonly templateServiceIds = new Set<string>();
+  private templateDeleteAttempts = new Map<string, number>();
   readonly templateDeploys: { templateId: string; serviceName: string; credentialKind: string }[] = [];
 
   deploys = 0;
@@ -72,6 +75,7 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
       templateRevealAfter: options.templateRevealAfter ?? 2,
       templateNeverReveals: options.templateNeverReveals ?? false,
       refuseTemplateServiceDelete: options.refuseTemplateServiceDelete ?? false,
+      templateDeleteFailures: options.templateDeleteFailures ?? 0,
       secretsPresent: options.secretsPresent ?? true,
       settleAfter: options.settleAfter ?? 1,
       outcome: options.outcome ?? 'SUCCESS',
@@ -447,6 +451,13 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
       case 'serviceDelete': {
         if (this.options.refuseTemplateServiceDelete && this.templateServiceIds.has(v.id as string)) {
           throw new Error('railway serviceDelete: Bad Access for template-created service [FORBIDDEN]');
+        }
+        // Measured live: deleting a template-created database exceeded the 25s request deadline, so the
+        // double can fail the first attempts and let the retry succeed (#80).
+        const attempts = (this.templateDeleteAttempts.get(v.id as string) ?? 0) + 1;
+        this.templateDeleteAttempts.set(v.id as string, attempts);
+        if (attempts <= (this.options.templateDeleteFailures ?? 0)) {
+          throw new Error('railway transport: serviceDelete failed to reach the API (TimeoutError) [NETWORK]');
         }
         const key = `${v.environmentId}:${v.id}`;
         this.instances.delete(key);
