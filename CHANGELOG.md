@@ -5,6 +5,23 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+### Added
+
+- **Manifest→plan translation, and a way to express database wiring (#84).**
+  `buildPlan(manifest, { instanceId, teamId, images })` turns a platform manifest into the plan a provider
+  applies: environment placement (staging as `cloneFrom`, replicas pinned to 1), databases, buckets, volumes
+  (`sizeGB` → `sizeMB`), public-only domains with staging derivation, secret **names** only, and the new
+  `references` field. Until now nothing generated a plan — every live provider test hand-built one in a
+  script, which is why "provisioned and deleted a database live" was true while "hosted a platform" was not.
+- **`services[].references` in the manifest schema** — wiring from a declared database into a service
+  variable, kept out of `secrets[]` on purpose (a reference is resolved by the provider and its name is
+  public; the secrets panel exists for what only the tenant can supply). `templates/example-web-app`
+  declares one.
+- **A placeholder digest is refused at build time.** Templates ship `sha256:1111…` as documentation and the
+  plan schema accepts that shape, so an example image would otherwise become a tenant's broken deploy;
+  pinning belongs to the release pipeline, and the failure is now explicit.
+
+
 ### Changed
 
 - **`serviceDelete` is retried, because the database orphan was a deadline (#80).** Measured live: deleting a

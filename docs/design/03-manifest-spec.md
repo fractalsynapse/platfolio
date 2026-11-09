@@ -124,6 +124,18 @@ spec:
 
 An archetype is a defaults module plus a validation rule set — not a separate format.
 
+### Service wiring: `references` (issue #84, implemented)
+
+A service may declare `references: [{ variable, database, output? }]` to wire a declared database into one of
+its environment variables. It is deliberately **not** a `secrets[]` entry: a reference is resolved by the
+provider, its name is public configuration, and the secrets panel exists to tell a tenant what only they can
+supply. Mixing them would list wiring as something to type in.
+
+Validation reuses the plan rule rather than a second one: a reference to a database the manifest does not
+declare is rejected by the contract (`unknown-database`), and the provider refuses to build a plan whose
+wiring it could not resolve. `templates/example-web-app` declares one (`DATABASE_URL` from `app-db`) so the
+catalog exercises it.
+
 ### Domains: literal hosts are provisional (OD12)
 
 The sketch above shows `domains: [ { host: app.example.com, port: 3000 } ]`, which is **fixture data standing in

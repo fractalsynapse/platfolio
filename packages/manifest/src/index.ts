@@ -4,3 +4,4 @@ export { renderCompose, renderRailwayIaC, renderAll, toIntermediate, stagingHost
 export { renderInstallPullRequest, WORKFLOW_PATH, IAC_PATH, WORKFLOW_PERMISSIONS, type InstallFiles, type InstallOptions } from './render-install.ts';
 export { parse } from './parse.ts';
 export { enabledEnvironments, serviceEnvironments, presentIn, type EnvName } from './environments.ts';
+export * from './build-plan.ts';
