@@ -29,6 +29,18 @@ change; entries describe merged intent, not aspirations.
 
 ### Added
 
+- **The full domain lifecycle was run against a real tenant domain, and it is documented with timings.**
+  Attach with no DNS → `CREATING`/`REQUIRES_UPDATE`; CNAME published → `ACTIVE`/`PROPAGATED` but still
+  unverified; ownership TXT published → `verified: true` after a measured **~11–12 minute** provider
+  verification cadence, then `certificateStatus: VALID` and a Let's Encrypt leaf (90-day) served at the edge
+  for `probe.fractalsynapse.com`. Cost: zero deployments. Two design points settled by evidence: the
+  ownership record never appears in `dnsRecords`, so a checklist built from that array is provably
+  incomplete; and the resolver-vs-provider disagreement window is real, which is what justifies the
+  `dns.probe` seam as advisory-only. `ACME_DNS01_CHALLENGE` was never required here, so the provider's
+  `challenge` mapping is forward-compatible handling rather than exercised behaviour.
+
+### Added
+
 - **Domains and DNS have a design, based on measurement (D25, [12](docs/design/12-domains-and-dns.md)).**
   Attaching before the tenant publishes anything works on a real zone — my earlier "refused" note came from a
   nonexistent zone — and the created object returns the authoritative record set (`requiredValue` vs
