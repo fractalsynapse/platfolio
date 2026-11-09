@@ -25,7 +25,7 @@ export interface MockOptions {
 }
 
 interface MockService { id: string; projectId: string; name: string }
-interface MockInstance { instanceId: string; limits?: { cpu: number; memoryMB: number }; status: string | null; image: string; numReplicas: number; domains: string[]; polls: number; variables: Set<string> }
+interface MockInstance { instanceId: string; limits?: { cpu: number; memoryMB: number }; settledDomains?: boolean | undefined; verifiedDomains?: boolean | undefined; status: string | null; image: string; numReplicas: number; domains: string[]; polls: number; variables: Set<string> }
 
 export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
   readonly endpoint = RAILWAY_ENDPOINT;
@@ -35,6 +35,7 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
   readonly instances = new Map<string, MockInstance>();
   readonly tokens = new Map<string, { id: string; projectId: string; environmentId: string; name: string }>;
   readonly buckets = new Map<string, string>();
+  readonly certRetries: string[] = [];
 
   deploys = 0;
   readonly operations: string[] = [];
@@ -83,7 +84,7 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
 
     // The measured authorization split. Getting this wrong is how a provider "works" against a fake and
     // fails on the first real call.
-    const needsProject = ['serviceCreate', 'serviceInstanceUpdate', 'serviceInstanceLimitsUpdate', 'variableUpsert', 'serviceInstanceDeploy', 'environment.serviceInstances', 'environment.config', 'serviceDomainCreate', 'customDomainCreate'];
+    const needsProject = ['serviceCreate', 'serviceInstanceUpdate', 'serviceInstanceLimitsUpdate', 'variableUpsert', 'serviceInstanceDeploy', 'environment.serviceInstances', 'environment.config', 'serviceDomainCreate', 'customDomainCreate', 'customDomainIssueCertificate'];
     const needsWorkspace = ['projects', 'project', 'projectCreate', 'projectUpdate', 'projectDelete', 'project.environments', 'environmentCreate', 'project.services', 'projectTokenCreate', 'projectTokens', 'projectTokenDelete', 'serviceDelete', 'project.buckets', 'bucketCreate', 'project.bucketsList'];
     if (needsProject.includes(operation) && credential.kind !== 'project') {
       this.denied.push(operation);
@@ -228,6 +229,15 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
         instance.limits = { cpu: input.vCPUs ?? 0, memoryMB: Math.round((input.memoryGB ?? 0) * 1024) };
         return { serviceInstanceLimitsUpdate: true } as T;
       }
+      case 'customDomainIssueCertificate': {
+        const id = v.id as string;
+        if (!id.startsWith('cdom-')) throw new Error('railway customDomainIssueCertificate: domain not found [NOT_FOUND]');
+        this.certRetries.push(id);
+        for (const instance of this.instances.values()) {
+          if (instance.domains.some((d) => `cdom-${d}` === id)) { instance.verifiedDomains = true; instance.settledDomains = true; }
+        }
+        return { customDomainIssueCertificate: true } as T;
+      }
       case 'variableUpsert': {
         const input = v.input as { environmentId: string; serviceId: string; name: string; value: string };
         const instance = this.instances.get(`${input.environmentId}:${input.serviceId}`);
@@ -260,7 +270,12 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
         for (const [key, instance] of this.instances) {
           if (!key.startsWith(`${environmentId}:`)) continue;
           instance.polls += 1;
-          if (instance.status === 'DEPLOYING' && instance.polls > this.options.settleAfter) instance.status = this.options.outcome;
+          if (instance.status === 'DEPLOYING' && instance.polls > this.options.settleAfter) {
+          instance.status = this.options.outcome;
+          // Domains go live with the deployment, as they do on Railway -- before that, syncStatus is
+          // CREATING and the provider must report pending rather than issued.
+          if (this.options.outcome === 'SUCCESS') instance.settledDomains = true;
+        }
           if (instance.status === null) instance.status = 'PENDING';
           const svc = this.services.get(key.split(':')[1]!);
           nodes.push({
@@ -272,8 +287,8 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
               latestDeployment: { status: instance.status },
               // Mirrors the measured API: custom status is an object, service syncStatus an enum.
               domains: {
-                customDomains: instance.domains.filter((d) => !d.endsWith('.up.railway.app')).map((domain) => ({ domain, status: { verified: false, certificateStatus: 'CERTIFICATE_STATUS_TYPE_VALIDATING_OWNERSHIP' } })),
-                serviceDomains: instance.domains.filter((d) => d.endsWith('.up.railway.app')).map((domain) => ({ domain, syncStatus: 'ACTIVE' })),
+                customDomains: instance.domains.filter((d) => !d.endsWith('.up.railway.app')).map((domain) => ({ id: `cdom-${domain}`, domain, status: { verified: instance.verifiedDomains === false ? false : true, certificateStatus: instance.verifiedDomains === false ? 'CERTIFICATE_STATUS_TYPE_VALIDATING_OWNERSHIP' : 'CERTIFICATE_STATUS_TYPE_VALID' } })),
+                serviceDomains: instance.domains.filter((d) => d.endsWith('.up.railway.app')).map((domain) => ({ id: `sdom-${domain}`, domain, syncStatus: instance.settledDomains ? 'ACTIVE' : 'CREATING' })),
               },
             },
           });

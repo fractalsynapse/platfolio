@@ -76,7 +76,18 @@ export interface RailwayProviderOptions {
 interface ServiceNode { id: string; name: string }
 interface EnvironmentNode { id: string; name: string }
 interface ProjectNode { id: string; name: string; description?: string }
-interface InstanceInfo { instanceId: string; rawStatus?: string | undefined; status: ServiceStateStatus; image: string; numReplicas: number; domainHosts: string[]; customDomainStatus: Record<string, string>; serviceDomainSync: Record<string, string> }
+interface InstanceInfo {
+  instanceId: string;
+  rawStatus?: string | undefined;
+  status: ServiceStateStatus;
+  image: string;
+  numReplicas: number;
+  domainHosts: string[];
+  /** Per-host state read from the provider: no hostname guessing anywhere in this file. */
+  domainStates: Record<string, { dnsStatus: 'pending' | 'verified' | 'failed'; certificateStatus: 'pending' | 'issued' | 'failed' }>;
+  /** Provider ids per host, so a failed certificate can be retried by id. */
+  domainIds: Record<string, string>;
+}
 
 export class RailwayInfraProvider implements InfraProvider {
   readonly contract = '1.0.0';
@@ -166,6 +177,7 @@ export class RailwayInfraProvider implements InfraProvider {
     const name = this.projectName(plan);
     const existing = await this.findProject(name);
     const projectId = existing ? existing.id : await this.createProject(name);
+    this.lastProjectId = projectId;
     const workspaceCredential = await this.credentials.workspace();
 
     // Record intent BEFORE mutating anything. An earlier version wrote this marker at the end of a
@@ -261,14 +273,21 @@ export class RailwayInfraProvider implements InfraProvider {
         // Measured: serviceDomainCreate is NOT idempotent -- re-applying created a second hostname for the
         // same service, so the plan looked satisfied while the tenant had two URLs. Check first.
         const already = await this.instanceStatus(projectId, environmentId, targetServiceId, token);
-        const existingHost = already?.domainHosts.some((h) => h === domain.host || (domain.host.endsWith('.up.railway.app') && h.endsWith('.up.railway.app')));
-        const placed = existingHost
-          ? { host: already?.domainHosts.find((h) => h.endsWith('.up.railway.app')) ?? domain.host, dnsStatus: 'verified' as const }
+        const reused = already?.domainHosts.find((h) => h === domain.host)
+          ?? (domain.host.endsWith('.up.railway.app') ? already?.domainHosts.find((h) => h.endsWith('.up.railway.app')) : undefined);
+        const placed = reused
+          ? { host: reused, dnsStatus: already?.domainStates[reused]?.dnsStatus ?? ('pending' as const) }
           : await this.createDomain(projectId, environmentId, targetServiceId, domain, token, failures);
-        // A Railway-generated hostname is assigned by the provider, so the plan's requested host is not
-        // necessarily what exists. Report the actual one; readState reports the same set, and the two
-        // must agree or "verified" means nothing.
-        domains.push({ host: placed.host, dnsStatus: placed.dnsStatus, certificateStatus: placed.dnsStatus === 'verified' ? 'issued' : 'pending', targetService: domain.service });
+        // Read the provider's state rather than assuming issuance follows creation: a custom domain waits
+        // on DNS the tenant owns, and a Railway one waits on the deployment settling.
+        const settled = await this.instanceStatus(projectId, environmentId, targetServiceId, token);
+        const state = settled?.domainStates[placed.host];
+        domains.push({
+          host: placed.host,
+          dnsStatus: state?.dnsStatus ?? placed.dnsStatus,
+          certificateStatus: state?.certificateStatus ?? 'pending',
+          targetService: domain.service,
+        });
       }
 
       for (const database of environment.databases) {
@@ -656,7 +675,7 @@ export class RailwayInfraProvider implements InfraProvider {
       credential,
       // `CustomDomain.status` is an OBJECT (verified + certificateStatus enum), not a scalar -- a mock
       // that accepted a string here hid it for a whole test cycle. Measured 2026-11-08.
-      query: 'query ($projectId: String!, $environmentId: String!) { environment(projectId: $projectId, id: $environmentId) { serviceInstances { edges { node { id serviceId numReplicas source { image } latestDeployment { status } domains { customDomains { domain status { verified certificateStatus } } serviceDomains { domain syncStatus } } } } } } }',
+      query: 'query ($projectId: String!, $environmentId: String!) { environment(projectId: $projectId, id: $environmentId) { serviceInstances { edges { node { id serviceId numReplicas source { image } latestDeployment { status } domains { customDomains { id domain status { verified certificateStatus } } serviceDomains { id domain syncStatus } } } } } } }',
       variables: { projectId, environmentId },
     });
     const out = new Map<string, InstanceInfo>();
@@ -667,8 +686,8 @@ export class RailwayInfraProvider implements InfraProvider {
       const deployment = node.latestDeployment as { status?: string } | null;
       const source = node.source as { image?: string } | null;
       const domains = node.domains as {
-        customDomains?: { domain: string; status?: { verified?: boolean; certificateStatus?: string } | null }[];
-        serviceDomains?: { domain: string; syncStatus?: string | null }[];
+        customDomains?: { id?: string; domain: string; status?: { verified?: boolean; certificateStatus?: string } | null }[];
+        serviceDomains?: { id?: string; domain: string; syncStatus?: string | null }[];
       } | null;
       out.set(serviceId, {
         instanceId: typeof node.id === 'string' ? node.id : serviceId,
@@ -676,9 +695,30 @@ export class RailwayInfraProvider implements InfraProvider {
         status: STATUS_MAP[deployment?.status ?? ''] ?? 'pending',
         image: source?.image ?? 'unknown',
         numReplicas: typeof node.numReplicas === 'number' ? node.numReplicas : 0,
-        domainHosts: [...(domains?.serviceDomains ?? []).map((d) => d.domain), ...(domains?.customDomains ?? []).map((d) => d.domain)],
-        customDomainStatus: Object.fromEntries((domains?.customDomains ?? []).map((d) => [d.domain, d.status?.verified ? 'VERIFIED' : (d.status?.certificateStatus ?? '') === 'CERTIFICATE_STATUS_TYPE_ISSUE_FAILED' ? 'FAILED' : 'PENDING'])),
-        serviceDomainSync: Object.fromEntries((domains?.serviceDomains ?? []).map((d) => [d.domain, d.syncStatus ?? 'CREATING'])),
+        ...(() => {
+          // Both domain kinds carry real state: service domains a `syncStatus` enum
+          // (ACTIVE/CREATING/UPDATING/DELETING/DELETED/UNSPECIFIED) and custom domains a `status` object
+          // (verified + certificateStatus enum). An earlier revision inferred issuance from the hostname,
+          // which is exactly the kind of comfortable shortcut that reports a certificate as live when it is
+          // still issuing.
+          const states: InstanceInfo['domainStates'] = {};
+          const ids: InstanceInfo['domainIds'] = {};
+          for (const d of domains?.serviceDomains ?? []) {
+            const active = d.syncStatus === 'ACTIVE';
+            states[d.domain] = { dnsStatus: active ? 'verified' : 'pending', certificateStatus: active ? 'issued' : 'pending' };
+            if (d.id) ids[d.domain] = d.id;
+          }
+          for (const d of domains?.customDomains ?? []) {
+            const cert = d.status?.certificateStatus ?? '';
+            const failed = cert === 'CERTIFICATE_STATUS_TYPE_ISSUE_FAILED';
+            states[d.domain] = {
+              dnsStatus: d.status?.verified ? 'verified' : failed ? 'failed' : 'pending',
+              certificateStatus: cert === 'CERTIFICATE_STATUS_TYPE_VALID' ? 'issued' : failed ? 'failed' : 'pending',
+            };
+            if (d.id) ids[d.domain] = d.id;
+          }
+          return { domainHosts: Object.keys(states), domainStates: states, domainIds: ids };
+        })(),
       });
     }
     return out;
@@ -733,16 +773,11 @@ export class RailwayInfraProvider implements InfraProvider {
         // two environments and the conformance suite called it a duplicate.
         out.push({ name: service.name, environment: environment.name, externalId: info.instanceId, status: info.status, image: info.image, numReplicas: info.numReplicas });
         for (const host of info.domainHosts) {
-          const custom = info.customDomainStatus[host];
-          const isRailwayHost = host.endsWith('.up.railway.app');
-          // Railway's own hostnames are issued by definition once the domain exists; a custom domain
-          // reports the provider's real verification and certificate state, which may legitimately be
-          // pending on DNS the tenant still owns.
-          const verified = isRailwayHost || custom === 'VERIFIED';
+          const state = info.domainStates[host];
           domains.push({
             host: host as StateSnapshot['domains'][number]['host'],
-            dnsStatus: verified ? 'verified' : custom === 'FAILED' ? 'failed' : 'pending',
-            certificateStatus: verified ? 'issued' : custom === 'FAILED' ? 'failed' : 'pending',
+            dnsStatus: state?.dnsStatus ?? 'pending',
+            certificateStatus: state?.certificateStatus ?? 'pending',
             targetService: service.name,
           });
         }
@@ -750,6 +785,38 @@ export class RailwayInfraProvider implements InfraProvider {
     }
     return { services: out, domains };
   }
+
+  /**
+   * Nudge a certificate re-issue by the provider's own domain id. Outside the `infra.provider` contract
+   * on purpose -- `OPERATIONS` is five verbs and the conformance suite holds every provider to it -- so it
+   * is a Railway-specific capability the composition root can offer, not something the controller may
+   * assume exists. Callers reach it through the concrete provider or a capability of their own.
+   */
+  async retryCertificate(domainId: string): Promise<void> {
+    const projectId = this.lastProjectId;
+    if (!projectId) throw new Error('retryCertificate needs a project resolved by a prior readState or applyPlan');
+    const credential = await this.credentials.workspace();
+    const environments = await this.environments(projectId, credential);
+    for (const environment of environments) {
+      const token = await this.credentials.forEnvironment(projectId, environment.name).catch(() => credential);
+      const instances = await this.environmentInstances(projectId, environment.id, token);
+      // domainIds maps host -> provider id, so the id is a VALUE here; testing membership on the keys
+      // made every retry look like a domain that was not attached.
+      const attached = [...instances.values()].some((info) => Object.values(info.domainIds).includes(domainId));
+      if (!attached) continue;
+      await this.transport.graphql({
+        operation: 'customDomainIssueCertificate',
+        credential: token,
+        query: 'mutation ($id: String!) { customDomainIssueCertificate(id: $id) }',
+        variables: { id: domainId },
+      });
+      return;
+    }
+    throw new Error(`retryCertificate: no custom domain with id "${domainId}" is attached to project "${projectId}"`);
+  }
+
+  /** Recorded so a retry can find the project without the caller repeating the mapping. */
+  private lastProjectId = '';
 
   private async buckets(projectId: string, credential: RailwayCredential): Promise<string[]> {
     try {
