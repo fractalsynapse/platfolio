@@ -303,6 +303,10 @@ export class RailwayInfraProvider implements InfraProvider {
         await this.provisionDatabase(projectId, environmentId, environment.name, database, environment, token, serviceIds, failures, notes);
       }
 
+      for (const volume of environment.volumes ?? []) {
+        await this.provisionVolume(projectId, environmentId, volume, environment.name, serviceIds, workspaceCredential, failures, notes);
+      }
+
       for (const bucket of environment.buckets) {
         // E28: bucketCreate works, but only with the workspace grant -- an environment-scoped project
         // token is answered with "Bad Access", which is why this call cannot go through `token`.
@@ -386,6 +390,13 @@ export class RailwayInfraProvider implements InfraProvider {
     }
 
     // Anything still there is reported, never counted as gone.
+    // Volumes are project-level and outlive the service they were attached to, so they are removed
+    // explicitly and anything left is reported. "Removed everything" has to mean everything we can create.
+    for (const volume of await this.listVolumes(project.id, credential)) {
+      await this.transport.graphql({ operation: 'volumeDelete', credential, query: 'mutation ($volumeId: String!) { volumeDelete(volumeId: $volumeId) }', variables: { volumeId: volume.id } })
+        .then(() => { removed.push(`volume:${volume.name}`); })
+        .catch(() => { orphans.push(`volume:${volume.name}`); });
+    }
     for (const leftover of await this.listServices(project.id, credential)) orphans.push(`service:${leftover.name}`);
     for (const bucket of await this.buckets(project.id, credential)) orphans.push(`bucket:${bucket}`);
 
@@ -970,16 +981,27 @@ export class RailwayInfraProvider implements InfraProvider {
       this.deploymentsUsed += 1;
       notes.push({ step, code: 'database-provisioning-started', message: `template deploy accepted (operation ${deployed.templateDeployV2.operationId ?? 'unreported'}); provisioning is asynchronous` });
 
-      // The deploy names the service after the plan; look it up and then confirm placement in this
-      // environment rather than accepting a project-wide match, which is what made staging hang forever.
-      const listed = await this.listServices(projectId, workspaceCredential);
-      const candidates = listed.filter((s) => s.name === database.name || (s.name ?? '').toLowerCase().includes(database.kind));
-      let created = candidates[0];
-      for (const candidate of candidates) {
-        if (await this.instanceStatus(projectId, environmentId, candidate.id, token)) { created = candidate; break; }
+      // templateDeployV2 is asynchronous (operationId/workflowId) and the service materialises tens of
+      // seconds later -- measured. Listing once immediately reported a healthy provisioning as a missing
+      // service (issue #77), so we wait for it to appear AND to be placed in this environment.
+      const deadline = Date.now() + this.deployTimeoutMs;
+      let created: ServiceNode | undefined;
+      for (;;) {
+        const listed = await this.listServices(projectId, workspaceCredential);
+        const candidates = listed.filter((s) => s.name === database.name || (s.name ?? '').toLowerCase().includes(database.kind));
+        for (const candidate of candidates) {
+          if (await this.instanceStatus(projectId, environmentId, candidate.id, token)) { created = candidate; break; }
+        }
+        if (created) break;
+        if (Date.now() > deadline) break;
+        await this.sleep(this.pollIntervalMs);
       }
       if (!created) {
-        failures.push({ step, code: 'database-service-missing', message: `the ${database.kind} template deploy did not surface a service in ${envName}` });
+        failures.push({
+          step,
+          code: 'database-provision-timeout',
+          message: `the ${database.kind} template deploy was accepted but surfaced no placed service within ${this.deployTimeoutMs}ms`,
+        });
         return;
       }
       serviceIds.set(`${envName}/${database.name}`, created.id);
@@ -1019,6 +1041,51 @@ export class RailwayInfraProvider implements InfraProvider {
         await this.upsertVariable(projectId, environmentId, target, reference.variable, expression, credential);
       }
     }
+  }
+
+  /**
+   * Provision a volume. `VolumeCreateInput` is { projectId, environmentId, serviceId, mountPath, region }:
+   * a volume is created ATTACHED to a service, so the plan's `volumes[].service` selects the target and
+   * there is no name to request and no separate attach call.
+   *
+   * Verification is deliberately limited to what is observable: `Volume` exposes id/name/project only, and
+   * VolumeInstance (which carries mountPath and serviceId) has no list query on this grant -- a single
+   * `volumeInstance(id)` lookup needs an id we are never handed. So this confirms the volume exists in the
+   * project and notes that mount state is unreadable, rather than inventing a check that always passes.
+   */
+  private async provisionVolume(projectId: string, environmentId: string, volume: { name: string; service: string; mountPath: string; sizeMB?: number | undefined }, envName: string, serviceIds: Map<string, string>, credential: RailwayCredential, failures: ApplyResult['failures'], notes: NonNullable<ApplyResult['notes']>): Promise<void> {
+    const step = `volumes.${volume.name}`;
+    const serviceId = serviceIds.get(`${envName}/${volume.service}`);
+    if (!serviceId) {
+      failures.push({ step, code: 'unknown-service', message: `volume "${volume.name}" targets service "${volume.service}", which is not resolved in "${envName}"` });
+      return;
+    }
+    try {
+      await this.transport.graphql({
+        operation: 'volumeCreate',
+        credential,
+        query: 'mutation ($input: VolumeCreateInput!) { volumeCreate(input: $input) { id name } }',
+        variables: { input: { projectId, environmentId, serviceId, mountPath: volume.mountPath } },
+      });
+      const listed = await this.listVolumes(projectId, credential);
+      if (!listed.length) {
+        failures.push({ step, code: 'volume-not-listed', message: `volume create returned but the project lists no volumes in ${envName}` });
+        return;
+      }
+      notes.push({ step, code: 'volume-mount-unobservable', message: `volume created for "${volume.service}" at ${volume.mountPath}; Railway exposes no volume-instance list on this grant, so the mount itself is not verifiable here` });
+    } catch (error) {
+      failures.push({ step, code: 'volume-create-failed', message: (error as Error).message.slice(0, 240) });
+    }
+  }
+
+  private async listVolumes(projectId: string, credential: RailwayCredential): Promise<{ id: string; name: string }[]> {
+    const data = await this.transport.graphql<{ project: { volumes?: { edges: { node: { id: string; name?: string } }[] } | null } | null }>({
+      operation: 'project.volumes',
+      credential,
+      query: 'query ($projectId: String!) { project(id: $projectId) { volumes(first: 50) { edges { node { id name } } } } }',
+      variables: { projectId },
+    });
+    return (data.project?.volumes?.edges ?? []).map((e) => ({ id: e.node.id, name: e.node.name ?? e.node.id }));
   }
 
   private async buckets(projectId: string, credential: RailwayCredential): Promise<string[]> {

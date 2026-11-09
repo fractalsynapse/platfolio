@@ -22,6 +22,10 @@ export interface MockOptions {
   outcome?: 'SUCCESS' | 'FAILED' | 'CRASHED';
   /** Buckets that exist when the project is deleted, to prove orphan reporting is honest. */
   buckets?: string[];
+  /** Reads before a template-deployed service becomes visible -- models asynchronous provisioning (#77). */
+  templateRevealAfter?: number;
+  /** A template deploy accepted but whose service never surfaces -- the stuck-provisioning case. */
+  templateNeverReveals?: boolean;
 }
 
 interface MockService { id: string; projectId: string; name: string }
@@ -40,6 +44,11 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
   readonly takenDomains = new Set<string>();
   readonly domainCreates: string[] = [];
   /** Template deploys recorded so tests can assert the composed name and the grant used. */
+  volumes: { id: string; projectId: string; name: string; serviceId: string; mountPath: string }[] = [];
+  /** How many template-created services are still hidden (diagnostics for tests). */
+  hiddenServiceCount(): number { return this.hiddenServices.size; }
+  /** Services hidden until read N times, so single-shot lookups fail as they do live (#77). */
+  private readonly hiddenServices = new Map<string, number>();
   readonly templateDeploys: { templateId: string; serviceName: string; credentialKind: string }[] = [];
 
   deploys = 0;
@@ -192,9 +201,40 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
         }
         return { environmentCreate: { id } } as T;
       }
+      case 'project.volumes': {
+        const projectId = v.projectId as string;
+        return { project: { volumes: { edges: this.volumes.filter((x) => x.projectId === projectId).map((node) => ({ node })) } } } as T;
+      }
+      case 'volumeCreate': {
+        const input = v.input as { projectId: string; environmentId: string; serviceId: string; mountPath: string };
+        if (!this.services.has(input.serviceId)) throw new Error('railway volumeCreate: unknown service [NOT_FOUND]');
+        const id = `vol-${String(this.sequence).padStart(4, '0')}`;
+        this.sequence += 1;
+        this.volumes.push({ id, projectId: input.projectId, name: `volume-${id}`, serviceId: input.serviceId, mountPath: input.mountPath });
+        return { volumeCreate: { id, name: `volume-${id}` } } as T;
+      }
+      case 'volumeDelete': {
+        const volumeId = v.volumeId as string;
+        const before = this.volumes.length;
+        this.volumes = this.volumes.filter((x) => x.id !== volumeId);
+        if (this.volumes.length === before) throw new Error('railway volumeDelete: no such volume [NOT_FOUND]');
+        return { volumeDelete: true } as T;
+      }
       case 'project.services': {
         const projectId = v.projectId as string;
-        const nodes = [...this.services.values()].filter((s) => s.projectId === projectId).map((node) => ({ node: { id: node.id, name: node.name } }));
+        // Async provisioning modelled honestly (#77): a template-created service is invisible until it has
+        // been read a few times, so a provider that lists once, immediately, gets nothing and must wait.
+        // Decrement is per read, so a very large counter is effectively "never" -- but the never-reveals
+        // flag is absolute, because a counter that a fast poll loop could drain would make the stuck case
+        // depend on machine speed, which is not a test anybody can trust.
+        for (const [id, remaining] of [...this.hiddenServices]) {
+          if (this.options.templateNeverReveals) continue;
+          const left = remaining - 1;
+          if (left <= 0) this.hiddenServices.delete(id);
+          else this.hiddenServices.set(id, left);
+        }
+        const visible = [...this.services.values()].filter((s) => s.projectId === projectId && !this.hiddenServices.has(s.id));
+        const nodes = visible.map((node) => ({ node: { id: node.id, name: node.name } }));
         return { project: { services: { edges: nodes } } } as T;
       }
       case 'serviceCreate': {
@@ -275,6 +315,7 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
           polls: 0,
           variables: new Set(Object.keys(spec.variables ?? {})),
         });
+        this.hiddenServices.set(serviceId, this.options.templateNeverReveals ? Number.MAX_SAFE_INTEGER : (this.options.templateRevealAfter ?? 2));
         return { templateDeployV2: { operationId: `op-${name}`, workflowId: `deployTemplate/${input.projectId}/mock` } } as T;
       }
       case 'customDomainAvailable': {
