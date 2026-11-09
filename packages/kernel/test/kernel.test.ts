@@ -32,7 +32,7 @@ test('the railway selection refuses to boot without wiring, then works with it',
     // buckets, which Railway's provider does not implement, so the apply must say so rather than pass.
     const applied = await ctx.infra.applyPlan(samplePlan());
     assert.equal(applied.verified, false, 'an instance missing its database is not verified');
-    assert.ok(applied.failures.some((f) => f.code === 'unsupported-resource'), JSON.stringify(applied.failures.map((f) => f.code)));
+    assert.ok(applied.failures.some((f) => f.code === 'database-not-provisioned'), JSON.stringify(applied.failures.map((f) => f.code)));
   } finally {
     await disposeKernel(ctx);
   }

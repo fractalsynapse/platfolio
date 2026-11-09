@@ -358,3 +358,43 @@ coalesced deployment). The dashboard number is authoritative and may differ.
 `projectDelete` returns **Not Authorized**. That combination has no explanation I can verify from here;
 the project is unreachable through the API and needs to be deleted in the Railway dashboard. Recorded
 rather than glossed, because "workspace is empty" is a claim I can no longer make.
+
+## E28 follow-up — "unsupported" was the wrong conclusion; the change set parses silently
+
+Prompted by the maintainer, who deploys Postgres to Railway routinely: an error from one mutation is not
+a provider limitation. Follow-up investigation, **zero deploys consumed** (every probe created a project and
+deleted it; nothing ever came up):
+
+**What exists.** `railway/iac` ships a first-class database resource — `{ address: 'database.<name>',
+type: 'database', kind: 'database', engine: 'postgres' | 'mysql' | 'redis' | 'mongo' | 'private', image,
+output }` — and the SDK's `CompileResult` is `{ graph: RailwayGraph; desiredConfig: EnvironmentConfig }`,
+where `EnvironmentConfig`'s top-level keys (from Railway's own published `env_schema.json`) are
+`services`, `buckets`, `volumes`, `groups`, `sharedVariables`, `stopServices`, `privateNetworkDisabled`.
+The CLI's own binary reveals `struct DesiredGraph(2) / DesiredProject(1) / DesiredResource(15)` and the
+exact operation, including `… { id status deploymentId stagedPatchId diagnostics changes { kind path
+summary status outputs } }`. So managed databases are created through the **config-as-code change set** —
+the E24 path — and `templateDeployV2` was simply the wrong door (it answers "Problem processing request"
+for a community-verified=false template).
+
+**What is stuck.** Every payload shape tried is accepted and does nothing:
+
+| Payload | Result |
+| --- | --- |
+| `{ version: 1, resources: [graph resource] }` | `applied`, `changes: []` |
+| `{ version: 1, project: { resources: [...] } }` | `applied`, `changes: []` |
+| `{ version: 1, services: { web: {...} } }` (EnvironmentConfig form) | `applied`, `changes: []` |
+| `{ version: 1, desiredConfig: { services: … } }`, with/without `graph` | `applied`, `changes: []` |
+| compiled straight from `railway/iac` (`postgres()` + `service()`) | `applied`, `changes: []` |
+| **`{ version: 1, project: { resources: [{ type: 'NOT_A_TYPE' … }] } }`** | **`applied`, `changes: []`** |
+| `version` omitted, or the string `"1"` instead of the number | hard error: *"Unsupported RailwayChangeSet version: undefined"* / *": 1"* |
+
+The last two rows are the important ones: **`version` is validated, and nothing after it is.** A nonsense
+resource type is not rejected, so the server is deserialising our JSON into an empty change set rather than
+refusing it — which means the field names for `DesiredResource` are wrong, not the mechanism. Rust serde
+keeps those names in data the binary doesn't expose as strings, so they can't be recovered here.
+
+**What settles it in one command:** `railway config plan --json` (its "raw runner JSON" *is* the change set)
+against a scratch project, using the maintainer's own `railway login`. Not `--show-values`, and the output
+goes to `.research/plan/`, which is gitignored and untrackable by the credential-hygiene gate. Until that
+sample exists, the honest status is **not-yet-implemented, mechanism identified** — not "unsupported", and
+not a claim about what Railway can or cannot do.
