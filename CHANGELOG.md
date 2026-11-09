@@ -7,6 +7,23 @@ change; entries describe merged intent, not aspirations.
 
 ### Added
 
+- **`apps/status-api` and the control-plane image (M1 step 6, build half).** `/healthz`, `/readyz`,
+  `/version` (commit, build time, provider contract); no secrets read, no tenant data held.
+  `.github/workflows/image.yml` builds and **runs the container** on PRs, and publishes
+  `sha-<short>` plus the branch tag on push, taking the digest from the push output — a plan pins a
+  digest, never a mutable tag. First digest and the four defects a green build hid are recorded in
+  [research/status-api-image-2026-11-09.md](docs/research/status-api-image-2026-11-09.md).
+
+### Fixed
+
+- **Two repository gates that could not see `apps/`.** The root test glob was `packages/*/test/*.test.ts`
+  and `tsconfig.json` included only `packages/*`, so the service was neither tested nor typechecked until
+  both were widened. The lockfile gate separately caught `pnpm install` claiming "already up to date"
+  with the importer missing from the lock.
+
+
+### Added
+
 - **Manifest→plan translation, and a way to express database wiring (#84).**
   `buildPlan(manifest, { instanceId, teamId, images })` turns a platform manifest into the plan a provider
   applies: environment placement (staging as `cloneFrom`, replicas pinned to 1), databases, buckets, volumes
