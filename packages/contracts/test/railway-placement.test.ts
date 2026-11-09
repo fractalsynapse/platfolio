@@ -28,7 +28,7 @@ test('a service is placed in a cloned environment, because duplication is the me
   const { provider, mock } = harness();
   const plan = planWith(() => {});
   const applied = await provider.applyPlan(plan);
-  const codes = applied.failures.map((f) => f.code).filter((c) => c !== 'unsupported-resource');
+  const codes = applied.failures.map((f) => f.code);
   assert.deepEqual(codes, [], JSON.stringify(applied.failures));
   assert.equal(applied.services.length, 2, 'production and staging both configured');
   assert.ok(mock.operations.includes('environmentCreate:workspace'), 'the clone is created with the workspace grant');
@@ -56,16 +56,24 @@ test('buckets are created with the workspace grant and an unenforced region is d
   assert.ok(regionNote, 'the plan asks for iad; the API takes no region, and that has to be said out loud');
 });
 
-test('databases remain honestly unsupported (E28 open)', async () => {
-  const { provider } = harness();
-  const plan = samplePlan();
-  for (const environment of plan.environments) {
-    for (const service of environment.services) { service.image = IMAGE; service.digest = DIGEST; }
-  }
+test('databases are provisioned through the template path, once per project (OD13)', async () => {
+  const { provider, mock } = harness();
+  // planWith clears databases for the placement tests, so this one declares them explicitly.
+  const plan = planWith((p) => { for (const environment of p.environments) environment.databases = [{ name: 'app-db', kind: 'postgres' }]; });
   const applied = await provider.applyPlan(plan);
-  const unsupported = applied.failures.filter((f) => f.code === 'database-not-provisioned');
-  assert.equal(unsupported.length, 2, JSON.stringify(unsupported.map((f) => f.step)));
-  assert.equal(applied.verified, false, 'a stateless service without its database is not a complete instance');
+  const dbFailures = applied.failures.filter((f) => f.code.startsWith('database-') || f.code === 'deployment-timeout');
+  assert.deepEqual(dbFailures, [], JSON.stringify(applied.failures.map((f) => f.code)));
+  assert.equal(applied.verified, true, 'an instance WITH its provisioned database is verified');
+
+  // One template deploy for a database declared in both environments: service names are project-wide, so
+  // staging receives it through duplication and only needs its deployment started.
+  assert.equal(mock.templateDeploys.length, 1, JSON.stringify(mock.templateDeploys));
+  assert.equal(mock.templateDeploys[0]!.serviceName, 'app-db', "the composed plan name, not the template's own");
+  assert.equal(mock.templateDeploys[0]!.credentialKind, 'workspace', 'template deploys need the workspace grant');
+  const placed = [...mock.instances.values()].filter((i) => i.image.includes('postgres'));
+  assert.equal(placed.length, 2, 'an instance in each environment');
+  assert.ok(placed.every((i) => i.status === 'SUCCESS'), placed.map((i) => i.status).join(','));
+  assert.ok(mock.operations.includes('serviceInstanceDeploy:project'), 'the duplicated environment needs its own deploy started');
 });
 
 test('the mock reproduces the silent no-op rather than helping the provider look right', async () => {

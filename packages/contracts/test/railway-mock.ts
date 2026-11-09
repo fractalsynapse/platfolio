@@ -328,7 +328,9 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
           // CREATING and the provider must report pending rather than issued.
           if (this.options.outcome === 'SUCCESS') instance.settledDomains = true;
         }
-          if (instance.status === null) instance.status = 'PENDING';
+          // A duplicated instance has NO latestDeployment in the real API (measured in E25), so the double
+          // must not invent PENDING: that made "never deployed" look identical to "deploying", and the
+          // provider then waited forever instead of starting the deployment a clone actually needs.
           const svc = this.services.get(key.split(':')[1]!);
           nodes.push({
             node: {

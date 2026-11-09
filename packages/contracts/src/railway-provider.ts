@@ -915,9 +915,18 @@ export class RailwayInfraProvider implements InfraProvider {
         return;
       }
       if (placed.status !== 'live') {
-        const outcome = await this.awaitDeployment(projectId, environmentId, existing.id, token, failures, notes);
-        if (outcome.status !== 'live') {
-          failures.push({ step, code: 'database-not-deployed', message: `${database.kind} reached ${outcome.status} instead of live` });
+        // A duplicate made by environmentCreate carries the service but NO deployment (measured in E25, and
+        // reproduced honestly by the double: the cloned instance sits at PENDING forever). Waiting on a
+        // deployment that was never started is the same class of bug as the project-wide lookup above -- the
+        // provider has to start it. Budget and idempotency still apply, so a re-apply does not redeploy.
+        // rawStatus is the provider's own last deployment record: null means nothing has ever been deployed
+        // in this environment, which is exactly the duplicated-staging case.
+        const started = placed.rawStatus == null ? await this.deploy(existing.id, environmentId, token, failures) : true;
+        if (started) {
+          const outcome = await this.awaitDeployment(projectId, environmentId, existing.id, token, failures, notes);
+          if (outcome.status !== 'live') {
+            failures.push({ step, code: 'database-not-deployed', message: `${database.kind} reached ${outcome.status} instead of live` });
+          }
         }
       }
       await this.wireReferences(projectId, environmentId, database, envName, environment, serviceIds, token);
@@ -948,7 +957,8 @@ export class RailwayInfraProvider implements InfraProvider {
         query: 'mutation ($input: TemplateDeployV2Input!) { templateDeployV2(input: $input) { operationId workflowId } }',
         variables: { input: { templateId, serializedConfig: composedConfig, projectId, environmentId, workspaceId: this.workspaceId } },
       });
-      // Template provisioning is a deployment in everything but the call we made, so the budget has to see it.
+      // Template provisioning is a deployment in everything but the call we made, so the budget has to see
+      // it, or a second environment would be free to deploy past the tenant's ceiling.
       this.deploymentsUsed += 1;
       notes.push({ step, code: 'database-provisioning-started', message: `template deploy accepted (operation ${deployed.templateDeployV2.operationId ?? 'unreported'}); provisioning is asynchronous` });
 
@@ -982,9 +992,14 @@ export class RailwayInfraProvider implements InfraProvider {
   }
 
   /**
-   * Write Railway's own reference expression for every service that declares a reference to this database.
-   * The stored value is the expression, not the credential, so the secret is resolved by the provider at
-   * deploy time and never crosses platfolio -- invariant 1 held by mechanism.
+   * Write Railway's own reference expression for every service that declares a reference to this database,
+   * so platfolio never *chooses* the value and never keeps it: the write is the only time it crosses.
+   *
+   * Measured, and it corrects an assumption I made in the design docs: Railway resolves `${{Service.VAR}}`
+   * **on write**, so `variables()` returns the resolved secret. This is therefore NOT a custody mechanism --
+   * it does not make reading safe, and it must not be described to a tenant as "we cannot see your secret".
+   * The custody guarantee comes from never reading variable values anywhere in this provider
+   * (`configVariableNames` takes keys only) and from the D24 tier choice, not from the expression syntax.
    */
   private async wireReferences(projectId: string, environmentId: string, database: { name: string; kind: string }, envName: string, environment: { name: string; services: ServicePlan[] }, serviceIds: Map<string, string>, credential: RailwayCredential): Promise<void> {
     for (const service of environment.services) {
