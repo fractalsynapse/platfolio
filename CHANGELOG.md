@@ -7,6 +7,20 @@ change; entries describe merged intent, not aspirations.
 
 ### Changed
 
+- **`serviceDelete` is retried, because the database orphan was a deadline (#80).** Measured live: deleting a
+  template-created database exceeded the 25s request timeout (`TimeoutError`) while ordinary services deleted
+  inside the window — not `Bad Access`, which is what the double modelled and what I would have written as the
+  cause. One retry with a short pause, and if both attempts fail the reason still reaches
+  `DeleteResult.failures`. Covered in both directions offline: one injected timeout → no orphan, resource
+  reported removed; five → orphan **with** its reason.
+- **Live evidence gathered while fixing it:** the provider provisioned the template database and read it back
+  as `live`, created the attached volume (Railway names it `api-volume`), and the app service reached `live` in
+  ~35s — which weakens, without dismissing, the theory that #79's 300s `deploying` was the tenant's daily
+  ceiling queueing.
+
+
+### Changed
+
 - **A refused delete now says why (#80).** `deleteInstance`'s empty `catch` swallowed every `serviceDelete`
   error, so absence and refusal were indistinguishable and a surviving database was reported as a bare orphan.
   Placement is checked with an environment token (best-effort: the read itself must not become the failure it
