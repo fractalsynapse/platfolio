@@ -5,6 +5,28 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-09
+
+First release since `0.1.0`, and **a minor bump rather than the patch `0.1.1` that was requested**:
+diffing the contract surface from `0.1.0` to this candidate gives 671 added declarations and no
+removals — the two lines that look like deletions are widenings (`runConformance` gained an optional
+third parameter, and the `RailwayInfraProvider` export gained a companion type), both callable exactly
+as before. Project policy is that additive means minor, and under 0.x a patch number signals
+fixes-only, which this is not: it carries a working provider, three new contracts, and a CI gate that
+did not exist.
+
+**Scope actually shipped.** The contracts layer (transport, provider, credential broker, secret
+delivery, SCM seam, attestation, conformance), the manifest renderer's environment model, the page
+schema's secrets panel, the credential-hygiene and lockfile gates, and `graphql:check` against a
+committed Railway schema snapshot. Corrected claims are part of this release too — several findings
+from the `0.1.0` era were wrong in ways that would have reached a tenant.
+
+**Scope deliberately not claimed.** M1 step 6 (Docker build and staging deployment of platfolio's own
+stack) and step 7 (its manifest) are open; M2's live half (OAuth connect, install PR, real dispatch,
+runner claims, JWKS) has not been exercised; databases and volumes are unimplemented; the manifest
+host-pattern change is **OD12**; and no control-plane service exists yet, so nothing here is deployed
+or reachable. See [09](docs/design/09-delivery-plan.md) for the honest state of each milestone.
+
 ### Added
 
 - **The Railway provider is real now.** `packages/contracts/src/railway-transport.ts` carries the
