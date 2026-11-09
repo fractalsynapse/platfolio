@@ -63,3 +63,44 @@ custodianship problem.
 Deployment of platfolio's own stack to a staging Railway environment (blocked as above), and the
 companion `railway.json`/manifest for the service itself (M1 step 7), which now has a real pinned image to
 point at once the visibility question is settled.
+
+
+## Closed: public pull, provider deploy, external proof
+
+The maintainer made `platfolio-status-api` public through the repository's Packages UI — "how most users
+might do it" — which is the shape of the action we ask tenants for, and the reason the provider's hint has
+to describe a console, not an API. Two verification notes from getting here, both mine:
+
+- my first two pull tests were wrong for different reasons: a `HOME` override for docker also hid `gh`'s
+  credentials, and a manifest `GET` without an `Accept` header returns 404 from ghcr even for a public
+  image. The correct anonymous probe is `docker manifest inspect` or a GET carrying the OCI/Docker manifest
+  content types; then `staging` returned **200** and the digest resolved.
+- `403 DENIED` and `404 Not Found` from the package APIs meant "this token cannot see it" (scopes: no
+  `read:packages`), not "does not exist" — which is also why the org-scoped visibility endpoint appeared to
+  404 while the package lived at **repository** scope.
+
+`applyPlan` was then called with a plan carrying `ghcr.io/fractalsynapse/platfolio-status-api:staging` and
+the resolved digest, one service, one generated domain, no databases or buckets. Provider output:
+
+```
+verified: true   services: [["status","live"]]   failures: []
+domains: [{"host":"status-production-54d3.up.railway.app","dnsStatus":"verified",
+          "certificateStatus":"issued","targetService":"status"}]
+```
+
+Reached from outside the platform:
+
+```
+GET https://status-production-54d3.up.railway.app/healthz -> {"status":"ok","livenessToken":"492fdecb32aea42b"}
+GET .../version -> {"name":"status-api","version":"staging","commit":"f546d785bb4c0695b744272c17181d6cc8fb2107",
+                    "buildTime":"2026-11-09T18:33:32Z","providerContract":{"name":"infra.provider","version":"1.0.0"}}
+GET .../nope    -> 404      TLS: issuer=Let's Encrypt, subject=CN=*.up.railway.app
+```
+
+`certificateStatus: issued` came from reading `syncStatus: ACTIVE` back through the provider, not from
+inferring it from the hostname — which is the behaviour #64 pinned. A second `applyPlan` of the same plan
+reported the same host with no redeploy, so idempotency holds on a service that came from a public
+registry image rather than the conformance fixture.
+
+**Deployments consumed by this step: two** (initial deploy, and the image's own provisioning build). No
+quota rejection at any point; the daily ceiling remains unmeasured from the API side, as documented.

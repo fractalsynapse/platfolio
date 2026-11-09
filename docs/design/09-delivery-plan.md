@@ -112,6 +112,21 @@ E14 lands as part of M1 step 1, since "it started" is not evidence that a profil
 > CI — a strong substitute, not the same gate; and step 7 (platfolio's own stack as a manifest) is
 > not started. See `packages/manifest` § Rendering status in [03](03-manifest-spec.md).
 
+> **Status 2026-11-09 — M1 step 6 is delivered in the full sense.** The blockquote above predates it: its
+> "step 6" was the CI gate around generated IaC, and the deployment step is now closed too.
+> `RailwayInfraProvider.applyPlan` deployed platfolio's own pinned public image
+> (`ghcr.io/fractalsynapse/platfolio-status-api:staging` + digest) into the development workspace:
+> instance `live`, `https://status-production-54d3.up.railway.app` serving HTTPS with a Let's Encrypt
+> certificate, `/version` reporting the deployed commit and the provider contract, and a second `applyPlan`
+> that changed nothing — idempotency demonstrated on a real registry-backed service rather than the
+> double. Certificate state came from reading `syncStatus` back, not from hostname inference. Sequence,
+> costs (two deployments) and the two pull-verification mistakes I made are in
+> [research/status-api-image-2026-11-09.md](../research/status-api-image-2026-11-09.md). Remaining in M1:
+> step 7 (platfolio's own stack as a manifest, which now has a real image to name) and the CLI-less
+> `config plan` question, answered differently than planned — `railway config plan --json` gave us the
+> change-set shape, and `environmentApplyChangeSet` turned out to accept any JSON and apply nothing, so the
+> provider applies through per-resource mutations and treats IaC as an ejection artifact.
+
 Two boundaries are frozen in this milestone, and both are worth the review time because everything
 later depends on them: `packages/contracts` (capability interfaces, config schemas, conformance
 suites, version derivation) and `packages/manifest` (schema, validation, renderers).
