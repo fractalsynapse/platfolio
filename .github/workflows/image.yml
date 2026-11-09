@@ -15,8 +15,12 @@ on:
       - main
   workflow_dispatch:
 
+# Publishing needs packages: write. Declaring it only on the publish step is invalid when the workflow
+# level does not grant it, and that failure kills the run before any log exists -- which is how a
+# permissions mistake looks like a mystery.
 permissions:
   contents: read
+  packages: write
 
 concurrency:
   group: image-${{ github.ref }}
@@ -73,10 +77,8 @@ jobs:
 
       # Only pushes publish. A pull request gets a build and a smoke test, never a registry write.
       - name: Publish
+        # Pushes only: a pull request gets a build and a smoke test, never a registry write.
         if: github.event_name == 'push'
-        permissions:
-          contents: read
-          packages: write
         env:
           REGISTRY: ghcr.io
           CR_PAT: ${{ secrets.GITHUB_TOKEN }}
