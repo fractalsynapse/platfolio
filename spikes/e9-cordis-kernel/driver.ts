@@ -67,7 +67,7 @@ await attempt('A2', 'provider selected by configuration, not code', async () => 
   const b = await boot('cordis.beta.yml');
   const driverA = (a.infra as any).driver;
   const driverB = (b.infra as any).driver;
-  const project = (a.infra as any).createProject({ name: 'treedx', environments: ['staging', 'production'] });
+  const project = (a.infra as any).createProject({ name: 'example-web-app', environments: ['staging', 'production'] });
   await dispose(a);
   await dispose(b);
   if (driverA !== 'alpha' || driverB !== 'beta') throw new Error(`alpha=${driverA} beta=${driverB}`);

@@ -17,7 +17,7 @@ function plan(): InfraPlan {
   // A generated Railway host and a custom one, so both status sources are exercised.
   p.environments[0]!.domains = [
     { host: 'web.up.railway.app', service: 'api', port: 3000, verificationName: 'unused' },
-    { host: 'api.example.com', service: 'api', port: 3000, verificationName: 'treedx-verify' },
+    { host: 'api.example.com', service: 'api', port: 3000, verificationName: 'domain-verify' },
   ];
   p.environments[1]!.domains = [];
   return p;
