@@ -29,6 +29,12 @@ change; entries describe merged intent, not aspirations.
 
 ### Changed
 
+- **E26 confirming run: the provider passes reduced-scope conformance against the live Railway API** — 9/9
+  in 95 seconds, including a re-apply that is a real no-op (no second deployment, no second hostname) and a
+  delete that reports orphans honestly. A zero-deploy probe confirmed secret presence is checked by name
+  against the real `Environment.config`, and the deploy budget refused without deploying. Because the run
+  was single-environment, **E25 stays open**, and full-scope conformance still fails until databases and
+  buckets exist (E28).
 - **E27: the overlapping-deploy theory was wrong, and the truth was smaller and worse.** Back-to-back
   `serviceInstanceDeploy` calls coalesce into one deployment on Railway; the stack of `FAILED`
   deployments was mine — `projectUpdate` returns `Project!` and my call had no sub-selection, so the plan
