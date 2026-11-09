@@ -297,15 +297,16 @@ export class RailwayInfraProvider implements InfraProvider {
         // E28 open: templateDeployV2 with a PostgreSQL template returns "Problem processing request"
         // with no detail, and no other creation path was found. Reported as missing rather than
         // approximated, because a stateless service without its database is worse than a failed apply.
-        // NOT a provider limitation. The mechanism is identified: config-as-code change sets, with a
-        // first-class `type: "database", engine: "postgres"` resource in railway/iac and
-        // CompileResult.desiredConfig: EnvironmentConfig. What is unresolved is the payload shape this
-        // build can make the API accept -- every attempt answers `applied` with `changes: []`, including
-        // a deliberately invalid resource type, while a missing/string `version` errors outright. So the
-        // server validates `version` and silently ignores the rest (E24 needs `plan --json` as a sample).
-        // Reported as unmet rather than approximated: a stateless service that comes up "healthy"
-        // without its database is the worst outcome this contract can produce.
-        failures.push({ step: `databases.${database.name}`, code: 'database-not-provisioned', message: `${database.kind} is not provisioned by this build: the change-set payload is unresolved (E24), and the instance is incomplete without it` });
+        // NOT a Railway limitation. Measured 2026-11-09: serviceCreate(input:{ projectId, environmentId,
+        // name, templateId }) creates a PostgreSQL service from Railway's own template, so databases are
+        // creatable through the API and this provider MUST do it -- an earlier comment here claimed they
+        // were unreachable, which came from probing the wrong endpoints (templateDeployV2, change sets).
+        // What is unresolved is making the created service deploy (serviceInstanceDeploy answered
+        // "Problem processing request"; candidates are serviceConnect, serviceInstanceDeployV2, or seeding
+        // its variables first) and wiring its URL through Railway's own reference syntax so the value never
+        // crosses platfolio. Until both work this fails closed: a service that comes up "healthy" without
+        // its database is the worst outcome this contract can produce.  OD13.
+        failures.push({ step: `databases.${database.name}`, code: 'database-not-provisioned', message: `${database.kind} is not provisioned by this build yet: template-created services do not deploy through the path tried so far (OD13), and the instance is incomplete without it` });
       }
       for (const bucket of environment.buckets) {
         // E28: bucketCreate works, but only with the workspace grant -- an environment-scoped project

@@ -114,7 +114,9 @@ Integration into `staging` does not close an implementation issue. When a releas
   the next production integration).
 - Published tag identities are retained; corrections ship as a new version. Refresh candidate scope and
   checks when its sources change.
-- A release that includes a new platform catalog entry must satisfy that platform's manifest CI gates;
+- Licences are already on `main` as of `0.2.0` (`LICENSE` Apache-2.0 and `vendor/cordis/LICENSE` MIT), so `production.yml`'s licence requirement is satisfied on both branches; nothing in a release is expected to touch either file.
+
+A release that includes a new platform catalog entry must satisfy that platform's manifest CI gates;
   a release that changes a capability contract states the derived bump and why.
 - platfolio code and documents are **licensed under Apache-2.0** (D18). `LICENSE` at the root is that
   grant: never edit, move, or replace it as a side effect of tooling work, and treat any change to it
