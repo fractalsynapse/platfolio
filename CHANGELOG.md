@@ -29,6 +29,14 @@ change; entries describe merged intent, not aspirations.
 
 ### Changed
 
+- **Plan contract extended to match the graph, and the renderer's domain bug fixed (E24b/E24c).**
+  `ServicePlanSchema.references` and `EnvironmentPlan.volumes` now exist (optional, so every existing plan
+  stays valid), validated across fields, and emitted by the change-set builder as reference variables,
+  volume nodes and `volumeAttachments`. A reference to an undeclared database throws instead of producing a
+  dangling link. Meanwhile `.railway/railway.ts` no longer declares `domains:` — Railway's CLI rejects
+  custom-domain registration in configuration — and the hosts are recorded as a comment only for the
+  environments the service is actually placed in, because a production-only service must not gain a staging
+  host even in prose.
 - **E24: the config-as-code payload is captured, not guessed.** `railway config plan --json` output is
   committed as a fixture and the new change-set builder is shape-tested against it — `{ project,
   resources }` with a fixed 15-key node, managed databases as Railway template images, variables in three

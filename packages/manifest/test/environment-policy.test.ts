@@ -25,8 +25,11 @@ test('staging hosts are derived, never reused', () => {
   assert.equal(stagingHost('app.example.com', 'staging-'), 'staging-app.example.com');
   assert.equal(stagingHost('*.auth.example.com', 'staging-'), '*.staging-auth.example.com');
   const iac = renderRailwayIaC(arcnexus).files['.railway/railway.ts']!;
-  assert.ok(iac.includes(`'staging-app.arcnexus.example.com'`), 'staging must get its own host');
-  assert.ok(!/domains: \[\{ domain: 'app\.arcnexus\.example\.com', port: 3000 \}\],\n/.test(iac), 'a host may not be claimed by both environments unconditionally');
+  // E24b: Railway rejects domain registration in the authoring file, so hosts are recorded as a
+  // comment (staging derivation included) and never emitted as `domains:`.
+  assert.ok(!/domains:/.test(iac), 'the IaC file must not declare domains');
+  assert.ok(iac.includes('staging-app.arcnexus.example.com:3000 (staging)'), 'staging derivation is still documented');
+  assert.ok(iac.includes('applied via the API, not this file'), 'the file says where domains actually get created');
 });
 
 test('a production-only service is declared but attached only where it exists', () => {
@@ -34,8 +37,8 @@ test('a production-only service is declared but attached only where it exists', 
   assert.ok(/let keycloak: ReturnType<typeof service> | undefined;/.test(iac), 'scoped service needs a guarded declaration');
   assert.ok(/if \(ctx\.isEnvironment\('production'\)\) \{/.test(iac), 'guard must use the documented context helper');
   assert.ok(/keycloak \?\? null/.test(iac) && /\.filter\(\(r\)/.test(iac), 'staging must not receive it');
-  // keycloak's own domain is production-only, so no ternary is needed on it
-  assert.ok(/domains: \[\{ domain: 'auth\.arcnexus\.example\.com', port: 8080 \}\],/.test(iac));
+  assert.ok(iac.includes('auth.arcnexus.example.com:8080 (production)'), 'the host is still recorded');
+  assert.ok(!iac.includes('staging-auth.arcnexus.example.com'), 'a production-only service invents no staging host');
 });
 
 test('the Compose rendering keeps external services for local development', () => {
@@ -91,8 +94,8 @@ test('host overlap is reported per environment, and same-service overlap stays a
   // A production-only service's hosts must not be duplicated into a staging it does not exist in.
   const iac = renderRailwayIaC(arcnexus).files['.railway/railway.ts']!;
   const kc = iac.slice(iac.indexOf("service('keycloak'"), iac.indexOf("service('keycloak'") + 900);
-  assert.ok(/domains: \[\{ domain: 'auth\.arcnexus\.example\.com', port: 8080 \}\],/.test(kc), 'scoped service keeps a plain production host list');
-  assert.ok(!kc.includes('staging-auth'), 'no staging host should be invented for a service with no staging placement');
+  assert.ok(kc.includes('auth.arcnexus.example.com:8080 (production)'), 'scoped service records its production host');
+  assert.ok(!kc.includes('staging-auth'), 'no staging host is invented for a service with no staging placement');
 });
 
 /** Validation through the package entry point, so tests exercise the same path the product does. */

@@ -183,11 +183,19 @@ export function renderRailwayIaC(m: Manifest): Rendered {
     const mounts = i.volumes.filter((v) => v.service === s.name);
     if (mounts.length) L.push(`${pad}    volumeMounts: { ${mounts.map((v) => `${tsString(v.mountPath)}: ${cam(v.name)}`).join(', ')} },`);
     if (s.domains.length) {
-      const prod = s.domains.map((d) => `{ domain: ${tsString(d)}, port: ${s.port} }`).join(', ');
-      const stg = s.domains.map((d) => `{ domain: ${tsString(stagingHost(d, prefix))}, port: ${s.port} }`).join(', ');
-      const inBoth = s.environments.includes('production') && s.environments.includes('staging');
-      if (inBoth) L.push(`${pad}    // One host cannot be claimed by two environments; staging derives its own.`);
-      L.push(inBoth ? `${pad}    domains: ctx.isEnvironment('production') ? [${prod}] : [${stg}],` : `${pad}    domains: [${prod}],`);
+      // Domains are NOT emitted into the authoring file: Railway's CLI rejects custom-domain
+      // registration in configuration ("Custom-domain registration is not supported by Railway
+      // configuration", measured with `railway config plan`), so IaC that declares them is refused
+      // outright. They are created through the API by the provider instead. The hosts are still
+      // listed here as a comment so the exported file remains a complete description of intent, and
+      // staging derivation is preserved for the checklist and the tenant's own DNS work.
+      // Only the environments this service is actually placed in (D23): a production-only service must
+      // not gain a staging host even in a comment, or the next reader will assume it has one.
+      const hosts = s.domains.flatMap((d) => [
+        ...(s.environments.includes('production') ? [`${d}:${s.port} (production)`] : []),
+        ...(s.environments.includes('staging') ? [`${stagingHost(d, prefix)}:${s.port} (staging)`] : []),
+      ]).join('; ');
+      L.push(`${pad}  // domains declared in the manifest, applied via the API, not this file: ${hosts}`);
     }
     L.push(s.replicas === 1 ? `${pad}    replicas: 1,` : `${pad}    replicas: ctx.environment === 'production' ? ${s.replicas} : 1,`);
     L.push(`${pad}  });`);
