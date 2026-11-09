@@ -7,6 +7,17 @@ change; entries describe merged intent, not aspirations.
 
 ### Added
 
+- **M1 step 6 closed: platfolio's own stack deployed by the provider and serving publicly.**
+  `applyPlan` with `ghcr.io/fractalsynapse/platfolio-status-api:staging` + resolved digest produced a
+  `live` instance at `status-production-54d3.up.railway.app`, HTTPS with a Let's Encrypt certificate,
+  `/version` reporting the deployed commit and the provider contract, and a re-apply that changed nothing.
+  The certificate state came from reading `syncStatus` back, not from hostname inference. Sequence and the
+  two pull-verification mistakes I made getting there are in
+  [research/status-api-image-2026-11-09.md](docs/research/status-api-image-2026-11-09.md).
+
+
+### Added
+
 - **Private images and private registries are the normal case, and the credential stays the tenant's.**
   `registryPullHint` attaches a named next action to a *real* deployment failure when the image comes from
   a registry that routinely holds private repositories (`image-pull-authorization-hint`): the tenant
