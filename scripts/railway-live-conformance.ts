@@ -53,7 +53,7 @@ function livePlan(): InfraPlan {
     console.error('error: LIVE_IMAGE_DIGEST must be a real sha256:<64 hex> digest for docker.io/library/nginx:alpine');
     process.exit(1);
   }
-  const service = (replicas: number) => ({
+  const service = (replicas: number, references: { variable: string; database: string; output?: string }[] = []) => ({
     name: 'web',
     image,
     digest,
@@ -63,6 +63,8 @@ function livePlan(): InfraPlan {
     limits: { cpu: 0.5, memoryMB: 512 },
     env: [{ name: 'NODE_ENV', literal: 'production' }],
     secrets: [],
+    // A declared reference: the provider writes Railway's reference expression, never a value it chose.
+    references,
   });
   return {
     instanceId: 'e26',
@@ -72,8 +74,8 @@ function livePlan(): InfraPlan {
     planHash: 'e26'.padEnd(16, '0'),
     manifestRef: { platform: 'livecheck', version: '0.0.0' },
     environments: [
-      { name: 'production', services: [service(1)], domains: [{ host: 'web.up.railway.app', service: 'web', port: 80, verificationName: 'unused' }], databases: [], buckets: [] },
-      { name: 'staging', services: [service(1)], domains: [], databases: [], buckets: [] },
+      { name: 'production', services: [service(1, [{ variable: 'DATABASE_URL', database: 'e2e-db', output: 'DATABASE_URL' }])], domains: [{ host: 'web.up.railway.app', service: 'web', port: 80, verificationName: 'unused' }], databases: [{ name: 'e2e-db', kind: 'postgres' }], buckets: [] },
+      { name: 'staging', services: [service(1, [])], domains: [], databases: [], buckets: [] },
     ],
   };
 }
