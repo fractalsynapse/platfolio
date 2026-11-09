@@ -283,11 +283,11 @@ schema change and gets its own `apiVersion` review.
 
 ## Worked examples to write next
 
-1. `templates/treedx/manifest.yaml` — `api-service`, one service, Postgres, object storage of
+1. `templates/example-web-app/manifest.yaml` — `api-service`, one service, Postgres, object storage of
    repository clones, API-key auth, no identity host. Verify: can it be deployed with zero secrets
    known to platfolio? Its AI-context generation workload needs a resource ceiling and a queue,
    otherwise one tenant saturates its own project (and its own bill — correct under D1).
-2. `templates/arcnexus/manifest.yaml` — `full-stack-web`, Keycloak dependency already in the
+2. `templates/example-full-stack/manifest.yaml` — `full-stack-web`, Keycloak dependency already in the
    platform, so both `hosted-realm` and `byo-oidc` modes must be exercised. Verify: realm import
    round-trip and that ejecting leaves a working, self-contained ArcNexus with its own IdP.
 3. `ops/platfolio/manifest.yaml` — platfolio hosting itself, which is how the renderer stays honest.

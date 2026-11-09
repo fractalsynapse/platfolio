@@ -16,7 +16,7 @@
     "test": "tsx --test packages/*/test/*.test.ts",
     "contracts:check": "tsx scripts/check-contracts.ts",
     "verify": "pnpm run lock:check && pnpm run install:check && pnpm run check && pnpm run vendor:verify && pnpm run graphql:check && pnpm run typecheck && pnpm run test && pnpm run contracts:check",
-    "render:example": "tsx packages/kernel/src/cli.ts render templates/treedx/manifest.yaml",
+    "render:example": "tsx packages/kernel/src/cli.ts render templates/example-web-app/manifest.yaml",
     "install:check": "pnpm install --frozen-lockfile --prefer-offline",
     "lock:check": "tsx scripts/check-lockfile.ts",
     "graphql:check": "tsx scripts/check-graphql-schema.ts",

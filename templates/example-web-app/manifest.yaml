@@ -1,12 +1,12 @@
 apiVersion: platfolio.dev/v1alpha1
 kind: Platform
 metadata:
-  name: treedx
+  name: example-web-app
   version: 1.4.0
-  title: TreeDX
+  title: ExampleWebApp
   summary: Knowledge management service that unifies a collection of Git repositories into an AI context generation machine.
   archetype: api-service
-  repository: https://github.com/fractalsynapse/treedx
+  repository: https://github.com/fractalsynapse/example-web-app
   license: Apache-2.0
   architectures: [amd64, arm64]
 spec:
@@ -21,13 +21,13 @@ spec:
     staging: { enabled: true, branch: staging, sleepByDefault: true }
     preview: { enabled: false }
   resources:
-    database: { name: treedx-db, kind: postgres }
+    database: { name: app-db, kind: postgres }
     storage: { name: repo-checkouts, region: iad }
     volumes:
-      - { name: index-cache, service: worker, mountPath: /var/cache/treedx, sizeGB: 20 }
+      - { name: index-cache, service: worker, mountPath: /var/cache/example-web-app, sizeGB: 20 }
   services:
     api:
-      image: ghcr.io/fractalsynapse/treedx-api:1.4.0
+      image: ghcr.io/fractalsynapse/example-web-app-api:1.4.0
       digest: sha256:1111111111111111111111111111111111111111111111111111111111111111
       port: 8080
       healthPath: /healthz
@@ -38,11 +38,11 @@ spec:
         LOG_LEVEL: info
         CONTEXT_BUDGET_TOKENS: "120000"
       secrets:
-        - { name: TREEDX_API_SIGNING_KEY, source: preserve }
-      domains: [api.treedx.example.com]
+        - { name: APP_API_SIGNING_KEY, source: preserve }
+      domains: [api.example.com]
       public: true
     worker:
-      image: ghcr.io/fractalsynapse/treedx-worker:1.4.0
+      image: ghcr.io/fractalsynapse/example-web-app-worker:1.4.0
       digest: sha256:2222222222222222222222222222222222222222222222222222222222222222
       port: 9090
       healthPath: /ready
@@ -57,5 +57,5 @@ spec:
     onSuspend: scale-to-zero
     onEject: [railway-iac, compose, data-export, secret-inventory]
     onDelete: { graceDays: 30, backupAgeOutDays: 90 }
-  observability: { uptimeChecks: ["api.treedx.example.com/healthz"], logRetentionDays: 7 }
-  billing: { sku: treedx-standard, metered: none }
+  observability: { uptimeChecks: ["api.example.com/healthz"], logRetentionDays: 7 }
+  billing: { sku: example-web-app-standard, metered: none }

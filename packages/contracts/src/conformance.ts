@@ -50,10 +50,10 @@ export function samplePlan(overrides: Partial<InfraPlan> = {}): InfraPlan {
     provider: 'sample',
     contract: '1.0.0',
     planHash: 'a'.repeat(16),
-    manifestRef: { platform: 'treedx', version: '1.4.0' },
+    manifestRef: { platform: 'example-web-app', version: '1.4.0' },
     environments: [
-      { name: 'production', services: [service('api', 2)], domains: [{ host: 'api.example.com', service: 'api', port: 3000, verificationName: 'treedx-verify' }], databases: [{ name: 'treedx-db', kind: 'postgres' }], buckets: [{ name: 'clones', region: 'iad' }] },
-      { name: 'staging', cloneFrom: 'production', services: [service('api', 1)], domains: [], databases: [{ name: 'treedx-db', kind: 'postgres' }], buckets: [] },
+      { name: 'production', services: [service('api', 2)], domains: [{ host: 'api.example.com', service: 'api', port: 3000, verificationName: 'domain-verify' }], databases: [{ name: 'app-db', kind: 'postgres' }], buckets: [{ name: 'clones', region: 'iad' }] },
+      { name: 'staging', cloneFrom: 'production', services: [service('api', 1)], domains: [], databases: [{ name: 'app-db', kind: 'postgres' }], buckets: [] },
     ],
     ...overrides,
   };

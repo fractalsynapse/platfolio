@@ -5,6 +5,17 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+### Changed
+
+- **The catalog is generic (D28): no platform identities in code or templates.** `templates/treedx` and
+  `templates/arcnexus` became `templates/example-web-app` and `templates/example-full-stack` — still the two
+  shapes that exercise the renderer, but carrying no tenant's product name. Scrubbed from code, fixtures and
+  scripts: sample plans, conformance expectations, secrets-panel and environment-policy tests, the E9 spike
+  driver, `render:example`/`manifest:example` scripts. Platform names stay in documentation where they
+  illustrate a real case (TreeDX's blob mount, ArcNexus's external Keycloak), and the design docs' template
+  paths were updated so nothing points at a renamed directory. D9's first-party-entry exception is marked
+  superseded rather than deleted, since the reasoning behind it still applies.
+
 ### Added
 
 - **OD13: a private PostgreSQL created and deployed through the API.** `templateDeployV2` with
