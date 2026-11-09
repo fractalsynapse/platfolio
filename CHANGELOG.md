@@ -29,6 +29,15 @@ change; entries describe merged intent, not aspirations.
 
 ### Changed
 
+- **"Databases are unsupported" was wrong, and the correction is a rule, not a one-off.** One failed
+  mutation was reported as a provider limit; the maintainer's pushback was right. Follow-up found
+  `railway/iac`'s first-class `type: "database", engine: "postgres"` resource and
+  `CompileResult.desiredConfig: EnvironmentConfig`, so managed databases are created through the
+  config-as-code change set — the E24 path. Every shape this build tried is answered `applied` with
+  `changes: []`, *including a deliberately invalid resource type*, while a missing or string `version`
+  errors outright: the version is validated and nothing after it is, so the payload is deserialising to
+  empty. Status is now "not implemented, mechanism identified, `plan --json` needed", which is also what
+  E28's row and the provider's own failure message say.
 - **E25 and E28 measured, and both changed the provider.** Placement into a second environment happens
   **only** by duplicating the environment, and the duplicate is a snapshot — `serviceInstanceUpdate` on an
   environment without the service returns `true` and does nothing, which is precisely the kind of success

@@ -63,7 +63,7 @@ test('databases remain honestly unsupported (E28 open)', async () => {
     for (const service of environment.services) { service.image = IMAGE; service.digest = DIGEST; }
   }
   const applied = await provider.applyPlan(plan);
-  const unsupported = applied.failures.filter((f) => f.code === 'unsupported-resource');
+  const unsupported = applied.failures.filter((f) => f.code === 'database-not-provisioned');
   assert.equal(unsupported.length, 2, JSON.stringify(unsupported.map((f) => f.step)));
   assert.equal(applied.verified, false, 'a stateless service without its database is not a complete instance');
 });

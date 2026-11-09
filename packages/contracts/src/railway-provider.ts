@@ -275,7 +275,15 @@ export class RailwayInfraProvider implements InfraProvider {
         // E28 open: templateDeployV2 with a PostgreSQL template returns "Problem processing request"
         // with no detail, and no other creation path was found. Reported as missing rather than
         // approximated, because a stateless service without its database is worse than a failed apply.
-        failures.push({ step: `databases.${database.name}`, code: 'unsupported-resource', message: `${database.kind} provisioning is not implemented by this provider (E28); the instance is not complete without it` });
+        // NOT a provider limitation. The mechanism is identified: config-as-code change sets, with a
+        // first-class `type: "database", engine: "postgres"` resource in railway/iac and
+        // CompileResult.desiredConfig: EnvironmentConfig. What is unresolved is the payload shape this
+        // build can make the API accept -- every attempt answers `applied` with `changes: []`, including
+        // a deliberately invalid resource type, while a missing/string `version` errors outright. So the
+        // server validates `version` and silently ignores the rest (E24 needs `plan --json` as a sample).
+        // Reported as unmet rather than approximated: a stateless service that comes up "healthy"
+        // without its database is the worst outcome this contract can produce.
+        failures.push({ step: `databases.${database.name}`, code: 'database-not-provisioned', message: `${database.kind} is not provisioned by this build: the change-set payload is unresolved (E24), and the instance is incomplete without it` });
       }
       for (const bucket of environment.buckets) {
         // E28: bucketCreate works, but only with the workspace grant -- an environment-scoped project
