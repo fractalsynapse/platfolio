@@ -1,5 +1,6 @@
 import {
   InfraPlanSchema, planIssues,
+  CONTRACT_VERSION,
   type ApplyResult, type CapabilityInfo, type DeleteResult, type InfraPlan, type InfraProvider,
   type Issue, type ServicePlan, type StateSnapshot,
 } from './infra.ts';
@@ -94,7 +95,7 @@ domainRecords: Record<string, NonNullable<StateSnapshot['domains'][number]['reco
 }
 
 export class RailwayInfraProvider implements InfraProvider {
-  readonly contract = '1.0.0';
+  readonly contract = CONTRACT_VERSION;
 
   private readonly credentials: RailwayCredentialSource;
   private readonly transport: RailwayTransport;

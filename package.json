@@ -13,7 +13,7 @@
     "vendor:verify": "tsx scripts/vendor-cordis.ts verify",
     "vendor:check": "tsx scripts/vendor-cordis.ts check",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "tsx --test packages/*/test/*.test.ts",
+    "test": "tsx --test packages/*/test/*.test.ts apps/*/test/*.test.ts",
     "contracts:check": "tsx scripts/check-contracts.ts",
     "verify": "pnpm run lock:check && pnpm run install:check && pnpm run check && pnpm run vendor:verify && pnpm run graphql:check && pnpm run typecheck && pnpm run test && pnpm run contracts:check",
     "render:example": "tsx packages/kernel/src/cli.ts render templates/example-web-app/manifest.yaml",

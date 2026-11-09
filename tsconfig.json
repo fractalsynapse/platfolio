@@ -6,5 +6,6 @@
     "verbatimModuleSyntax": true, "allowImportingTsExtensions": true, "erasableSyntaxOnly": true,
     "rootDir": "."
   },
-  "include": ["scripts/**/*.ts", "packages/*/src/**/*.ts", "packages/*/test/**/*.ts"]
+  "include": ["scripts/**/*.ts", "packages/*/src/**/*.ts", "packages/*/test/**/*.ts",
+    "apps/*/src/**/*.ts", "apps/*/test/**/*.ts"]
 }
