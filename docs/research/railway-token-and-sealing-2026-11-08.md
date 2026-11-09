@@ -265,3 +265,33 @@ the suite stay green. It now reports 2 failures when a selection is removed, and
 **Status of E26 after these fixes: unverified live.** The suite has not been re-run against Railway since
 the marker fix; ~14 of the tenant's 20 daily deploys are accounted for, so the confirming run (≈3 deploys)
 is waiting on the maintainer's go-ahead rather than being spent unilaterally.
+
+## E26 confirming run — **reduced-scope conformance passes live** (95s, ≤3 deploys)
+
+After the marker fix, `scripts/railway-live-conformance.ts` with `LIVE_SINGLE_ENV=1 LIVE_DEPLOY_BUDGET=3`:
+
+```
+scope=reduced  ok=true   passed 9  failed 0  not-implemented 0
+  PASS apply then readState shows every environment, service and domain
+       1 services, 1 domains, all live with certificate state reported
+  PASS re-applying the same planHash is a no-op, not a duplicate
+       1 services, no duplicates
+  PASS interrupted apply converges on retry with no orphans
+       converged to 1 services
+  PASS deleteInstance removes everything and reports orphans honestly
+       2 resources removed; state no longer readable
+```
+
+The two results that matter most: **the re-apply is a genuine no-op** (no second deployment, no second
+hostname — the behaviour whose absence produced the four-deployment stack earlier), and the whole run
+finishes in **95 seconds** rather than stalling into an eleven-minute timeout. Elapsed time is a proxy for
+churn, and this is the cheapest regression signal the suite has.
+
+The zero-deploy secret probe also ran against the live API: `["secret-unavailable","deploy-budget-exhausted"]`
+— presence-by-name through `Environment.config` works on the real provider, and the deploy budget refused
+without deploying. Two minted tokens revoked; the project deleted; workspace verified empty.
+
+**What is still not claimed:** the **full** reference plan requires databases and buckets, which this
+provider does not implement, so full-scope conformance remains a deliberate fail (E28). Credentials for a
+tenant, OAuth connect, the GitHub dispatch round trip, and JWKS verification are all still unimplemented —
+this run exercised the provider's provider half only.
