@@ -7,6 +7,17 @@ change; entries describe merged intent, not aspirations.
 
 ### Added
 
+- **Private images and private registries are the normal case, and the credential stays the tenant's.**
+  `registryPullHint` attaches a named next action to a *real* deployment failure when the image comes from
+  a registry that routinely holds private repositories (`image-pull-authorization-hint`): the tenant
+  attaches a read-only registry credential in their own Railway project. platfolio cannot verify
+  pullability (it holds no registry credential by design) and must not read Railway build logs, which
+  contain resolved environment values — so this is a hint phrased as a likely cause, never a claimed
+  diagnosis, and a public `docker.io` image gets no nagging. Documented in [04](docs/design/04-execution-plane-github-workflows.md).
+
+
+### Added
+
 - **`apps/status-api` and the control-plane image (M1 step 6, build half).** `/healthz`, `/readyz`,
   `/version` (commit, build time, provider contract); no secrets read, no tenant data held.
   `.github/workflows/image.yml` builds and **runs the container** on PRs, and publishes

@@ -55,6 +55,21 @@ const STATUS_MAP: Record<string, ServiceStateStatus> = {
 };
 
 /** Statuses the controller may keep polling on; anything else is terminal for a wait. */
+/** Registry hosts that routinely hold private images; docker.io library images almost never do. */
+const PRIVATE_CAPABLE_REGISTRIES = ['ghcr.io', 'quay.io', 'mcr.microsoft.com', 'public.ecr.aws'];
+
+/**
+ * Where a tenant should look when their own image fails to deploy. Narrow on purpose: platfolio cannot
+ * verify pullability (no registry credential, by design) and must not read provider build logs, so this
+ * never asserts a cause -- it names the one action only the tenant can take.
+ */
+export function registryPullHint(image: string): string | undefined {
+  const host = image.split('/')[0] ?? '';
+  if (!host.includes('.') && !host.includes('localhost')) return undefined;   // docker.io shorthand form
+  if (!PRIVATE_CAPABLE_REGISTRIES.some((known) => host === known || host.endsWith(`.${known}`))) return undefined;
+  return `"${image}" is pulled from ${host}, which routinely holds private repositories. If the deployment failed to start, the likely cause is that this Railway project cannot pull the image: attach a read-only registry credential for ${host} in the project's settings. platfolio cannot do this for you and does not hold such a credential -- it is yours to grant, and is never stored here.`;
+}
+
 const IN_FLIGHT: ReadonlySet<ServiceStateStatus> = new Set(['pending', 'building', 'deploying']);
 
 type ServiceStateStatus = StateSnapshot['services'][number]['status'];
@@ -262,6 +277,16 @@ export class RailwayInfraProvider implements InfraProvider {
 
         const deployed = await this.deploy(serviceId, environmentId, token, failures);
         const outcome = deployed ? await this.awaitDeployment(projectId, environmentId, serviceId, token, failures, notes) : { status: 'pending' as const, instanceId: serviceId };
+        // A deployment that does not come up is often a pull authorization problem, and the tenant -- not
+        // platfolio -- is the only party who can fix it. We cannot pull-test their image (we hold no registry
+        // credential by design) and must not read Railway build logs (they contain resolved environment
+        // values), so this is a hint attached to a real failure, never a claimed diagnosis.
+        if (outcome.status !== 'live') {
+          const hint = registryPullHint(service.image);
+          if (hint) {
+            notes.push({ step: `services.${service.name}`, code: 'image-pull-authorization-hint', message: hint });
+          }
+        }
         services.push({
           name: service.name,
           environment: environment.name,
