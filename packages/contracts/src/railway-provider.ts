@@ -897,6 +897,33 @@ export class RailwayInfraProvider implements InfraProvider {
       return;
     }
 
+    // Service names are project-wide (measured in E25: creating the same name in another environment is
+    // rejected), and staging receives services through environment duplication. So an existing database
+    // service is never re-provisioned here -- the only question is whether it has an instance in THIS
+    // environment, which is the same placement rule already applied to ordinary services.
+    const workspaceForLookup = await this.credentials.workspace();
+    const existing = (await this.listServices(projectId, workspaceForLookup)).find((s) => s.name === database.name);
+    if (existing) {
+      serviceIds.set(`${envName}/${database.name}`, existing.id);
+      const placed = await this.instanceStatus(projectId, environmentId, existing.id, token);
+      if (!placed) {
+        failures.push({
+          step,
+          code: 'database-instance-missing-in-environment',
+          message: `${database.kind} exists in this project but has no instance in "${envName}"; recreate the environment duplicate so it is placed`,
+        });
+        return;
+      }
+      if (placed.status !== 'live') {
+        const outcome = await this.awaitDeployment(projectId, environmentId, existing.id, token, failures, notes);
+        if (outcome.status !== 'live') {
+          failures.push({ step, code: 'database-not-deployed', message: `${database.kind} reached ${outcome.status} instead of live` });
+        }
+      }
+      await this.wireReferences(projectId, environmentId, database, envName, environment, serviceIds, token);
+      return;
+    }
+
     try {
       const fetched = await this.transport.graphql<{ template: { serializedConfig?: { services?: Record<string, Record<string, unknown>> } | null } }>({
         operation: 'template',
@@ -925,8 +952,14 @@ export class RailwayInfraProvider implements InfraProvider {
       this.deploymentsUsed += 1;
       notes.push({ step, code: 'database-provisioning-started', message: `template deploy accepted (operation ${deployed.templateDeployV2.operationId ?? 'unreported'}); provisioning is asynchronous` });
 
+      // The deploy names the service after the plan; look it up and then confirm placement in this
+      // environment rather than accepting a project-wide match, which is what made staging hang forever.
       const listed = await this.listServices(projectId, workspaceCredential);
-      const created = listed.find((s) => s.name === database.name) ?? listed.find((s) => (s.name ?? '').toLowerCase().includes(database.kind));
+      const candidates = listed.filter((s) => s.name === database.name || (s.name ?? '').toLowerCase().includes(database.kind));
+      let created = candidates[0];
+      for (const candidate of candidates) {
+        if (await this.instanceStatus(projectId, environmentId, candidate.id, token)) { created = candidate; break; }
+      }
       if (!created) {
         failures.push({ step, code: 'database-service-missing', message: `the ${database.kind} template deploy did not surface a service in ${envName}` });
         return;
@@ -942,21 +975,26 @@ export class RailwayInfraProvider implements InfraProvider {
       // Wire every service in this environment that references the database, using Railway's own reference
       // expression so the credential is resolved by the provider: platfolio writes an expression and never
       // sees the value it stands for.
-      // Wire every service in this environment that references the database. The value written is Railway's
-      // reference expression, not a credential: the provider resolves it at deploy time, so the secret never
-      // crosses platfolio -- which is invariant 1 satisfied by the mechanism rather than by policy alone.
-      for (const service of environment.services) {
-        for (const reference of service.references ?? []) {
-          if (reference.database !== database.name) continue;
-          const target = serviceIds.get(`${envName}/${service.name}`);
-          if (!target) continue;
-          const expression = '$' + `{{${database.name}.${reference.output ?? 'DATABASE_URL'}}}`;
-          await this.upsertVariable(projectId, environmentId, target, reference.variable, expression, token);
-        }
-      }
-
+      await this.wireReferences(projectId, environmentId, database, envName, environment, serviceIds, token);
     } catch (error) {
       failures.push({ step, code: 'database-provision-failed', message: (error as Error).message.slice(0, 240) });
+    }
+  }
+
+  /**
+   * Write Railway's own reference expression for every service that declares a reference to this database.
+   * The stored value is the expression, not the credential, so the secret is resolved by the provider at
+   * deploy time and never crosses platfolio -- invariant 1 held by mechanism.
+   */
+  private async wireReferences(projectId: string, environmentId: string, database: { name: string; kind: string }, envName: string, environment: { name: string; services: ServicePlan[] }, serviceIds: Map<string, string>, credential: RailwayCredential): Promise<void> {
+    for (const service of environment.services) {
+      for (const reference of service.references ?? []) {
+        if (reference.database !== database.name) continue;
+        const target = serviceIds.get(`${envName}/${service.name}`);
+        if (!target) continue;
+        const expression = '$' + `{{${database.name}.${reference.output ?? 'DATABASE_URL'}}}`;
+        await this.upsertVariable(projectId, environmentId, target, reference.variable, expression, credential);
+      }
     }
   }
 
