@@ -26,6 +26,8 @@ export interface MockOptions {
   templateRevealAfter?: number;
   /** A template deploy accepted but whose service never surfaces -- the stuck-provisioning case. */
   templateNeverReveals?: boolean;
+  /** Refuse serviceDelete for template-created services, modelling #80's survivor. */
+  refuseTemplateServiceDelete?: boolean;
 }
 
 interface MockService { id: string; projectId: string; name: string }
@@ -49,6 +51,7 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
   hiddenServiceCount(): number { return this.hiddenServices.size; }
   /** Services hidden until read N times, so single-shot lookups fail as they do live (#77). */
   private readonly hiddenServices = new Map<string, number>();
+  readonly templateServiceIds = new Set<string>();
   readonly templateDeploys: { templateId: string; serviceName: string; credentialKind: string }[] = [];
 
   deploys = 0;
@@ -62,7 +65,13 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
   private readonly options: Required<Pick<MockOptions, 'secretsPresent' | 'settleAfter' | 'outcome'>> & MockOptions;
 
   constructor(options: MockOptions = {}) {
+    // Every option has to be listed here: the normalization below silently drops unknown keys, which is how
+    // templateNeverReveals looked "ignored" -- the guard was correct and never received the flag. A double
+    // that drops its own configuration is the same failure class as a stub that passes vacuously.
     this.options = {
+      templateRevealAfter: options.templateRevealAfter ?? 2,
+      templateNeverReveals: options.templateNeverReveals ?? false,
+      refuseTemplateServiceDelete: options.refuseTemplateServiceDelete ?? false,
       secretsPresent: options.secretsPresent ?? true,
       settleAfter: options.settleAfter ?? 1,
       outcome: options.outcome ?? 'SUCCESS',
@@ -315,6 +324,7 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
           polls: 0,
           variables: new Set(Object.keys(spec.variables ?? {})),
         });
+        this.templateServiceIds.add(serviceId);
         this.hiddenServices.set(serviceId, this.options.templateNeverReveals ? Number.MAX_SAFE_INTEGER : (this.options.templateRevealAfter ?? 2));
         return { templateDeployV2: { operationId: `op-${name}`, workflowId: `deployTemplate/${input.projectId}/mock` } } as T;
       }
@@ -435,6 +445,9 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
         return { customDomainCreate: { id: `dom-${this.sequence++}`, domain: input.domain } } as T;
       }
       case 'serviceDelete': {
+        if (this.options.refuseTemplateServiceDelete && this.templateServiceIds.has(v.id as string)) {
+          throw new Error('railway serviceDelete: Bad Access for template-created service [FORBIDDEN]');
+        }
         const key = `${v.environmentId}:${v.id}`;
         this.instances.delete(key);
         const service = this.services.get(v.id as string);

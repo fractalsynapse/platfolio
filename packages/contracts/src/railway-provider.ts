@@ -370,6 +370,7 @@ export class RailwayInfraProvider implements InfraProvider {
     const credential = await this.credentials.workspace();
     const removed: string[] = [];
     const orphans: string[] = [];
+    const deleteFailures: NonNullable<DeleteResult['failures']> = [];
 
     const environments = await this.environments(project.id, credential);
     const services = await this.listServices(project.id, credential);
@@ -383,8 +384,22 @@ export class RailwayInfraProvider implements InfraProvider {
             variables: { environmentId: environment.id, id: service.id },
           });
           removed.push(`service:${environment.name}/${service.name}`);
-        } catch {
-          // Absent in this environment is not an orphan.
+        } catch (error) {
+          // The empty catch was a bug in the family we keep chasing: the intent was "absent in this
+          // environment is not an orphan", but a real refusal -- exactly what happened to the
+          // template-created database in #80 -- disappeared, leaving a survivor reported with no reason.
+          // Placement decides whether the delete has anything to say about it.
+          // Placement decides whether to speak, but the placement read itself needs an environment token and
+          // can fail -- a refused delete still deserves a reason either way, so this is best-effort.
+          let placed: unknown = true;
+          try {
+            const envToken = await this.credentials.forEnvironment(project.id, environment.name);
+            placed = await this.instanceStatus(project.id, environment.id, service.id, envToken);
+          } catch {
+            placed = true;
+          }
+          if (!placed) continue;   // genuinely absent here: not an orphan, nothing to report
+          deleteFailures.push({ step: `service:${environment.name}/${service.name}`, code: 'service-delete-failed', message: (error as Error).message.slice(0, 200) });
         }
       }
     }
@@ -392,6 +407,8 @@ export class RailwayInfraProvider implements InfraProvider {
     // Anything still there is reported, never counted as gone.
     // Volumes are project-level and outlive the service they were attached to, so they are removed
     // explicitly and anything left is reported. "Removed everything" has to mean everything we can create.
+    // Volumes first: a volume is attached to its service, so releasing the attachment before the service is
+    // the order a template-created database is most likely to accept (#80's survivor still held its volume).
     for (const volume of await this.listVolumes(project.id, credential)) {
       await this.transport.graphql({ operation: 'volumeDelete', credential, query: 'mutation ($volumeId: String!) { volumeDelete(volumeId: $volumeId) }', variables: { volumeId: volume.id } })
         .then(() => { removed.push(`volume:${volume.name}`); })
@@ -407,7 +424,7 @@ export class RailwayInfraProvider implements InfraProvider {
       variables: { id: project.id },
     });
     removed.push(`project:${project.name}`);
-    return { instanceId, removed, orphans };
+    return { instanceId, removed, orphans, ...(deleteFailures.length ? { failures: deleteFailures } : {}) };
   }
 
   // --- internals -------------------------------------------------------------------------------
