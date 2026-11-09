@@ -235,10 +235,13 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
         return { serviceInstanceLimitsUpdate: true } as T;
       }
       case 'template': {
-        const id = v.id as string;
-        if (id !== 'c27544e8-a7e7-450d-9314-bdaa25c734aa') throw new Error('railway template: not found [NOT_FOUND]');
+        // Keyed by CODE, the authorized read for public catalog entries (#75). The double accepted the
+        // id only because I chose it, which is how a wrong lookup passed every offline test.
+        const code = v.code as string;
+        if (code !== 'postgresql') throw new Error('railway template: not found [NOT_FOUND]');
         return {
           template: {
+            id: 'c27544e8-a7e7-450d-9314-bdaa25c734aa',
             serializedConfig: {
               services: {
                 '36d08c1e-1bcb-4de6-a199-3749dc83dff3': {
