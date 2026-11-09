@@ -562,3 +562,30 @@ Open, in order:
 4. **Async.** `operationId`/`workflowId` means provisioning a database is a job with a status, not a call
    that returns a resource. Our `applyPlan` has to poll or accept partial state, and `ServiceInstanceStatus`
    may need a "provisioning" affordance rather than pretending the service exists the moment we return.
+
+## `${{Service.VAR}}` is resolved on write, not at deploy -- so it is NOT a custody mechanism
+
+Measured against the live API on the dev sample project: `variableUpsert` accepted
+`${{Postgres.DATABASE_URL}}` (`{"variableUpsert":true}`), and reading the variable back returned a fully
+resolved connection string **including the password** -- the reference was expanded server-side at store
+time, not at deploy time. The value was then deleted and the database password reset.
+
+Consequences, applied rather than noted:
+
+- **Nothing about `variables()` is safe.** A reference expression does not make the read harmless: the API
+  hands back the resolved secret to any credential that can call it. That confirms D24 from the other side
+  -- tokens carry roles, not subsets -- and it makes the standing rule stronger than "avoid reading secret
+  values": platfolio code must have **no path that reads `variables()` values at all.** The provider reads
+  `Object.keys(...)` only (`configVariableNames`); that is not a nicety, it is the only thing separating the
+  control plane from a secret store.
+- **The wiring is still worth doing, for a different reason.** Writing the reference means platfolio never
+  *chooses* the URL, never stores the value in its own database, and never sends it over the network more
+  than once -- but it cannot be described as "platfolio cannot see the value", because it demonstrably can.
+  Any UI or claim about secret custody must say: we do not hold it; we could read it; the tiers in D24 are
+  what keeps that from happening.
+- **A credential surfaced in tool output because of this probe.** The dev project's database password appeared
+  in a session transcript during a deliberate shape check (I printed a prefix and length, and the prefix
+  carried the whole resolved string). No tenant credential is involved -- this is platfolio's own scratch
+  project -- and the password has been reset and the variable deleted. The lesson is the method: when a read
+  might return a secret, print **nothing derived from its content**, not even a prefix. Length-only or
+  boolean-only checks were the intent; a prefix is not a safe reduction.
