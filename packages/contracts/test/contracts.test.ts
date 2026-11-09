@@ -16,7 +16,10 @@ function railwayPlan() {
   for (const environment of plan.environments) {
     environment.databases = [];
     environment.buckets = [];
-    environment.cloneFrom = undefined;
+    // cloneFrom is kept: E25 measured that duplicating an environment is the only placement mechanism
+    // Railway offers, so a plan that wants a service in two environments must clone -- and the provider
+    // now refuses to pretend otherwise. Nulling this out makes the reduced plan describe an
+    // arrangement the provider correctly rejects.
     environment.domains = environment.domains.map((d) => ({ ...d, host: `${d.service}.up.railway.app` }));
   }
   return plan;

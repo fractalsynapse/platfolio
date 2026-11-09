@@ -159,6 +159,7 @@ export class RailwayInfraProvider implements InfraProvider {
     const failures: ApplyResult['failures'] = [];
     const notes: NonNullable<ApplyResult['notes']> = [];
     const serviceIds = new Map<string, string>();
+    const resources: string[] = [];
     const services: StateSnapshot['services'] = [];
     const domains: ApplyResult['domains'] = [];
 
@@ -191,7 +192,21 @@ export class RailwayInfraProvider implements InfraProvider {
       const environmentId = await this.ensureEnvironment(projectId, environment.name, environment.cloneFrom, workspaceCredential);
       const token = await this.credentials.forEnvironment(projectId, environment.name);
 
+      const placed = await this.environmentInstances(projectId, environmentId, token);
       for (const service of environment.services) {
+        const known = (await this.listServices(projectId, workspaceCredential)).find((s) => s.name === service.name);
+        if (known && !placed.has(known.id)) {
+          // E25: `serviceInstanceUpdate` on an environment with no instance returns true and changes
+          // nothing. Silently continuing would report a service as configured in an environment where
+          // it does not exist, so it is refused here and reported. Placement happens by duplicating an
+          // environment, which is a snapshot: a service added to the source afterwards is not present.
+          failures.push({
+            step: `services.${service.name}@${environment.name}`,
+            code: 'instance-missing-in-environment',
+            message: `"${service.name}" has no instance in "${environment.name}"; Railway places services into a new environment only when that environment is duplicated, so this environment must be recreated from a source that already contains the service`,
+          });
+          continue;
+        }
         const serviceId = await this.ensureService(projectId, environmentId, service, token, workspaceCredential, notes);
         // Domain and instance placement take the *service* id; readState reports the *instance* id,
         // because the instance is the per-environment thing that exists. Passing one where the other
@@ -257,10 +272,28 @@ export class RailwayInfraProvider implements InfraProvider {
       }
 
       for (const database of environment.databases) {
-        failures.push({ step: `databases.${database.name}`, code: 'unsupported-resource', message: `${database.kind} provisioning is not implemented by this provider; the instance is not complete without it` });
+        // E28 open: templateDeployV2 with a PostgreSQL template returns "Problem processing request"
+        // with no detail, and no other creation path was found. Reported as missing rather than
+        // approximated, because a stateless service without its database is worse than a failed apply.
+        failures.push({ step: `databases.${database.name}`, code: 'unsupported-resource', message: `${database.kind} provisioning is not implemented by this provider (E28); the instance is not complete without it` });
       }
       for (const bucket of environment.buckets) {
-        failures.push({ step: `buckets.${bucket.name}`, code: 'unsupported-resource', message: 'bucket provisioning is not implemented by this provider' });
+        // E28: bucketCreate works, but only with the workspace grant -- an environment-scoped project
+        // token is answered with "Bad Access", which is why this call cannot go through `token`.
+        try {
+          const created = await this.transport.graphql<{ bucketCreate: { id: string; name: string } }>({
+            operation: 'bucketCreate',
+            credential: workspaceCredential,
+            query: 'mutation ($input: BucketCreateInput!) { bucketCreate(input: $input) { id name } }',
+            variables: { input: { projectId, environmentId, name: bucket.name } },
+          });
+          resources.push(`bucket:${created.bucketCreate.name}`);
+          if (bucket.region) {
+            notes.push({ step: `buckets.${bucket.name}`, code: 'bucket-region-ignored', message: `the API takes no region on creation; "${bucket.region}" is not enforced` });
+          }
+        } catch (error) {
+          failures.push({ step: `buckets.${bucket.name}`, code: 'bucket-create-failed', message: (error as Error).message.slice(0, 160) });
+        }
       }
     }
 
@@ -414,9 +447,20 @@ export class RailwayInfraProvider implements InfraProvider {
       operation: 'environmentCreate',
       credential,
       query: 'mutation ($input: EnvironmentCreateInput!) { environmentCreate(input: $input) { id } }',
-      // Cloning carries configuration; the provider documents that sealed values are NOT copied, which is
-      // why the secrets checklist is expected to report red on a freshly cloned staging.
-      variables: { input: { projectId, name: environment, isPrivate: false, ...(source ? { sourceEnvironmentId: source.id } : {}) } },
+      // Introspected `EnvironmentCreateInput` has NO isPrivate field -- sending one fails validation,
+      // which is exactly how E25 found this: a single-environment run never creates a second
+      // environment, so the bug was invisible to the passing suite. skipInitialDeploys keeps a clone
+      // from deploying the world without the controller deciding to; the tenant's daily ceiling is
+      // shared and finite. Cloning carries configuration, and sealed values are documented NOT to be
+      // copied -- which is why the secrets checklist is expected to report red on a fresh staging.
+      variables: {
+        input: {
+          projectId,
+          name: environment,
+          skipInitialDeploys: true,
+          ...(source ? { sourceEnvironmentId: source.id } : {}),
+        },
+      },
     });
     return data.environmentCreate.id;
   }

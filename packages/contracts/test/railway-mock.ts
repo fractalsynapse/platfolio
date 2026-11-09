@@ -33,7 +33,8 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
   readonly environments = new Map<string, { id: string; projectId: string; name: string }>();
   readonly services = new Map<string, MockService>();
   readonly instances = new Map<string, MockInstance>();
-  readonly tokens = new Map<string, { id: string; projectId: string; environmentId: string; name: string }>();
+  readonly tokens = new Map<string, { id: string; projectId: string; environmentId: string; name: string }>;
+  readonly buckets = new Map<string, string>();
 
   deploys = 0;
   readonly operations: string[] = [];
@@ -83,7 +84,7 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
     // The measured authorization split. Getting this wrong is how a provider "works" against a fake and
     // fails on the first real call.
     const needsProject = ['serviceCreate', 'serviceInstanceUpdate', 'serviceInstanceLimitsUpdate', 'variableUpsert', 'serviceInstanceDeploy', 'environment.serviceInstances', 'environment.config', 'serviceDomainCreate', 'customDomainCreate'];
-    const needsWorkspace = ['projects', 'project', 'projectCreate', 'projectUpdate', 'projectDelete', 'project.environments', 'environmentCreate', 'project.services', 'projectTokenCreate', 'projectTokens', 'projectTokenDelete', 'serviceDelete', 'project.buckets'];
+    const needsWorkspace = ['projects', 'project', 'projectCreate', 'projectUpdate', 'projectDelete', 'project.environments', 'environmentCreate', 'project.services', 'projectTokenCreate', 'projectTokens', 'projectTokenDelete', 'serviceDelete', 'project.buckets', 'bucketCreate', 'project.bucketsList'];
     if (needsProject.includes(operation) && credential.kind !== 'project') {
       this.denied.push(operation);
       throw new Error(`railway ${operation}: Not Authorized [INTERNAL_SERVER_ERROR]`);
@@ -92,6 +93,31 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
       this.denied.push(operation);
       throw new Error(`railway ${operation}: Not Authorized [INTERNAL_SERVER_ERROR]`);
     }
+    /**
+     * The real API rejects unknown input fields at validation, which is how E25 caught `isPrivate` in
+     * `environmentCreate` -- a field invented confidently enough to pass every test the mock was asked to
+     * answer. These allowlists come from live introspection; extend them deliberately, never by deleting.
+     */
+    const inputFields: Record<string, string[]> = {
+      projectCreate: ['name', 'workspaceId', 'isPublic', 'description', 'defaultEnvironmentName', 'prDeploys', 'isMonorepo', 'repo', 'runtime'],
+      projectUpdate: ['name', 'description', 'isPublic', 'baseEnvironmentId', 'prDeploys', 'botPrEnvironments', 'focusedPrEnvironments'],
+      environmentCreate: ['projectId', 'name', 'sourceEnvironmentId', 'skipInitialDeploys', 'applyChangesInBackground', 'ephemeral', 'stageInitialChanges'],
+      projectTokenCreate: ['projectId', 'environmentId', 'name'],
+      serviceCreate: ['projectId', 'environmentId', 'name', 'source', 'templateId', 'templateServiceId', 'variables', 'branch', 'icon', 'registryCredentials'],
+      serviceInstanceUpdate: ['numReplicas', 'healthcheckPath', 'healthcheckTimeout', 'source', 'startCommand', 'buildCommand', 'preDeployCommand', 'region', 'restartPolicyType', 'sleepApplication', 'watchPatterns', 'cronSchedule', 'dockerfilePath', 'buildpacks', 'nixpacksPlan'],
+      variableUpsert: ['projectId', 'environmentId', 'serviceId', 'name', 'value', 'skipDeploys'],
+      serviceDomainCreate: ['environmentId', 'serviceId', 'targetPort'],
+      customDomainCreate: ['projectId', 'environmentId', 'serviceId', 'domain', 'targetPort'],
+      serviceInstanceLimitsUpdate: ['environmentId', 'serviceId', 'memoryGB', 'vCPUs'],
+    };
+    const inputKey = ['projectCreate', 'projectUpdate', 'environmentCreate', 'projectTokenCreate', 'serviceCreate', 'serviceInstanceUpdate', 'variableUpsert', 'serviceDomainCreate', 'customDomainCreate', 'serviceInstanceLimitsUpdate'].includes(operation) ? 'input' : null;
+    if (inputKey) {
+      const allowed = inputFields[operation];
+      const payload = (v[inputKey] ?? {}) as Record<string, unknown>;
+      const unknown = allowed ? Object.keys(payload).filter((k) => !allowed.includes(k)) : [];
+      if (unknown.length) throw new Error(`railway ${operation}: Field ${JSON.stringify(unknown[0])} is not defined by ${operation} input (the real API rejects this)`);
+    }
+
     // Guard the class of bug E26 exposed: mutations returning an OBJECT are rejected by the real API
     // unless they select a subfield. The mock used to accept the query and never notice.
     const objectReturning = ['projectCreate', 'environmentCreate', 'serviceCreate', 'projectUpdate', 'serviceDomainCreate', 'customDomainCreate'];
@@ -152,7 +178,10 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
           for (const [key, instance] of this.instances) {
             if (!key.startsWith(`${input.sourceEnvironmentId}:`)) continue;
             const cloneKey = `${id}:${key.split(':')[1]}`;
-            this.instances.set(cloneKey, { ...instance, variables: new Set(instance.variables), status: null, polls: 0 });
+            // A duplicated environment gets its OWN instances -- reusing the source's id made readState
+            // report two services with one externalId, which is the duplicate the conformance suite is
+            // right to reject.
+            this.instances.set(cloneKey, { ...instance, instanceId: `inst-${this.sequence++}`, variables: new Set(instance.variables), status: null, polls: 0 });
           }
         }
         return { environmentCreate: { id } } as T;
@@ -182,7 +211,10 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
         const key = `${v.environmentId}:${v.serviceId}`;
         const instance = this.instances.get(key);
         const input = v.input as { numReplicas?: number; source?: { image?: string }; healthcheckPath?: string };
-        if (!instance) throw new Error('railway serviceInstanceUpdate: no instance [NOT_FOUND]');
+        // Measured in E25: the real API returns true for an environment that has no instance and
+        // creates nothing. A mock that threw NOT_FOUND hid exactly that, so it now reproduces the
+        // silent no-op and the provider has to detect it on its own.
+        if (!instance) return { serviceInstanceUpdate: true } as T;
         if (input.numReplicas !== undefined) instance.numReplicas = input.numReplicas;
         if (input.source?.image) instance.image = input.source.image;
         return { serviceInstanceUpdate: true } as T;
@@ -272,6 +304,16 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
       case 'project.buckets': {
         const ids = (this.options.buckets ?? []).map((id) => ({ node: { id } }));
         return { project: { buckets: ids.length ? { edges: ids } : null } } as T;
+      }
+      case 'bucketCreate': {
+        const input = v.input as { projectId: string; environmentId: string; name: string };
+        const id = `bkt-${this.sequence++}`;
+        this.buckets.set(id, input.name);
+        return { bucketCreate: { id, name: input.name } } as T;
+      }
+      case 'project.bucketsList': {
+        const nodes = [...this.buckets.entries()].map(([id, name]) => ({ node: { id, name } }));
+        return { project: { buckets: { edges: nodes } } } as T;
       }
       case 'projectTokenCreate': {
         const input = v.input as { projectId: string; environmentId: string; name: string };
