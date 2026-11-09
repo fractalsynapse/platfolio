@@ -87,6 +87,8 @@ interface InstanceInfo {
   domainStates: Record<string, { dnsStatus: 'pending' | 'verified' | 'failed'; certificateStatus: 'pending' | 'issued' | 'failed' }>;
   /** Provider ids per host, so a failed certificate can be retried by id. */
   domainIds: Record<string, string>;
+/** The records the provider asked for, read back rather than derived (D25). */
+domainRecords: Record<string, NonNullable<StateSnapshot['domains'][number]['records']>>;
 }
 
 export class RailwayInfraProvider implements InfraProvider {
@@ -286,6 +288,7 @@ export class RailwayInfraProvider implements InfraProvider {
           host: placed.host,
           dnsStatus: state?.dnsStatus ?? placed.dnsStatus,
           certificateStatus: state?.certificateStatus ?? 'pending',
+          ...(settled?.domainRecords[placed.host] ? { records: settled.domainRecords[placed.host] } : {}),
           targetService: domain.service,
         });
       }
@@ -675,7 +678,7 @@ export class RailwayInfraProvider implements InfraProvider {
       credential,
       // `CustomDomain.status` is an OBJECT (verified + certificateStatus enum), not a scalar -- a mock
       // that accepted a string here hid it for a whole test cycle. Measured 2026-11-08.
-      query: 'query ($projectId: String!, $environmentId: String!) { environment(projectId: $projectId, id: $environmentId) { serviceInstances { edges { node { id serviceId numReplicas source { image } latestDeployment { status } domains { customDomains { id domain status { verified certificateStatus } } serviceDomains { id domain syncStatus } } } } } } }',
+      query: 'query ($projectId: String!, $environmentId: String!) { environment(projectId: $projectId, id: $environmentId) { serviceInstances { edges { node { id serviceId numReplicas source { image } latestDeployment { status } domains { customDomains { id domain syncStatus status { verified certificateStatus verificationDnsHost verificationToken dnsRecords { fqdn hostlabel zone recordType requiredValue currentValue status purpose } } } serviceDomains { id domain syncStatus } } } } } } }',
       variables: { projectId, environmentId },
     });
     const out = new Map<string, InstanceInfo>();
@@ -686,7 +689,11 @@ export class RailwayInfraProvider implements InfraProvider {
       const deployment = node.latestDeployment as { status?: string } | null;
       const source = node.source as { image?: string } | null;
       const domains = node.domains as {
-        customDomains?: { id?: string; domain: string; status?: { verified?: boolean; certificateStatus?: string } | null }[];
+        customDomains?: { id?: string; domain: string; syncStatus?: string | null; status?: {
+          verified?: boolean; certificateStatus?: string; verificationDnsHost?: string; verificationToken?: string;
+          dnsRecords?: { fqdn: string; hostlabel?: string | null; zone: string; recordType?: string | null;
+            requiredValue?: string | null; currentValue?: string | null; status?: string | null; purpose?: string | null }[] | null;
+        } | null }[];
         serviceDomains?: { id?: string; domain: string; syncStatus?: string | null }[];
       } | null;
       out.set(serviceId, {
@@ -703,12 +710,47 @@ export class RailwayInfraProvider implements InfraProvider {
           // still issuing.
           const states: InstanceInfo['domainStates'] = {};
           const ids: InstanceInfo['domainIds'] = {};
+          const recordsByHost: InstanceInfo['domainRecords'] = {};
           for (const d of domains?.serviceDomains ?? []) {
             const active = d.syncStatus === 'ACTIVE';
             states[d.domain] = { dnsStatus: active ? 'verified' : 'pending', certificateStatus: active ? 'issued' : 'pending' };
             if (d.id) ids[d.domain] = d.id;
           }
           for (const d of domains?.customDomains ?? []) {
+          const raw = d.status?.dnsRecords ?? [];
+          // Every record below is copied out of the provider's response. Nothing here derives a value: the
+          // routing target is Railway's own host and cannot be computed from the service hostname.
+          const records: InstanceInfo['domainRecords'][string] = raw.filter((r) => r?.requiredValue).map((r) => ({
+            host: r.hostlabel || r.fqdn,
+            fqdn: r.fqdn,
+            zone: r.zone,
+            type: r.recordType?.endsWith('_CNAME') ? 'CNAME' as const
+              : r.recordType?.endsWith('_TXT') ? 'TXT' as const
+                : r.recordType?.endsWith('_A') ? 'A' as const : 'NS' as const,
+            value: r.requiredValue ?? '',
+            ...(r.currentValue ? { current: r.currentValue } : {}),
+            status: r.status?.endsWith('PROPAGATED') ? 'propagated' as const
+              : r.status?.endsWith('REQUIRES_UPDATE') ? 'requires-update' as const : 'unspecified' as const,
+            purpose: r.purpose?.endsWith('TRAFFIC_ROUTE') ? 'traffic' as const
+              : r.purpose?.endsWith('ACME_DNS01_CHALLENGE') ? 'challenge' as const : 'unspecified' as const,
+          }));
+          // The ownership TXT is disclosed as a host/token pair rather than inside dnsRecords, so it joins the
+          // same list: one renderable set of instructions beats two the UI must merge.
+          const vHost = d.status?.verificationDnsHost;
+          const vToken = d.status?.verificationToken;
+          if (vHost && vToken && !records.some((r) => r.purpose === 'ownership')) {
+            const zone = raw[0]?.zone ?? d.domain.split('.').slice(-2).join('.');
+            records.push({
+              host: vHost,
+              fqdn: vHost.includes('.') ? vHost : `${vHost}.${zone}`,
+              zone,
+              type: 'TXT',
+              value: vToken,
+              status: d.status?.verified ? 'propagated' as const : 'requires-update' as const,
+              purpose: 'ownership' as const,
+            });
+          }
+          if (records.length) recordsByHost[d.domain] = records;
             const cert = d.status?.certificateStatus ?? '';
             const failed = cert === 'CERTIFICATE_STATUS_TYPE_ISSUE_FAILED';
             states[d.domain] = {
@@ -717,7 +759,7 @@ export class RailwayInfraProvider implements InfraProvider {
             };
             if (d.id) ids[d.domain] = d.id;
           }
-          return { domainHosts: Object.keys(states), domainStates: states, domainIds: ids };
+          return { domainHosts: Object.keys(states), domainStates: states, domainIds: ids, domainRecords: recordsByHost };
         })(),
       });
     }
@@ -741,6 +783,24 @@ export class RailwayInfraProvider implements InfraProvider {
         });
         actual = created.serviceDomainCreate.domain ?? domain.host;
       } else {
+        // Availability is asked before the attach, because it is the only source of a human-readable reason:
+        // a refused create returns the bare "Failed to create custom domain, please try again", which cannot
+        // be the cause a tenant is shown (D25). An unclaimable host fails with the provider's own text and
+        // the create is never attempted.
+        const availability = await this.transport.graphql<{ customDomainAvailable: { available: boolean; message: string } }>({
+          operation: 'customDomainAvailable',
+          credential,
+          query: 'query ($domain: String!) { customDomainAvailable(domain: $domain) { available message } }',
+          variables: { domain: domain.host },
+        });
+        if (!availability.customDomainAvailable.available) {
+          failures.push({
+            step: `domains.${domain.host}`,
+            code: 'domain-not-available',
+            message: availability.customDomainAvailable.message || `"${domain.host}" is not available`,
+          });
+          return { host: domain.host, dnsStatus: 'failed' as const };
+        }
         await this.transport.graphql({
           operation: 'customDomainCreate',
           credential,
@@ -778,6 +838,7 @@ export class RailwayInfraProvider implements InfraProvider {
             host: host as StateSnapshot['domains'][number]['host'],
             dnsStatus: state?.dnsStatus ?? 'pending',
             certificateStatus: state?.certificateStatus ?? 'pending',
+            ...(info.domainRecords[host] ? { records: info.domainRecords[host] } : {}),
             targetService: service.name,
           });
         }

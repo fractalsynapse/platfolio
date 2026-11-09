@@ -116,11 +116,33 @@ export const InfraPlanSchema = z.object({
   environments: z.array(EnvironmentPlanSchema).min(1),
 });
 
+/**
+ * A DNS record the provider asked for. Every value here comes from the provider's own disclosure and is
+ * never derived: the routing target is the provider's host and is not computable from the service
+ * hostname, which is why a synthesised record can never validate (D25).
+ */
+export const DnsRecordStateSchema = z.object({
+  /** Short label as a DNS console usually asks for it (`probe`), not the FQDN. */
+  host: z.string().min(1),
+  fqdn: z.string().min(1),
+  /** The zone the record belongs to, because `probe` in one zone is not `probe` in another. */
+  zone: z.string().min(1),
+  type: z.enum(['A', 'CNAME', 'TXT', 'NS']),
+  /** What the provider says to publish. */
+  value: z.string().min(1),
+  /** What the provider currently observes; absent when it observes nothing. */
+  current: z.string().optional(),
+  status: z.enum(['requires-update', 'propagated', 'unspecified']),
+  purpose: z.enum(['traffic', 'ownership', 'challenge', 'unspecified']),
+});
+
 export const DomainStateSchema = z.object({
   host: HostSchema,
   /** pending | verified | failed — mirrors the provider's own DNS/cert reporting. */
   dnsStatus: z.enum(['pending', 'verified', 'failed']),
   certificateStatus: z.enum(['pending', 'issued', 'failed']),
+  /** Records the provider asked for, re-read on every poll: the set can grow after attach. */
+  records: z.array(DnsRecordStateSchema).optional(),
   targetService: NameSchema,
 });
 

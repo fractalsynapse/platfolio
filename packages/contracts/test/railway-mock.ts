@@ -36,6 +36,9 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
   readonly tokens = new Map<string, { id: string; projectId: string; environmentId: string; name: string }>;
   readonly buckets = new Map<string, string>();
   readonly certRetries: string[] = [];
+  /** Hosts the availability check refuses, so a test can prove the create is never attempted. */
+  readonly takenDomains = new Set<string>();
+  readonly domainCreates: string[] = [];
 
   deploys = 0;
   readonly operations: string[] = [];
@@ -229,6 +232,13 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
         instance.limits = { cpu: input.vCPUs ?? 0, memoryMB: Math.round((input.memoryGB ?? 0) * 1024) };
         return { serviceInstanceLimitsUpdate: true } as T;
       }
+      case 'customDomainAvailable': {
+        const domain = v.domain as string;
+        if (this.takenDomains.has(domain)) {
+          return { customDomainAvailable: { available: false, message: `"${domain}" is already attached to another project` } } as T;
+        }
+        return { customDomainAvailable: { available: true, message: 'Available' } } as T;
+      }
       case 'customDomainIssueCertificate': {
         const id = v.id as string;
         if (!id.startsWith('cdom-')) throw new Error('railway customDomainIssueCertificate: domain not found [NOT_FOUND]');
@@ -287,7 +297,34 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
               latestDeployment: { status: instance.status },
               // Mirrors the measured API: custom status is an object, service syncStatus an enum.
               domains: {
-                customDomains: instance.domains.filter((d) => !d.endsWith('.up.railway.app')).map((domain) => ({ id: `cdom-${domain}`, domain, status: { verified: instance.verifiedDomains === false ? false : true, certificateStatus: instance.verifiedDomains === false ? 'CERTIFICATE_STATUS_TYPE_VALIDATING_OWNERSHIP' : 'CERTIFICATE_STATUS_TYPE_VALID' } })),
+                // Records mirror Railway's disclosure: a routing host that is NOT the service hostname,
+                // an ownership TXT pair outside dnsRecords, and REQUIRES_UPDATE until the domain settles.
+                customDomains: instance.domains.filter((d) => !d.endsWith('.up.railway.app')).map((domain) => {
+                  // Nothing is published by the mock, so the honest default is "not yet verified":
+                  // a fresh attach must look like work the tenant still has to do.
+                  const verified = instance.verifiedDomains === true;
+                  const label = domain.split('.')[0] ?? domain;
+                  const zone = domain.split('.').slice(-2).join('.');
+                  return {
+                    id: `cdom-${domain}`,
+                    domain,
+                    syncStatus: instance.settledDomains ? 'ACTIVE' : 'CREATING',
+                    status: {
+                      verified,
+                      certificateStatus: verified ? 'CERTIFICATE_STATUS_TYPE_VALID' : 'CERTIFICATE_STATUS_TYPE_VALIDATING_OWNERSHIP',
+                      verificationDnsHost: `_railway-verify.${label}`,
+                      verificationToken: `railway-verify=${'a'.repeat(64)}`,
+                      dnsRecords: [{
+                        fqdn: domain, hostlabel: label, zone,
+                        recordType: 'DNS_RECORD_TYPE_CNAME',
+                        requiredValue: '1ggsepht.up.railway.app',
+                        ...(verified ? { currentValue: '1ggsepht.up.railway.app' } : {}),
+                        status: verified ? 'DNS_RECORD_STATUS_PROPAGATED' : 'DNS_RECORD_STATUS_REQUIRES_UPDATE',
+                        purpose: 'DNS_RECORD_PURPOSE_TRAFFIC_ROUTE',
+                      }],
+                    },
+                  };
+                }),
                 serviceDomains: instance.domains.filter((d) => d.endsWith('.up.railway.app')).map((domain) => ({ id: `sdom-${domain}`, domain, syncStatus: instance.settledDomains ? 'ACTIVE' : 'CREATING' })),
               },
             },
@@ -303,6 +340,7 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
         return { serviceDomainCreate: { id: `dom-${this.sequence++}`, domain: `service-${input.serviceId}.up.railway.app` } } as T;
       }
       case 'customDomainCreate': {
+        this.domainCreates.push(String((v.input as { domain?: string }).domain ?? ''));
         const input = v.input as { environmentId: string; serviceId: string; domain: string };
         const instance = this.instances.get(`${input.environmentId}:${input.serviceId}`);
         instance?.domains.push(input.domain);
