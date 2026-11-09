@@ -32,6 +32,13 @@ const Service = z.object({
   domains: z.array(z.string().min(1)).default([]),
   dependsOn: z.array(Name).default([]),
   public: z.boolean().default(false),
+  /**
+   * Wiring from a declared database into a service variable. Deliberately NOT part of `secrets[]`: a
+   * reference is resolved by the provider and its name is public configuration, while a secret entry is
+   * something the tenant must supply. Folding them together would put wiring in the panel that tells
+   * tenants what to type (issue #84).
+   */
+  references: z.array(z.object({ variable: Name, database: Name, output: Name.optional() }).strict()).default([]),
 }).strict();
 
 const Resources = z.object({

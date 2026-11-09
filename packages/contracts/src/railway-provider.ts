@@ -237,7 +237,7 @@ export class RailwayInfraProvider implements InfraProvider {
           if (entry.literal === undefined) continue;
           await this.upsertVariable(projectId, environmentId, serviceId, entry.name, entry.literal, token);
         }
-        await this.ensureSecrets(projectId, environmentId, serviceId, service, failures);
+        await this.ensureSecrets(projectId, environmentId, serviceId, service, environment.name, failures);
 
         // Measured on 2026-11-08: ceilings ARE reachable through `serviceInstanceLimitsUpdate`, even
         // though the IaC graph has no field for them. An earlier revision of this provider reported them
@@ -610,7 +610,7 @@ export class RailwayInfraProvider implements InfraProvider {
    * put the value in our memory for no reason, and that is the difference between a claim we can keep and
    * one we cannot.
    */
-  private async ensureSecrets(projectId: string, environmentId: string, serviceId: string, service: ServicePlan, failures: ApplyResult['failures']): Promise<void> {
+  private async ensureSecrets(projectId: string, environmentId: string, serviceId: string, service: ServicePlan, envName: string, failures: ApplyResult['failures']): Promise<void> {
     if (service.secrets.length === 0) return;
     const present = new Set(await this.configVariableNames(projectId, environmentId, serviceId));
     for (const secret of service.secrets) {
@@ -619,7 +619,10 @@ export class RailwayInfraProvider implements InfraProvider {
       }
       if (!present.has(secret.name)) {
         failures.push({
-          step: `services.${service.name}.secrets.${secret.name}`,
+          // The environment belongs in the step: with two environments this failure was reported twice under an
+          // identical step, which tells a tenant nothing about where to set the value (found by the
+          // manifest->plan->provider chain test in #84).
+          step: `environments.${envName}.services.${service.name}.secrets.${secret.name}`,
           code: 'secret-unavailable',
           message: `no variable named "${secret.name}" exists in this environment (source "${secret.source}"); the deploy is not healthy until the tenant supplies it`,
         });

@@ -39,6 +39,9 @@ spec:
         CONTEXT_BUDGET_TOKENS: "120000"
       secrets:
         - { name: APP_API_SIGNING_KEY, source: preserve }
+      # Wiring, not a secret: the provider writes a provider-resolved reference and never holds the value.
+      references:
+        - { variable: DATABASE_URL, database: app-db, output: DATABASE_URL }
       domains: [api.example.com]
       public: true
     worker:
