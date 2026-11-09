@@ -62,7 +62,7 @@ export interface RailwayProviderOptions {
   credentials: RailwayCredentialSource;
   transport?: RailwayTransport;
   workspaceId: string;
-  /** Engine kind -> Railway Template id used to provision managed databases (OD13). */
+  /** Engine kind -> Railway Template code; public catalog entries are read by code (#75). */
   databaseTemplates?: Record<string, string>;
   /**
    * Deploys this provider instance may trigger. The execution plane treats the tenant's daily ceiling as
@@ -103,8 +103,9 @@ export class RailwayInfraProvider implements InfraProvider {
   private readonly deployTimeoutMs: number;
   private readonly pollIntervalMs: number;
   private readonly sleep: (ms: number) => Promise<void>;
-  /** Engine kind -> Railway Template id; ids are Railway's own, looked up not guessed (OD13). */
-  private readonly templateIds: Record<string, string>;
+  /** Engine kind -> Railway Template CODE. Catalog reads authorize by code: template(id:) answers
+  /** "Not Authorized" for public entries even on the workspace grant (#75). */
+  private readonly databaseTemplates: Record<string, string>;
 
   /** Deploys consumed so far; the caller reports this against the tenant's daily ceiling. */
   deploymentsUsed = 0;
@@ -113,7 +114,7 @@ export class RailwayInfraProvider implements InfraProvider {
     this.credentials = options.credentials;
     this.transport = options.transport ?? new HttpRailwayTransport();
     this.workspaceId = options.workspaceId;
-    this.templateIds = { postgres: 'c27544e8-a7e7-450d-9314-bdaa25c734aa', ...options.databaseTemplates };
+    this.databaseTemplates = { postgres: 'postgresql', ...options.databaseTemplates };
     this.deployBudget = options.deployBudget ?? 4;
     this.deployTimeoutMs = options.deployTimeoutMs ?? 180_000;
     this.pollIntervalMs = options.pollIntervalMs ?? 5_000;
@@ -891,9 +892,9 @@ export class RailwayInfraProvider implements InfraProvider {
    */
   private async provisionDatabase(projectId: string, environmentId: string, envName: string, database: { name: string; kind: string }, environment: { name: string; services: ServicePlan[]; databases: { name: string; kind: string }[] }, token: RailwayCredential, serviceIds: Map<string, string>, failures: ApplyResult['failures'], notes: NonNullable<ApplyResult['notes']>): Promise<void> {
     const step = `databases.${database.name}`;
-    const templateId = this.templateIds[database.kind];
-    if (!templateId) {
-      failures.push({ step, code: 'unknown-database-kind', message: `${database.kind} has no template configured on this provider` });
+    const templateCode = this.databaseTemplates[database.kind];
+    if (!templateCode) {
+      failures.push({ step, code: 'unknown-database-kind', message: `${database.kind} has no template code configured on this provider` });
       return;
     }
 
@@ -937,17 +938,22 @@ export class RailwayInfraProvider implements InfraProvider {
       // The catalog read goes on the workspace grant: every live probe that reached a Template did, while an
       // environment-scoped project token is the grant that gets "Bad Access" on project-level operations.
       const workspaceCredential = await this.credentials.workspace();
-      const fetched = await this.transport.graphql<{ template: { serializedConfig?: { services?: Record<string, Record<string, unknown>> } | null } }>({
+      const fetched = await this.transport.graphql<{ template: { id?: string | null; serializedConfig?: { services?: Record<string, Record<string, unknown>> } | null } }>({
         operation: 'template',
         credential: workspaceCredential,
-        query: 'query ($id: String!) { template(id: $id) { serializedConfig } }',
-        variables: { id: templateId },
+        query: 'query ($code: String!) { template(code: $code) { id serializedConfig } }',
+        variables: { code: templateCode },
       });
+      const templateId = fetched.template.id;
       const config = fetched.template.serializedConfig;
+      if (!templateId) {
+        failures.push({ step, code: 'template-config-unexpected', message: `template code "${templateCode}" returned no id to deploy` });
+        return;
+      }
       const services = config?.services ?? {};
       const keys = Object.keys(services);
       if (keys.length !== 1 || !config) {
-        failures.push({ step, code: 'template-config-unexpected', message: `template ${templateId} exposed ${String(keys.length)} services; this provider composes exactly one` });
+        failures.push({ step, code: 'template-config-unexpected', message: `template "${templateCode}" exposed ${String(keys.length)} services; this provider composes exactly one` });
         return;
       }
       const key = keys[0]!;
