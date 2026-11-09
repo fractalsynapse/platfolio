@@ -150,6 +150,13 @@ production-only external service never demands its secrets be filled in a stagin
 no place for them. Whether `railway config plan` honours per-environment resource membership is E21 —
 the shape type-checks here, which is a weaker claim than "it deploys correctly".
 
+Staging is **a duplicate of production, created after the services exist** — measured in E25: Railway has
+no "add service to this environment" call, `environmentCreate(sourceEnvironmentId: …)` copies the services
+present at that moment, and a service added later is absent from the existing duplicate. `cloneFrom`
+therefore carries ordering and completeness meaning, not just "start from this config": a platform that
+grows a service must recreate the environment, and the provider refuses to pretend otherwise
+(`instance-missing-in-environment`). See [the record](../research/railway-token-and-sealing-2026-11-08.md).
+
 The default is **`tenant-side`**, not `relay-sealed` — that ordering was reversed by E18, and the panel
 renders accordingly.
 

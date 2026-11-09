@@ -29,6 +29,17 @@ change; entries describe merged intent, not aspirations.
 
 ### Changed
 
+- **E25 and E28 measured, and both changed the provider.** Placement into a second environment happens
+  **only** by duplicating the environment, and the duplicate is a snapshot — `serviceInstanceUpdate` on an
+  environment without the service returns `true` and does nothing, which is precisely the kind of success
+  a mock will happily reproduce in the wrong direction. The provider now verifies instance placement and
+  reports `instance-missing-in-environment` instead of continuing. `bucketCreate` works but only with the
+  workspace grant (project token: "Bad Access") and accepts no region, so a region in a plan is now
+  disclosed rather than assumed; private databases remain unreachable through `templateDeployV2`
+  ("Problem processing request"), so full-scope conformance still fails deliberately. Measured: **1
+  environment per 30 seconds**, a second throttle beside the project one. The mock's clone also had to be
+  corrected to mint fresh instance ids — reusing the source's made readState report two services with one
+  identity, which the conformance suite rightly called a duplicate.
 - **E26 confirming run: the provider passes reduced-scope conformance against the live Railway API** — 9/9
   in 95 seconds, including a re-apply that is a real no-op (no second deployment, no second hostname) and a
   delete that reports orphans honestly. A zero-deploy probe confirmed secret presence is checked by name

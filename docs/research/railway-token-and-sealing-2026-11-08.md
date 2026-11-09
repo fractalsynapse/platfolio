@@ -295,3 +295,66 @@ without deploying. Two minted tokens revoked; the project deleted; workspace ver
 provider does not implement, so full-scope conformance remains a deliberate fail (E28). Credentials for a
 tenant, OAuth connect, the GitHub dispatch round trip, and JWKS verification are all still unimplemented —
 this run exercised the provider's provider half only.
+
+## E25 — how a service gets into a second environment: duplication, and only duplication
+
+Decisive probe (2 deploys, both to `SUCCESS`, project deleted, 2 tokens revoked). Explicitly per-call
+tokens, because an earlier version of this probe inherited a staging-scoped token for a production write
+and was refused — **the environment scoping is genuinely enforced**, which is the least-privilege property
+D20 was supposed to buy.
+
+| Step | Result |
+| --- | --- |
+| `serviceCreate` in `production` | 1 instance in production, **0 in staging** |
+| `serviceInstanceUpdate(staging, …)` | **returns `true` and does nothing** — no instance created |
+| `serviceCreate` same name, staging | rejected: *"A service named 'web' already exists in this project"* |
+| `serviceInstanceDeploy(staging, …)` | rejected: *"Service Instance not found"* |
+| `environmentUnskipService(staging, web)` | rejected: *"Service is not skipped in this environment"* — not a placement primitive |
+| `environmentCreate(sourceEnvironmentId: production)` | **staging gets an instance for every service that exists at that moment** — fresh instance ids, independently deployable, deploy reached `SUCCESS` |
+| service created **after** the clone | production 2 instances, staging still 1 — **the clone is a snapshot** |
+
+**So: duplication is the placement mechanism, it is a snapshot, and there is no "add service to existing
+environment" call in this API.** That has design consequences rather than just a workaround:
+
+- Environment ordering is semantic. Creating `staging` before the services exist produces an empty
+  environment, and the API will not tell you — `serviceInstanceUpdate` is contentedly true the whole time.
+- A service added to a platform later needs the environment recreated, or it silently exists in
+  production only. The provider now reports `instance-missing-in-environment` and refuses to continue for
+  that service, because a green apply that configured nothing is the worst possible outcome.
+- **A second throttle**: `1 environment per 30 seconds` per workspace, on top of 1 project per 30s. With
+  one environment per instance that is a 30-second floor on tenant onboarding, which belongs in the
+  connect-flow expectations.
+- The mock had been *helping*: it threw `NOT_FOUND` where the real API returns `true`, and it reused the
+  source's instance ids on clone, which made readState report two services sharing one identity. Both
+  behaviours were rewritten to match the measurement, and the tests now pin them so a future edit cannot
+  quietly make the provider look correct again.
+
+## E28 — buckets work with the workspace grant; the private database does not
+
+- **`bucketCreate({ projectId, environmentId, name })` succeeds** with the workspace credential and
+  appears in `project.buckets`. With an environment-scoped project token it is answered
+  **"Bad Access"** — so bucket creation is a workspace-level operation and cannot be delegated to the
+  per-instance token. Recorded in the provider, which now uses the workspace grant for it and takes
+  `BucketCreateInput`'s lack of a region seriously: a plan naming a region gets a
+  `bucket-region-ignored` note instead of a false sense of placement.
+- **Databases are still unimplemented.** `templateSearch(query: "PostgreSQL")` returns templates
+  (`verified=false`), but `templateDeployV2` — with `stageOnly`, with a valid payload selection of
+  `{ projectId operationId }` — is answered with **"Problem processing request"**, the same opaque 200
+  error that hid `isPrivate` earlier, so there is no usable reason to act on. Nothing else in the
+  mutation list looks like a private-service create. Databases therefore stay
+  `unsupported-resource`, which keeps full-scope conformance failing on purpose: a stateless service
+  reported as healthy without its database is worse than a failed apply.
+
+## Deploy accounting for the session, and one leftover
+
+No deploy ceiling was reached — every failure above was validation or authorization, not quota, and the
+API exposes no usage measurement that counts deployments (`MetricMeasurement` is resources only), so the
+total is from this file rather than from Railway: **~19 accepted deploys** (14 during E15–E26, 2 for the
+E26 confirming run, 2 for E25, 1 in the earlier digest probe, plus the E27 pair that produced the single
+coalesced deployment). The dashboard number is authoritative and may differ.
+
+**One resource I could not remove**: `platfolio-e25` still appears in
+`projects(workspaceId, includeDeleted: false)`, while `project(id)` returns **"Project not found"** and
+`projectDelete` returns **Not Authorized**. That combination has no explanation I can verify from here;
+the project is unreachable through the API and needs to be deleted in the Railway dashboard. Recorded
+rather than glossed, because "workspace is empty" is a claim I can no longer make.
