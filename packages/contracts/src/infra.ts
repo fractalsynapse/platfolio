@@ -187,6 +187,8 @@ export const DeleteResultSchema = z.object({
   removed: z.array(z.string().min(1)),
   /** Anything the provider could not remove; a non-empty list must fail the delete. */
   orphans: z.array(z.string().min(1)),
+  /** Why a resource could not be removed. Orphans with no reason are unactionable (#80). */
+  failures: z.array(z.object({ step: z.string().min(1), code: NameSchema, message: z.string().min(1) })).optional(),
 });
 
 export const CapabilityInfoSchema = z.object({

@@ -7,6 +7,19 @@ change; entries describe merged intent, not aspirations.
 
 ### Changed
 
+- **A refused delete now says why (#80).** `deleteInstance`'s empty `catch` swallowed every `serviceDelete`
+  error, so absence and refusal were indistinguishable and a surviving database was reported as a bare orphan.
+  Placement is checked with an environment token (best-effort: the read itself must not become the failure it
+  reports), and `DeleteResult.failures` (additive, optional) carries the provider's reason. Volumes are
+  removed before services, since a volume holds its service.
+- **`database-provision-timeout` is tested in both directions (#79).** The double's constructor whitelists its
+  options and had been silently dropping `templateNeverReveals`, so an earlier version of this test asserted
+  nothing; with normalization fixed, one plan verifies when the service appears and yields the timeout code
+  when it never does.
+
+
+### Changed
+
 - **The catalog is generic (D28): no platform identities in code or templates.** `templates/treedx` and
   `templates/arcnexus` became `templates/example-web-app` and `templates/example-full-stack` — still the two
   shapes that exercise the renderer, but carrying no tenant's product name. Scrubbed from code, fixtures and

@@ -33,6 +33,28 @@ test('the provider waits for an asynchronous template deploy instead of declarin
   assert.equal(mock.templateDeploys.length, 1, 'provisioned once for a database declared in both environments');
 });
 
+test('a template deploy that never surfaces is a timeout, not a missing resource (#79)', async () => {
+  // Proven in both directions with the same plan: templateRevealAfter 2 verifies, never-reveals yields
+  // database-provision-timeout. The double's option normalization used to drop this flag silently, which is
+  // why an earlier version of this test passed while asserting nothing.
+  const never = harness({ templateNeverReveals: true });
+  const p = plan((x) => { x.environments[0]!.databases = [{ name: 'app-db', kind: 'postgres' }]; x.environments[1]!.databases = []; });
+  const applied = await never.provider.applyPlan(p);
+  const timeout = applied.failures.find((f) => f.code === 'database-provision-timeout');
+  assert.ok(timeout, JSON.stringify(applied.failures.map((f) => f.code)));
+  assert.equal(timeout.step, 'databases.app-db');
+  assert.match(timeout.message, /accepted but surfaced no placed service/, 'slow is not the same as refused');
+  assert.equal(never.mock.hiddenServiceCount(), 1, 'the service stayed hidden for the whole window');
+  assert.equal(applied.verified, false);
+
+  // Control: same plan, the service appears after a couple of reads -> verified, no timeout.
+  const ok = harness({ templateRevealAfter: 2 });
+  const p2 = plan((x) => { x.environments[0]!.databases = [{ name: 'app-db', kind: 'postgres' }]; x.environments[1]!.databases = []; });
+  const applied2 = await ok.provider.applyPlan(p2);
+  assert.deepEqual(applied2.failures.map((f) => f.code), [], JSON.stringify(applied2.failures.map((f) => f.code)));
+  assert.equal(applied2.verified, true);
+});
+
 test('volumes are created attached to their service and verified against the project listing', async () => {
   const { mock, provider } = harness();
   const p = plan((x) => {
@@ -60,6 +82,22 @@ test('a volume targeting an undeclared service is rejected before any resource i
   // provider reporting a failure after resources were created.
   await assert.rejects(() => provider.applyPlan(p), /unknown service "does-not-exist"/);
   assert.equal(mock.projects.size, 0, 'no project was created for an invalid plan');
+});
+
+test('a refused database delete is reported WITH the reason, not as a bare orphan (#80)', async () => {
+  const mock = new RailwayMock({ refuseTemplateServiceDelete: true });
+  const provider = new RailwayInfraProvider({ credentials: mock, transport: mock, workspaceId: 'ws-1', deployBudget: 20, deployTimeoutMs: 4_000, pollIntervalMs: 1, sleep: async () => {} });
+  const p = plan((x) => {
+    x.environments[0]!.databases = [{ name: 'app-db', kind: 'postgres' }];
+    x.environments[1]!.databases = [];
+    x.environments[1]!.volumes = [];
+  });
+  await provider.applyPlan(p);
+  const deleted = await provider.deleteInstance(p.instanceId);
+  assert.ok(deleted.orphans.length, 'the template-created service survives, as it did live');
+  assert.ok(deleted.failures?.length, `no failures recorded: ${JSON.stringify(deleted)}`);
+  assert.match(deleted.failures![0]!.message, /Bad Access for template-created service/);
+  assert.ok(deleted.failures![0]!.step.startsWith('service:'), deleted.failures![0]!.step);
 });
 
 test('deleteInstance removes volumes too, and reports any that survive', async () => {
