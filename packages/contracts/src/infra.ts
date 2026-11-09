@@ -84,6 +84,7 @@ export const ServicePlanSchema = z.object({
   limits: z.object({ cpu: z.number().positive(), memoryMB: z.number().int().positive() }),
   env: z.array(z.object({ name: NameSchema, literal: z.string().optional() }).strict()),
   secrets: z.array(SecretRefSchema),
+  references: z.array(z.object({ variable: NameSchema, database: NameSchema, output: NameSchema.optional() }).strict()).optional(),
 });
 
 export const DomainPlanSchema = z.object({
@@ -101,6 +102,7 @@ export const EnvironmentPlanSchema = z.object({
   domains: z.array(DomainPlanSchema),
   databases: z.array(z.object({ name: NameSchema, kind: z.enum(['postgres', 'redis', 'mysql']) })),
   buckets: z.array(z.object({ name: NameSchema, region: NameSchema.optional() })),
+  volumes: z.array(z.object({ name: NameSchema, service: NameSchema, mountPath: z.string().startsWith('/'), sizeMB: z.number().int().positive().optional() })).optional(),
 });
 
 export const InfraPlanSchema = z.object({
@@ -252,6 +254,20 @@ export function planIssues(plan: unknown): Issue[] {
   if (new Set(names).size !== names.length) issues.push({ path: ['environments'], code: 'duplicate-environment', message: 'environment names must be unique' });
   for (const env of data.environments) {
     const services = new Set(env.services.map((s) => s.name));
+
+    const databases = new Set(env.databases.map((d) => d.name));
+    for (const service of env.services) {
+      for (const reference of service.references ?? []) {
+        if (!databases.has(reference.database)) {
+          issues.push({ path: ['environments', env.name, 'services', service.name, 'references', reference.variable], code: 'unknown-database', message: `references database "${reference.database}" is not declared by "${env.name}"` });
+        }
+      }
+    }
+    for (const volume of env.volumes ?? []) {
+      if (!services.has(volume.service)) {
+        issues.push({ path: ['environments', env.name, 'volumes', volume.name, 'service'], code: 'unknown-service', message: `volume "${volume.name}" mounts into unknown service "${volume.service}"` });
+      }
+    }
     for (const d of env.domains) {
       if (!services.has(d.service)) {
         issues.push({ path: ['environments', env.name, 'domains', d.host], code: 'unknown-service', message: `domain targets service "${d.service}" which is not in environment "${env.name}"` });

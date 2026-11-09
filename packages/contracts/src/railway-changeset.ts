@@ -66,8 +66,9 @@ export function buildDesiredGraph(plan: InfraPlan, environment: EnvironmentPlan)
       config: bucket.region ? { region: bucket.region } : {},
     }));
   }
-  // Volumes appear in this graph as `type: "volume"` plus `volumeAttachments` on the service (see the
-  // fixture), but EnvironmentPlan declares none -- not invented here. Follow-up: add volumes to the plan.
+  for (const volume of environment.volumes ?? []) {
+    resources.push(node({ address: `volume.${volume.name}`, type: 'volume', name: volume.name, config: volume.sizeMB ? { sizeMB: volume.sizeMB } : {} }));
+  }
 
   for (const service of environment.services) {
     const variables: Record<string, GraphVariable> = {};
@@ -78,14 +79,19 @@ export function buildDesiredGraph(plan: InfraPlan, environment: EnvironmentPlan)
       // `preserve` is the whole point: the value stays in Railway and never crosses platfolio.
       if (secret.source === 'preserve' || secret.source === 'shared-variable') variables[secret.name] = { type: 'preserve' };
     }
-    // `{ type: "reference", resource: "database.x", output: "DATABASE_URL" }` is how the graph wires a
-    // generated URL into a service. The plan cannot express it yet -- ServicePlanSchema has no reference
-    // field -- so no database wiring is emitted rather than approximating it with preserve().
+
+    for (const reference of service.references ?? []) {
+      if (!environment.databases.some((d) => d.name === reference.database)) {
+        throw new Error(`service "${service.name}" references database "${reference.database}", which "${environment.name}" does not declare`);
+      }
+      variables[reference.variable] = { type: 'reference', resource: `database.${reference.database}`, output: reference.output ?? 'DATABASE_URL' };
+    }
 
     resources.push(node({
       address: `service.${service.name}`, type: 'service', kind: 'docker-image', name: service.name,
       source: { image: `${service.image}@${service.digest}`, type: 'image' },
       variables,
+      volumeAttachments: Object.fromEntries((environment.volumes ?? []).filter((v) => v.service === service.name).map((v) => [v.name, { mountPath: v.mountPath, volume: `volume.${v.name}` }])),
       deploy: {
         healthcheckPath: service.healthPath,
         numReplicas: service.replicas,
