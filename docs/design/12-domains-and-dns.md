@@ -76,6 +76,7 @@ Per hostname, one row, always with the value they must set and what we currently
 | `record-wrong` | expected vs observed | both values shown; the common cause is pointing at the service hostname instead of the routing host |
 | `ownership-pending` | TXT not seen | publish `_railway-verify.<label>` TXT; some issuers need it, some do not |
 | `issuing` | "Certificate in progress", elapsed | no action; do not re-publish |
+| `awaiting-provider-check` | our resolver sees the record, the provider does not yet | **no action** — measured at ~11–12 minutes for Railway's own verification cadence, so say that instead of showing a stall |
 | `live` | host, port, certificate valid | — |
 | `failed` | reason, re-issue button | `ISSUE_FAILED` carries `certificateErrorType`/`certificateErrorMessage` when present |
 
@@ -107,6 +108,11 @@ agreement cannot make a domain live. A second, optional source is resolving the 
 That belongs behind a seam (`dns.probe`), injectable and testable offline, **advisory only**: our resolver
 may upgrade a row to "published, waiting on provider", never to `live`. If it ever becomes the source of
 green, we have a control plane that disagrees with the thing issuing certificates.
+
+The gap is measured, not hypothetical: after the ownership TXT became publicly resolvable, our resolver and
+`1.1.1.1` agreed within seconds while Railway's `verified` stayed false for **~11–12 minutes** — and for
+those minutes the provider's own state legitimately reads "nothing published", which is the wrong thing to
+tell a tenant who has done the work. The seam earns its place on that number.
 
 ## Contract surface
 
