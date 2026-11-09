@@ -29,6 +29,15 @@ change; entries describe merged intent, not aspirations.
 
 ### Changed
 
+- **`environmentApplyChangeSet` is a trap, and the provider now stays away from it.** Three requests — the
+  CLI's own `desiredGraph`, that plus `variablePolicy`, and a hand-written `changes` array — all returned
+  `status: applied`, `changes: []`, `diagnostics: []`, and created nothing: the endpoint treats the input as
+  an opaque blob and reports success regardless of content, while the CLI computes the diff locally. An
+  endpoint that answers "applied" to anything is the most dangerous kind to automate, because a typo
+  becomes a silent no-op that reports success. Per-resource mutations remain the applied path (proven end to
+  end); the captured graph stays as a state-model reference and a fixture. Also confirmed: **the daily deploy
+  limit is not observable through the API** — `MetricMeasurement` covers resources only, and the only limits
+  ever surfaced in errors were the 1-project-per-30s and 1-environment-per-30s creation throttles.
 - **Plan contract extended to match the graph, and the renderer's domain bug fixed (E24b/E24c).**
   `ServicePlanSchema.references` and `EnvironmentPlan.volumes` now exist (optional, so every existing plan
   stays valid), validated across fields, and emitted by the change-set builder as reference variables,
