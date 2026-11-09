@@ -7,3 +7,4 @@ export * from './secret-delivery.ts';
 export * from './scm-github.ts';
 export * from './railway-transport.ts';
 export { RailwayInfraProvider, type RailwayProviderOptions } from './railway-provider.ts';
+export * from './railway-changeset.ts';

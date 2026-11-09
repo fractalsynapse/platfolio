@@ -1,0 +1,111 @@
+{
+  "project": {
+    "name": "platfolio-iac-sample"
+  },
+  "resources": [
+    {
+      "address": "database.db1",
+      "type": "database",
+      "kind": "database",
+      "name": "db1",
+      "engine": "postgres",
+      "variables": null,
+      "source": {
+        "image": "ghcr.io/railwayapp-templates/postgres-ssl:18",
+        "type": "image"
+      },
+      "build": null,
+      "deploy": null,
+      "networking": null,
+      "volumeAttachments": null,
+      "config": null,
+      "groupId": null,
+      "tracing": null,
+      "cdn": null
+    },
+    {
+      "address": "bucket.media",
+      "type": "bucket",
+      "kind": null,
+      "name": "media",
+      "engine": null,
+      "variables": null,
+      "source": null,
+      "build": null,
+      "deploy": null,
+      "networking": null,
+      "volumeAttachments": null,
+      "config": {
+        "region": "iad"
+      },
+      "groupId": null,
+      "tracing": null,
+      "cdn": null
+    },
+    {
+      "address": "volume.blob-cache",
+      "type": "volume",
+      "kind": null,
+      "name": "blob-cache",
+      "engine": null,
+      "variables": null,
+      "source": null,
+      "build": null,
+      "deploy": null,
+      "networking": null,
+      "volumeAttachments": null,
+      "config": {},
+      "groupId": null,
+      "tracing": null,
+      "cdn": null
+    },
+    {
+      "address": "service.web",
+      "type": "service",
+      "kind": "docker-image",
+      "name": "web",
+      "engine": null,
+      "variables": {
+        "DATABASE_URL": {
+          "output": "DATABASE_URL",
+          "resource": "database.db1",
+          "type": "reference"
+        },
+        "PLAIN": {
+          "type": "literal",
+          "value": "plain-value"
+        },
+        "SECRET_HERE": {
+          "type": "preserve"
+        }
+      },
+      "source": {
+        "image": "docker.io/library/nginx:alpine",
+        "type": "image"
+      },
+      "build": null,
+      "deploy": {
+        "healthcheckPath": "/",
+        "numReplicas": 2
+      },
+      "networking": null,
+      "volumeAttachments": {
+        "blob-cache": {
+          "mountPath": "/data",
+          "volume": "volume.blob-cache"
+        }
+      },
+      "config": null,
+      "groupId": null,
+      "tracing": null,
+      "cdn": null
+    }
+  ],
+  "variablePolicy": {
+    "managed": true,
+    "ignore": [],
+    "default": true,
+    "ignoredCount": 0,
+    "byPattern": {}
+  }
+}

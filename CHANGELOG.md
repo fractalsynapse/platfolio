@@ -29,6 +29,14 @@ change; entries describe merged intent, not aspirations.
 
 ### Changed
 
+- **E24: the config-as-code payload is captured, not guessed.** `railway config plan --json` output is
+  committed as a fixture and the new change-set builder is shape-tested against it — `{ project,
+  resources }` with a fixed 15-key node, managed databases as Railway template images, variables in three
+  forms (`literal` / `preserve` / `reference`), and **no custom domains in IaC**, which exposes a renderer
+  bug (we emit `domains:` today) and confirms the secret-custody design: `preserve()` is the provider's own
+  primitive. `environmentPreviewChangeSet` gives a zero-side-effect way to check a payload, replacing the
+  loop that produced nothing but silent `applied` results. Not applied live yet: the reference form needs a
+  field on `ServicePlanSchema` first, and the tenant deploy ceiling should reset before spending deploys.
 - **"Databases are unsupported" was wrong, and the correction is a rule, not a one-off.** One failed
   mutation was reported as a provider limit; the maintainer's pushback was right. Follow-up found
   `railway/iac`'s first-class `type: "database", engine: "postgres"` resource and

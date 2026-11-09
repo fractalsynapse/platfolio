@@ -398,3 +398,37 @@ against a scratch project, using the maintainer's own `railway login`. Not `--sh
 goes to `.research/plan/`, which is gitignored and untrackable by the credential-hygiene gate. Until that
 sample exists, the honest status is **not-yet-implemented, mechanism identified** — not "unsupported", and
 not a claim about what Railway can or cannot do.
+
+## E24 solved — the change-set payload, captured rather than guessed
+
+`railway config plan --json` against a graph written with `railway/iac` produced the authoritative shape,
+kept as `packages/contracts/test/fixtures/railway-desired-graph.json`. The envelope is
+`{ project: { name }, resources: [ … ] }` — **an array**, with every node carrying the same 15 keys:
+`address, type, kind, name, engine, variables, source, build, deploy, networking, volumeAttachments,
+config, groupId, tracing, cdn`.
+
+Three findings that change the provider:
+
+- **A managed database is a template image.** `postgres('db1')` compiles to
+  `{ type: "database", kind: "database", engine: "postgres", source: { image:
+  "ghcr.io/railwayapp-templates/postgres-ssl:18", type: "image" } }`. Nothing exotic — which is why
+  "unsupported" was the wrong conclusion, and why the earlier `templateDeployV2` failure meant nothing.
+- **Variables have exactly three forms**, and they are our manifest's `value_source` semantics
+  materialised: `{ type: "literal", value }`, `{ type: "preserve" }`, and
+  `{ type: "reference", resource: "database.db1", output: "DATABASE_URL" }`. The reference form has no
+  representation in `ServicePlanSchema` yet, so the builder emits none rather than faking it with
+  `preserve()`.
+- **Custom domains are not config-as-code.** The CLI refused ours outright: *"Custom-domain registration
+  is not supported by Railway configuration. Add … in the dashboard."* Domains belong to the API
+  (`serviceDomainCreate` / `customDomainCreate`), so our rendered `.railway/railway.ts` must stop emitting
+  `domains:` — it currently does, which is a renderer bug this run surfaced.
+
+Along the way: `environmentPreviewChangeSet(environmentId, input: JSON)` returns
+`{ changeSet, diagnostics, effects }` with **no side effects**, and echoes the submitted JSON back
+unaltered — including a canary key and a nonsense `type`. That silent tolerance is precisely why payload
+discovery by trial and error was hopeless here, and why the preview call is now the standing loop for
+provider work: verify shape, then apply.
+
+`plan` consumed no deploys (read-only), and `.research/plan/run-plan.sh` reproduces the capture using a
+workspace-local official Node — this machine's distro Node is built without TypeScript support, so the
+CLI's own `node` evaluation fails with `ERR_NO_TYPESCRIPT` until a supported build is on `PATH`.
