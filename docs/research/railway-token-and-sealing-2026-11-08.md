@@ -432,3 +432,44 @@ provider work: verify shape, then apply.
 `plan` consumed no deploys (read-only), and `.research/plan/run-plan.sh` reproduces the capture using a
 workspace-local official Node — this machine's distro Node is built without TypeScript support, so the
 CLI's own `node` evaluation fails with `ERR_NO_TYPESCRIPT` until a supported build is on `PATH`.
+
+## Why `environmentApplyChangeSet` must not be automated yet
+
+Follow-up to E24, after the maintainer released the deploy budget for confirmation. Two applies and one
+preview, all against the existing empty sample project — **and nothing was ever created** (`services: []`
+after each), so no deployment was consumed despite the attempts.
+
+What was ruled out, in order:
+
+| Input sent | Server answer |
+| --- | --- |
+| `{version, project:{name}, resources:[fully-specified 15-key node]}` (the CLI's own `desiredGraph`) | `status: applied`, `changes: []`, `diagnostics: []` |
+| same plus `variablePolicy` (the other field the CLI's output carried) | identical: applied, nothing |
+| `{version, changes:[{kind:"resource.create", summary:"Create service web", …}]}` | **`changes` echoed back verbatim**, still `applied`, still nothing created |
+
+That last row is the conclusion: **the endpoint treats the input as an opaque blob, stores it as the change
+set, and reports `applied` regardless of content.** It does not compute a diff — the `changes` list in
+`railway config plan --json` comes from the CLI's own native engine, which diffs `currentGraph` against
+`desiredGraph` locally (`plan.json` carries both, plus `diff`, `command: "plan"`, and `applyResult: null`).
+
+Consequences, applied rather than noted:
+
+- The captured `desiredGraph` is still valuable — it documents the *state model* Railway converges on,
+  which is why the builder and its fixture/shape tests stay. It is not a request format.
+- **The provider does not call `environmentApplyChangeSet`, and must not until the real request format is
+  captured** (the only route left is observing the CLI's outgoing HTTP body — a proxy or debug logging —
+  not inference from responses). A mutation that answers `applied` to anything is the most dangerous kind
+  of API to automate: a typo becomes a silent no-op that reports success.
+- The proven path remains per-resource mutations, which we have observed to work end to end: project,
+  environment, token mint, service, variables, deploy to SUCCESS, domains, limits, bucket, delete.
+
+## Is the daily deploy limit observable? No.
+
+Asked directly: it cannot be confirmed from the API. `usage` and `workspaceUsageTotals` require a
+`measurements: [MetricMeasurement!]!` argument, and that enum is **resource metrics only** — CPU, memory,
+disk, network, backups, agent tokens — with no deployment count anywhere. No `Query` field exposes plan
+ceilings or consumption. So the only authoritative sources are the Railway dashboard and the error the API
+produces *when* a limit bites — and the only limits that have actually surfaced in errors during this
+whole session are the two creation throttles: **1 project per 30 seconds** and **1 environment per 30
+seconds**. The daily service cap never appeared in any response, so nothing observed today contradicts or
+confirms 20 versus the older documented 25.
