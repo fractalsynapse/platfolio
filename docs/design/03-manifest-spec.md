@@ -124,6 +124,16 @@ spec:
 
 An archetype is a defaults module plus a validation rule set — not a separate format.
 
+### Domains: literal hosts are provisional (OD12)
+
+The sketch above shows `domains: [ { host: app.example.com, port: 3000 } ]`, which is **fixture data standing in
+for configuration**. One manifest serves many tenants, so it cannot name a domain any more than it can name a
+secret value. The target shape, measured reasoning and the migration are in
+[12 § Where a domain is defined](12-domains-and-dns.md): the manifest declares which services are publicly
+reachable and the host *pattern* (`app`, `api`, wildcard and apex policy); the instance supplies the root domain
+per environment; the plan resolves the two into the concrete hosts the provider already consumes. Until OD12
+lands, treat literal hosts in manifests and templates as examples — never copy one into a platform definition
+intended for more than one tenant.
 ## Secrets
 
 `value_source` is a closed enum, and it is the mechanism that keeps decision D4 true:

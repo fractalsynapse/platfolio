@@ -29,6 +29,24 @@ change; entries describe merged intent, not aspirations.
 
 ### Added
 
+- **Domains and DNS have a design, based on measurement (D25, [12](docs/design/12-domains-and-dns.md)).**
+  Attaching before the tenant publishes anything works on a real zone — my earlier "refused" note came from a
+  nonexistent zone — and the created object returns the authoritative record set (`requiredValue` vs
+  `currentValue`, `PROPAGATED`/`REQUIRES_UPDATE`, plus a `verificationDnsHost`/`verificationToken` TXT pair).
+  So the flow is availability-check → attach → render *Railway's* records → tenant publishes → poll, with
+  infrastructure health and domain health kept as separate axes. The CNAME target is Railway's routing host, not
+  derivable from the service hostname, and `ACME_DNS01_CHALLENGE` proves the record set can grow after attach —
+  hence re-read every poll. **OD12** opens the manifest change: hosts become patterns, root domains become
+  instance config; [03](docs/design/03-manifest-spec.md) marks its literal hosts provisional.
+- **Domain availability is checked before attaching, and required records reach tenant-facing state.**
+  `customDomainAvailable(domain)` is the only source of a human-readable reason, so an unclaimable host fails
+  with `domain-not-available` and the provider's own text instead of Railway's "please try again", and the create
+  call is skipped. `StateSnapshot.domains[].records` carries provider-returned records — host, FQDN, zone, type,
+  required value, observed value, status, purpose — plus the ownership TXT derived from
+  `verificationDnsHost`/`verificationToken`, which is what makes "expected versus observed" renderable.
+
+### Added
+
 - **Domain state is read, not inferred, and failed certificates can be nudged.** Generated service
   domains now report `syncStatus` (CREATING reads as pending even for a `*.up.railway.app` host, which the
   previous hostname inference would have called issued) and custom domains report
