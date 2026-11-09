@@ -27,6 +27,15 @@ change; entries describe merged intent, not aspirations.
   gained a **`scope`** field (`full` / `reduced`) plus a guard that rejects a reduced plan too small to
   exercise the surface, so a reduced run can never be quoted as conformance.
 
+### Added
+
+- **`graphql:check` — every GraphQL document we write is validated against Railway's live schema**
+  (committed introspection snapshot, 697 types) and runs in all three CI tiers. It catches the four bug
+  classes we hit this week by name: a root field that doesn't exist, a guessed input-type name, an
+  object-returning field with no sub-selection, and a wrong argument name. Negative-tested by injecting
+  each one. This is the mechanical answer to an API that answers unknown fields with a runtime error and
+  unknown payloads with `applied`.
+
 ### Changed
 
 - **`environmentApplyChangeSet` is a trap, and the provider now stays away from it.** Three requests — the

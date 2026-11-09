@@ -45,6 +45,14 @@ only substantive change from the starter's policy is scope: this is now an appli
 
 ## Branching and gating
 
+Every tier also runs `graphql:check`: each GraphQL document in the provider and the live-runner script
+is validated against a committed introspection snapshot (`api/railway-schema.json`, refreshable with
+`scripts/refresh-railway-schema.ts`). This exists because Railway's API answers *unknown fields* with a
+validation error at runtime and *unknown payloads* with `status: applied` — so both classes of mistake are
+invisible until a tenant's apply fails or silently succeeds. The check is negative-tested against the four
+bugs it was written for (invented root field, guessed input type name, missing sub-selection, wrong argument
+name).
+
 `staging` accumulates integrated work; `main` carries what has been released. Each kind of change is
 gated by a workflow under `.github/workflows/`, and all three run the same shared checks from
 `scripts/check-project.ts` rather than three private copies of the logic:
