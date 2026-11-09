@@ -84,6 +84,7 @@ export const ServicePlanSchema = z.object({
   limits: z.object({ cpu: z.number().positive(), memoryMB: z.number().int().positive() }),
   env: z.array(z.object({ name: NameSchema, literal: z.string().optional() }).strict()),
   secrets: z.array(SecretRefSchema),
+  references: z.array(z.object({ variable: NameSchema, database: NameSchema, output: NameSchema.optional() }).strict()).optional(),
 });
 
 export const DomainPlanSchema = z.object({
@@ -101,6 +102,7 @@ export const EnvironmentPlanSchema = z.object({
   domains: z.array(DomainPlanSchema),
   databases: z.array(z.object({ name: NameSchema, kind: z.enum(['postgres', 'redis', 'mysql']) })),
   buckets: z.array(z.object({ name: NameSchema, region: NameSchema.optional() })),
+  volumes: z.array(z.object({ name: NameSchema, service: NameSchema, mountPath: z.string().startsWith('/'), sizeMB: z.number().int().positive().optional() })).optional(),
 });
 
 export const InfraPlanSchema = z.object({
@@ -114,11 +116,33 @@ export const InfraPlanSchema = z.object({
   environments: z.array(EnvironmentPlanSchema).min(1),
 });
 
+/**
+ * A DNS record the provider asked for. Every value here comes from the provider's own disclosure and is
+ * never derived: the routing target is the provider's host and is not computable from the service
+ * hostname, which is why a synthesised record can never validate (D25).
+ */
+export const DnsRecordStateSchema = z.object({
+  /** Short label as a DNS console usually asks for it (`probe`), not the FQDN. */
+  host: z.string().min(1),
+  fqdn: z.string().min(1),
+  /** The zone the record belongs to, because `probe` in one zone is not `probe` in another. */
+  zone: z.string().min(1),
+  type: z.enum(['A', 'CNAME', 'TXT', 'NS']),
+  /** What the provider says to publish. */
+  value: z.string().min(1),
+  /** What the provider currently observes; absent when it observes nothing. */
+  current: z.string().optional(),
+  status: z.enum(['requires-update', 'propagated', 'unspecified']),
+  purpose: z.enum(['traffic', 'ownership', 'challenge', 'unspecified']),
+});
+
 export const DomainStateSchema = z.object({
   host: HostSchema,
   /** pending | verified | failed — mirrors the provider's own DNS/cert reporting. */
   dnsStatus: z.enum(['pending', 'verified', 'failed']),
   certificateStatus: z.enum(['pending', 'issued', 'failed']),
+  /** Records the provider asked for, re-read on every poll: the set can grow after attach. */
+  records: z.array(DnsRecordStateSchema).optional(),
   targetService: NameSchema,
 });
 
@@ -150,6 +174,11 @@ export const ApplyResultSchema = z.object({
   services: z.array(ServiceStateSchema),
   domains: z.array(DomainStateSchema),
   failures: z.array(z.object({ step: z.string().min(1), code: NameSchema, message: z.string().min(1) })),
+  // Informational observations that do not contradict the plan. Kept separate from failures
+  // on purpose: the first revision of the Railway provider recorded a placement fallback as a
+  // failure, which made a correct apply report itself unverified. Notes must never downgrade a
+  // claim quietly, and failures must never be demoted to notes to buy a green.
+  notes: z.array(z.object({ step: z.string().min(1), code: NameSchema, message: z.string().min(1) })).optional(),
   noop: z.boolean(),
 });
 
@@ -247,6 +276,20 @@ export function planIssues(plan: unknown): Issue[] {
   if (new Set(names).size !== names.length) issues.push({ path: ['environments'], code: 'duplicate-environment', message: 'environment names must be unique' });
   for (const env of data.environments) {
     const services = new Set(env.services.map((s) => s.name));
+
+    const databases = new Set(env.databases.map((d) => d.name));
+    for (const service of env.services) {
+      for (const reference of service.references ?? []) {
+        if (!databases.has(reference.database)) {
+          issues.push({ path: ['environments', env.name, 'services', service.name, 'references', reference.variable], code: 'unknown-database', message: `references database "${reference.database}" is not declared by "${env.name}"` });
+        }
+      }
+    }
+    for (const volume of env.volumes ?? []) {
+      if (!services.has(volume.service)) {
+        issues.push({ path: ['environments', env.name, 'volumes', volume.name, 'service'], code: 'unknown-service', message: `volume "${volume.name}" mounts into unknown service "${volume.service}"` });
+      }
+    }
     for (const d of env.domains) {
       if (!services.has(d.service)) {
         issues.push({ path: ['environments', env.name, 'domains', d.host], code: 'unknown-service', message: `domain targets service "${d.service}" which is not in environment "${env.name}"` });

@@ -1,7 +1,7 @@
 {
   "name": "platfolio",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "description": "platfolio control plane. Design phase: this manifest exists to make repository tooling and CI gates reproducible, not to publish a package.",
   "packageManager": "pnpm@12.4.2",
@@ -15,10 +15,12 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "tsx --test packages/*/test/*.test.ts",
     "contracts:check": "tsx scripts/check-contracts.ts",
-    "verify": "pnpm run lock:check && pnpm run install:check && pnpm run check && pnpm run vendor:verify && pnpm run typecheck && pnpm run test && pnpm run contracts:check",
+    "verify": "pnpm run lock:check && pnpm run install:check && pnpm run check && pnpm run vendor:verify && pnpm run graphql:check && pnpm run typecheck && pnpm run test && pnpm run contracts:check",
     "render:example": "tsx packages/kernel/src/cli.ts render templates/treedx/manifest.yaml",
     "install:check": "pnpm install --frozen-lockfile --prefer-offline",
-    "lock:check": "tsx scripts/check-lockfile.ts"
+    "lock:check": "tsx scripts/check-lockfile.ts",
+    "graphql:check": "tsx scripts/check-graphql-schema.ts",
+    "graphql:snapshot": "tsx scripts/refresh-railway-schema.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

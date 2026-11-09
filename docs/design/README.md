@@ -22,6 +22,7 @@ the check before implementing and 01 as the record of what was decided.
 | [09](09-delivery-plan.md) | Delivery plan | Milestone 0 experiments with pass criteria (E1–E12), M1–M6 with observable acceptance, prerequisites P1–P8, standing risks, pending decisions |
 | [10](10-cordis-kernel-and-extension-seams.md) | Cordis kernel and extension seams | What Cordis actually is (read from source), where it fits, the two-tier extension model that keeps the zero-secret invariant true, twelve capability seams, contract-derived versioning, eight named risks, OD6–OD7 |
 | [11](11-ui-components-and-page-model.md) | UI components and page model | Cordis is not the frontend answer; the component-library rules that make mobile cheap; pages as data with one deliberate escape hatch; app-store prerequisites |
+| [12](12-domains-and-dns.md) | Domains and DNS | Records are read from the provider, never synthesised; the tenant always manages their own DNS |
 
 Evidence base, not restated here:
 

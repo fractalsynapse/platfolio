@@ -5,6 +5,181 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-09
+
+First release since `0.1.0`, and **a minor bump rather than the patch `0.1.1` that was requested**:
+diffing the contract surface from `0.1.0` to this candidate gives 671 added declarations and no
+removals — the two lines that look like deletions are widenings (`runConformance` gained an optional
+third parameter, and the `RailwayInfraProvider` export gained a companion type), both callable exactly
+as before. Project policy is that additive means minor, and under 0.x a patch number signals
+fixes-only, which this is not: it carries a working provider, three new contracts, and a CI gate that
+did not exist.
+
+**Scope actually shipped.** The contracts layer (transport, provider, credential broker, secret
+delivery, SCM seam, attestation, conformance), the manifest renderer's environment model, the page
+schema's secrets panel, the credential-hygiene and lockfile gates, and `graphql:check` against a
+committed Railway schema snapshot. Corrected claims are part of this release too — several findings
+from the `0.1.0` era were wrong in ways that would have reached a tenant.
+
+**Scope deliberately not claimed.** M1 step 6 (Docker build and staging deployment of platfolio's own
+stack) and step 7 (its manifest) are open; M2's live half (OAuth connect, install PR, real dispatch,
+runner claims, JWKS) has not been exercised; databases and volumes are unimplemented; the manifest
+host-pattern change is **OD12**; and no control-plane service exists yet, so nothing here is deployed
+or reachable. See [09](docs/design/09-delivery-plan.md) for the honest state of each milestone.
+
+### Added
+
+- **The Railway provider is real now.** `packages/contracts/src/railway-transport.ts` carries the
+  credential model the measurements forced: a workspace grant for project/environment/token creation, an
+  environment-scoped token for service work, and the `Project-Access-Token` header chosen by credential
+  **kind** rather than by the caller. It also holds `HttpRailwayTransport` — Railway answers
+  authorization denials as HTTP 200 with `errors[]`, so anything that is not `data` is treated as an error
+  — and `MintingRailwayCredentials`, which mints per-environment tokens and can revoke what it created.
+  `RailwayInfraProvider` implements `applyPlan` / `readState` / `deleteInstance`: idempotent by
+  `planHash` through a marker in the project description, per-environment instance placement, service and
+  custom domains with certificate state reported as the provider sees it, configuration written with
+  `skipDeploys` so a variable write never triggers an unintended redeploy, secrets verified by **name
+  presence** through the value-redacting `Environment.config` and never through `variables()` (which is
+  the call that would actually return them), ceilings applied via `serviceInstanceLimitsUpdate`, and a
+  hard per-instance deploy budget reflecting the tenant's daily ceiling. `packages/kernel` wires the
+  selection through the Cordis boundary and refuses to boot a Railway provider with no workspace or
+  credential source.
+- **`ApplyResult.notes`**, so an observation cannot masquerade as a failure: the first revision recorded a
+  placement fallback as a failure and made a correct apply report itself unverified. The conformance suite
+  gained a **`scope`** field (`full` / `reduced`) plus a guard that rejects a reduced plan too small to
+  exercise the surface, so a reduced run can never be quoted as conformance.
+
+### Added
+
+- **The full domain lifecycle was run against a real tenant domain, and it is documented with timings.**
+  Attach with no DNS → `CREATING`/`REQUIRES_UPDATE`; CNAME published → `ACTIVE`/`PROPAGATED` but still
+  unverified; ownership TXT published → `verified: true` after a measured **~11–12 minute** provider
+  verification cadence, then `certificateStatus: VALID` and a Let's Encrypt leaf (90-day) served at the edge
+  for `probe.fractalsynapse.com`. Cost: zero deployments. Two design points settled by evidence: the
+  ownership record never appears in `dnsRecords`, so a checklist built from that array is provably
+  incomplete; and the resolver-vs-provider disagreement window is real, which is what justifies the
+  `dns.probe` seam as advisory-only. `ACME_DNS01_CHALLENGE` was never required here, so the provider's
+  `challenge` mapping is forward-compatible handling rather than exercised behaviour.
+
+### Added
+
+- **Domains and DNS have a design, based on measurement (D25, [12](docs/design/12-domains-and-dns.md)).**
+  Attaching before the tenant publishes anything works on a real zone — my earlier "refused" note came from a
+  nonexistent zone — and the created object returns the authoritative record set (`requiredValue` vs
+  `currentValue`, `PROPAGATED`/`REQUIRES_UPDATE`, plus a `verificationDnsHost`/`verificationToken` TXT pair).
+  So the flow is availability-check → attach → render *Railway's* records → tenant publishes → poll, with
+  infrastructure health and domain health kept as separate axes. The CNAME target is Railway's routing host, not
+  derivable from the service hostname, and `ACME_DNS01_CHALLENGE` proves the record set can grow after attach —
+  hence re-read every poll. **OD12** opens the manifest change: hosts become patterns, root domains become
+  instance config; [03](docs/design/03-manifest-spec.md) marks its literal hosts provisional.
+- **Domain availability is checked before attaching, and required records reach tenant-facing state.**
+  `customDomainAvailable(domain)` is the only source of a human-readable reason, so an unclaimable host fails
+  with `domain-not-available` and the provider's own text instead of Railway's "please try again", and the create
+  call is skipped. `StateSnapshot.domains[].records` carries provider-returned records — host, FQDN, zone, type,
+  required value, observed value, status, purpose — plus the ownership TXT derived from
+  `verificationDnsHost`/`verificationToken`, which is what makes "expected versus observed" renderable.
+
+### Added
+
+- **Domain state is read, not inferred, and failed certificates can be nudged.** Generated service
+  domains now report `syncStatus` (CREATING reads as pending even for a `*.up.railway.app` host, which the
+  previous hostname inference would have called issued) and custom domains report
+  `status.verified`/`certificateStatus` (VALID / ISSUING / VALIDATING_OWNERSHIP / ISSUE_FAILED). Apply-time
+  domain status re-reads the provider instead of assuming issuance follows creation, since a custom domain
+  waits on DNS the tenant still owns. `retryCertificate(domainId)` calls `customDomainIssueCertificate`
+  using the id Railway issued — kept outside the five-operation contract deliberately, so no provider can
+  be assumed to have it.
+
+### Added
+
+- **`graphql:check` — every GraphQL document we write is validated against Railway's live schema**
+  (committed introspection snapshot, 697 types) and runs in all three CI tiers. It catches the four bug
+  classes we hit this week by name: a root field that doesn't exist, a guessed input-type name, an
+  object-returning field with no sub-selection, and a wrong argument name. Negative-tested by injecting
+  each one. This is the mechanical answer to an API that answers unknown fields with a runtime error and
+  unknown payloads with `applied`.
+
+### Changed
+
+- **`environmentApplyChangeSet` is a trap, and the provider now stays away from it.** Three requests — the
+  CLI's own `desiredGraph`, that plus `variablePolicy`, and a hand-written `changes` array — all returned
+  `status: applied`, `changes: []`, `diagnostics: []`, and created nothing: the endpoint treats the input as
+  an opaque blob and reports success regardless of content, while the CLI computes the diff locally. An
+  endpoint that answers "applied" to anything is the most dangerous kind to automate, because a typo
+  becomes a silent no-op that reports success. Per-resource mutations remain the applied path (proven end to
+  end); the captured graph stays as a state-model reference and a fixture. Also confirmed: **the daily deploy
+  limit is not observable through the API** — `MetricMeasurement` covers resources only, and the only limits
+  ever surfaced in errors were the 1-project-per-30s and 1-environment-per-30s creation throttles.
+- **Plan contract extended to match the graph, and the renderer's domain bug fixed (E24b/E24c).**
+  `ServicePlanSchema.references` and `EnvironmentPlan.volumes` now exist (optional, so every existing plan
+  stays valid), validated across fields, and emitted by the change-set builder as reference variables,
+  volume nodes and `volumeAttachments`. A reference to an undeclared database throws instead of producing a
+  dangling link. Meanwhile `.railway/railway.ts` no longer declares `domains:` — Railway's CLI rejects
+  custom-domain registration in configuration — and the hosts are recorded as a comment only for the
+  environments the service is actually placed in, because a production-only service must not gain a staging
+  host even in prose.
+- **E24: the config-as-code payload is captured, not guessed.** `railway config plan --json` output is
+  committed as a fixture and the new change-set builder is shape-tested against it — `{ project,
+  resources }` with a fixed 15-key node, managed databases as Railway template images, variables in three
+  forms (`literal` / `preserve` / `reference`), and **no custom domains in IaC**, which exposes a renderer
+  bug (we emit `domains:` today) and confirms the secret-custody design: `preserve()` is the provider's own
+  primitive. `environmentPreviewChangeSet` gives a zero-side-effect way to check a payload, replacing the
+  loop that produced nothing but silent `applied` results. Not applied live yet: the reference form needs a
+  field on `ServicePlanSchema` first, and the tenant deploy ceiling should reset before spending deploys.
+- **"Databases are unsupported" was wrong, and the correction is a rule, not a one-off.** One failed
+  mutation was reported as a provider limit; the maintainer's pushback was right. Follow-up found
+  `railway/iac`'s first-class `type: "database", engine: "postgres"` resource and
+  `CompileResult.desiredConfig: EnvironmentConfig`, so managed databases are created through the
+  config-as-code change set — the E24 path. Every shape this build tried is answered `applied` with
+  `changes: []`, *including a deliberately invalid resource type*, while a missing or string `version`
+  errors outright: the version is validated and nothing after it is, so the payload is deserialising to
+  empty. Status is now "not implemented, mechanism identified, `plan --json` needed", which is also what
+  E28's row and the provider's own failure message say.
+- **E25 and E28 measured, and both changed the provider.** Placement into a second environment happens
+  **only** by duplicating the environment, and the duplicate is a snapshot — `serviceInstanceUpdate` on an
+  environment without the service returns `true` and does nothing, which is precisely the kind of success
+  a mock will happily reproduce in the wrong direction. The provider now verifies instance placement and
+  reports `instance-missing-in-environment` instead of continuing. `bucketCreate` works but only with the
+  workspace grant (project token: "Bad Access") and accepts no region, so a region in a plan is now
+  disclosed rather than assumed; private databases remain unreachable through `templateDeployV2`
+  ("Problem processing request"), so full-scope conformance still fails deliberately. Measured: **1
+  environment per 30 seconds**, a second throttle beside the project one. The mock's clone also had to be
+  corrected to mint fresh instance ids — reusing the source's made readState report two services with one
+  identity, which the conformance suite rightly called a duplicate.
+- **E26 confirming run: the provider passes reduced-scope conformance against the live Railway API** — 9/9
+  in 95 seconds, including a re-apply that is a real no-op (no second deployment, no second hostname) and a
+  delete that reports orphans honestly. A zero-deploy probe confirmed secret presence is checked by name
+  against the real `Environment.config`, and the deploy budget refused without deploying. Because the run
+  was single-environment, **E25 stays open**, and full-scope conformance still fails until databases and
+  buckets exist (E28).
+- **E27: the overlapping-deploy theory was wrong, and the truth was smaller and worse.** Back-to-back
+  `serviceInstanceDeploy` calls coalesce into one deployment on Railway; the stack of `FAILED`
+  deployments was mine — `projectUpdate` returns `Project!` and my call had no sub-selection, so the plan
+  marker was never written and every apply re-deployed the world. Fixed: the selection, the marker written
+  **before** mutating (a partially-applied plan must not make its own retry destructive), and a hostname
+  check because `serviceDomainCreate` is not idempotent. The mock had agreed with the bug; it now rejects
+  selection-less mutations — and the first version of *that* guard matched the wrong parentheses and could
+  never fail, caught only by breaking a query on purpose and watching the suite stay green.
+- **E26 ran the conformance suite against the live Railway API, and it overturned four assumptions the
+  mock had been happily agreeing to.** A tagless `repo@sha256:…` reference is accepted and then
+  **never deploys** (20+ minutes in `DEPLOYING`; the tagged `repo:tag@sha256:…` form reached `SUCCESS` in
+  ~20s), so `image` now requires a tag alongside the digest in both validators. `CustomDomain.status` is
+  an object, not a string. There is no root `serviceInstances` query — instances hang off `Environment`.
+  A workspace allows **one project creation per 30 seconds**, which bounds onboarding throughput and had
+  to be respected in the runner. And an HTTP request with no deadline hung a whole run, so the transport
+  aborts at 25s by default. `DeploymentStatus` was mapped exhaustively from introspection, which exposed
+  that `NEEDS_APPROVAL` — the state that must reach a tenant as an action — was missing. Repeated
+  overlapping deploys produced `FAILED` with `diagnosis: null`, recorded as **E27** rather than guessed
+  at, along with the design lesson that an idempotency marker has to be written *before* the mutating
+  call. Evidence: [research record](docs/research/railway-token-and-sealing-2026-11-08.md).
+- **Two claims corrected, both generalized from the wrong artifact.** Resource ceilings are not
+  un-settable in Railway — they are unexpressible in the **IaC graph**, and the API sets them, so the
+  provider now does ([03](docs/design/03-manifest-spec.md)). And Railway services are project-level while
+  the deployed thing is the per-environment **instance**: an apply that updated without ensuring placement
+  silently stopped configuring the second environment, and readState must report instance identity while
+  domain calls take service identity. Which call the real API wants for cross-environment placement is
+  now **E25**, with **E26** running the conformance suite live.
+
 ## [0.1.0] - 2026-11-08
 
 First tagged release. It is the **contract layer**, not a running product: versioned capability

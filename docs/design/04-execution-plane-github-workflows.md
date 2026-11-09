@@ -54,6 +54,7 @@ Contracts exist and are tested; nothing here talks to GitHub or Railway yet.
 | Secret delivery (D21) | **implemented**: `RelaySecretDelivery` with the four modes; a relayed value reaches exactly one place — the provider port. Receipts, log sinks, recorded surfaces and error paths are asserted value-free, and refusing to write an unsealed secret is a visible degrade, not a silent fallback |
 | SCM seam (D22) | **implemented for the credential-free half**: `GithubAppProvider` builds the manifest (permissions as a literal object so widening is a visible diff), the registration URL with an unguessable state, state-checked callback consumption and the install link; `GithubPatProvider` satisfies the same interface with fewer advertised operations. Network half not implemented |
 | Environment placement (D23) | **implemented in the manifest layer**: `ownership` + `environments`, per-environment host-overlap validation, `ctx.isEnvironment(...)` guarded declarations, staging hosts derived by `dns.stagingPrefix` and never reused |
+| Railway provider | **live-verified at reduced scope (E26, 2026-11-08)**: create project → environment → mint token → create service from `repo:tag@digest` → write configuration → deploy to `SUCCESS` → read back state including hostnames and certificate status → re-apply as a genuine no-op → delete with orphan reporting. Full-scope conformance still fails by design: databases and buckets are unimplemented (E28) |
 | JWKS signature verification, live dispatch, live runner claims | **not implemented** | deliberately absent: signature verification belongs to the transport layer, which must pin the issuer; `verifyAttestation` accepts claims, not a raw JWT, so the boundary is explicit in the types |
 | `actions/platfolio` composite action, GitHub App registration, tenant credential custody | **not implemented** | needs a real App installation and a tenant repository: see E2/E5 in the delivery plan |
 
@@ -108,6 +109,17 @@ in this design, not a detail.
 Things deliberately **not** asked of a tenant: creating tokens, creating GitHub environments, learning
 the provider's UI, installing anything on a laptop, opening a tunnel, or repeating any of the above per
 project.
+
+## Domain and certificate state (measured against the schema)
+
+Attachment is an API operation, not a configuration one — Railway's CLI rejects custom-domain
+*registration* inside `.railway/railway.ts`, so the renderer records hosts as comments and the provider
+creates them. State is then read back rather than assumed: `serviceDomains.syncStatus`
+(`ACTIVE`/`CREATING`/…) for generated hosts and `customDomains.status` (`verified`, `certificateStatus` ∈
+`VALID`/`ISSUING`/`VALIDATING_OWNERSHIP`/`ISSUE_FAILED`) for custom ones, which is what lets the tenant
+see *waiting on your DNS records* instead of a false green. `customDomainIssueCertificate(id)` is exposed
+as a provider-specific `retryCertificate(domainId)` using Railway's own id; it is deliberately not part of
+the five-operation `infra.provider` contract.
 
 ## Components
 

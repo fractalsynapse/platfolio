@@ -124,6 +124,16 @@ spec:
 
 An archetype is a defaults module plus a validation rule set — not a separate format.
 
+### Domains: literal hosts are provisional (OD12)
+
+The sketch above shows `domains: [ { host: app.example.com, port: 3000 } ]`, which is **fixture data standing in
+for configuration**. One manifest serves many tenants, so it cannot name a domain any more than it can name a
+secret value. The target shape, measured reasoning and the migration are in
+[12 § Where a domain is defined](12-domains-and-dns.md): the manifest declares which services are publicly
+reachable and the host *pattern* (`app`, `api`, wildcard and apex policy); the instance supplies the root domain
+per environment; the plan resolves the two into the concrete hosts the provider already consumes. Until OD12
+lands, treat literal hosts in manifests and templates as examples — never copy one into a platform definition
+intended for more than one tenant.
 ## Secrets
 
 `value_source` is a closed enum, and it is the mechanism that keeps decision D4 true:
@@ -149,6 +159,13 @@ staging host are not in conflict; and the secrets checklist is filtered by envir
 production-only external service never demands its secrets be filled in a staging environment that has
 no place for them. Whether `railway config plan` honours per-environment resource membership is E21 —
 the shape type-checks here, which is a weaker claim than "it deploys correctly".
+
+Staging is **a duplicate of production, created after the services exist** — measured in E25: Railway has
+no "add service to this environment" call, `environmentCreate(sourceEnvironmentId: …)` copies the services
+present at that moment, and a service added later is absent from the existing duplicate. `cloneFrom`
+therefore carries ordering and completeness meaning, not just "start from this config": a platform that
+grows a service must recreate the environment, and the provider refuses to pretend otherwise
+(`instance-missing-in-environment`). See [the record](../research/railway-token-and-sealing-2026-11-08.md).
 
 The default is **`tenant-side`**, not `relay-sealed` — that ordering was reversed by E18, and the panel
 renders accordingly.
@@ -199,10 +216,13 @@ Consequences that must hold in the implementation:
 sketch it was corrected here rather than in code comments. Verified facts from
 `railway@3.16.0` (the package the generated file is type-checked against in CI):
 
-- **Resource ceilings are not expressible in Railway IaC.** `IntentServiceConfig` has no CPU/memory
-  field, so the renderer records manifest limits as comments in the generated file and notes them in
-  `Rendered.notes`. The tenant workflow applies them out of band via `serviceInstanceLimitsUpdate`.
-  Silently dropping them would have been the worse failure.
+- **Resource ceilings are not expressible in Railway IaC — but they ARE settable through the API.**
+  `IntentServiceConfig` has no CPU/memory field, so the renderer records manifest limits as comments in
+  the generated file and notes them in `Rendered.notes`. That is a limit of the *exported artifact*, not
+  of platfolio: the provider applies ceilings with `serviceInstanceLimitsUpdate` (introspected and now
+  implemented in `RailwayInfraProvider`), and reports `ceilings-not-applied` if the call fails. The
+  earlier note told tenants to apply them out of band, which was an inference from the IaC type
+  surfacing generalized into a provider limit; corrected 2026-11-08.
 - **Resource references go through `.env`.** The SDK exposes `ReferencableDatabaseNode.env`, so the
   generated code emits `db.env.DATABASE_URL`; `db.DATABASE_URL` does not type-check.
 - **Bucket regions are an allowlist, not a cast.** `BucketRegion = "sjc" | "iad" | "ams" | "sin"`, and
@@ -213,6 +233,11 @@ sketch it was corrected here rather than in code comments. Verified facts from
 - **Secrets render as `preserve()` in IaC and `"$${NAME:-}"` in Compose** — names in both, values never.
 - Comments are language-appropriate per target: sharing a `#` header with the Compose output made the
   generated TypeScript fail to parse.
+- **`image` must carry a tag alongside the digest.** Measured in E26: Railway accepts
+  `repo@sha256:…` and then never deploys it — the deployment sat in `DEPLOYING` for over 20 minutes,
+  while `repo:tag@sha256:…` reached `SUCCESS` in about 20 seconds, and the reference is stored verbatim.
+  Digest pinning is the invariant; the tag is how the provider is told *which* manifest to resolve.
+  Validation rejects it with `image-tag-missing` in the manifest and again in `RailwayInfraProvider`.
 
 The fixture suite in `packages/manifest/test/` is the executable form of § Validation gates: two real
 platform manifests render and validate clean, and five negative fixtures each produce a specific code
