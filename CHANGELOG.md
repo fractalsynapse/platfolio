@@ -5,6 +5,23 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+### Changed
+
+- **"Databases cannot be created" is retracted -- they can, and the provider has to do it.**
+  `serviceCreate(input: { projectId, environmentId, name, templateId })` created a PostgreSQL service from
+  Railway's own template against the live API (`treedx-db`), after two rounds of maintainer pushback that I
+  answered by probing the wrong endpoints: `templateDeployV2` and the change-set API are not how a database
+  is made, and their silence is not a capability limit. What is now open is implementation, not
+  possibility: getting the created service to deploy (`serviceConnect`, `serviceInstanceDeployV2`, or
+  seeding variables first) and wiring its URL through Railway's `${{Service.VAR}}` reference syntax so the
+  value never crosses platfolio. Tracked as **OD13**, with the provider's `database-not-provisioned`
+  comment rewritten to say exactly that. This is the top priority: without it TreeDX and ArcNexus cannot
+  run, and "discover and wire, never create" was the wrong shape to propose.
+- **D26 and D27 recorded, OD12 closed.** One Railway project per platform instance, teams holding multiple
+  platforms; domains live in the platform's own repository, which retires the shared-catalog assumption the
+  host-pattern redesign was built on. `MAINTAINING` corrected: the licences already reached `main` in
+  `0.1.0`/`0.2.0`, so the "next production integration" note was stale.
+
 ## [0.2.0] - 2026-11-09
 
 First release since `0.1.0`, and **a minor bump rather than the patch `0.1.1` that was requested**:

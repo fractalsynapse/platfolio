@@ -473,3 +473,44 @@ produces *when* a limit bites — and the only limits that have actually surface
 whole session are the two creation throttles: **1 project per 30 seconds** and **1 environment per 30
 seconds**. The daily service cap never appeared in any response, so nothing observed today contradicts or
 confirms 20 versus the older documented 25.
+
+## RETRACTED: "databases cannot be created" -- they can, and I had not tried the path that works
+
+Late on 2026-11-09, after the maintainer rejected my conclusion a second time and correctly pointed out
+that automated setups he has seen create Railway databases without any manual step. He was right.
+
+**What works.** A template carries a service graph in `serializedConfig.services`, and
+`serviceCreate` accepts `templateId`:
+
+```
+serviceCreate(input: { projectId, environmentId, name: "treedx-db", templateId: <PostgreSQL template> })
+  -> { id: "e76c0140-…", name: "treedx-db" }        # created, and listed in project.services
+```
+
+So the earlier statements in this document -- that private databases are "not reachable", and the
+`database-not-provisioned` framing that leaned on that -- were wrong. The failure that produced them was
+`templateDeployV2` returning "Problem processing request" and `environmentApplyChangeSet` accepting any
+payload and computing nothing. Neither of those endpoints is the way to create a database; `serviceCreate`
+with a template was, and I never tried it. The `postgres-ssl` image that the IaC compiler emits
+(`ghcr.io/railwayapp-templates/postgres-ssl:18`) was the clue sitting in my own fixture.
+
+**What is still open, and it is implementation, not capability:**
+
+- **Deploying the created service.** `serviceInstanceDeploy(environmentId, serviceId)` on the template-created
+  service returned "Problem processing request", and its `latestDeployment` stayed `null`. Candidates not yet
+  tried: `serviceInstanceDeployV2`, `serviceConnect(id, input)` (whose `ServiceConnectionInfo` example is
+  literally a Postgres URI), setting `instancenumReplicas`/port first, or the database needing its variables
+  seeded before it will boot.
+- **The wiring syntax.** Railway resolves references inside variable values -- the template's own config uses
+  `${{RAILWAY_PRIVATE_DOMAIN}}`, and `Service.connectionString` exists on the type. My test of writing
+  `${{treedx-db.DATABASE_URL}}` into the app service failed on my *shell quoting*, not on the API: I passed
+  `VariableInput` instead of the real `VariableUpsertInput`, and jq rejected the escape. If the reference
+  form works, wiring a database URL into a service requires **no secret to ever cross platfolio** -- we
+  would write an expression Railway resolves, which is a stronger custody story than anything designed so far.
+- `variables(...)` on the new DB service also returned "Problem processing request" while it worked on `web`
+  in earlier runs, so that message is generic for "target not in the state I expect" -- another instance of
+  the unhelpful error pattern already documented here.
+
+None of this is verified beyond creation, and nothing here is a claim that the provider works. The claim is
+narrower and more important: **databases are creatable through the API, so "discover and wire, never create"
+was the wrong answer to propose, and the provider has to do the creating.**
