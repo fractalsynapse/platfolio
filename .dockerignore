@@ -1,0 +1,11 @@
+.git
+.cache
+.research
+node_modules
+**/node_modules
+docs
+spikes
+vendor
+.github
+coverage
+*.log
