@@ -934,9 +934,12 @@ export class RailwayInfraProvider implements InfraProvider {
     }
 
     try {
+      // The catalog read goes on the workspace grant: every live probe that reached a Template did, while an
+      // environment-scoped project token is the grant that gets "Bad Access" on project-level operations.
+      const workspaceCredential = await this.credentials.workspace();
       const fetched = await this.transport.graphql<{ template: { serializedConfig?: { services?: Record<string, Record<string, unknown>> } | null } }>({
         operation: 'template',
-        credential: token,
+        credential: workspaceCredential,
         query: 'query ($id: String!) { template(id: $id) { serializedConfig } }',
         variables: { id: templateId },
       });
@@ -950,7 +953,6 @@ export class RailwayInfraProvider implements InfraProvider {
       const key = keys[0]!;
       const composedConfig = { ...config, services: { [key]: { ...services[key]!, name: database.name } } };
 
-      const workspaceCredential = await this.credentials.workspace();
       const deployed = await this.transport.graphql<{ templateDeployV2: { operationId?: string | null; workflowId?: string | null } }>({
         operation: 'templateDeployV2',
         credential: workspaceCredential,

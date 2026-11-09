@@ -144,7 +144,10 @@ export async function runConformance(make: () => InfraProvider, requiredRange = 
     const provider = make();
     const plan = planFor();
     const applied = await provider.applyPlan(plan);
-    if (!applied.verified) return { status: 'fail', detail: 'apply reported success without read-back verification' };
+    if (!applied.verified) {
+      const reasons = applied.failures.map((f) => `${f.code}@${f.step}: ${f.message.slice(0, 110)}`);
+      return { status: 'fail', detail: `apply did not verify: ${reasons.join(' | ') || 'no failures reported'}` };
+    }
     if (applied.failures.length) return { status: 'fail', detail: `apply reported failures: ${applied.failures.map((f) => f.code).join(', ')}` };
     const state = await provider.readState(plan.instanceId);
     const want = plan.environments.reduce((n, e) => n + e.services.length, 0);
