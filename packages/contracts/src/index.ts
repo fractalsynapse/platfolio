@@ -10,3 +10,4 @@ export { RailwayInfraProvider, type RailwayProviderOptions } from './railway-pro
 export * from './railway-changeset.ts';
 export * from './secret-writer.ts';
 export * from './binding.ts';
+export * from './workflow-runner.ts';
