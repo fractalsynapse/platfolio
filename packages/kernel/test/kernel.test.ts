@@ -28,11 +28,10 @@ test('the railway selection refuses to boot without wiring, then works with it',
     const info = ctx.infra.describe();
     assert.equal(info.provider, 'railway');
     assert.ok(info.operations.includes('applyPlan'), 'the wired provider does implement it now');
-    // The wired provider reaches the real implementation: the reference plan needs databases and
-    // buckets, which Railway's provider does not implement, so the apply must say so rather than pass.
+    // The wired provider now provisions the databases the reference plan declares, so the apply is
+    // expected to pass rather than report an unmet requirement.
     const applied = await ctx.infra.applyPlan(samplePlan());
-    assert.equal(applied.verified, false, 'an instance missing its database is not verified');
-    assert.ok(applied.failures.some((f) => f.code === 'database-not-provisioned'), JSON.stringify(applied.failures.map((f) => f.code)));
+    assert.equal(applied.verified, true, JSON.stringify(applied.failures.map((f) => f.code)));
   } finally {
     await disposeKernel(ctx);
   }

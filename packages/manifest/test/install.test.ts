@@ -17,7 +17,7 @@ function manifest(p: string): Manifest {
 const OPTS = { actionRepo: 'platfolio/action', actionSha: '0123456789abcdef0123456789abcdef01234567', platfolioUrl: 'https://api.platfolio.example' };
 
 test('the generated workflow is valid YAML with the expected shape', () => {
-  const out = renderInstallPullRequest(manifest('templates/arcnexus/manifest.yaml'), OPTS);
+  const out = renderInstallPullRequest(manifest('templates/example-full-stack/manifest.yaml'), OPTS);
   const doc = yamlParse(out.files[WORKFLOW_PATH]!) as Record<string, any>;
   assert.equal(doc.name, 'platfolio managed');
   assert.ok(doc.on.workflow_dispatch.inputs, 'dispatch inputs required');
@@ -32,7 +32,7 @@ test('the generated workflow is valid YAML with the expected shape', () => {
 });
 
 test('permissions stay exactly the minimal set', () => {
-  const out = renderInstallPullRequest(manifest('templates/treedx/manifest.yaml'), OPTS);
+  const out = renderInstallPullRequest(manifest('templates/example-web-app/manifest.yaml'), OPTS);
   const doc = yamlParse(out.files[WORKFLOW_PATH]!) as Record<string, any>;
   assert.deepEqual(doc.permissions, WORKFLOW_PERMISSIONS);
   assert.deepEqual(Object.keys(WORKFLOW_PERMISSIONS).sort(), ['checks', 'contents', 'id-token', 'statuses']);
@@ -45,14 +45,14 @@ test('permissions stay exactly the minimal set', () => {
 });
 
 test('production is gated by an environment, not by a bare job', () => {
-  const out = renderInstallPullRequest(manifest('templates/arcnexus/manifest.yaml'), OPTS);
+  const out = renderInstallPullRequest(manifest('templates/example-full-stack/manifest.yaml'), OPTS);
   const text = out.files[WORKFLOW_PATH]!;
   assert.ok(/environment:\s*\n\s+name:/.test(text), 'the job must reference a GitHub environment');
   assert.ok(text.includes('inputs.environment'), 'the environment is chosen per dispatch, so protection rules apply');
 });
 
 test('no empty or malformed expression placeholder appears in generated output', () => {
-  const out = renderInstallPullRequest(manifest('templates/arcnexus/manifest.yaml'), OPTS);
+  const out = renderInstallPullRequest(manifest('templates/example-full-stack/manifest.yaml'), OPTS);
   for (const [name, content] of Object.entries(out.files)) {
     const empty = content.match(/\$\{\{\s*\}\}/);
     assert.ok(!empty, `${name} contains an empty expression placeholder, which invalidates the whole file`);
@@ -63,7 +63,7 @@ test('no empty or malformed expression placeholder appears in generated output',
 });
 
 test('the action is pinned by SHA and the doc explains removal', () => {
-  const m = manifest('templates/treedx/manifest.yaml');
+  const m = manifest('templates/example-web-app/manifest.yaml');
   const out = renderInstallPullRequest(m, OPTS);
   assert.ok(out.files[WORKFLOW_PATH]!.includes(`@${OPTS.actionSha}`), 'must pin by commit SHA');
   assert.ok(!/@[a-z]+\/v?\d/.test(out.files[WORKFLOW_PATH]!.split('uses: platfolio/action@')[1] ?? ''), 'no floating tag on our own action');
@@ -73,7 +73,7 @@ test('the action is pinned by SHA and the doc explains removal', () => {
 });
 
 test('no secret value can appear in the install output', () => {
-  const out = renderInstallPullRequest(manifest('templates/arcnexus/manifest.yaml'), OPTS);
+  const out = renderInstallPullRequest(manifest('templates/example-full-stack/manifest.yaml'), OPTS);
   const joined = Object.values(out.files).join('\n');
   for (const s of out.secrets) {
     assert.ok(joined.includes(s.name), `secret name ${s.name} should be listed`);
@@ -83,7 +83,7 @@ test('no secret value can appear in the install output', () => {
 });
 
 test('rendering is deterministic and depends only on the manifest and options', () => {
-  const m = manifest('templates/arcnexus/manifest.yaml');
+  const m = manifest('templates/example-full-stack/manifest.yaml');
   const a = renderInstallPullRequest(m, OPTS);
   const b = renderInstallPullRequest(m, OPTS);
   assert.deepEqual(Object.keys(a.files).sort(), Object.keys(b.files).sort());
@@ -91,7 +91,7 @@ test('rendering is deterministic and depends only on the manifest and options', 
 });
 
 test('an arm64-only platform runs on an arm runner', () => {
-  const m = manifest('templates/treedx/manifest.yaml');
+  const m = manifest('templates/example-web-app/manifest.yaml');
   const armOnly = { ...m, metadata: { ...m.metadata, architectures: ['arm64'] as ('amd64' | 'arm64')[] } };
   const out = renderInstallPullRequest(armOnly, OPTS);
   assert.ok(out.files[WORKFLOW_PATH]!.includes('runs-on: ubicloud-arm'), 'single-arch arm must not claim an x86 runner');
@@ -100,7 +100,7 @@ test('an arm64-only platform runs on an arm runner', () => {
 });
 
 test('staging is omitted from triggers when the platform does not enable it', () => {
-  const m = manifest('templates/treedx/manifest.yaml');
+  const m = manifest('templates/example-web-app/manifest.yaml');
   const prod = { ...m, spec: { ...m.spec, environments: { ...m.spec.environments, staging: { enabled: false, sleepByDefault: true } } } } as Manifest;
   const doc = yamlParse(renderInstallPullRequest(prod, OPTS).files[WORKFLOW_PATH]!) as Record<string, any>;
   assert.deepEqual(doc.on.push.branches, ['production']);

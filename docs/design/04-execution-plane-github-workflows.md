@@ -110,6 +110,30 @@ Things deliberately **not** asked of a tenant: creating tokens, creating GitHub 
 the provider's UI, installing anything on a laptop, opening a tunnel, or repeating any of the above per
 project.
 
+## Private images and private repositories
+
+Tenant platform images live in the **tenant's** registry — usually GHCR under their own repo, which is
+private by default even when the repository is public. Railway pulls them with a credential **the tenant
+attaches to their own project**. platfolio writes the image reference and nothing else:
+
+- it never receives, stores or transits a registry credential — the same rule that keeps it away from
+  `variables()` values, and for the same reason: a grant that can read one thing can usually read more;
+- it therefore **cannot verify pullability**. Nothing in the control plane can answer "can Railway pull
+  this?", so no feature may depend on asking;
+- it must not read Railway build logs, which contain resolved environment values. That forecloses the
+  obvious diagnostic for "why did this deployment fail", so the provider offers a **hint attached to a real
+  failure** (`image-pull-authorization-hint`) naming the one action only the tenant can take, phrased as
+  "likely cause", never as a diagnosis.
+
+The supported alternative — Railway building from the tenant's repository through their own GitHub App
+link — handles private repos with no registry credential, but it produces an artifact the release job did
+not sign, which breaks digest pinning (D16). It is not the default, and adopting it would be a decision,
+not an optimisation.
+
+Consequence for onboarding copy: a first deploy that fails on a private image looks like a broken control
+plane. The checklist therefore states the credential step **before** the first deploy, with the reason —
+this is a tenant action with a visible purpose, exactly like the DNS records in [12](12-domains-and-dns.md).
+
 ## Domain and certificate state (measured against the schema)
 
 Attachment is an API operation, not a configuration one — Railway's CLI rejects custom-domain

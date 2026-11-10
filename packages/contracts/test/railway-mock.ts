@@ -22,6 +22,14 @@ export interface MockOptions {
   outcome?: 'SUCCESS' | 'FAILED' | 'CRASHED';
   /** Buckets that exist when the project is deleted, to prove orphan reporting is honest. */
   buckets?: string[];
+  /** Reads before a template-deployed service becomes visible -- models asynchronous provisioning (#77). */
+  templateRevealAfter?: number;
+  /** A template deploy accepted but whose service never surfaces -- the stuck-provisioning case. */
+  templateNeverReveals?: boolean;
+  /** Refuse serviceDelete for template-created services, modelling #80's survivor. */
+  refuseTemplateServiceDelete?: boolean;
+  /** Fail the first N serviceDelete calls for template services, to test the retry. */
+  templateDeleteFailures?: number;
 }
 
 interface MockService { id: string; projectId: string; name: string }
@@ -39,6 +47,15 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
   /** Hosts the availability check refuses, so a test can prove the create is never attempted. */
   readonly takenDomains = new Set<string>();
   readonly domainCreates: string[] = [];
+  /** Template deploys recorded so tests can assert the composed name and the grant used. */
+  volumes: { id: string; projectId: string; name: string; serviceId: string; mountPath: string }[] = [];
+  /** How many template-created services are still hidden (diagnostics for tests). */
+  hiddenServiceCount(): number { return this.hiddenServices.size; }
+  /** Services hidden until read N times, so single-shot lookups fail as they do live (#77). */
+  private readonly hiddenServices = new Map<string, number>();
+  readonly templateServiceIds = new Set<string>();
+  private templateDeleteAttempts = new Map<string, number>();
+  readonly templateDeploys: { templateId: string; serviceName: string; credentialKind: string }[] = [];
 
   deploys = 0;
   readonly operations: string[] = [];
@@ -51,7 +68,14 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
   private readonly options: Required<Pick<MockOptions, 'secretsPresent' | 'settleAfter' | 'outcome'>> & MockOptions;
 
   constructor(options: MockOptions = {}) {
+    // Every option has to be listed here: the normalization below silently drops unknown keys, which is how
+    // templateNeverReveals looked "ignored" -- the guard was correct and never received the flag. A double
+    // that drops its own configuration is the same failure class as a stub that passes vacuously.
     this.options = {
+      templateRevealAfter: options.templateRevealAfter ?? 2,
+      templateNeverReveals: options.templateNeverReveals ?? false,
+      refuseTemplateServiceDelete: options.refuseTemplateServiceDelete ?? false,
+      templateDeleteFailures: options.templateDeleteFailures ?? 0,
       secretsPresent: options.secretsPresent ?? true,
       settleAfter: options.settleAfter ?? 1,
       outcome: options.outcome ?? 'SUCCESS',
@@ -190,9 +214,40 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
         }
         return { environmentCreate: { id } } as T;
       }
+      case 'project.volumes': {
+        const projectId = v.projectId as string;
+        return { project: { volumes: { edges: this.volumes.filter((x) => x.projectId === projectId).map((node) => ({ node })) } } } as T;
+      }
+      case 'volumeCreate': {
+        const input = v.input as { projectId: string; environmentId: string; serviceId: string; mountPath: string };
+        if (!this.services.has(input.serviceId)) throw new Error('railway volumeCreate: unknown service [NOT_FOUND]');
+        const id = `vol-${String(this.sequence).padStart(4, '0')}`;
+        this.sequence += 1;
+        this.volumes.push({ id, projectId: input.projectId, name: `volume-${id}`, serviceId: input.serviceId, mountPath: input.mountPath });
+        return { volumeCreate: { id, name: `volume-${id}` } } as T;
+      }
+      case 'volumeDelete': {
+        const volumeId = v.volumeId as string;
+        const before = this.volumes.length;
+        this.volumes = this.volumes.filter((x) => x.id !== volumeId);
+        if (this.volumes.length === before) throw new Error('railway volumeDelete: no such volume [NOT_FOUND]');
+        return { volumeDelete: true } as T;
+      }
       case 'project.services': {
         const projectId = v.projectId as string;
-        const nodes = [...this.services.values()].filter((s) => s.projectId === projectId).map((node) => ({ node: { id: node.id, name: node.name } }));
+        // Async provisioning modelled honestly (#77): a template-created service is invisible until it has
+        // been read a few times, so a provider that lists once, immediately, gets nothing and must wait.
+        // Decrement is per read, so a very large counter is effectively "never" -- but the never-reveals
+        // flag is absolute, because a counter that a fast poll loop could drain would make the stuck case
+        // depend on machine speed, which is not a test anybody can trust.
+        for (const [id, remaining] of [...this.hiddenServices]) {
+          if (this.options.templateNeverReveals) continue;
+          const left = remaining - 1;
+          if (left <= 0) this.hiddenServices.delete(id);
+          else this.hiddenServices.set(id, left);
+        }
+        const visible = [...this.services.values()].filter((s) => s.projectId === projectId && !this.hiddenServices.has(s.id));
+        const nodes = visible.map((node) => ({ node: { id: node.id, name: node.name } }));
         return { project: { services: { edges: nodes } } } as T;
       }
       case 'serviceCreate': {
@@ -231,6 +286,51 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
         const input = v.input as { memoryGB?: number; vCPUs?: number };
         instance.limits = { cpu: input.vCPUs ?? 0, memoryMB: Math.round((input.memoryGB ?? 0) * 1024) };
         return { serviceInstanceLimitsUpdate: true } as T;
+      }
+      case 'template': {
+        // Keyed by CODE, the authorized read for public catalog entries (#75). The double accepted the
+        // id only because I chose it, which is how a wrong lookup passed every offline test.
+        const code = v.code as string;
+        if (code !== 'postgresql') throw new Error('railway template: not found [NOT_FOUND]');
+        return {
+          template: {
+            id: 'c27544e8-a7e7-450d-9314-bdaa25c734aa',
+            serializedConfig: {
+              services: {
+                '36d08c1e-1bcb-4de6-a199-3749dc83dff3': {
+                  name: 'Postgres',
+                  source: { image: 'ghcr.io/ncontiero/postgres-ssl:18.6', type: 'image' },
+                  variables: { POSTGRES_PASSWORD: { isSensitive: true, generateValue: true } },
+                },
+              },
+            },
+          },
+        } as T;
+      }
+      case 'templateDeployV2': {
+        // Measured: a workspace-grant operation that provisions asynchronously.
+        if (credential.kind !== 'workspace') throw new Error('railway templateDeployV2: Bad Access [UNPROCESSABLE]');
+        const input = v.input as { templateId: string; serializedConfig: { services: Record<string, { name?: string; source?: { image?: string }; variables?: Record<string, unknown> }> }; projectId: string; environmentId: string };
+        const spec = Object.values(input.serializedConfig.services)[0]!;
+        const name = spec.name ?? 'Postgres';
+        this.templateDeploys.push({ templateId: input.templateId, serviceName: name, credentialKind: credential.kind });
+        if (!this.projects.has(input.projectId)) throw new Error('railway templateDeployV2: project not found [NOT_FOUND]');
+        const serviceId = `svc-${this.sequence++}`;
+        this.services.set(serviceId, { id: serviceId, name, projectId: input.projectId });
+        // Measured: a template deploy provisions AND deploys on its own -- the instance came up
+        // DEPLOYING and reached SUCCESS without any serviceInstanceDeploy call from us.
+        this.instances.set(`${input.environmentId}:${serviceId}`, {
+          instanceId: `inst-${this.sequence++}`,
+          status: 'DEPLOYING',
+          image: spec.source?.image ?? '',
+          numReplicas: 1,
+          domains: [],
+          polls: 0,
+          variables: new Set(Object.keys(spec.variables ?? {})),
+        });
+        this.templateServiceIds.add(serviceId);
+        this.hiddenServices.set(serviceId, this.options.templateNeverReveals ? Number.MAX_SAFE_INTEGER : (this.options.templateRevealAfter ?? 2));
+        return { templateDeployV2: { operationId: `op-${name}`, workflowId: `deployTemplate/${input.projectId}/mock` } } as T;
       }
       case 'customDomainAvailable': {
         const domain = v.domain as string;
@@ -286,7 +386,9 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
           // CREATING and the provider must report pending rather than issued.
           if (this.options.outcome === 'SUCCESS') instance.settledDomains = true;
         }
-          if (instance.status === null) instance.status = 'PENDING';
+          // A duplicated instance has NO latestDeployment in the real API (measured in E25), so the double
+          // must not invent PENDING: that made "never deployed" look identical to "deploying", and the
+          // provider then waited forever instead of starting the deployment a clone actually needs.
           const svc = this.services.get(key.split(':')[1]!);
           nodes.push({
             node: {
@@ -347,6 +449,16 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
         return { customDomainCreate: { id: `dom-${this.sequence++}`, domain: input.domain } } as T;
       }
       case 'serviceDelete': {
+        if (this.options.refuseTemplateServiceDelete && this.templateServiceIds.has(v.id as string)) {
+          throw new Error('railway serviceDelete: Bad Access for template-created service [FORBIDDEN]');
+        }
+        // Measured live: deleting a template-created database exceeded the 25s request deadline, so the
+        // double can fail the first attempts and let the retry succeed (#80).
+        const attempts = (this.templateDeleteAttempts.get(v.id as string) ?? 0) + 1;
+        this.templateDeleteAttempts.set(v.id as string, attempts);
+        if (attempts <= (this.options.templateDeleteFailures ?? 0)) {
+          throw new Error('railway transport: serviceDelete failed to reach the API (TimeoutError) [NETWORK]');
+        }
         const key = `${v.environmentId}:${v.id}`;
         this.instances.delete(key);
         const service = this.services.get(v.id as string);

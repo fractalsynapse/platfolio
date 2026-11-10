@@ -473,3 +473,119 @@ produces *when* a limit bites — and the only limits that have actually surface
 whole session are the two creation throttles: **1 project per 30 seconds** and **1 environment per 30
 seconds**. The daily service cap never appeared in any response, so nothing observed today contradicts or
 confirms 20 versus the older documented 25.
+
+## RETRACTED: "databases cannot be created" -- they can, and I had not tried the path that works
+
+Late on 2026-11-09, after the maintainer rejected my conclusion a second time and correctly pointed out
+that automated setups he has seen create Railway databases without any manual step. He was right.
+
+**What works.** A template carries a service graph in `serializedConfig.services`, and
+`serviceCreate` accepts `templateId`:
+
+```
+serviceCreate(input: { projectId, environmentId, name: "treedx-db", templateId: <PostgreSQL template> })
+  -> { id: "e76c0140-…", name: "treedx-db" }        # created, and listed in project.services
+```
+
+So the earlier statements in this document -- that private databases are "not reachable", and the
+`database-not-provisioned` framing that leaned on that -- were wrong. The failure that produced them was
+`templateDeployV2` returning "Problem processing request" and `environmentApplyChangeSet` accepting any
+payload and computing nothing. Neither of those endpoints is the way to create a database; `serviceCreate`
+with a template was, and I never tried it. The `postgres-ssl` image that the IaC compiler emits
+(`ghcr.io/railwayapp-templates/postgres-ssl:18`) was the clue sitting in my own fixture.
+
+**What is still open, and it is implementation, not capability:**
+
+- **Deploying the created service.** `serviceInstanceDeploy(environmentId, serviceId)` on the template-created
+  service returned "Problem processing request", and its `latestDeployment` stayed `null`. Candidates not yet
+  tried: `serviceInstanceDeployV2`, `serviceConnect(id, input)` (whose `ServiceConnectionInfo` example is
+  literally a Postgres URI), setting `instancenumReplicas`/port first, or the database needing its variables
+  seeded before it will boot.
+- **The wiring syntax.** Railway resolves references inside variable values -- the template's own config uses
+  `${{RAILWAY_PRIVATE_DOMAIN}}`, and `Service.connectionString` exists on the type. My test of writing
+  `${{treedx-db.DATABASE_URL}}` into the app service failed on my *shell quoting*, not on the API: I passed
+  `VariableInput` instead of the real `VariableUpsertInput`, and jq rejected the escape. If the reference
+  form works, wiring a database URL into a service requires **no secret to ever cross platfolio** -- we
+  would write an expression Railway resolves, which is a stronger custody story than anything designed so far.
+- `variables(...)` on the new DB service also returned "Problem processing request" while it worked on `web`
+  in earlier runs, so that message is generic for "target not in the state I expect" -- another instance of
+  the unhelpful error pattern already documented here.
+
+None of this is verified beyond creation, and nothing here is a claim that the provider works. The claim is
+narrower and more important: **databases are creatable through the API, so "discover and wire, never create"
+was the wrong answer to propose, and the provider has to do the creating.**
+
+## OD13 SOLVED (the create+deploy half): `templateDeployV2` with a supplied `serializedConfig`
+
+The path was neither `serviceCreate` alone, nor the change set. The mutation's argument type is
+`TemplateDeployV2Input` -- **not** `TemplateDeployInput`, which also exists and which my first introspection
+read, so I spent attempts against the wrong shape:
+
+```
+templateDeployV2(input: {
+  templateId:       <Template.id>            # e.g. c27544e8-... for code "postgresql"
+  serializedConfig: <Template.serializedConfig>   # read from the template, supplied by the caller
+  projectId, environmentId, workspaceId
+}) -> TemplateDeployPayload { operationId, workflowId, projectId }     # asynchronous
+```
+
+`serializedConfig.services` holds the full recipe -- for this template one service, image
+`ghcr.io/ncontiero/postgres-ssl:18.6`, with `PGDATA`/`PGHOST`/`PGPORT`/`PGUSER` and the password variable
+declared with descriptions and defaults. The caller supplies that config; the server does not fetch it from
+the template id. That is why my earlier probe (`templateId` only, or `templateCode`) returned the same opaque
+"Problem processing request" as everything else: **the message means "your input did not deserialize", and it
+has no shape sensitivity whatsoever** -- the same failure mode documented above for change sets.
+
+Measured result, workspace grant, project `platfolio-iac-sample`, production environment:
+
+```
+deploy -> { operationId: 62cff224-..., workflowId: deployTemplate/project/c521ed54-.../m2WRti }
++45 s  -> services: ["Postgres", "web"]
+          instances: nginx SUCCESS, ghcr.io/ncontiero/postgres-ssl:18.6 SUCCESS
+```
+
+A private PostgreSQL **created and deployed successfully through the API**, with no dashboard step and no
+manual pre-creation. Which is what the maintainer said all along, and what I should have found by reading
+the argument type properly instead of concluding impossibility from three endpoints that I had aimed badly.
+
+Open, in order:
+
+1. **Naming.** It arrived as `Postgres` -- the template's service name, not the `app-db` I asked for, and
+   `services` is not a field of this input at all. So the provider must rename via `serviceUpdate`, or
+   compose the `serializedConfig` with the plan's name (the config is caller-supplied, so this should be
+   possible -- untested).
+2. **Seeding.** Whether Railway generated the password value itself, and whether `variables()` on the new
+   service returns it -- which must **not** be read into platfolio. Names only from here on.
+3. **Wiring.** Railway's own templates use `${{RAILWAY_PRIVATE_DOMAIN}}`, so a `${{Service.VAR}}` style
+   reference in the app service's `DATABASE_URL` is the likely mechanism. If it works, the URL crosses as an
+   *expression* and the value never enters platfolio at all -- strictly better than the custody design so far.
+4. **Async.** `operationId`/`workflowId` means provisioning a database is a job with a status, not a call
+   that returns a resource. Our `applyPlan` has to poll or accept partial state, and `ServiceInstanceStatus`
+   may need a "provisioning" affordance rather than pretending the service exists the moment we return.
+
+## `${{Service.VAR}}` is resolved on write, not at deploy -- so it is NOT a custody mechanism
+
+Measured against the live API on the dev sample project: `variableUpsert` accepted
+`${{Postgres.DATABASE_URL}}` (`{"variableUpsert":true}`), and reading the variable back returned a fully
+resolved connection string **including the password** -- the reference was expanded server-side at store
+time, not at deploy time. The value was then deleted and the database password reset.
+
+Consequences, applied rather than noted:
+
+- **Nothing about `variables()` is safe.** A reference expression does not make the read harmless: the API
+  hands back the resolved secret to any credential that can call it. That confirms D24 from the other side
+  -- tokens carry roles, not subsets -- and it makes the standing rule stronger than "avoid reading secret
+  values": platfolio code must have **no path that reads `variables()` values at all.** The provider reads
+  `Object.keys(...)` only (`configVariableNames`); that is not a nicety, it is the only thing separating the
+  control plane from a secret store.
+- **The wiring is still worth doing, for a different reason.** Writing the reference means platfolio never
+  *chooses* the URL, never stores the value in its own database, and never sends it over the network more
+  than once -- but it cannot be described as "platfolio cannot see the value", because it demonstrably can.
+  Any UI or claim about secret custody must say: we do not hold it; we could read it; the tiers in D24 are
+  what keeps that from happening.
+- **A credential surfaced in tool output because of this probe.** The dev project's database password appeared
+  in a session transcript during a deliberate shape check (I printed a prefix and length, and the prefix
+  carried the whole resolved string). No tenant credential is involved -- this is platfolio's own scratch
+  project -- and the password has been reset and the variable deleted. The lesson is the method: when a read
+  might return a secret, print **nothing derived from its content**, not even a prefix. Length-only or
+  boolean-only checks were the intent; a prefix is not a safe reduction.

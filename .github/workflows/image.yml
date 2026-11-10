@@ -1,0 +1,109 @@
+name: Image
+
+# M1 step 6: platfolio's own stack must be buildable as a container and publishable with a digest an
+# operator can pin. Building is also the cheapest way to keep the Dockerfile honest -- a manifest plan
+# refuses a placeholder digest, so a real pinned image is the only thing that can prove the hosting chain.
+
+on:
+  push:
+    branches:
+      - staging
+      - main
+  pull_request:
+    branches:
+      - staging
+      - main
+  workflow_dispatch:
+
+# Publishing needs packages: write. Declaring it only on the publish step is invalid when the workflow
+# level does not grant it, and that failure kills the run before any log exists -- which is how a
+# permissions mistake looks like a mystery.
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: image-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  IMAGE_NAME: ${{ github.repository }}-status-api
+
+jobs:
+  build:
+    name: Build the control-plane image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # A build that cannot produce the lockfile-pinned dependency set is not the same artifact CI just
+      # tested, so the frozen install inside the image is load-bearing rather than cosmetic.
+      - name: Validate the build context
+        run: |
+          test -f apps/status-api/Dockerfile || { echo "Dockerfile missing"; exit 1; }
+          grep -q "frozen-lockfile" apps/status-api/Dockerfile || { echo "image install is not lockfile-frozen"; exit 1; }
+
+      - name: Build
+        run: |
+          docker build \
+            --file apps/status-api/Dockerfile \
+            --build-arg PLATFOLIO_COMMIT="${{ github.sha }}" \
+            --build-arg PLATFOLIO_VERSION="${{ github.ref_name }}" \
+            --build-arg PLATFOLIO_BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --tag platfolio-status-api:build \
+            .
+
+      # The image answers its own healthcheck during the run, so a green job means the container serves --
+      # not merely that it assembled. This is the difference the project keeps insisting on.
+      - name: Smoke test the built container
+        run: |
+          docker run -d --rm --name status-smoke -p 8080:8080 \
+            -e PLATFOLIO_COMMIT="${{ github.sha }}" \
+            -e PLATFOLIO_VERSION="${{ github.ref_name }}" \
+            -e PLATFOLIO_BUILD_TIME="ci" \
+            platfolio-status-api:build
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8080/healthz >/dev/null 2>&1; then break; fi
+            sleep 2
+            if [ "$i" = "30" ]; then echo "healthz never answered"; docker logs status-smoke; exit 1; fi
+          done
+          echo "  healthz: $(curl -fsS http://127.0.0.1:8080/healthz)"
+          echo "  version: $(curl -fsS http://127.0.0.1:8080/version)"
+          curl -fsS http://127.0.0.1:8080/version | grep -q '"commit":"${{ github.sha }}"' \
+            || { echo "build identity not reported"; exit 1; }
+          curl -fsS http://127.0.0.1:8080/version | grep -q '"providerContract"' \
+            || { echo "provider contract not reported"; exit 1; }
+          docker stop status-smoke
+
+      # Only pushes publish. A pull request gets a build and a smoke test, never a registry write.
+      - name: Publish
+        # Pushes only: a pull request gets a build and a smoke test, never a registry write.
+        if: github.event_name == 'push'
+        env:
+          REGISTRY: ghcr.io
+          CR_PAT: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "$CR_PAT" | docker login "$REGISTRY" -u "$GITHUB_ACTOR" --password-stdin >/dev/null
+          SHORT="$(echo "${{ github.sha }}" | cut -c1-7)"
+          for tag in "sha-$SHORT" "${{ github.ref_name }}"; do
+            docker tag platfolio-status-api:build "$REGISTRY/$IMAGE_NAME:$tag"
+            # The digest comes out of the push itself. A plan pins sha256:..., never a mutable tag, and
+            # re-deriving it locally would need a go-template whose braces collide with this repo's
+            # workflow placeholder lint.
+            PUSHED="$(docker push "$REGISTRY/$IMAGE_NAME:$tag")"
+            if [ "$tag" = "sha-$SHORT" ]; then
+              DIGEST="$(printf '%s\n' "$PUSHED" | sed -n 's/.*digest: \(sha256:[0-9a-f]*\).*/\1/p' | head -1)"
+            fi
+          done
+          # The digest is the whole point of publishing: a plan pins sha256:..., not a mutable tag.
+          {
+            echo "## Published image"
+            echo ""
+            echo "- Reference: \`$REGISTRY/$IMAGE_NAME:sha-$SHORT\`"
+            echo "- **Pinned digest: \`${DIGEST:-unavailable}\`**"
+            echo ""
+            echo "Use the digest, never the tag: a tag is mutable and a plan that trusts one can be moved"
+            echo "under a tenant. If this package is private, Railway cannot pull it until the package"
+            echo "visibility is set to public (a maintainer action; the workflow token cannot change it)."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "  pinned digest: ${DIGEST:-unavailable}"

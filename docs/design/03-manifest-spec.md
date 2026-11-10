@@ -13,6 +13,18 @@ copy-pasted environment lists that only work on the day they were written. The m
 product's core IP; the admin UI is derivative. It must be reviewable, diffable and machine-validated
 before any customer-facing feature depends on it.
 
+## Format status (D29 — this document is becoming an input adapter)
+
+**Accepted 2026-11-09: Docker Compose is the authoring format** ([13](13-compose-first-and-execution.md)). The
+schema sketched below stays authoritative as the **intermediate model** — Compose parses into it, the
+renderers, validators and `buildPlan` keep consuming it, and nothing downstream changes. What is superseded is
+the idea that a human authors this YAML directly: a platform's source of truth becomes `compose.yaml` plus an
+`x-platfolio` block, and this document's job is to specify that model precisely because it is what an adapter
+must land on. Where a field below has a Compose-native equivalent (`image`, `build`, `environment`,
+`healthcheck`, volumes, `depends_on`, limits, replicas), Compose wins and the adapter maps it; where it does
+not (environment placement, ownership, custody sources, identity clients, DNS policy, lifecycle, plan,
+release pinning), it lives under `x-platfolio`.
+
 ## Design rules
 
 1. **Names, never values.** No field may hold a secret value. Secrets are declared by name with a
@@ -123,6 +135,18 @@ spec:
 | `full-stack-web` (ArcNexus) | two+ services, session/cookie origin rules derived from `domains`, CSRF-safe same-site defaults, CSP report endpoint, `/health` conventions, static asset service optional |
 
 An archetype is a defaults module plus a validation rule set — not a separate format.
+
+### Service wiring: `references` (issue #84, implemented)
+
+A service may declare `references: [{ variable, database, output? }]` to wire a declared database into one of
+its environment variables. It is deliberately **not** a `secrets[]` entry: a reference is resolved by the
+provider, its name is public configuration, and the secrets panel exists to tell a tenant what only they can
+supply. Mixing them would list wiring as something to type in.
+
+Validation reuses the plan rule rather than a second one: a reference to a database the manifest does not
+declare is rejected by the contract (`unknown-database`), and the provider refuses to build a plan whose
+wiring it could not resolve. `templates/example-web-app` declares one (`DATABASE_URL` from `app-db`) so the
+catalog exercises it.
 
 ### Domains: literal hosts are provisional (OD12)
 
@@ -283,11 +307,11 @@ schema change and gets its own `apiVersion` review.
 
 ## Worked examples to write next
 
-1. `templates/treedx/manifest.yaml` — `api-service`, one service, Postgres, object storage of
+1. `templates/example-web-app/manifest.yaml` — `api-service`, one service, Postgres, object storage of
    repository clones, API-key auth, no identity host. Verify: can it be deployed with zero secrets
    known to platfolio? Its AI-context generation workload needs a resource ceiling and a queue,
    otherwise one tenant saturates its own project (and its own bill — correct under D1).
-2. `templates/arcnexus/manifest.yaml` — `full-stack-web`, Keycloak dependency already in the
+2. `templates/example-full-stack/manifest.yaml` — `full-stack-web`, Keycloak dependency already in the
    platform, so both `hosted-realm` and `byo-oidc` modes must be exercised. Verify: realm import
    round-trip and that ejecting leaves a working, self-contained ArcNexus with its own IdP.
 3. `ops/platfolio/manifest.yaml` — platfolio hosting itself, which is how the renderer stays honest.

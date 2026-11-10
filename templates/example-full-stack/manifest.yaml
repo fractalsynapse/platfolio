@@ -1,12 +1,12 @@
 apiVersion: platfolio.dev/v1alpha1
 kind: Platform
 metadata:
-  name: arcnexus
+  name: example-full-stack
   version: 0.9.2
-  title: ArcNexus
+  title: ExampleFullStack
   summary: Architecture studio that grows software with agent-driven development across repository collections.
   archetype: full-stack-web
-  repository: https://github.com/fractalsynapse/arcnexus
+  repository: https://github.com/fractalsynapse/example-full-stack
   license: Apache-2.0
   architectures: [amd64, arm64]
 spec:
@@ -23,13 +23,13 @@ spec:
     staging: { enabled: true, branch: staging, sleepByDefault: true }
     preview: { enabled: false }
   resources:
-    database: { name: arcnexus-db, kind: postgres }
-    cache: { name: arcnexus-cache, kind: redis }
+    database: { name: app-db, kind: postgres }
+    cache: { name: example-full-stack-cache, kind: redis }
     volumes:
       - { name: workspace-data, service: agent, mountPath: /work, sizeGB: 50 }
   services:
     web:
-      image: ghcr.io/fractalsynapse/arcnexus-web:0.9.2
+      image: ghcr.io/fractalsynapse/example-full-stack-web:0.9.2
       digest: sha256:3333333333333333333333333333333333333333333333333333333333333333
       port: 3000
       healthPath: /api/health
@@ -40,12 +40,12 @@ spec:
         NODE_ENV: production
         # Issuer supplied by hand. A team realm consumed across instances is OD11; until that lands this
         # cannot be resolved by the system, so it is written as a real value rather than a stand-in.
-        OIDC_ISSUER: https://auth.arcnexus.example.com/realms/acme
-        OIDC_CLIENT_ID: arcnexus
-      domains: [app.arcnexus.example.com]
+        OIDC_ISSUER: https://auth.example.com/realms/acme
+        OIDC_CLIENT_ID: example-full-stack
+      domains: [app.example.com]
       public: true
     api:
-      image: ghcr.io/fractalsynapse/arcnexus-api:0.9.2
+      image: ghcr.io/fractalsynapse/example-full-stack-api:0.9.2
       digest: sha256:4444444444444444444444444444444444444444444444444444444444444444
       port: 8080
       healthPath: /healthz
@@ -55,13 +55,13 @@ spec:
       limits: { cpu: 1, memoryMB: 1024 }
       env:
         # See the note on the web service: hand-supplied until OD11.
-        OIDC_ISSUER: https://auth.arcnexus.example.com/realms/acme
-        OIDC_CLIENT_ID: arcnexus
+        OIDC_ISSUER: https://auth.example.com/realms/acme
+        OIDC_CLIENT_ID: example-full-stack
       secrets:
         - { name: OIDC_CLIENT_SECRET, source: preserve }
         - { name: STRIPE_WEBHOOK_SECRET, source: preserve }
       dependsOn: [web]
-      domains: [api.arcnexus.example.com]
+      domains: [api.example.com]
       public: true
     keycloak:
       image: quay.io/keycloak/keycloak:26.0
@@ -75,10 +75,10 @@ spec:
         KC_HOSTNAME_STRICT: "false"
       secrets:
         - { name: KEYCLOAK_ADMIN_INITIAL_ACCESS, source: preserve }
-      domains: [auth.arcnexus.example.com]
+      domains: [auth.example.com]
       public: true
     agent:
-      image: ghcr.io/fractalsynapse/arcnexus-agent:0.9.2
+      image: ghcr.io/fractalsynapse/example-full-stack-agent:0.9.2
       digest: sha256:5555555555555555555555555555555555555555555555555555555555555555
       port: 7070
       healthPath: /health
@@ -93,5 +93,5 @@ spec:
     onSuspend: scale-to-zero
     onEject: [railway-iac, compose, data-export, realm-export, secret-inventory]
     onDelete: { graceDays: 30, backupAgeOutDays: 90 }
-  observability: { uptimeChecks: ["app.arcnexus.example.com/api/health"], logRetentionDays: 7 }
-  billing: { sku: arcnexus-standard, metered: none }
+  observability: { uptimeChecks: ["app.example.com/api/health"], logRetentionDays: 7 }
+  billing: { sku: example-full-stack-standard, metered: none }

@@ -1,5 +1,6 @@
 packages:
   - packages/*
+  - apps/*
 
 # Repository tooling runs no dependency build scripts. pnpm blocks them by default and reports it;
 # strictDepBuilds=false keeps that report a notice so `pnpm install --frozen-lockfile` succeeds in CI,

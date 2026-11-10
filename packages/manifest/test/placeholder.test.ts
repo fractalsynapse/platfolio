@@ -6,7 +6,7 @@ import { parse, validateManifest } from '../src/index.ts';
 import type { Manifest } from '../src/index.ts';
 
 const root = path.resolve(new URL('.', import.meta.url).pathname, '../../..');
-const base = parse(fs.readFileSync(path.join(root, 'templates/treedx/manifest.yaml'), 'utf8')).manifest!;
+const base = parse(fs.readFileSync(path.join(root, 'templates/example-web-app/manifest.yaml'), 'utf8')).manifest!;
 
 function withEnv(key: string, value: string) {
   const m = structuredClone(base) as Manifest;
@@ -30,7 +30,7 @@ test('real values are not rejected — the rule must not produce false positives
 });
 
 test('both shipped fixtures resolve cleanly with no placeholder in them', () => {
-  for (const p of ['templates/treedx/manifest.yaml', 'templates/arcnexus/manifest.yaml']) {
+  for (const p of ['templates/example-web-app/manifest.yaml', 'templates/example-full-stack/manifest.yaml']) {
     const r = parse(fs.readFileSync(path.join(root, p), 'utf8'));
     assert.equal(r.issues.length, 0, `${p}: ${JSON.stringify(r.issues)}`);
     // Check *values*, not raw text: prose in a comment is allowed to mention the word.

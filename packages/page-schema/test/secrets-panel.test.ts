@@ -14,7 +14,7 @@ function manifest(p: string): Manifest {
   assert.equal(r.issues.length, 0, JSON.stringify(r.issues));
   return r.manifest!;
 }
-const arcnexus = manifest('templates/arcnexus/manifest.yaml');
+const fullStack = manifest('templates/example-full-stack/manifest.yaml');
 
 const BOTH_ENVS = { instanceId: 'inst-1', environments: ['production', 'staging'], satisfied: [] };
 const SEALED = { sealedVariables: true, custody: 'managed' as const };
@@ -32,7 +32,7 @@ function walk(page: Page): { component: string; props: Record<string, unknown> }
 }
 
 test('managed + sealable renders write-only inputs, one per secret per environment', () => {
-  const panel = buildSecretsPanel(arcnexus, BOTH_ENVS, SEALED);
+  const panel = buildSecretsPanel(fullStack, BOTH_ENVS, SEALED);
   const fields = walk(panel).filter((n) => n.component === 'secret-field');
   const names = fields.map((f) => `${f.props.service}/${f.props.environment}/${f.props.name}`).sort();
   assert.deepEqual(names, [
@@ -45,7 +45,7 @@ test('managed + sealable renders write-only inputs, one per secret per environme
 });
 
 test('a production-only external service gets no staging rows (D23)', () => {
-  const panel = buildSecretsPanel(arcnexus, BOTH_ENVS, SEALED);
+  const panel = buildSecretsPanel(fullStack, BOTH_ENVS, SEALED);
   const groups = walk(panel).filter((n) => n.component === 'secret-group');
   const kc = groups.filter((g) => g.props.service === 'keycloak');
   assert.equal(kc.length, 1, 'keycloak appears once');
@@ -54,7 +54,7 @@ test('a production-only external service gets no staging rows (D23)', () => {
 });
 
 test('the built page carries no value-bearing property anywhere', () => {
-  const panel = buildSecretsPanel(arcnexus, BOTH_ENVS, SEALED);
+  const panel = buildSecretsPanel(fullStack, BOTH_ENVS, SEALED);
   assert.deepEqual(findValueBearingProps(panel), []);
   const text = projectToText(panel);
   // A key would serialise as "value": — checking the *key* form, not the word, because the word
@@ -80,7 +80,7 @@ test('a secret-field schema refuses a value prop outright', () => {
 });
 
 test('an unsealable provider switches to outbound links and never writes', () => {
-  const panel = buildSecretsPanel(arcnexus, BOTH_ENVS, { sealedVariables: false, custody: 'managed' });
+  const panel = buildSecretsPanel(fullStack, BOTH_ENVS, { sealedVariables: false, custody: 'managed' });
   const kinds = new Set(walk(panel).map((n) => n.component));
   assert.ok(!kinds.has('secret-field'), 'no input fields when sealing is unavailable');
   assert.ok(kinds.has('link-field'));
@@ -92,7 +92,7 @@ test('an unsealable provider switches to outbound links and never writes', () =>
 });
 
 test('strict custody routes secrets to the tenant CI', () => {
-  const panel = buildSecretsPanel(arcnexus, BOTH_ENVS, { sealedVariables: true, custody: 'strict' });
+  const panel = buildSecretsPanel(fullStack, BOTH_ENVS, { sealedVariables: true, custody: 'strict' });
   const kinds = new Set(walk(panel).map((n) => n.component));
   assert.ok(kinds.has('instructions'));
   assert.ok(!kinds.has('secret-field') && !kinds.has('link-field'));
@@ -101,7 +101,7 @@ test('strict custody routes secrets to the tenant CI', () => {
 });
 
 test('a satisfied sealed secret shows the rotation warning and changes its action label', () => {
-  const panel = buildSecretsPanel(arcnexus, {
+  const panel = buildSecretsPanel(fullStack, {
     ...BOTH_ENVS, satisfied: [{ service: 'api', environment: 'production', name: 'OIDC_CLIENT_SECRET' }],
   }, SEALED);
   const field = walk(panel).find((n) => n.component === 'secret-field' && n.props.name === 'OIDC_CLIENT_SECRET' && n.props.environment === 'production');
@@ -114,17 +114,17 @@ test('a satisfied sealed secret shows the rotation warning and changes its actio
 });
 
 test('an environment the platform does not declare is reported, not rendered blindly', () => {
-  const panel = buildSecretsPanel(arcnexus, { ...BOTH_ENVS, environments: ['production', 'qa'] }, SEALED);
+  const panel = buildSecretsPanel(fullStack, { ...BOTH_ENVS, environments: ['production', 'qa'] }, SEALED);
   const notices = walk(panel).filter((n) => n.component === 'notice');
   assert.ok(notices.some((n) => /"qa" is not declared/.test(String(n.props.text))), JSON.stringify(notices.map((n) => n.props.text)));
 });
 
 test('rendering is deterministic: the same inputs give the same page, byte for byte', () => {
-  const a = buildSecretsPanel(arcnexus, BOTH_ENVS, SEALED);
-  const b = buildSecretsPanel(arcnexus, BOTH_ENVS, SEALED);
+  const a = buildSecretsPanel(fullStack, BOTH_ENVS, SEALED);
+  const b = buildSecretsPanel(fullStack, BOTH_ENVS, SEALED);
   assert.deepEqual(a, b);
   assert.equal(projectToText(a), projectToText(b));
-  assert.notEqual(projectToText(a), projectToText(buildSecretsPanel(arcnexus, BOTH_ENVS, { sealedVariables: false, custody: 'managed' })));
+  assert.notEqual(projectToText(a), projectToText(buildSecretsPanel(fullStack, BOTH_ENVS, { sealedVariables: false, custody: 'managed' })));
 });
 
 test('the registry covers every declared component name and nothing else', () => {
@@ -133,7 +133,7 @@ test('the registry covers every declared component name and nothing else', () =>
 });
 
 test('a page with no secrets says so instead of rendering an empty shell', () => {
-  const panel = buildSecretsPanel(arcnexus, { instanceId: 'inst-2', environments: ['production'], satisfied: [] }, { sealedVariables: true, custody: 'strict' });
+  const panel = buildSecretsPanel(fullStack, { instanceId: 'inst-2', environments: ['production'], satisfied: [] }, { sealedVariables: true, custody: 'strict' });
   const groups = walk(panel).filter((n) => n.component === 'secret-group');
   assert.ok(groups.length >= 1);
   assert.ok(PageSchema.safeParse(panel).success, 'output validates against its own schema');

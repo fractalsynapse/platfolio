@@ -17,7 +17,7 @@ function plan(): InfraPlan {
   // A generated Railway host and a custom one, so both status sources are exercised.
   p.environments[0]!.domains = [
     { host: 'web.up.railway.app', service: 'api', port: 3000, verificationName: 'unused' },
-    { host: 'api.example.com', service: 'api', port: 3000, verificationName: 'treedx-verify' },
+    { host: 'api.example.com', service: 'api', port: 3000, verificationName: 'domain-verify' },
   ];
   p.environments[1]!.domains = [];
   return p;
@@ -80,4 +80,34 @@ test('retryCertificate refuses an id that is not attached, rather than calling b
   const { provider } = harness();
   await provider.applyPlan(plan());
   await assert.rejects(() => provider.retryCertificate('cdom-nope'), /no custom domain with id/);
+});
+
+test('a failed private-registry deployment carries the tenant-only next action', async () => {
+  const mock = new RailwayMock({ outcome: 'FAILED' });
+  const provider = new RailwayInfraProvider({ credentials: mock, transport: mock, workspaceId: 'ws-1', deployBudget: 20, deployTimeoutMs: 1_000, pollIntervalMs: 1, sleep: async () => {} });
+  const p = samplePlan();
+  for (const environment of p.environments) {
+    environment.databases = [];
+    environment.buckets = [];
+    environment.cloneFrom = undefined;
+    for (const service of environment.services) { service.image = 'ghcr.io/acme/private-app:1.2.3'; service.digest = `sha256:${'e'.repeat(64)}`; }
+  }
+  const applied = await provider.applyPlan(p);
+  const hint = (applied.notes ?? []).find((n) => n.code === 'image-pull-authorization-hint');
+  assert.ok(hint, JSON.stringify(applied.notes ?? []));
+  assert.match(hint.message, /does not hold such a credential/);
+  assert.match(hint.message, /likely cause/, 'a hint, not a claimed diagnosis');
+
+  // A public docker.io image must not be nagged about credentials it does not need.
+  const mock2 = new RailwayMock({ outcome: 'FAILED' });
+  const provider2 = new RailwayInfraProvider({ credentials: mock2, transport: mock2, workspaceId: 'ws-1', deployBudget: 20, deployTimeoutMs: 1_000, pollIntervalMs: 1, sleep: async () => {} });
+  const p2 = samplePlan();
+  for (const environment of p2.environments) {
+    environment.databases = [];
+    environment.buckets = [];
+    environment.cloneFrom = undefined;
+    for (const service of environment.services) { service.image = 'docker.io/library/nginx:alpine'; service.digest = `sha256:${'e'.repeat(64)}`; }
+  }
+  const applied2 = await provider2.applyPlan(p2);
+  assert.ok(!(applied2.notes ?? []).some((n) => n.code === 'image-pull-authorization-hint'), 'no credential hint for a public image');
 });

@@ -50,10 +50,10 @@ export function samplePlan(overrides: Partial<InfraPlan> = {}): InfraPlan {
     provider: 'sample',
     contract: '1.0.0',
     planHash: 'a'.repeat(16),
-    manifestRef: { platform: 'treedx', version: '1.4.0' },
+    manifestRef: { platform: 'example-web-app', version: '1.4.0' },
     environments: [
-      { name: 'production', services: [service('api', 2)], domains: [{ host: 'api.example.com', service: 'api', port: 3000, verificationName: 'treedx-verify' }], databases: [{ name: 'treedx-db', kind: 'postgres' }], buckets: [{ name: 'clones', region: 'iad' }] },
-      { name: 'staging', cloneFrom: 'production', services: [service('api', 1)], domains: [], databases: [{ name: 'treedx-db', kind: 'postgres' }], buckets: [] },
+      { name: 'production', services: [service('api', 2)], domains: [{ host: 'api.example.com', service: 'api', port: 3000, verificationName: 'domain-verify' }], databases: [{ name: 'app-db', kind: 'postgres' }], buckets: [{ name: 'clones', region: 'iad' }] },
+      { name: 'staging', cloneFrom: 'production', services: [service('api', 1)], domains: [], databases: [{ name: 'app-db', kind: 'postgres' }], buckets: [] },
     ],
     ...overrides,
   };
@@ -144,7 +144,10 @@ export async function runConformance(make: () => InfraProvider, requiredRange = 
     const provider = make();
     const plan = planFor();
     const applied = await provider.applyPlan(plan);
-    if (!applied.verified) return { status: 'fail', detail: 'apply reported success without read-back verification' };
+    if (!applied.verified) {
+      const reasons = applied.failures.map((f) => `${f.code}@${f.step}: ${f.message.slice(0, 110)}`);
+      return { status: 'fail', detail: `apply did not verify: ${reasons.join(' | ') || 'no failures reported'}` };
+    }
     if (applied.failures.length) return { status: 'fail', detail: `apply reported failures: ${applied.failures.map((f) => f.code).join(', ')}` };
     const state = await provider.readState(plan.instanceId);
     const want = plan.environments.reduce((n, e) => n + e.services.length, 0);

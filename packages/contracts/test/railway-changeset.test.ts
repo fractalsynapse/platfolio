@@ -52,10 +52,10 @@ test('bucket region survives; a secret is preserve-typed and never literal', () 
 test('a declared reference becomes a graph reference node, not a preserve()', () => {
   const plan = samplePlan();
   const environment = plan.environments[0]!;
-  environment.services[0]!.references = [{ variable: 'DATABASE_URL', database: 'treedx-db', output: 'DATABASE_URL' }];
+  environment.services[0]!.references = [{ variable: 'DATABASE_URL', database: 'app-db', output: 'DATABASE_URL' }];
   const graph = buildDesiredGraph(plan, environment);
   const web = graph.resources.find((r) => r.type === 'service')!;
-  assert.deepEqual(web.variables?.DATABASE_URL, { type: 'reference', resource: 'database.treedx-db', output: 'DATABASE_URL' });
+  assert.deepEqual(web.variables?.DATABASE_URL, { type: 'reference', resource: 'database.app-db', output: 'DATABASE_URL' });
 });
 
 test('a reference to an undeclared database throws instead of emitting a dangling link', () => {

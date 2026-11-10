@@ -1,5 +1,6 @@
 import {
   InfraPlanSchema, planIssues,
+  CONTRACT_VERSION,
   type ApplyResult, type CapabilityInfo, type DeleteResult, type InfraPlan, type InfraProvider,
   type Issue, type ServicePlan, type StateSnapshot,
 } from './infra.ts';
@@ -54,6 +55,21 @@ const STATUS_MAP: Record<string, ServiceStateStatus> = {
 };
 
 /** Statuses the controller may keep polling on; anything else is terminal for a wait. */
+/** Registry hosts that routinely hold private images; docker.io library images almost never do. */
+const PRIVATE_CAPABLE_REGISTRIES = ['ghcr.io', 'quay.io', 'mcr.microsoft.com', 'public.ecr.aws'];
+
+/**
+ * Where a tenant should look when their own image fails to deploy. Narrow on purpose: platfolio cannot
+ * verify pullability (no registry credential, by design) and must not read provider build logs, so this
+ * never asserts a cause -- it names the one action only the tenant can take.
+ */
+export function registryPullHint(image: string): string | undefined {
+  const host = image.split('/')[0] ?? '';
+  if (!host.includes('.') && !host.includes('localhost')) return undefined;   // docker.io shorthand form
+  if (!PRIVATE_CAPABLE_REGISTRIES.some((known) => host === known || host.endsWith(`.${known}`))) return undefined;
+  return `"${image}" is pulled from ${host}, which routinely holds private repositories. If the deployment failed to start, the likely cause is that this Railway project cannot pull the image: attach a read-only registry credential for ${host} in the project's settings. platfolio cannot do this for you and does not hold such a credential -- it is yours to grant, and is never stored here.`;
+}
+
 const IN_FLIGHT: ReadonlySet<ServiceStateStatus> = new Set(['pending', 'building', 'deploying']);
 
 type ServiceStateStatus = StateSnapshot['services'][number]['status'];
@@ -62,6 +78,8 @@ export interface RailwayProviderOptions {
   credentials: RailwayCredentialSource;
   transport?: RailwayTransport;
   workspaceId: string;
+  /** Engine kind -> Railway Template code; public catalog entries are read by code (#75). */
+  databaseTemplates?: Record<string, string>;
   /**
    * Deploys this provider instance may trigger. The execution plane treats the tenant's daily ceiling as
    * external and hard, so the guard lives here instead of in the caller's memory.
@@ -92,7 +110,10 @@ domainRecords: Record<string, NonNullable<StateSnapshot['domains'][number]['reco
 }
 
 export class RailwayInfraProvider implements InfraProvider {
-  readonly contract = '1.0.0';
+  // Annotated with the literal type on purpose: `readonly contract = CONTRACT_VERSION` infers
+  // `string`, which widens a public field consumers narrow on -- a tightening for them even though it reads
+  // as an improvement here. The baseline drift gate caught it as a removal.
+  readonly contract: typeof CONTRACT_VERSION = CONTRACT_VERSION;
 
   private readonly credentials: RailwayCredentialSource;
   private readonly transport: RailwayTransport;
@@ -101,6 +122,9 @@ export class RailwayInfraProvider implements InfraProvider {
   private readonly deployTimeoutMs: number;
   private readonly pollIntervalMs: number;
   private readonly sleep: (ms: number) => Promise<void>;
+  /** Engine kind -> Railway Template CODE. Catalog reads authorize by code: template(id:) answers
+  /** "Not Authorized" for public entries even on the workspace grant (#75). */
+  private readonly databaseTemplates: Record<string, string>;
 
   /** Deploys consumed so far; the caller reports this against the tenant's daily ceiling. */
   deploymentsUsed = 0;
@@ -109,6 +133,7 @@ export class RailwayInfraProvider implements InfraProvider {
     this.credentials = options.credentials;
     this.transport = options.transport ?? new HttpRailwayTransport();
     this.workspaceId = options.workspaceId;
+    this.databaseTemplates = { postgres: 'postgresql', ...options.databaseTemplates };
     this.deployBudget = options.deployBudget ?? 4;
     this.deployTimeoutMs = options.deployTimeoutMs ?? 180_000;
     this.pollIntervalMs = options.pollIntervalMs ?? 5_000;
@@ -231,7 +256,7 @@ export class RailwayInfraProvider implements InfraProvider {
           if (entry.literal === undefined) continue;
           await this.upsertVariable(projectId, environmentId, serviceId, entry.name, entry.literal, token);
         }
-        await this.ensureSecrets(projectId, environmentId, serviceId, service, failures);
+        await this.ensureSecrets(projectId, environmentId, serviceId, service, environment.name, failures);
 
         // Measured on 2026-11-08: ceilings ARE reachable through `serviceInstanceLimitsUpdate`, even
         // though the IaC graph has no field for them. An earlier revision of this provider reported them
@@ -255,6 +280,16 @@ export class RailwayInfraProvider implements InfraProvider {
 
         const deployed = await this.deploy(serviceId, environmentId, token, failures);
         const outcome = deployed ? await this.awaitDeployment(projectId, environmentId, serviceId, token, failures, notes) : { status: 'pending' as const, instanceId: serviceId };
+        // A deployment that does not come up is often a pull authorization problem, and the tenant -- not
+        // platfolio -- is the only party who can fix it. We cannot pull-test their image (we hold no registry
+        // credential by design) and must not read Railway build logs (they contain resolved environment
+        // values), so this is a hint attached to a real failure, never a claimed diagnosis.
+        if (outcome.status !== 'live') {
+          const hint = registryPullHint(service.image);
+          if (hint) {
+            notes.push({ step: `services.${service.name}`, code: 'image-pull-authorization-hint', message: hint });
+          }
+        }
         services.push({
           name: service.name,
           environment: environment.name,
@@ -294,19 +329,13 @@ export class RailwayInfraProvider implements InfraProvider {
       }
 
       for (const database of environment.databases) {
-        // E28 open: templateDeployV2 with a PostgreSQL template returns "Problem processing request"
-        // with no detail, and no other creation path was found. Reported as missing rather than
-        // approximated, because a stateless service without its database is worse than a failed apply.
-        // NOT a provider limitation. The mechanism is identified: config-as-code change sets, with a
-        // first-class `type: "database", engine: "postgres"` resource in railway/iac and
-        // CompileResult.desiredConfig: EnvironmentConfig. What is unresolved is the payload shape this
-        // build can make the API accept -- every attempt answers `applied` with `changes: []`, including
-        // a deliberately invalid resource type, while a missing/string `version` errors outright. So the
-        // server validates `version` and silently ignores the rest (E24 needs `plan --json` as a sample).
-        // Reported as unmet rather than approximated: a stateless service that comes up "healthy"
-        // without its database is the worst outcome this contract can produce.
-        failures.push({ step: `databases.${database.name}`, code: 'database-not-provisioned', message: `${database.kind} is not provisioned by this build: the change-set payload is unresolved (E24), and the instance is incomplete without it` });
+        await this.provisionDatabase(projectId, environmentId, environment.name, database, environment, token, serviceIds, failures, notes);
       }
+
+      for (const volume of environment.volumes ?? []) {
+        await this.provisionVolume(projectId, environmentId, volume, environment.name, serviceIds, workspaceCredential, failures, notes);
+      }
+
       for (const bucket of environment.buckets) {
         // E28: bucketCreate works, but only with the workspace grant -- an environment-scoped project
         // token is answered with "Bad Access", which is why this call cannot go through `token`.
@@ -370,26 +399,45 @@ export class RailwayInfraProvider implements InfraProvider {
     const credential = await this.credentials.workspace();
     const removed: string[] = [];
     const orphans: string[] = [];
+    const deleteFailures: NonNullable<DeleteResult['failures']> = [];
 
     const environments = await this.environments(project.id, credential);
     const services = await this.listServices(project.id, credential);
     for (const environment of environments) {
       for (const service of services) {
         try {
-          await this.transport.graphql({
-            operation: 'serviceDelete',
-            credential,
-            query: 'mutation ($environmentId: String!, $id: String!) { serviceDelete(environmentId: $environmentId, id: $id) }',
-            variables: { environmentId: environment.id, id: service.id },
-          });
+          await this.deleteServiceWithRetry(project.id, environment, service, credential);
           removed.push(`service:${environment.name}/${service.name}`);
-        } catch {
-          // Absent in this environment is not an orphan.
+        } catch (error) {
+          // The empty catch was a bug in the family we keep chasing: the intent was "absent in this
+          // environment is not an orphan", but a real refusal -- exactly what happened to the
+          // template-created database in #80 -- disappeared, leaving a survivor reported with no reason.
+          // Placement decides whether the delete has anything to say about it.
+          // Placement decides whether to speak, but the placement read itself needs an environment token and
+          // can fail -- a refused delete still deserves a reason either way, so this is best-effort.
+          let placed: unknown = true;
+          try {
+            const envToken = await this.credentials.forEnvironment(project.id, environment.name);
+            placed = await this.instanceStatus(project.id, environment.id, service.id, envToken);
+          } catch {
+            placed = true;
+          }
+          if (!placed) continue;   // genuinely absent here: not an orphan, nothing to report
+          deleteFailures.push({ step: `service:${environment.name}/${service.name}`, code: 'service-delete-failed', message: (error as Error).message.slice(0, 200) });
         }
       }
     }
 
     // Anything still there is reported, never counted as gone.
+    // Volumes are project-level and outlive the service they were attached to, so they are removed
+    // explicitly and anything left is reported. "Removed everything" has to mean everything we can create.
+    // Volumes first: a volume is attached to its service, so releasing the attachment before the service is
+    // the order a template-created database is most likely to accept (#80's survivor still held its volume).
+    for (const volume of await this.listVolumes(project.id, credential)) {
+      await this.transport.graphql({ operation: 'volumeDelete', credential, query: 'mutation ($volumeId: String!) { volumeDelete(volumeId: $volumeId) }', variables: { volumeId: volume.id } })
+        .then(() => { removed.push(`volume:${volume.name}`); })
+        .catch(() => { orphans.push(`volume:${volume.name}`); });
+    }
     for (const leftover of await this.listServices(project.id, credential)) orphans.push(`service:${leftover.name}`);
     for (const bucket of await this.buckets(project.id, credential)) orphans.push(`bucket:${bucket}`);
 
@@ -400,7 +448,7 @@ export class RailwayInfraProvider implements InfraProvider {
       variables: { id: project.id },
     });
     removed.push(`project:${project.name}`);
-    return { instanceId, removed, orphans };
+    return { instanceId, removed, orphans, ...(deleteFailures.length ? { failures: deleteFailures } : {}) };
   }
 
   // --- internals -------------------------------------------------------------------------------
@@ -591,7 +639,7 @@ export class RailwayInfraProvider implements InfraProvider {
    * put the value in our memory for no reason, and that is the difference between a claim we can keep and
    * one we cannot.
    */
-  private async ensureSecrets(projectId: string, environmentId: string, serviceId: string, service: ServicePlan, failures: ApplyResult['failures']): Promise<void> {
+  private async ensureSecrets(projectId: string, environmentId: string, serviceId: string, service: ServicePlan, envName: string, failures: ApplyResult['failures']): Promise<void> {
     if (service.secrets.length === 0) return;
     const present = new Set(await this.configVariableNames(projectId, environmentId, serviceId));
     for (const secret of service.secrets) {
@@ -600,7 +648,10 @@ export class RailwayInfraProvider implements InfraProvider {
       }
       if (!present.has(secret.name)) {
         failures.push({
-          step: `services.${service.name}.secrets.${secret.name}`,
+          // The environment belongs in the step: with two environments this failure was reported twice under an
+          // identical step, which tells a tenant nothing about where to set the value (found by the
+          // manifest->plan->provider chain test in #84).
+          step: `environments.${envName}.services.${service.name}.secrets.${secret.name}`,
           code: 'secret-unavailable',
           message: `no variable named "${secret.name}" exists in this environment (source "${secret.source}"); the deploy is not healthy until the tenant supplies it`,
         });
@@ -878,6 +929,233 @@ export class RailwayInfraProvider implements InfraProvider {
 
   /** Recorded so a retry can find the project without the caller repeating the mapping. */
   private lastProjectId = '';
+
+  /**
+   * Provision a managed database through the template path (OD13). Measured 2026-11-09:
+   * `templateDeployV2({ templateId, serializedConfig, projectId, environmentId, workspaceId })` created AND
+   * deployed a private PostgreSQL to SUCCESS with no dashboard step. Two details make it work where earlier
+   * probes failed: the input type is `TemplateDeployV2Input` (a different, similarly named type exists), and
+   * `serializedConfig` is supplied by the caller -- read from the Template itself. Wrong shapes get the same
+   * opaque "Problem processing request" that change sets emit, so that message means "could not deserialize",
+   * never "cannot be done".
+   *
+   * The input has no services field and the deploy arrives under the template's own service name, so the
+   * config is fetched, renamed to the plan's name, and sent back. Provisioning is asynchronous
+   * (operationId/workflowId), so success is observed by reading the deployment back, not by the mutation
+   * returning. A database that does not reach SUCCESS fails the apply: a service reported healthy without
+   * its database is the worst outcome this contract can produce.
+   */
+  private async provisionDatabase(projectId: string, environmentId: string, envName: string, database: { name: string; kind: string }, environment: { name: string; services: ServicePlan[]; databases: { name: string; kind: string }[] }, token: RailwayCredential, serviceIds: Map<string, string>, failures: ApplyResult['failures'], notes: NonNullable<ApplyResult['notes']>): Promise<void> {
+    const step = `databases.${database.name}`;
+    const templateCode = this.databaseTemplates[database.kind];
+    if (!templateCode) {
+      failures.push({ step, code: 'unknown-database-kind', message: `${database.kind} has no template code configured on this provider` });
+      return;
+    }
+
+    // Service names are project-wide (measured in E25: creating the same name in another environment is
+    // rejected), and staging receives services through environment duplication. So an existing database
+    // service is never re-provisioned here -- the only question is whether it has an instance in THIS
+    // environment, which is the same placement rule already applied to ordinary services.
+    const workspaceForLookup = await this.credentials.workspace();
+    const existing = (await this.listServices(projectId, workspaceForLookup)).find((s) => s.name === database.name);
+    if (existing) {
+      serviceIds.set(`${envName}/${database.name}`, existing.id);
+      const placed = await this.instanceStatus(projectId, environmentId, existing.id, token);
+      if (!placed) {
+        failures.push({
+          step,
+          code: 'database-instance-missing-in-environment',
+          message: `${database.kind} exists in this project but has no instance in "${envName}"; recreate the environment duplicate so it is placed`,
+        });
+        return;
+      }
+      if (placed.status !== 'live') {
+        // A duplicate made by environmentCreate carries the service but NO deployment (measured in E25, and
+        // reproduced honestly by the double: the cloned instance sits at PENDING forever). Waiting on a
+        // deployment that was never started is the same class of bug as the project-wide lookup above -- the
+        // provider has to start it. Budget and idempotency still apply, so a re-apply does not redeploy.
+        // rawStatus is the provider's own last deployment record: null means nothing has ever been deployed
+        // in this environment, which is exactly the duplicated-staging case.
+        const started = placed.rawStatus == null ? await this.deploy(existing.id, environmentId, token, failures) : true;
+        if (started) {
+          const outcome = await this.awaitDeployment(projectId, environmentId, existing.id, token, failures, notes);
+          if (outcome.status !== 'live') {
+            failures.push({ step, code: 'database-not-deployed', message: `${database.kind} reached ${outcome.status} instead of live` });
+          }
+        }
+      }
+      await this.wireReferences(projectId, environmentId, database, envName, environment, serviceIds, token);
+      return;
+    }
+
+    try {
+      // The catalog read goes on the workspace grant: every live probe that reached a Template did, while an
+      // environment-scoped project token is the grant that gets "Bad Access" on project-level operations.
+      const workspaceCredential = await this.credentials.workspace();
+      const fetched = await this.transport.graphql<{ template: { id?: string | null; serializedConfig?: { services?: Record<string, Record<string, unknown>> } | null } }>({
+        operation: 'template',
+        credential: workspaceCredential,
+        query: 'query ($code: String!) { template(code: $code) { id serializedConfig } }',
+        variables: { code: templateCode },
+      });
+      const templateId = fetched.template.id;
+      const config = fetched.template.serializedConfig;
+      if (!templateId) {
+        failures.push({ step, code: 'template-config-unexpected', message: `template code "${templateCode}" returned no id to deploy` });
+        return;
+      }
+      const services = config?.services ?? {};
+      const keys = Object.keys(services);
+      if (keys.length !== 1 || !config) {
+        failures.push({ step, code: 'template-config-unexpected', message: `template "${templateCode}" exposed ${String(keys.length)} services; this provider composes exactly one` });
+        return;
+      }
+      const key = keys[0]!;
+      const composedConfig = { ...config, services: { [key]: { ...services[key]!, name: database.name } } };
+
+      const deployed = await this.transport.graphql<{ templateDeployV2: { operationId?: string | null; workflowId?: string | null } }>({
+        operation: 'templateDeployV2',
+        credential: workspaceCredential,
+        query: 'mutation ($input: TemplateDeployV2Input!) { templateDeployV2(input: $input) { operationId workflowId } }',
+        variables: { input: { templateId, serializedConfig: composedConfig, projectId, environmentId, workspaceId: this.workspaceId } },
+      });
+      // Template provisioning is a deployment in everything but the call we made, so the budget has to see
+      // it, or a second environment would be free to deploy past the tenant's ceiling.
+      this.deploymentsUsed += 1;
+      notes.push({ step, code: 'database-provisioning-started', message: `template deploy accepted (operation ${deployed.templateDeployV2.operationId ?? 'unreported'}); provisioning is asynchronous` });
+
+      // templateDeployV2 is asynchronous (operationId/workflowId) and the service materialises tens of
+      // seconds later -- measured. Listing once immediately reported a healthy provisioning as a missing
+      // service (issue #77), so we wait for it to appear AND to be placed in this environment.
+      const deadline = Date.now() + this.deployTimeoutMs;
+      let created: ServiceNode | undefined;
+      for (;;) {
+        const listed = await this.listServices(projectId, workspaceCredential);
+        const candidates = listed.filter((s) => s.name === database.name || (s.name ?? '').toLowerCase().includes(database.kind));
+        for (const candidate of candidates) {
+          if (await this.instanceStatus(projectId, environmentId, candidate.id, token)) { created = candidate; break; }
+        }
+        if (created) break;
+        if (Date.now() > deadline) break;
+        await this.sleep(this.pollIntervalMs);
+      }
+      if (!created) {
+        failures.push({
+          step,
+          code: 'database-provision-timeout',
+          message: `the ${database.kind} template deploy was accepted but surfaced no placed service within ${this.deployTimeoutMs}ms`,
+        });
+        return;
+      }
+      serviceIds.set(`${envName}/${database.name}`, created.id);
+
+      const outcome = await this.awaitDeployment(projectId, environmentId, created.id, token, failures, notes);
+      if (outcome.status !== 'live') {
+        failures.push({ step, code: 'database-not-deployed', message: `${database.kind} reached ${outcome.status} instead of success` });
+        return;
+      }
+
+      // Wire every service in this environment that references the database, using Railway's own reference
+      // expression so the credential is resolved by the provider: platfolio writes an expression and never
+      // sees the value it stands for.
+      await this.wireReferences(projectId, environmentId, database, envName, environment, serviceIds, token);
+    } catch (error) {
+      failures.push({ step, code: 'database-provision-failed', message: (error as Error).message.slice(0, 240) });
+    }
+  }
+
+  /**
+   * Write Railway's own reference expression for every service that declares a reference to this database,
+   * so platfolio never *chooses* the value and never keeps it: the write is the only time it crosses.
+   *
+   * Measured, and it corrects an assumption I made in the design docs: Railway resolves `${{Service.VAR}}`
+   * **on write**, so `variables()` returns the resolved secret. This is therefore NOT a custody mechanism --
+   * it does not make reading safe, and it must not be described to a tenant as "we cannot see your secret".
+   * The custody guarantee comes from never reading variable values anywhere in this provider
+   * (`configVariableNames` takes keys only) and from the D24 tier choice, not from the expression syntax.
+   */
+  private async wireReferences(projectId: string, environmentId: string, database: { name: string; kind: string }, envName: string, environment: { name: string; services: ServicePlan[] }, serviceIds: Map<string, string>, credential: RailwayCredential): Promise<void> {
+    for (const service of environment.services) {
+      for (const reference of service.references ?? []) {
+        if (reference.database !== database.name) continue;
+        const target = serviceIds.get(`${envName}/${service.name}`);
+        if (!target) continue;
+        const expression = '$' + `{{${database.name}.${reference.output ?? 'DATABASE_URL'}}}`;
+        await this.upsertVariable(projectId, environmentId, target, reference.variable, expression, credential);
+      }
+    }
+  }
+
+  /**
+   * Provision a volume. `VolumeCreateInput` is { projectId, environmentId, serviceId, mountPath, region }:
+   * a volume is created ATTACHED to a service, so the plan's `volumes[].service` selects the target and
+   * there is no name to request and no separate attach call.
+   *
+   * Verification is deliberately limited to what is observable: `Volume` exposes id/name/project only, and
+   * VolumeInstance (which carries mountPath and serviceId) has no list query on this grant -- a single
+   * `volumeInstance(id)` lookup needs an id we are never handed. So this confirms the volume exists in the
+   * project and notes that mount state is unreadable, rather than inventing a check that always passes.
+   */
+  private async provisionVolume(projectId: string, environmentId: string, volume: { name: string; service: string; mountPath: string; sizeMB?: number | undefined }, envName: string, serviceIds: Map<string, string>, credential: RailwayCredential, failures: ApplyResult['failures'], notes: NonNullable<ApplyResult['notes']>): Promise<void> {
+    const step = `volumes.${volume.name}`;
+    const serviceId = serviceIds.get(`${envName}/${volume.service}`);
+    if (!serviceId) {
+      failures.push({ step, code: 'unknown-service', message: `volume "${volume.name}" targets service "${volume.service}", which is not resolved in "${envName}"` });
+      return;
+    }
+    try {
+      await this.transport.graphql({
+        operation: 'volumeCreate',
+        credential,
+        query: 'mutation ($input: VolumeCreateInput!) { volumeCreate(input: $input) { id name } }',
+        variables: { input: { projectId, environmentId, serviceId, mountPath: volume.mountPath } },
+      });
+      const listed = await this.listVolumes(projectId, credential);
+      if (!listed.length) {
+        failures.push({ step, code: 'volume-not-listed', message: `volume create returned but the project lists no volumes in ${envName}` });
+        return;
+      }
+      notes.push({ step, code: 'volume-mount-unobservable', message: `volume created for "${volume.service}" at ${volume.mountPath}; Railway exposes no volume-instance list on this grant, so the mount itself is not verifiable here` });
+    } catch (error) {
+      failures.push({ step, code: 'volume-create-failed', message: (error as Error).message.slice(0, 240) });
+    }
+  }
+
+    /**
+     * serviceDelete is slow for template-created services: measured live, deleting the provisioned database
+     * exceeded the transport's 25s request deadline and timed out, leaving an orphan, while ordinary services
+     * deleted inside the window. One retry with a short pause keeps the surface honest -- if both attempts
+     * fail, the reason still lands in DeleteResult.failures rather than in an empty catch.
+     */
+    private async deleteServiceWithRetry(projectId: string, environment: EnvironmentNode, service: ServiceNode, credential: RailwayCredential): Promise<void> {
+      let lastError: unknown;
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          await this.transport.graphql({
+            operation: 'serviceDelete',
+            credential,
+            query: 'mutation ($environmentId: String!, $id: String!) { serviceDelete(environmentId: $environmentId, id: $id) }',
+            variables: { environmentId: environment.id, id: service.id },
+          });
+          return;
+        } catch (error) {
+          lastError = error;
+          if (attempt === 0) await this.sleep(2_000);
+        }
+      }
+      throw lastError instanceof Error ? lastError : new Error('serviceDelete failed');
+    }
+
+  private async listVolumes(projectId: string, credential: RailwayCredential): Promise<{ id: string; name: string }[]> {
+    const data = await this.transport.graphql<{ project: { volumes?: { edges: { node: { id: string; name?: string } }[] } | null } | null }>({
+      operation: 'project.volumes',
+      credential,
+      query: 'query ($projectId: String!) { project(id: $projectId) { volumes(first: 50) { edges { node { id name } } } } }',
+      variables: { projectId },
+    });
+    return (data.project?.volumes?.edges ?? []).map((e) => ({ id: e.node.id, name: e.node.name ?? e.node.id }));
+  }
 
   private async buckets(projectId: string, credential: RailwayCredential): Promise<string[]> {
     try {

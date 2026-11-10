@@ -204,3 +204,37 @@ Everything above cost **zero deployments**: attach, poll, verify and issue are m
 timeline for `probe.fractalsynapse.com` — attach with no DNS at all → `CREATING`/`REQUIRES_UPDATE`; CNAME →
 `ACTIVE`/`PROPAGATED`, still unverified; TXT → `verified: true` → `cert: VALID` → LE leaf served at the edge,
 with the ownership record never appearing in the records array.
+
+## Clean live pass: the provider provisions and deletes a managed database (2026-11-09)
+
+Fresh instance (`pclean`, plan hash `deadbeefdeadbeef`), one environment, one service, one template database,
+one volume. **Two deployments consumed.** No project or resource left behind.
+
+| t | observation |
+| --- | --- |
+| 45s | `verified=true`, `failures=[]`, app service `api` at `live` |
+| 45s | notes: `database-provisioning-started`, `volume-mount-unobservable` |
+| 46s | `readState`: `clean-db live`, `api live` -- the **provider-created** database is live |
+| 114s | `removed`: `service:production/clean-db`, `service:production/api`, `volume:api-volume`, `volume:clean-db-volume`, `project:platfolio-pclean` |
+| 114s | `orphans=[]`, no delete failures |
+
+Three claims that were previously only argued and are now measured:
+
+1. **The provider creates managed databases.** Not a direct API probe any more: `applyPlan` ran the template
+   path, waited for the asynchronous deploy, and read the service back as live.
+2. **The provider can delete them** (#80). The template database is removed with the rest of the instance --
+   after the retry and volumes-before-services ordering from #82. Railway creates a volume for it
+   (`clean-db-volume`) and we delete that too.
+3. **Volumes are created and attached live** (`volume:api-volume`), while mount state remains unobservable on
+   this grant, which the `volume-mount-unobservable` note states rather than glossing.
+
+On #79's queueing hypothesis: two deployments in one project settled inside 45s on the same day an earlier run
+watched a service sit at `deploying` for 300s. So ceiling-queueing is **not** the normal condition; the stuck
+case stands as an unreproduced observation, and the failure code that would report it honestly
+(`database-provision-timeout`) exists and is tested in both directions.
+
+Two self-inflicted errors worth keeping in the record because they cost nothing and taught something:
+`projects: Not Authorized` was my probe passing `{kind, token}` to a constructor expecting
+`{ workspaceToken }` -- an empty bearer, and a truthful answer from the API; and a plan rejected by schema
+validation because I used `clean` as a hex hash (`l` and `n` are not hex). Both failed *before* spending a
+deployment, which is the point of validating at the boundary.
