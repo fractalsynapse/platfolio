@@ -29,7 +29,8 @@ import {
   type LocalManifestOptions,
 } from '../packages/contracts/src/index.ts';
 
-const args = process.argv.slice(2);
+// pnpm only forwards flags after a bare `--`, so accept both spellings and say which one we understood.
+const args = process.argv.slice(2).filter((a) => a !== '--');
 const flag = (name: string, fallback?: string): string | undefined => {
   const i = args.indexOf(`--${name}`);
   return i >= 0 ? (args[i + 1] ?? fallback) : fallback;

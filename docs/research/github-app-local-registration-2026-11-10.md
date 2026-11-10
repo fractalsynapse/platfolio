@@ -125,3 +125,42 @@ What that establishes, precisely:
 
 App id `5693967`, slug `platfolio-local` -- identifiers, safe to record. The next step is installation, which
 only the maintainer's browser can do.
+
+## Registration succeeded, and the app could not be installed anywhere useful
+
+The flow completed: `platfolio-local`, app id 5693967, credentials in a `0600` file, `GET /app` under an app
+JWT answering **200** — so the manifest, the unauthenticated exchange and `createAppJwt` are all now evidence
+rather than reasoning. Then installation failed in a way that looked like a permissions problem:
+
+> can install only on `adrianwebb` repositories; cannot install on any `fractalsynapse` repository
+
+It is not permissions, and no grant would fix it. [GitHub's visibility
+documentation](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/making-a-github-app-public-or-private)
+states the rule twice, and it is the operative constraint:
+
+> If you set your GitHub App registration to private, **it can only be installed on the account that owns the
+> app**. … Private GitHub Apps can only be installed on the user or organization account of the app owner.
+
+The manifest we generate says `public: false` — deliberately, because a development app holding `contents:
+write` and `secrets: write` must not have a public Install button. It was registered through
+`github.com/settings/apps/new`, so its owner is the **personal** account (`GET /app` confirms
+`owner.type = "User"`). Private + personal-owned ⇒ org repositories are not installable targets. There is no
+middle setting: making it public would put a write-capable dev app on a public landing page.
+
+**The fix is the ownership, not the visibility: register under the organization.** `pnpm run app:local --
+--org fractalsynapse` posts the same manifest to
+`https://github.com/organizations/fractalsynapse/settings/apps/new`, producing an org-owned private app whose
+install targets are that organization's repositories — which is also what the self-hosting test needs, since
+the tenant repository lives in the org.
+
+Two artifacts of this discovery, both worth keeping:
+
+- `app:check` now prints the rule when it applies. The symptom (an install page with no org in the list) gives
+  no hint of the cause, and the cause is a one-sentence documentation fact.
+- `pnpm run <script>` does **not** forward flags without a bare `--`, so `pnpm run app:local --org x` silently
+  registered under the personal account while looking like it had used the org. The script now strips a
+  leading `--` and the docs write the command with it. A flag that is quietly dropped is worse than one that
+  errors, and this is the same class as the mock's option whitelist dropping `keepProjectAfterDelete`.
+
+The personal-account app should be deleted once the org app exists; it holds credentials that are unusable
+for the only target that matters, and leaving a write-capable app installed nowhere is just a wider surface.
