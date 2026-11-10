@@ -5,6 +5,17 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+### Added
+
+- **platfolio described as a platform (#113, offline half).** `platforms/platfolio/` is a Compose document
+  with `x-platfolio`, its own `.platfolio/environment.yaml` inventory, and a generated prod overlay pinned to
+  the digest CI published. It round-trips through `parseCompose → applyInventory → buildPlan → validatePlan`
+  with zero issues, the overlay regenerates byte-identically (D29's drift gate), and the plan carries secret
+  *names* only. First-party and deliberately outside the catalog, which stays identity-free (D28).
+- **First connect runbook** ([14](docs/design/14-first-connect-runbook.md)): the ordered M2 steps with the
+  two that need a human at a browser marked, and the assumption each one is meant to falsify.
+
+
 ### Fixed
 
 - **Teardown order, and what it actually was (#107).** A template-created database that still owned a volume

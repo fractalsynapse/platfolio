@@ -268,6 +268,10 @@ No billing decision blocks M1: OD1, OD3, OD4, OD5 and OI1–OI3 are accepted, an
 
 A reference platform manifest went `buildPlan` → `applyPlan` against Railway and came up: two services `live`, a managed database `live`, its volume attached, a bucket created, a generated domain with a certificate read back as issued — using platfolio's own published image in place of the templates' placeholder digests, so the run proves the hosting mechanism rather than a real platform boot. `verified` was **false**, for the one honest reason: the tenant had not supplied `APP_API_SIGNING_KEY`, reported with its environment and service (`secret-unavailable@environments.production.services.api.…`). Teardown left `orphans: [bucket:…]` and a refused `serviceDelete` on the database (#106 — no bucket delete mutation exists, so those are now reported as released with the project; #107 — ordering, now volumes-before-services and enforced by the double). A follow-up reporting gap became #111). Evidence: [research/tenant-run-2026-11-10.md](../research/tenant-run-2026-11-10.md).
 
+## M2 entry point
+
+The first tenant will be platfolio hosting platfolio: `platforms/platfolio/` is authored in the Compose format with its own inventory and a generated prod overlay, and round-trips through `parseCompose → applyInventory → buildPlan → validatePlan` with no issues (#113 offline half). The live half is the ordered runbook with its two browser-only steps marked: [14-first-connect-runbook.md](14-first-connect-runbook.md).
+
 ## Follow-on work accepted with D29–D31 (2026-11-09)
 
 Sequencing for the compose-first inversion. Step 7 is deliberately re-pointed: rather than writing
