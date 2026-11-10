@@ -20,7 +20,9 @@
     "install:check": "pnpm install --frozen-lockfile --prefer-offline",
     "lock:check": "tsx scripts/check-lockfile.ts",
     "graphql:check": "tsx scripts/check-graphql-schema.ts",
-    "graphql:snapshot": "tsx scripts/refresh-railway-schema.ts"
+    "graphql:snapshot": "tsx scripts/refresh-railway-schema.ts",
+    "app:local": "tsx scripts/github-app-local.ts",
+    "app:local:check": "tsx scripts/github-app-local.ts --check"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

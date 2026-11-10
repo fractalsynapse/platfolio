@@ -10,11 +10,19 @@ pleasant to author. The offline half is done (`platforms/platfolio/`); the live 
 
 ## Steps requiring a human
 
-1. **Create the GitHub App** at `https://github.com/settings/apps/new` from the manifest platfolio generates
-   (`appManifest()` in the SCM seam — name, callback URL, the permission set from D22/D25, no webhook).
-   GitHub will not accept this from an API call; it is a consent screen by design.
-2. **Install it on `fractalsynapse/platfolio`** and approve the permission set. This is the step that
-   produces the installation id every later call needs, and the one where a too-broad grant becomes visible.
+1. **Register the GitHub App locally.** `pnpm run app:local`, then open `http://localhost:8077` — the page
+   POSTs platfolio's manifest to GitHub's own form (the flow requires a POST, not a link with the manifest
+   encoded), GitHub redirects back to the laptop with a one-time code, and the script exchanges it for the
+   app id, client id and private key into `.secrets/platfolio-app.json` at mode 0600. No tunnel, no public
+   host, no webhook: localhost callbacks are what GitHub's own tutorial uses, and platfolio polls
+   installations rather than receiving deliveries. Details and sources:
+   [github-app-local-registration-2026-11-10.md](../research/github-app-local-registration-2026-11-10.md).
+   GitHub will not accept the registration from an API call; it is a consent screen by design, and all three
+   legs of the handshake must finish within an hour.
+2. **Install it on `fractalsynapse/platfolio`** at `https://github.com/apps/<slug>/installations/new` and
+   approve the permission set. The script is still listening and polls `GET /app/installations` with a
+   short-lived app JWT, so it records the installation id by itself — this is the step where a too-broad
+   grant becomes visible.
 
 Everything after these is platfolio's work: environments on the tenant repository, the install pull request,
 `workflow_dispatch`, the runner claim, attestation verification, then `applyPlan` with the tenant's own grant.

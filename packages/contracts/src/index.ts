@@ -11,3 +11,4 @@ export * from './railway-changeset.ts';
 export * from './secret-writer.ts';
 export * from './binding.ts';
 export * from './workflow-runner.ts';
+export { localDevManifest, localManifestTarget, exchangeManifestCode, createAppJwt, type LocalManifestOptions } from './scm-github.ts';
