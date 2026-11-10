@@ -139,3 +139,17 @@ test('the app asks for the grant that provisioning environments needs, visibly',
   const manifest = localDevManifest({ port: 8077 }) as unknown as { default_permissions: Record<string, string> };
   assert.equal(manifest.default_permissions.administration, 'write', 'and it reaches the registration manifest, not just the schema');
 });
+
+test('required reviewers are part of the environment body, with the measured type restriction', async () => {
+  const { sent, writes } = harness();
+  await writes.ensureEnvironment('o/r', 'production', { reviewers: [{ type: 'User', id: 121749 }] });
+  const put = sent.find((s) => s.method === 'PUT');
+  assert.deepEqual(put?.body, { wait_timer: 0, reviewers: [{ type: 'User', id: 121749 }] });
+  // `App` is what the live API refused; encoding the refusal here keeps a future change from inventing it back.
+  const z = await import('zod');
+  const reviewerType = z.z.enum(['User', 'Team']);
+  assert.equal(reviewerType.safeParse('App').success, false, 'App cannot approve its own deployments');
+  await writes.ensureEnvironment('o/r', 'staging');
+  const bare = sent.filter((s) => s.method === 'PUT').at(-1);
+  assert.deepEqual(bare?.body, { wait_timer: 0 }, 'omitting reviewers must not send an empty list, which means "remove the gate"');
+});

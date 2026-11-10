@@ -137,9 +137,14 @@ export class GithubRepositoryWrites {
   }
 
   /**
-   * Create or update a repository environment (needs `administration: write`; measured 403 without it).
-   * Idempotent by design: GitHub answers 200 when it already exists and 201 when created, and neither is a
-   * signal worth carrying into a plan.
+   * Create or update a repository environment (needs `administration: write`; measured 403 without it), and
+   * optionally attach the human gate: `PUT` accepts `reviewers` with type `User` or `Team` and rejects `App`.
+   * Both halves measured live (issue #126), which is why platfolio can create a production environment *with*
+   * its required reviewers rather than handing the tenant a half-configured object.
+   *
+   * Note this is a full replacement, not a patch: an omitted `reviewers` field leaves the existing gate
+   * alone, while `reviewers: []` removes it. GitHub answers 200 for both create and update, so the caller
+   * cannot tell from the status whether anything changed.
    */
   async ensureEnvironment(repo: string, name: string, protection: EnvironmentProtection = {}): Promise<void> {
     Repo.parse(repo);
@@ -194,13 +199,28 @@ export class GithubRepositoryWrites {
  * installation token, and setting environment *required reviewers* through the API, are both pending a live
  * check against a registration that carries these grants. Neither is faked in a test.
  */
-export interface EnvironmentProtection {
-  /** Minutes GitHub waits before allowing a deployment. Settable via API; required reviewers may not be. */
-  waitTimerMinutes?: number;
+export interface EnvironmentReviewer {
+  /**
+   * Measured: GitHub accepts `User` and `Team` and rejects `App` -- "App is not a possible value" -- because
+   * an app cannot approve its own deployments. The earlier assumption that required reviewers were a UI-only
+   * setting was wrong, and this is the proof.
+   */
+  type: 'User' | 'Team';
+  id: number;
 }
 
-export function environmentBody(protection: EnvironmentProtection): { wait_timer: number } {
-  return { wait_timer: protection.waitTimerMinutes ?? 0 };
+export interface EnvironmentProtection {
+  /** Minutes GitHub waits before allowing a deployment. */
+  waitTimerMinutes?: number;
+  /** Settable through the API, with the type restriction above. Empty means "no gate", not "unchanged". */
+  reviewers?: EnvironmentReviewer[];
+}
+
+export function environmentBody(protection: EnvironmentProtection): { wait_timer: number; reviewers?: { type: string; id: number }[] } {
+  return {
+    wait_timer: protection.waitTimerMinutes ?? 0,
+    ...(protection.reviewers ? { reviewers: protection.reviewers } : {}),
+  };
 }
 
 export interface TemplateRepositoryRequest {
