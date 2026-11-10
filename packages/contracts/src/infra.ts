@@ -189,6 +189,14 @@ export const DeleteResultSchema = z.object({
   orphans: z.array(z.string().min(1)),
   /** Why a resource could not be removed. Orphans with no reason are unactionable (#80). */
   failures: z.array(z.object({ step: z.string().min(1), code: NameSchema, message: z.string().min(1) })).optional(),
+  /**
+   * #111: what left because the project did, rather than because we removed it. Kept distinct from both
+   * `removed` and `orphans` because the three claims differ: "I deleted this", "this was taken along", and
+   * "this is still reachable and nobody dealt with it". On Railway today a bucket and a template-created
+   * database both land here -- there is no bucket delete mutation at all, and a database with a volume that
+   * goes with its project was never individually deleted either.
+   */
+  releasedWithProject: z.array(z.string().min(1)).optional(),
 });
 
 export const CapabilityInfoSchema = z.object({

@@ -399,19 +399,33 @@ export class RailwayInfraProvider implements InfraProvider {
     const credential = await this.credentials.workspace();
     const removed: string[] = [];
     const orphans: string[] = [];
+    const releasedWithProject: string[] = [];
     const deleteFailures: NonNullable<DeleteResult['failures']> = [];
 
     const environments = await this.environments(project.id, credential);
     const services = await this.listServices(project.id, credential);
 
+    // #111: take the inventory BEFORE anything is removed. The old sweep ran after projectDelete, so with
+    // the project unreadable "nothing was left" and "nothing can be seen" produced the same answer, and a
+    // clean-looking orphan list quietly overstated what we had done. Every resource that existed at the
+    // start is now classified into one of three states: removed by us, taken along with the project, or
+    // still reachable afterwards -- the only case that earns the name orphan.
+    const volumesAtStart = await this.listVolumes(project.id, credential);
+    const bucketsAtStart = await this.buckets(project.id, credential);
+    const expected = new Set<string>([
+      ...volumesAtStart.map((v) => `volume:${v.name}`),
+      ...bucketsAtStart.map((b) => `bucket:${b}`),
+      ...environments.flatMap((e) => services.map((s) => `service:${e.name}/${s.name}`)),
+    ]);
+
       // Volumes are released BEFORE the services they are attached to. Measured: a template-created database
       // whose volume still existed was refused by serviceDelete ("Problem processing request"), while an
       // identical volume-less one deleted cleanly -- so #107 was ordering, not a capability limit, and the
       // previous order (services first, volumes after) guaranteed the refusal at every attempt.
-      for (const volume of await this.listVolumes(project.id, credential)) {
+      for (const volume of volumesAtStart) {
         await this.transport.graphql({ operation: 'volumeDelete', credential, query: 'mutation ($volumeId: String!) { volumeDelete(volumeId: $volumeId) }', variables: { volumeId: volume.id } })
           .then(() => { removed.push(`volume:${volume.name}`); })
-          .catch(() => { orphans.push(`volume:${volume.name}`); });
+          .catch(() => { /* unresolved: classified after the project goes */ });
       }
 
     for (const environment of environments) {
@@ -446,8 +460,6 @@ export class RailwayInfraProvider implements InfraProvider {
     // #106 -- so a bucket cannot be released individually and projectDelete is the mechanism that takes it.
     // Reporting one as an orphan before the project is gone was accurate but misleading: nothing is left
     // reachable afterwards. Anything that outlives a successful projectDelete is a genuine survivor.
-    for (const leftover of await this.listServices(project.id, credential)) orphans.push(`service:${leftover.name}`);
-    const survivingBuckets = await this.buckets(project.id, credential);
 
     await this.transport.graphql({
       operation: 'projectDelete',
@@ -456,11 +468,20 @@ export class RailwayInfraProvider implements InfraProvider {
       variables: { id: project.id },
     });
     removed.push(`project:${project.name}`);
-    // Named explicitly rather than counted as a clean delete: these had no individual delete available, so
-    // they left because the project did. A reader can tell the difference between what we removed and what
-    // was taken along, which is the distinction #106 exists to keep visible.
-    for (const bucket of survivingBuckets) removed.push(`bucket:${bucket} (released with the project; no delete mutation exists)`);
-    return { instanceId, removed, orphans, ...(deleteFailures.length ? { failures: deleteFailures } : {}) };
+
+    // Classify against the snapshot. Reachability after the delete is the only way to tell "released with
+    // the project" from "still out there", so it is probed rather than assumed.
+    const reachable = await this.reachableResources(project.id, credential);
+    for (const item of expected) {
+      if (removed.includes(item)) continue;
+      if (reachable === null) releasedWithProject.push(item);
+      else if (reachable.has(item)) orphans.push(item);
+      else releasedWithProject.push(item);
+    }
+    if (orphans.length) {
+      deleteFailures.push({ step: "orphans", code: "teardown-incomplete", message: `${String(orphans.length)} resource(s) still reachable after projectDelete: ${orphans.join(", ")}` });
+    }
+    return { instanceId, removed, orphans, ...(releasedWithProject.length ? { releasedWithProject } : {}), ...(deleteFailures.length ? { failures: deleteFailures } : {}) };
   }
 
   // --- internals -------------------------------------------------------------------------------
@@ -1158,6 +1179,29 @@ export class RailwayInfraProvider implements InfraProvider {
       }
       throw lastError instanceof Error ? lastError : new Error('serviceDelete failed');
     }
+
+  /**
+   * What still answers after the project delete. Null when the project itself is unreadable, which is a
+   * different fact from an empty set: unreadable means everything went with it, an empty set means we
+   * looked and found nothing, and a non-empty set is the case that deserves an orphan report.
+   */
+  private async reachableResources(projectId: string, credential: RailwayCredential): Promise<Set<string> | null> {
+    try {
+      const [services, bucketNames, volumeNodes, environments] = await Promise.all([
+        this.listServices(projectId, credential),
+        this.buckets(projectId, credential),
+        this.listVolumes(projectId, credential),
+        this.environments(projectId, credential),
+      ]);
+      return new Set<string>([
+        ...volumeNodes.map((v) => `volume:${v.name}`),
+        ...bucketNames.map((b) => `bucket:${b}`),
+        ...environments.flatMap((e) => services.map((s) => `service:${e.name}/${s.name}`)),
+      ]);
+    } catch {
+      return null;
+    }
+  }
 
   private async listVolumes(projectId: string, credential: RailwayCredential): Promise<{ id: string; name: string }[]> {
     const data = await this.transport.graphql<{ project: { volumes?: { edges: { node: { id: string; name?: string } }[] } | null } | null }>({

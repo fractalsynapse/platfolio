@@ -28,6 +28,8 @@ export interface MockOptions {
   templateNeverReveals?: boolean;
   /** Refuse serviceDelete for template-created services, modelling #80's survivor. */
   refuseTemplateServiceDelete?: boolean;
+  /** Model a partial delete: projectDelete answers true but the project remains readable (#111). */
+  keepProjectAfterDelete?: boolean;
   /** Fail the first N serviceDelete calls for template services, to test the retry. */
   templateDeleteFailures?: number;
 }
@@ -75,6 +77,9 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
       templateRevealAfter: options.templateRevealAfter ?? 2,
       templateNeverReveals: options.templateNeverReveals ?? false,
       refuseTemplateServiceDelete: options.refuseTemplateServiceDelete ?? false,
+      // Not a whitelist entry: the constructor rebuilds options, and a flag left out here is silently
+      // undefined -- the exact bug that once made a test vacuous. Any new option must be threaded through.
+      keepProjectAfterDelete: options.keepProjectAfterDelete ?? false,
       templateDeleteFailures: options.templateDeleteFailures ?? 0,
       secretsPresent: options.secretsPresent ?? true,
       settleAfter: options.settleAfter ?? 1,
@@ -189,10 +194,14 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
         return { projectUpdate: true } as T;
       }
       case 'projectDelete': {
-        this.projects.delete(v.id as string);
+        // #111's orphan branch needs a partial delete to exist: a projectDelete that returns true while the
+        // project stays readable. Without it, everything unremoved lands in releasedWithProject and the
+        // provider could claim a clean teardown without the survivor case ever being exercised.
+        if (!this.options.keepProjectAfterDelete) this.projects.delete(v.id as string);
         return { projectDelete: true } as T;
       }
       case 'project.environments': {
+        if (!this.projects.has(v.projectId as string)) throw new Error(`railway project.environments: Project not found [INTERNAL_SERVER_ERROR]`);
         const projectId = v.projectId as string;
         const nodes = [...this.environments.values()].filter((e) => e.projectId === projectId).map((node) => ({ node }));
         return { project: { environments: { edges: nodes } } } as T;
@@ -215,6 +224,7 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
         return { environmentCreate: { id } } as T;
       }
       case 'project.volumes': {
+        if (!this.projects.has(v.projectId as string)) throw new Error(`railway project.volumes: Project not found [INTERNAL_SERVER_ERROR]`);
         const projectId = v.projectId as string;
         return { project: { volumes: { edges: this.volumes.filter((x) => x.projectId === projectId).map((node) => ({ node })) } } } as T;
       }
@@ -234,6 +244,7 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
         return { volumeDelete: true } as T;
       }
       case 'project.services': {
+        if (!this.projects.has(v.projectId as string)) throw new Error(`railway project.services: Project not found [INTERNAL_SERVER_ERROR]`);
         const projectId = v.projectId as string;
         // Async provisioning modelled honestly (#77): a template-created service is invisible until it has
         // been read a few times, so a provider that lists once, immediately, gets nothing and must wait.
@@ -473,6 +484,7 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
         return { serviceDelete: true } as T;
       }
       case 'project.buckets': {
+        if (!this.projects.has(v.projectId as string)) throw new Error(`railway project.buckets: Project not found [INTERNAL_SERVER_ERROR]`);
         const ids = (this.options.buckets ?? []).map((id) => ({ node: { id } }));
         return { project: { buckets: ids.length ? { edges: ids } : null } } as T;
       }

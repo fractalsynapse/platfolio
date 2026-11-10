@@ -264,6 +264,15 @@ No billing decision blocks M1: OD1, OD3, OD4, OD5 and OI1–OI3 are accepted, an
 `/proprietary` boundary, and the trademark policy — plus **OD9**, the core-lineage choice from E9.
 
 
+## Teardown accounting closed (#111)
+
+`deleteInstance` now snapshots before removing anything and classifies each resource as `removed` by us,
+`releasedWithProject` (which on Railway includes every bucket, since no bucket delete mutation exists), or
+`orphans` — the last reserved for what is **still reachable** after `projectDelete`. Verified live: one
+service `removed`, one bucket `released`, `orphans: []` as a probed claim rather than an assumption. Refusals
+still land in `failures` with their reason, so #80's guarantee is intact and only the vocabulary moved.
+Evidence and the two mock bugs found along the way: [teardown-accounting-2026-11-10.md](../research/teardown-accounting-2026-11-10.md).
+
 ## First tenant-shaped live run (2026-11-10)
 
 A reference platform manifest went `buildPlan` → `applyPlan` against Railway and came up: two services `live`, a managed database `live`, its volume attached, a bucket created, a generated domain with a certificate read back as issued — using platfolio's own published image in place of the templates' placeholder digests, so the run proves the hosting mechanism rather than a real platform boot. `verified` was **false**, for the one honest reason: the tenant had not supplied `APP_API_SIGNING_KEY`, reported with its environment and service (`secret-unavailable@environments.production.services.api.…`). Teardown left `orphans: [bucket:…]` and a refused `serviceDelete` on the database (#106 — no bucket delete mutation exists, so those are now reported as released with the project; #107 — ordering, now volumes-before-services and enforced by the double). A follow-up reporting gap became #111). Evidence: [research/tenant-run-2026-11-10.md](../research/tenant-run-2026-11-10.md).
