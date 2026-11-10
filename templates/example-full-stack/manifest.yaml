@@ -13,6 +13,16 @@ spec:
   requires:
     platfolio: ">=0.1.0 <1"
     migrationWindow: 20m
+  # This platform is a team service as well as a hosted app: the identity provider it runs is published
+  # for other instances to require by capability, never by instance id (D34).
+  provides:
+    name: identity
+    outputs:
+      - { output: issuer, kind: url, description: Realm issuer URL consumers point their OIDC client at. }
+      - { output: client_id, kind: value, description: Public client identifier issued to a consumer. }
+      # Relayed once into the consumer's execution plane and never stored, so a lost value is re-issued
+      # rather than replayed (D32). Declaring it here does not make it readable by anything.
+      - { output: client_secret, kind: secret, description: Confidential client secret issued to a consumer. }
   identity:
     mode: hosted-realm
     clients:

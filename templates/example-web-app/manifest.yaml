@@ -13,6 +13,10 @@ spec:
   requires:
     platfolio: ">=0.1.0 <1"
     migrationWindow: 15m
+  # Named by capability, not by instance: the team can move to another provider without editing this
+  # platform's file (D34). Where the resolved values land is the environment inventory's job.
+  capabilities:
+    - { capability: identity, as: [OIDC_ISSUER] }
   identity:
     mode: none
     clients: []

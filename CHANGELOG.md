@@ -7,6 +7,21 @@ change; entries describe merged intent, not aspirations.
 
 ### Added
 
+- **Cross-instance outputs and binding (D34, #94).** `packages/contracts/src/binding.ts`: dependents
+  `require` a **capability** rather than an instance id, so a team can move its identity provider without
+  editing every consumer; resolution picks the supplier, records the **generation** of what was published,
+  and reports drift as `rebind-required` instead of silently rewriting a running platform. Secret outputs
+  (`client_secret`) exist only as state — the `values` type cannot represent a secret, so the binding
+  record a database would hold is not a secret store, and a lost credential's only path is
+  `re-issue-required`, never replay. No supplier is a state (`awaiting-provider`) rather than an error,
+  since teams bind consumers before the provider exists; two suppliers is refused rather than guessed.
+  `summarise` answers "how many consumers still point at the old issuer" in one call, which is what the UI
+  needs to avoid an operator clicking through instances. The reference templates now describe both halves
+  of the same capability.
+
+
+### Added
+
 - **Environment inventory (D33, #92).** `.platfolio/environment.yaml` declares what a platform needs — typed
   `reference` / `secret` / `value` / `output` entries with defaults, applicability and descriptions — and
   `deriveObligations` splits **what a tenant must supply** from **what the provider resolves**, so a

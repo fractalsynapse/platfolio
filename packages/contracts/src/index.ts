@@ -9,3 +9,4 @@ export * from './railway-transport.ts';
 export { RailwayInfraProvider, type RailwayProviderOptions } from './railway-provider.ts';
 export * from './railway-changeset.ts';
 export * from './secret-writer.ts';
+export * from './binding.ts';

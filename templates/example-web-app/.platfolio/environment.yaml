@@ -31,4 +31,6 @@
   from: identity#issuer
   service: api
   environments: [production]
-  description: Provided by the team identity service when one is bound (D34).
+  # Wiring, not an obligation: binding resolves it (D34), and it must never appear on the panel
+  # that lists things the tenant is asked to supply.
+  description: Issuer URL published by a team service that provides the identity capability.
