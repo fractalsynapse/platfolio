@@ -110,7 +110,10 @@ domainRecords: Record<string, NonNullable<StateSnapshot['domains'][number]['reco
 }
 
 export class RailwayInfraProvider implements InfraProvider {
-  readonly contract = CONTRACT_VERSION;
+  // Annotated with the literal type on purpose: `readonly contract = CONTRACT_VERSION` infers
+  // `string`, which widens a public field consumers narrow on -- a tightening for them even though it reads
+  // as an improvement here. The baseline drift gate caught it as a removal.
+  readonly contract: typeof CONTRACT_VERSION = CONTRACT_VERSION;
 
   private readonly credentials: RailwayCredentialSource;
   private readonly transport: RailwayTransport;
