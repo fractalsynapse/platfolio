@@ -5,6 +5,25 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+### Changed
+
+- **D30's first law was overstated and is corrected (D32): secrets are written once, not never.** platfolio is
+  the sole management interface, so it must set a workflow secret from a value the tenant just supplied; what
+  must be impossible is keeping or re-fetching it. GitHub's write-only API enforces the read side for us;
+  Railway's readable variables do not, which is why the provider's keys-only rule stays behavioural and
+  test-enforced. Consequence for the product: re-apply cannot re-deliver a lost secret, so the action offered
+  is rotate-and-rebind.
+
+### Added
+
+- **Environment inventory (D33) and cross-instance output binding (D34)** designed in
+  [13](docs/design/13-compose-first-and-execution.md): typed entries carrying defaults and applicability
+  without ever carrying secret values, and `provides`/`requires` resolved by capability so a team can swap
+  its identity provider without editing every consumer. Generated credentials are re-issued rather than
+  replayed, and a binding records the supplier generation it was satisfied against. Plan of record gains
+  C7-C9.
+
+
 ### Added
 
 - **Architecture: Compose-first authoring and the actor/executor split (D29–D31,

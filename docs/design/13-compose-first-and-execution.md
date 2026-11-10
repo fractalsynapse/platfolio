@@ -107,10 +107,20 @@ rather than a new exception.
 
 ### Four laws, because each was already paid for in measurement
 
-1. **platfolio never writes a tenant secret.** Setting an Actions secret transmits a value. The API is
-   write-only by design, so presence is checkable (`GET …/actions/secrets/NAME`, 404 means absent) and the
-   value is not readable — a custody-safe question. Wording anywhere in the product must be "the tenant's CI
-   tenancy holds it; we verify it exists", never "we store your secrets".
+1. **A secret is written once and never read back.** platfolio is the management interface, so it *must* be
+   able to set a workflow secret the tenant just supplied: `PUT …/actions/secrets/NAME` with the value from
+   that request. What is forbidden is storage and retrieval. GitHub makes retrieval structurally impossible —
+   the API is write-only, and presence is checkable (`GET` → 204 present, 404 absent). Railway is the
+   opposite: its variables **are** readable, which is why the provider reads keys only and why that
+   constraint is behavioural rather than enforced by the platform. So the rule is directional:
+   **tenant → platfolio → the tenant's execution plane, once, in memory, never persisted, never fetched
+   again.** No logs, no database column, no cache, no plan artifact, no value in a Compose file or the
+   repository.
+   
+   The consequence belongs in the UI, not just here: **write-once means re-apply cannot re-deliver a lost
+   secret.** If a value was set and then deleted upstream, the action is rotate-and-rebind, never replay —
+   because there is nothing stored to replay. Caching it to make retries convenient would be the easiest
+   way to break the invariant from the inside.
 2. **Workflow logs are never read.** They are free text and routinely contain resolved environment values.
    Run *status* is metadata; a diagnosis comes back as a structured field the workflow chose to emit.
 3. **A pinned image means the release job built it.** A digest that the pipeline did not produce is not
@@ -148,6 +158,86 @@ it. The plan of record:
 5. Existing `railway.json`/`railway.toml` stays retired; IaC output remains an ejection artifact, not the
    execution mechanism, for the reason measured in E24: `environmentApplyChangeSet` answers `applied` to any
    payload. Compose is the authoring format precisely because the *provider's* API is still the executor.
+
+## The environment inventory: what a platform needs, not what it holds
+
+Compose and the manifest describe **topology**. Neither describes **obligations** — which variables a build
+requires, which are secrets, what the defaults are, where a value comes from, and whether a missing one is
+fatal or merely unoptimised. Without that, "is this instance ready to deploy?" is unanswerable and the
+onboarding checklist gets invented per platform. So the model gains an inventory, authored in the platform's
+own repository and built up over time:
+
+```yaml
+# .platfolio/environment.yaml (or x-platfolio.environment inside the Compose document)
+- name: DATABASE_URL
+  kind: reference            # resolved by the provider; never a value here
+  service: web
+  environments: [production, staging]
+- name: APP_API_SIGNING_KEY
+  kind: secret
+  required: true
+  rotate: on-demand
+  description: Signs bearer tokens issued by the API.
+- name: CONTEXT_BUDGET_TOKENS
+  kind: value
+  default: "120000"
+  environments: [production]
+- name: OIDC_ISSUER
+  kind: output               # supplied by another instance; see the next section
+  from: team-service/oidc#issuer
+```
+
+`kind` is the load-bearing field, and it replaces today's split between `env` (values) and `secrets` (names),
+which cannot express a default, an applicability range, or "this comes from a service". The rules that make it
+safe:
+
+- **A `secret` entry never carries a value anywhere in the repository.** The value exists only inside the
+  request that writes it into the tenant's execution plane. Names, descriptions and defaults are inventory;
+  the value is not data platfolio may hold.
+- **A `value` entry may carry defaults** — that is the point — and anything resembling a credential in one is
+  refused by the existing placeholder scan, escalated from a warning to a hard refusal for inventory files.
+- **`reference` and `output` entries are wiring, not obligations**, so they never appear on the panel that
+  tells a tenant what to supply. That distinction came out of #84 at the plan layer; it belongs at the
+  authoring layer too.
+- **Absence is a state, not an error.** The panel reports `missing / set / set-but-unverifiable`, because we
+  can confirm presence for workflow secrets and confirm nothing about a Railway variable without reading its
+  value, which we will not do.
+
+This is where `platform-text.yaml`'s placeholder policy and the page-schema secrets panel finally meet: one
+file answers what a platform needs, what a tenant is asked for, and what must never be committed.
+
+## Feeding one platform's outputs into another's inputs
+
+Independent instances have to interoperate: a team-run identity service whose issuer and client credentials
+a hosted platform consumes; shared logging endpoints; a backend API several platforms call. Plan-level
+`references` only reaches a database inside the same environment, which is too small. This is OD11's S2
+shape, and the requirement that **management-layer services produce inputs for dependent platforms** is what
+makes it concrete rather than speculative.
+
+Three things, and only three:
+
+- **`provides:`** on a team-service instance, naming typed outputs — `issuer` (public URL), `jwks_uri`,
+  `api_base`, or `client_secret` (**generated, single-use**).
+- **`requires:`** on a dependent instance, referring to a *capability* rather than a resource: "I need an OIDC
+  provider", not "I need `plat/inst-a1`" — so a team can swap the supplier without editing dependents.
+- **Binding**, which resolves requires against provides inside a team and writes the results into the
+  dependent: public values into variables, credentials through the write-once path above.
+
+Two consequences to settle on the record rather than discover in production:
+
+1. **A generated credential cannot be re-delivered.** If the identity service mints a client secret and
+   platfolio relays it once, a failed apply cannot replay it — nothing was kept. So binding must be
+   **re-issue, not retry**: the dependent's action is "rotate at the supplier and rebind", which the UI has to
+   offer as a workflow rather than surfacing an error string.
+2. **Bindings must survive supplier changes.** A changed issuer URL means every dependent needs a fresh write,
+   and dependents run on their own release cycles. A binding therefore records the *generation* it was
+   satisfied against, so the UI can say "two of three consumers are still pointed at the old issuer" — the same
+   honest-pending discipline as the DNS checklist in [12](12-domains-and-dns.md).
+
+Public values crossing an instance boundary are unremarkable; an issuer URL is advertised. Credentials
+crossing it are the interesting case: **relay once, persist never, re-issue on demand** — the same rule as a
+tenant's own secrets, with the supplier rather than the tenant as the origin.
+
 
 ## Consequences to watch, stated now
 
