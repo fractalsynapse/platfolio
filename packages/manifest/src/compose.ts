@@ -160,7 +160,11 @@ export function parseCompose(texts: string | string[]): ParsedCompose {
   const meta = isRec(xp.metadata) ? xp.metadata as Rec : {};
 
   const outServices: Rec = {};
-  const volumes: Rec[] = Array.isArray(resources.volumes) ? resources.volumes as Rec[] : [];
+  // Declared separately from the mounts discovered below, and copied: this array was the *same object* as
+  // resources.volumes, so every mount pushed into it mutated the declaration. The dedupe then compared a
+  // list against itself and reported one volume where the author wrote two views of one disk.
+  const declaredVolumes: Rec[] = Array.isArray(resources.volumes) ? [...(resources.volumes as Rec[])] : [];
+  const mounts: Rec[] = [];
   for (const [name, raw] of Object.entries(services)) {
     const svc = raw as Rec;
     scanService(name, svc, issues);
@@ -214,7 +218,7 @@ export function parseCompose(texts: string | string[]): ParsedCompose {
     for (const vol of asArr(svc.volumes)) {
       const spec = typeof vol === 'string' ? vol : '';
       const [vname, mount] = spec.split(':');
-      if (vname && mount) volumes.push({ name: vname, service: name, mountPath: mount });
+      if (vname && mount) mounts.push({ name: vname, service: name, mountPath: mount });
     }
   }
 
@@ -230,9 +234,14 @@ export function parseCompose(texts: string | string[]): ParsedCompose {
     },
     spec: {
       requires: { platfolio: typeof requires.platfolio === 'string' ? requires.platfolio : '>=0.1.0 <1', ...(typeof requires.migrationWindow === 'string' ? { migrationWindow: requires.migrationWindow } : {}) },
+      // D34 had to be authorable here or the capability model was unreachable in the format it was
+      // designed for: `provides` and `capabilities` were only reaching the manifest through hand-written
+      // YAML, which is precisely the path D29 retired.
+      ...(isRec(xp.provides) ? { provides: xp.provides } : {}),
+      ...(Array.isArray(xp.capabilities) ? { capabilities: xp.capabilities } : {}),
       identity,
       environments: isRec(xp.environments) ? xp.environments : { production: { enabled: true }, staging: { enabled: false } },
-      resources: { ...resources, volumes },
+      resources: { ...resources, volumes: mergeVolumes({ volumes: declaredVolumes }, mounts as { name: string; service: string; mountPath: string }[]) },
       services: outServices,
       dns: isRec(xp.dns) ? xp.dns : {},
       lifecycle: isRec(xp.lifecycle) ? xp.lifecycle : { onSuspend: 'scale-to-zero', onEject: [], onDelete: { graceDays: 30, backupAgeOutDays: 90 } },
@@ -281,4 +290,33 @@ export function renderProdOverlay(baseText: string, pins: Record<string, { image
     if (isRec(svc) && svc.build !== undefined) lines.push('    build: !reset null');
   }
   return `${lines.join('\n')}\n`;
+}
+
+/**
+ * An explicit `x-platfolio.resources.volumes` entry and a Compose mount describe the same disk, so they must
+ * become one plan entry. The earlier code concatenated both, and the duplicate built from the mount string
+ * carries no `retention` — so a volume declared to survive also appeared as a plain entry that teardown was
+ * free to delete, with whichever matched first deciding whether a tenant's state lived. That is a data-loss
+ * bug shaped like a merge, and the template test found it by declaring both, which is exactly what an author
+ * writing Compose would naturally do.
+ */
+export function mergeVolumes(
+  declared: { volumes?: Record<string, unknown>[] },
+  derived: { name: string; service: string; mountPath: string }[],
+): Record<string, unknown>[] {
+  const explicit = (declared.volumes ?? []).map((v) => ({ ...v }));
+  const byMount = new Map<string, number>();
+  explicit.forEach((v, index) => { if (typeof v.mountPath === 'string') byMount.set(v.mountPath, index); });
+  for (const mount of derived) {
+    const at = byMount.get(mount.mountPath);
+    if (at !== undefined) {
+      // The declaration wins every field it states; the mount only supplies what is absent.
+      const existing = explicit[at]!;
+      if (typeof existing.service !== 'string') existing.service = mount.service;
+      if (typeof existing.name !== 'string') existing.name = mount.name;
+      continue;
+    }
+    explicit.push({ ...mount });
+  }
+  return explicit;
 }

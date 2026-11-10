@@ -107,6 +107,36 @@ export class GithubRepositoryWrites {
     return { headSha: commit.sha, baseSha };
   }
 
+  /**
+   * The very first commit into an empty repository.
+   *
+   * A repository created by platfolio has no branches at all, so `commitFiles` -- which resolves a base ref
+   * -- cannot run against it, and a publish path that only works on non-empty repositories is one that
+   * cannot bootstrap anything. `parents: []` and no base tree is the documented shape for an initial commit.
+   */
+  async createInitialCommit(input: { repo: string; branch: string; message: string; files: Record<string, string> }): Promise<string> {
+    Repo.parse(input.repo);
+    const paths = Object.keys(input.files).sort();
+    if (paths.length === 0) throw new Error('github: refusing to create an empty initial commit');
+    const blobs = await Promise.all(paths.map(async (path) => {
+      const blob = await this.call<{ sha: string }>(`/repos/${input.repo}/git/blobs`, { method: 'POST', body: { content: input.files[path] } });
+      return { path, sha: blob.sha, mode: '100644' as const };
+    }));
+    const tree = await this.call<{ sha: string }>(`/repos/${input.repo}/git/trees`, { method: 'POST', body: { tree: blobs } });
+    const commit = await this.call<{ sha: string }>(`/repos/${input.repo}/git/commits`, { method: 'POST', body: { message: input.message, tree: tree.sha, parents: [] } });
+    await this.call(`/repos/${input.repo}/git/refs`, { method: 'POST', body: { ref: `refs/heads/${input.branch}`, sha: commit.sha } });
+    return commit.sha;
+  }
+
+  /** Whether the installation can see a repository at all -- the #130 check, made explicit. */
+  async repositoryVisible(repo: string): Promise<boolean> {
+    Repo.parse(repo);
+    const response = await this.fetchImpl(`${this.api}/repos/${repo}`, { headers: this.headers });
+    if (response.status === 200) return true;
+    if (response.status === 404) return false;
+    throw new Error(`github: repository visibility check returned ${String(response.status)}`);
+  }
+
   async openPullRequest(input: { repo: string; title: string; body: string; head: string; base: string; draft?: boolean }): Promise<PullRequestResult> {
     Repo.parse(input.repo);
     let pr: { number: number; url?: string; html_url?: string; head?: { sha?: string }; base?: { sha?: string } };

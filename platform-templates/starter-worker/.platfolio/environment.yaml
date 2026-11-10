@@ -1,0 +1,3 @@
+- { name: QUEUE_DRIVER,   kind: value, default: disk, service: queue, description: disk keeps jobs in the retained volume; swap for a hosted queue when scale matters. }
+- { name: WORKER_CONCURRENCY, kind: value, default: "4", service: queue }
+- { name: STATE_ENCRYPTION_KEY, kind: secret, required: false, service: queue, description: Optional at-rest key for job payloads. platfolio writes it once and never reads it back (D32). }

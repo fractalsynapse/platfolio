@@ -167,3 +167,22 @@ x-platfolio:
   assert.equal(declared[0]!.retention, 'survive');
   void applyInventory;
 });
+
+test('mergeVolumes collapses a declaration and a mount that describe the same disk', async () => {
+  const { mergeVolumes } = await import('../src/compose.ts');
+  const declared = [{ name: 'job-state', service: 'queue', mountPath: '/var/lib/state', sizeGB: 5, retention: 'survive' }];
+  const mounts = [{ name: 'job-state', service: 'queue', mountPath: '/var/lib/state' }];
+  const merged = mergeVolumes({ volumes: declared }, mounts);
+  assert.equal(merged.length, 1, 'two views of one disk must not become two plan entries -- the second carried no retention and teardown could delete it');
+  assert.equal(merged[0]!.retention, 'survive', 'the declaration wins every field it states');
+
+  // The aliasing that made this a real bug: mutating the mount list must not touch the declared array.
+  const resources = { volumes: [...declared] };
+  mergeVolumes(resources, mounts);
+  assert.equal(resources.volumes.length, 1, 'the merge must not mutate the caller array');
+
+  // A mount nobody declared is still a volume -- created with the default retention, not dropped.
+  const onlyMount = mergeVolumes({ volumes: [] }, [{ name: 'scratch', service: 'queue', mountPath: '/tmp/scratch' }]);
+  assert.equal(onlyMount.length, 1);
+  assert.equal(onlyMount[0]!.retention, undefined, 'undeclared means the default, and the default is deletion with the instance');
+});

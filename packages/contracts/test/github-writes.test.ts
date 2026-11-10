@@ -217,3 +217,43 @@ test('an unrelated PR failure is not treated as a duplicate', async () => {
   const writes = new GithubRepositoryWrites({ token: 't', fetch: fetchImpl });
   await assert.rejects(() => writes.openPullRequest({ repo: 'o/r', title: 't', body: 'b', head: 'h', base: 'main' }), /failed \(403\)/);
 });
+
+test('an initial commit has no parents and no base tree, because the repository is empty', async () => {
+  const sent: { method: string; path: string; body?: Record<string, unknown> }[] = [];
+  const fetchImpl = (async (url: string, init?: { method?: string; body?: string }) => {
+    const path = url.replace('https://api.github.com', '');
+    const method = init?.method ?? 'GET';
+    sent.push({ method, path, ...(init?.body ? { body: JSON.parse(init.body) as Record<string, unknown> } : {}) });
+    if (path.endsWith('/git/blobs')) return { ok: true, status: 201, async json() { return { sha: 'b1' }; } } as Response;
+    if (path.endsWith('/git/trees')) return { ok: true, status: 201, async json() { return { sha: 'tree1' }; } } as Response;
+    if (path.endsWith('/git/commits')) return { ok: true, status: 201, async json() { return { sha: 'commit1' }; } } as Response;
+    return { ok: true, status: 201, async json() { return {}; }, async text() { return ''; } } as Response;
+  }) as unknown as typeof globalThis.fetch;
+  const writes = new GithubRepositoryWrites({ token: 't', fetch: fetchImpl });
+  const sha = await writes.createInitialCommit({ repo: 'o/r', branch: 'main', message: 'platfolio starter', files: { 'README.md': 'a', 'compose.yaml': 'b' } });
+  assert.equal(sha, 'commit1');
+  const tree = sent.find((s) => s.path.endsWith('/git/trees'));
+  assert.equal('base_tree' in (tree?.body ?? {}), false, 'no base tree exists in an empty repository');
+  const commit = sent.find((s) => s.path.endsWith('/git/commits'));
+  assert.deepEqual((commit?.body as { parents: string[] }).parents, [], 'the first commit is parentless by definition');
+  const ref = sent.find((s) => s.path === '/repos/o/r/git/refs');
+  assert.equal((ref?.body as { ref: string }).ref, 'refs/heads/main');
+});
+
+test('an empty file set is refused before a request goes out', async () => {
+  const calls: string[] = [];
+  const fetchImpl = (async (url: string) => { calls.push(url); return { ok: true, status: 204, async json() { return {}; } } as Response; }) as unknown as typeof globalThis.fetch;
+  const writes = new GithubRepositoryWrites({ token: 't', fetch: fetchImpl });
+  await assert.rejects(() => writes.createInitialCommit({ repo: 'o/r', branch: 'main', message: 'm', files: {} }), /empty initial commit/);
+  assert.equal(calls.length, 0);
+});
+
+test('visibility is reported as a fact, not as a guess, because 404 means two different things', async () => {
+  const forStatus = (status: number) => new GithubRepositoryWrites({
+    token: 't',
+    fetch: (async () => ({ ok: status === 200, status, async json() { return {}; }, async text() { return ''; } })) as unknown as typeof globalThis.fetch,
+  });
+  assert.equal(await forStatus(200).repositoryVisible('o/r'), true);
+  assert.equal(await forStatus(404).repositoryVisible('o/r'), false, '404 is what #130 looks like from the outside');
+  await assert.rejects(() => forStatus(401).repositoryVisible('o/r'), /returned 401/, 'a credential failure must not be read as "not installed"');
+});
