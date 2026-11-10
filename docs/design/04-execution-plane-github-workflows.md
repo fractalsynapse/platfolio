@@ -62,6 +62,27 @@ Consequences of that last row: the "with platfolio stopped, `git push` still dep
 for M2 cannot pass yet, and nothing here proves a hosted runner behaves as the contract assumes. That
 is the outstanding part of M2, not a detail to smooth over.
 
+## Attestation outcomes, and why `partial` exists
+
+A runner's report has four states, and the fourth is the one that keeps infrastructure honest:
+
+| `result` | Means | Rule enforced by the schema |
+| --- | --- | --- |
+| `ok` | the plan applied and read-back confirmed it | must name at least one resource for an `apply`; must not carry `errorCode` |
+| `partial` | some resources landed, something did not | must carry `errorCode`, must name at least one resource — "partial with nothing landed" is `failed` |
+| `failed` | nothing landed | must carry `errorCode` |
+| `noop` | the plan needed no change | an empty successful apply is this, never `ok` |
+
+Collapsing `partial` into `ok` hides drift permanently; collapsing it into `failed` discards resources that
+exist and are running, which the next apply then tries to create twice. The enum was widened for this
+(D37), which technically tightens any consumer switching exhaustively — there are none outside this
+repository yet, so it ships as a minor with the widening stated rather than filed under "additive".
+
+`planHash` in an attestation is the digest of **the plan that ran**, not the one that was requested: echoing
+the request would prove nothing about which plan executed. A dispatch whose fetched plan no longer matches is
+refused before anything mutates (`staleIntent`), which is the only safe answer to a queued dispatch: applying
+"whatever is current" could move a tenant to a state an operator superseded between queue and run.
+
 ## Custody tiers, and what the runner is for (D24)
 
 Two tiers, one codebase, decided by where the provider grant lives. The **managed** tier is the default.

@@ -103,6 +103,12 @@ export function renderInstallPullRequest(m: Manifest, opts: InstallOptions): Ins
     "      - name: Apply desired state with this repository's own credentials",
     '        id: apply',
     `        uses: ${opts.actionRepo}@${opts.actionSha}`,
+    // The provider credential comes from the repository environment's own secret. Without this block the
+    // action had no way to reach the provider at all -- plan, identity and trigger were all present, and the
+    // one thing needed to act was missing. Names in the manifest, never values: GitHub resolves the secret
+    // into the step process and platfolio never sees it.
+    '        env:',
+    '          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}',
     '        with:',
     `          action: ${EXPR.action}`,
     `          environment: ${EXPR.environment}`,
@@ -138,7 +144,11 @@ export function renderInstallPullRequest(m: Manifest, opts: InstallOptions): Ins
     '',
     '## Secrets you must set',
     '',
-    secretLines.length ? secretLines.join('\n') : '_None declared by this platform._',
+      // The provider token is listed because the workflow resolves it. Instructions that cover the
+      // platform's own secrets while omitting the one credential the apply step runs on are how an
+      // install looks complete and then fails on the first dispatch.
+      '- `RAILWAY_TOKEN` — workflow-level, resolved from your environment secret by the managed step',
+      ...(secretLines.length ? secretLines : ['_No additional platform secrets declared._']),
     '',
     'No secret value crosses platfolio. Set these in your own provider project or as environment',
     'secrets here; platfolio learns they are filled only from a healthy deployment.',
