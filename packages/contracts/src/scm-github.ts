@@ -39,6 +39,18 @@ export const AppPermissionsSchema = z.object({
    * narrowing attempt is filed as a follow-up rather than risk breaking registration on an unproven key.
    */
   administration: z.literal('write'),
+  /**
+   * Requested so platfolio can *operate on* repositories it creates. Measured (D35/#130): with
+   * `administration: write` alone, `POST /orgs/{org}/repos` returns 201 and then every follow-up call on that
+   * repository -- PATCH, template generate, DELETE -- returns 404, because the new repository is not in the
+   * installation's selection. GitHub's own description of this permission includes the sentence that fixes
+   * it: "Your app is automatically given access to repositories it creates."
+   *
+   * Not verified as a manifest key from outside a registration, which is why this is a test rather than an
+   * assumption: if GitHub's app-creation page rejects the key, delete this line and the org-level creation
+   * stays a manual step. Nothing else in the design depends on the answer.
+   */
+  repository_creation: z.literal('write'),
 }).strict();
 
 /** What platfolio asks GitHub for. Kept one line per capability so a widening is a visible diff. */
@@ -47,6 +59,8 @@ export const DEFAULT_APP_PERMISSIONS = {
   actions: 'read', environments: 'write', secrets: 'write', statuses: 'write', checks: 'write',
   // D35: environments and tenant repositories. See AppPermissionsSchema for why no narrower grant works.
   administration: 'write',
+  // D35 follow-up (#125): see the created repositories, not just create them.
+  repository_creation: 'write',
 } as const satisfies z.infer<typeof AppPermissionsSchema>;
 
 export const RegistrationConfigSchema = z.object({

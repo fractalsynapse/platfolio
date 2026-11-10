@@ -149,3 +149,12 @@ test('revocation accepts the states that mean "no longer valid"', async () => {
   const loud = (async () => ({ ok: false, status: 500, async json() { return {}; } })) as unknown as typeof globalThis.fetch;
   await assert.rejects(() => revokeInstallationAccessToken({ token: 't', fetch: loud }), /returned 500/);
 });
+
+test('the local manifest asks for repository_creation, and would fail loudly if GitHub rejects it', () => {
+  // The key is unverified from outside a registration. The registration page is therefore the test, and this
+  // assertion exists so the request is deliberate rather than accidental -- dropping it would silently
+  // regress to "we can create repos we cannot see" (#130).
+  const m = localDevManifest({ port: 8077 }) as unknown as { default_permissions: Record<string, string> };
+  assert.equal(m.default_permissions.repository_creation, 'write');
+  assert.ok(Object.keys(m.default_permissions).includes('administration'), 'administration stays: environments still need it');
+});

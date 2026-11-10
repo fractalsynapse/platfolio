@@ -7,6 +7,17 @@ change; entries describe merged intent, not aspirations.
 
 ### Added
 
+- **The app requests `repository_creation` (#125), deliberately as a test.** With `administration: write`
+  alone, platfolio can create an org repository (201) and then cannot see it: `PATCH`, template `generate` and
+  `DELETE` all answer 404 because the repository isn't in the installation's selection (#130). GitHub documents
+  this permission as also granting "automatic access to repositories it creates", which is the missing piece for
+  creating tenant repositories at all. The manifest parameter name cannot be validated from outside a
+  registration — GitHub answers the identical 422 for unknown and ungranted permissions — so the app-creation
+  page is the test, and the runbook says what to revert if it objects.
+
+
+### Added
+
 - **Volumes can outlive their service (#137, measured).** `retention: 'instance' | 'survive'` on plan and
   manifest volume entries; `provisionVolume` matches an existing volume **on its mount** and re-attaches it via
   `volumeInstanceUpdate` instead of creating a second disk; `deleteInstance(instanceId, { retainMounts })`
