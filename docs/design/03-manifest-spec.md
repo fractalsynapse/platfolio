@@ -136,6 +136,16 @@ spec:
 
 An archetype is a defaults module plus a validation rule set — not a separate format.
 
+### Environment inventory (D33, implemented)
+
+Obligations live beside the manifest, not inside it: `templates/*/.platfolio/environment.yaml` declares
+`reference` / `secret` / `value` / `output` entries with defaults, applicability and descriptions.
+`applyInventory` folds them into the service model, so the plan builder and provider stay untouched, and it
+is idempotent because install can be re-run after a tenant edits the file. The refusal rules are the point:
+a secret entry carrying a value is refused with the reason rather than an "unrecognized key", and a
+credential-shaped `value` default is refused outright. See
+[13 § environment inventory](13-compose-first-and-execution.md).
+
 ### Service wiring: `references` (issue #84, implemented)
 
 A service may declare `references: [{ variable, database, output? }]` to wire a declared database into one of
