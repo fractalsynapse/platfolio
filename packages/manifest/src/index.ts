@@ -6,3 +6,4 @@ export { renderInstallPullRequest, WORKFLOW_PATH, IAC_PATH, WORKFLOW_PERMISSIONS
 export { parse } from './parse.ts';
 export { enabledEnvironments, serviceEnvironments, presentIn, type EnvName } from './environments.ts';
 export * from './build-plan.ts';
+export { InventoryEntrySchema, parseInventory, validateInventory, deriveObligations, applyInventory, type InventoryEntry, type InventoryObligations, type ParsedInventory } from './inventory.ts';

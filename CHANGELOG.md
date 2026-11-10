@@ -5,6 +5,67 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-10
+
+Range reviewed: `0.3.0..staging`, 8 commits closing #92, #93, #94 (planned work from D32–D34).
+**Minor, derived:** the contract diff against `0.3.0` is 104 added declarations and **zero removals** — new
+capability surface only (`binding`, `secret-writer`), so no consumer narrows against anything that changed.
+Had a refactor widened a literal as it nearly did before `0.3.0`, this number would have been `1.0.0`.
+
+**Shipped and verified live.** The write-once secret path: a repository secret was placed, presence moved
+`missing → set`, a `GET` returned only `name, created_at, updated_at` with the value appearing in no
+response, a second write rotated, and removal returned it to `missing`. The writer exposes no read method
+and a test asserts that shape rather than trusting GitHub's write-only API.
+
+**Shipped as logic, exercised by the catalog.** The environment inventory (typed obligations versus wiring,
+with named refusals and an idempotent fold into the service model) and cross-instance capability binding
+(requires-by-name, generation-tracked drift, secret outputs representable only as state). Both reference
+templates now declare the two halves of one capability so the shape is not fixture-only.
+
+**Not claimed.** No binding or inventory screen exists yet; the execution split (C5) is decided but not
+implemented; no tenant has been hosted; there is still no full-scope live conformance pass; and the daily
+deploy ceiling remains unreadable from the API, so the dashboard is the only authority on it.
+
+
+### Added
+
+- **Cross-instance outputs and binding (D34, #94).** `packages/contracts/src/binding.ts`: dependents
+  `require` a **capability** rather than an instance id, so a team can move its identity provider without
+  editing every consumer; resolution picks the supplier, records the **generation** of what was published,
+  and reports drift as `rebind-required` instead of silently rewriting a running platform. Secret outputs
+  (`client_secret`) exist only as state — the `values` type cannot represent a secret, so the binding
+  record a database would hold is not a secret store, and a lost credential's only path is
+  `re-issue-required`, never replay. No supplier is a state (`awaiting-provider`) rather than an error,
+  since teams bind consumers before the provider exists; two suppliers is refused rather than guessed.
+  `summarise` answers "how many consumers still point at the old issuer" in one call, which is what the UI
+  needs to avoid an operator clicking through instances. The reference templates now describe both halves
+  of the same capability.
+
+
+### Added
+
+- **Environment inventory (D33, #92).** `.platfolio/environment.yaml` declares what a platform needs — typed
+  `reference` / `secret` / `value` / `output` entries with defaults, applicability and descriptions — and
+  `deriveObligations` splits **what a tenant must supply** from **what the provider resolves**, so a
+  provider-wired `DATABASE_URL` can never appear on the checklist asking a tenant to type it.
+  `applyInventory` folds entries into the service model (idempotent, because install can be re-run), so the
+  plan builder and provider are untouched. Refusals are named, not generic: a secret entry carrying a value,
+  a missing `kind`, an unknown service or environment, a reference to an undeclared database, and a
+  credential-shaped default on a `value` entry. The generic reference template now ships one, so the
+  document format is exercised by the catalog.
+
+
+### Added
+
+- **Write-once secret path (D32, #93).** `GithubActionsSecretWriter` places a secret the tenant just
+  supplied, checks presence (`set` / `missing` / `unverifiable`), and rotates by delete-and-reissue. It has
+  no read method, and a test asserts that absence rather than trusting GitHub's write-only API. Verified
+  live: `missing → write → set`, `GET` returns `name, created_at, updated_at` and the value appears in no
+  response, a second write rotates, `remove → missing`.
+  [Research record](docs/research/github-actions-secret-write-2026-11-09.md) — three base64 and endpoint
+  details that cost time, and the two ways my own test double was more forgiving than the real API.
+
+
 ## [0.3.0] - 2026-11-09
 
 Range reviewed: `0.2.0..staging`, 40 commits, closing #69, #70, #71, #72, #75, #77, #78, #80, #82–#91.

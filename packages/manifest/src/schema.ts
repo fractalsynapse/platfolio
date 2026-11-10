@@ -1,3 +1,4 @@
+import { CapabilitySchema, RequiredCapabilitySchema } from '@platfolio/contracts';
 import { z } from 'zod';
 
 /** Schema version this renderer understands. Bumped only by breaking manifest changes. */
@@ -64,6 +65,14 @@ export const ManifestSchema = z.object({
   }).strict(),
   spec: z.object({
     requires: z.object({ platfolio: SemverRange, migrationWindow: z.string().optional() }).strict(),
+    /**
+     * Capabilities this platform needs from elsewhere in the team (D34). Named by capability, never by
+     * instance, so a team can swap its identity provider without editing every consumer. Where the resolved
+     * values land is the environment inventory's job (`kind: output`), not this one's.
+     */
+    capabilities: z.array(RequiredCapabilitySchema).default([]),
+    /** Declared when this platform IS a team service: what it publishes for others to require. */
+    provides: CapabilitySchema.optional(),
     identity: z.object({
       mode: z.enum(['none', 'byo-oidc', 'hosted-realm']),
       /** Clients to create in a platfolio-hosted realm. Ignored for byo-oidc/none. */
