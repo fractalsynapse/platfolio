@@ -5,6 +5,38 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-09
+
+Range reviewed: `0.2.0..staging`, 40 commits, closing #69, #70, #71, #72, #75, #77, #78, #80, #82–#91.
+**Minor, derived not chosen:** comparing the contract surface against `0.2.0` leaves only additions —
+`registryPullHint`, `DeleteResult.failures`, `DomainState.records`, template-provisioning options — plus one
+declaration that renders differently (`= "1.0.0"` → `: "1.0.0"`) with an identical inferred type. Had
+`#88`'s refactor been left as written it would have widened that field to `string` and made this a major, so
+the bump was checked at the point where a wrong one becomes permanent.
+
+**Shipped and proven.** Managed **databases created and deployed by the provider** against the live API
+(template path, asynchronous provisioning observed rather than assumed), then **deleted** with the instance —
+`orphans=[]` — after #82 fixed the real cause, which was a 25-second request deadline, not a permission
+problem. Per-environment placement now verified instead of inferred (#64): `serviceInstanceUpdate` on an
+unplaced environment answers `true` while doing nothing, and that silence used to be reported as success.
+Domain and certificate state is read back from the provider, including the finding that Railway's
+`dnsRecords` never lists the ownership TXT that is the only thing blocking a certificate. Volumes are
+provisioned and attached. `0.2.0`'s tag annotation carried claims this release retracts, and tags are not
+rewritten.
+
+**Shipped as design, not capability.** Compose-first authoring and the actor/executor split
+([13](docs/design/13-compose-first-and-execution.md), D29–D34). The adapter works — platfolio's own service is
+now authored in Compose, its prod overlay generated and pinned to the digest CI built, and applying that plan
+against the running instance was a verified no-op — but the importer report, the generated-overlay wiring into
+the release job, and C7–C9 (#92, #93, #94: inventory, secret write path, cross-instance binding) are open
+work with issues, not features.
+
+**Not claimed.** No tenant has been hosted; no full-scope live conformance pass (databases provision, but the
+end-to-end platform run with a real tenant image is still ahead); `graphql:check` validates queries against a
+snapshot, not behaviour; and the daily deploy ceiling remains unreadable from the API, so the limit you track
+is the dashboard's.
+
+
 ### Changed
 
 - **D30's first law was overstated and is corrected (D32): secrets are written once, not never.** platfolio is
