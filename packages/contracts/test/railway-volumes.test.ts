@@ -152,3 +152,57 @@ test('deleteInstance removes volumes too, and reports any that survive', async (
   assert.ok(deleted.removed.some((r) => r.startsWith('volume:')), JSON.stringify(deleted.removed));
   assert.deepEqual(deleted.orphans, [], JSON.stringify(deleted.orphans));
 });
+
+const withVolume = (p: InfraPlan, retention?: 'instance' | 'survive'): InfraPlan => {
+  p.environments[0]!.volumes = [{ name: 'state-cache', service: 'api', mountPath: '/var/cache/app', ...(retention ? { retention } : {}) }];
+  p.environments[0]!.databases = [];
+  p.environments[1]!.databases = [];
+  p.environments[1]!.volumes = [];
+  return p;
+};
+
+test('a volume that outlived its service is re-attached, not duplicated', async () => {
+  // The hibernate case exactly: compute was destroyed, the volume and its mount survived, and a new service
+  // now declares the same mount. Matched on the mount because Railway names volumes itself and ignores the
+  // plan's label, so the name can never be the identity. A second volume here would split state across two
+  // disks with nothing to show for it.
+  const { mock, provider } = harness();
+  await provider.applyPlan(withVolume(plan()));
+  assert.equal(mock.volumes.length, 1);
+  const survivor = mock.volumes[0]!;
+  assert.match(survivor.name, /-volume$/, 'the double names volumes the way Railway does, not after the plan label');
+
+  // Simulate the service being destroyed while the volume stays.
+  survivor.serviceId = 'service-that-no-longer-exists';
+
+  // A re-apply of the same plan is a no-op by plan hash (measured live, and desirable), so reconciliation has
+  // to be provoked with a real change -- otherwise this test would prove nothing about the volume path.
+  const changed = withVolume(plan());
+  // Reconciliation is gated on the plan's own declared hash, which `samplePlan` fixes -- an unchanged hash is
+  // a no-op by design. A test that forgot this would quietly assert nothing.
+  changed.planHash = 'b'.repeat(64);
+  const applied = await provider.applyPlan(changed);
+  assert.equal((applied.notes ?? []).filter((n) => n.code === 'volume-reused').length, 1, JSON.stringify(applied.notes));
+  assert.equal(mock.volumes.length, 1, `re-attach created a second disk: ${JSON.stringify(mock.volumes)}`);
+  assert.notEqual(mock.volumes[0]!.serviceId, 'service-that-no-longer-exists', 'the survivor was re-attached to the live service');
+  assert.equal(mock.volumes[0]!.mountPath, '/var/cache/app');
+});
+
+test('deleteInstance retains what the plan said to keep, and reports it as retained', async () => {
+  const { mock, provider } = harness();
+  await provider.applyPlan(withVolume(plan(), 'survive'));
+  assert.equal(mock.volumes.length, 1);
+
+  const deleted = await provider.deleteInstance(plan().instanceId, { retainMounts: ['/var/cache/app'] });
+  assert.equal(mock.volumes.length, 1, 'a retained volume is still there after teardown');
+  assert.deepEqual(deleted.retained, ['api-volume (mounted at /var/cache/app)']);
+  assert.ok(!deleted.removed.some((r) => r.startsWith('volume:')), 'and it is not claimed as removed');
+
+  // Contrasting case with its own instance: omitting the option keeps today's behaviour. Retention must be a
+  // decision someone made, not a default that strands storage and bills quietly.
+  const plain = harness();
+  await plain.provider.applyPlan(withVolume(plan()));
+  const gone = await plain.provider.deleteInstance(plan().instanceId);
+  assert.equal(plain.mock.volumes.length, 0, 'not retained, so removed with the instance');
+  assert.ok(!('retained' in gone), 'no retained field when nothing was retained');
+});

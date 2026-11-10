@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { parse, renderAll, renderCompose, renderRailwayIaC, requiredSecrets } from '../src/index.ts';
+import { parse, renderAll, renderCompose, renderRailwayIaC, requiredSecrets, validateManifest } from '../src/index.ts';
 
 const here = path.dirname(fileToPathSafe(import.meta.url));
 const root = path.resolve(here, '../../..');
@@ -104,4 +104,34 @@ test('resource ceilings are reported, not silently dropped', () => {
   const out = renderRailwayIaC(manifest!);
   assert.ok(out.notes.some((n) => /NOT expressible|out of band/i.test(n)), JSON.stringify(out.notes));
   assert.ok((out.files['.railway/railway.ts'] ?? '').includes('NOT expressible in Railway IaC'), 'limits must be recorded in the file');
+});
+
+test('the new archetypes carry rules, not just names', () => {
+  // Mutating a shipped template rather than hand-writing YAML: the fixture stays valid as the schema evolves,
+  // so a failing assertion means the rule broke and not that my fixture drifted.
+  const base = parse(read('templates/example-web-app/manifest.yaml')).manifest!;
+  const withArchetype = (archetype: 'worker' | 'shared-service'): typeof base => ({ ...base, metadata: { ...base.metadata, archetype } });
+
+  // The web template's api service is externally reachable, so calling it a worker must be refused.
+  const worker = validateManifest(withArchetype('worker'));
+  assert.ok(worker.some((i) => i.code === 'archetype-worker'), JSON.stringify(worker.map((i) => i.code)));
+
+  // example-full-stack has no public inbound? it does (app). Use it for the shared-service contract instead:
+  // a shared service with nothing reachable is unbindable, so the rule must say so.
+  const quiet = structuredClone(base);
+  for (const name of Object.keys(quiet.spec.services)) quiet.spec.services[name] = { ...quiet.spec.services[name]!, domains: [] };
+  const shared = validateManifest(withArchetype('shared-service'));
+  // Clear the hosts the same way the schema models them (strings on the service), or the assertion below
+  // proves only that my fixture was wrong.
+  const cleared = structuredClone(base);
+  for (const name of Object.keys(cleared.spec.services)) cleared.spec.services[name] = { ...cleared.spec.services[name]!, domains: [] };
+  assert.deepEqual(validateManifest({ ...cleared, metadata: { ...cleared.metadata, archetype: 'full-stack-web' } })
+    .filter((i) => i.code === 'archetype-full-stack').map((i) => i.code), ['archetype-full-stack'], 'the cleared fixture must still be a valid shape apart from exposure');
+  assert.ok(validateManifest({ ...cleared, metadata: { ...cleared.metadata, archetype: 'shared-service' } })
+    .some((i) => i.code === 'archetype-shared-service'), 'no public service means nothing can bind to it');
+  // ...and once something is reachable, the same shape passes.
+  const exposed = structuredClone(quiet);
+  exposed.spec.services.api = { ...exposed.spec.services.api!, domains: ['id.example.com'] };
+  assert.ok(!validateManifest({ ...exposed, metadata: { ...exposed.metadata, archetype: 'shared-service' } }).some((i) => i.code === 'archetype-shared-service'),
+    'a shared service that exposes something is valid');
 });

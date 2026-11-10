@@ -102,7 +102,29 @@ export const EnvironmentPlanSchema = z.object({
   domains: z.array(DomainPlanSchema),
   databases: z.array(z.object({ name: NameSchema, kind: z.enum(['postgres', 'redis', 'mysql']) })),
   buckets: z.array(z.object({ name: NameSchema, region: NameSchema.optional() })),
-  volumes: z.array(z.object({ name: NameSchema, service: NameSchema, mountPath: z.string().startsWith('/'), sizeMB: z.number().int().positive().optional() })).optional(),
+  /**
+   * Volumes outlive the service attached to them -- measured on the live API: `serviceDelete` left both
+   * `postgres-volume` and `hibernate-a-volume` intact, and `volumeInstanceUpdate` re-attached a surviving
+   * volume to a different service (verified by read-back). That is the hibernate pattern a tenant pays less
+   * for, so `retention` states which side of the boundary platfolio respects: `instance` (default) is torn
+   * down with the instance; `survive` is kept, attached to nothing, and reported as a survivor.
+   *
+   * Deletion is **scheduled, not immediate**: a successful `volumeDelete` sets `isPendingDeletion` with a
+   * `deletedAt` roughly two days out while the volume stays listed. A caller that treats the mutation's
+   * `true` as completion is reporting a fact the provider has not yet performed.
+   */
+  volumes: z.array(z.object({
+    name: NameSchema,
+    service: NameSchema,
+    mountPath: z.string().startsWith('/'),
+    sizeMB: z.number().int().positive().optional(),
+    /**
+     * Optional rather than defaulted: `InfraPlan` is the schema's *output* type, so a `.default()` here
+     * would make every plan builder and fixture state retention explicitly. The provider treats absence as
+     * `instance` at the point of use, where the decision is actually made.
+     */
+    retention: z.enum(['instance', 'survive']).optional(),
+  })).optional(),
 });
 
 export const InfraPlanSchema = z.object({
@@ -197,6 +219,12 @@ export const DeleteResultSchema = z.object({
    * goes with its project was never individually deleted either.
    */
   releasedWithProject: z.array(z.string().min(1)).optional(),
+  /**
+   * Volumes deliberately left in place because the plan said `retention: 'survive'`. Listed separately from
+   * `removed` and `orphans` because the third meaning is different again: "we kept this on purpose". They are
+   * also not free -- an unattached volume bills -- so the answer has to be visible to whoever asks.
+   */
+  retained: z.array(z.string().min(1)).optional(),
 });
 
 export const CapabilityInfoSchema = z.object({

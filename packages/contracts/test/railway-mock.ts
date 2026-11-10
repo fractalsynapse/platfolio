@@ -233,8 +233,36 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
         if (!this.services.has(input.serviceId)) throw new Error('railway volumeCreate: unknown service [NOT_FOUND]');
         const id = `vol-${String(this.sequence).padStart(4, '0')}`;
         this.sequence += 1;
-        this.volumes.push({ id, projectId: input.projectId, name: `volume-${id}`, serviceId: input.serviceId, mountPath: input.mountPath });
-        return { volumeCreate: { id, name: `volume-${id}` } } as T;
+        // Named like the real API, which derives `<service>-volume` and ignores whatever label the plan used.
+        // The double used to invent `volume-<id>`, and that difference is what made a match-by-name provider
+        // path look fine in CI and be dead code against production.
+        const owner = this.services.get(input.serviceId);
+        const volumeName = `${owner?.name ?? 'orphan'}-volume`;
+        this.volumes.push({ id, projectId: input.projectId, name: volumeName, serviceId: input.serviceId, mountPath: input.mountPath });
+        return { volumeCreate: { id, name: volumeName } } as T;
+      }
+      case 'environment.volumeInstances': {
+        const environment = [...this.environments.values()].find((e) => e.id === v.environmentId);
+        const scoped = environment ? this.volumes.filter((x) => x.projectId === environment.projectId) : this.volumes;
+        return {
+          environment: {
+            volumeInstances: {
+              edges: scoped.map((x) => ({
+                node: { volumeId: x.id, serviceId: x.serviceId, mountPath: x.mountPath, volume: { name: x.name } },
+              })),
+            },
+          },
+        } as T;
+      }
+      case 'volumeInstanceUpdate': {
+        const input = v.input as { serviceId: string; mountPath: string };
+        const target = this.volumes.find((x) => x.id === v.volumeId);
+        if (!target) throw new Error('railway volumeInstanceUpdate: no such volume [NOT_FOUND]');
+        // Read-back must change what the next query reports, or this double cannot tell an applied re-attach
+        // from the silent `true` that Railway itself returns for an unplaced instance.
+        target.serviceId = input.serviceId;
+        target.mountPath = input.mountPath;
+        return { volumeInstanceUpdate: true } as T;
       }
       case 'volumeDelete': {
         const volumeId = v.volumeId as string;
@@ -460,10 +488,12 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
         return { customDomainCreate: { id: `dom-${this.sequence++}`, domain: input.domain } } as T;
       }
       case 'serviceDelete': {
-        // Measured ordering (#107): a template-created database that still owns a volume is refused by
-        // serviceDelete; the same service deletes cleanly once its volume is released. The double enforced
-        // neither rule, which is how the provider's teardown order went unnoticed for a full live run.
-        if (this.volumes.some((x) => x.serviceId === v.id)) {
+        // Measured, and narrower than my first version of this rule. A template-created database is refused
+        // while its volume exists; an ORDINARY service with an attached volume deletes fine (probed 2026-11-10:
+        // `hibernate-a` deleted with its volume intact and the volume survived). The double used to refuse
+        // every attached volume, which encoded an over-generalisation from one database case and would have
+        // made the provider's blanket volumes-first ordering look like a requirement instead of a caution.
+        if (this.templateServiceIds.has(v.id as string) && this.volumes.some((x) => x.serviceId === v.id)) {
           throw new Error('railway serviceDelete: Problem processing request [UNPROCESSABLE]');
         }
         if (this.options.refuseTemplateServiceDelete && this.templateServiceIds.has(v.id as string)) {

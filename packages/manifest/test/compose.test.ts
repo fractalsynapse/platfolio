@@ -140,3 +140,30 @@ test('the generated prod overlay is deterministic, which is what makes drift det
   assert.equal(overlay('web'), overlay('web'));
   assert.notEqual(overlay('web'), renderProdOverlay(BASE, pins), 'a different pin produces a different file');
 });
+
+test('x-platfolio carries volume retention from the Compose document', async () => {
+  // The hibernate pattern has to be authorable where everything else is authored, or it stays a provider
+  // capability nobody can declare. A mount is the identity that survives its service, so retention is
+  // declared on the volume entry and reaches the plan unchanged.
+  const { parseCompose } = await import('../src/compose.ts');
+  const { applyInventory } = await import('../src/index.ts');
+  const base = `
+name: hibernate-demo
+services:
+  worker:
+    image: ghcr.io/acme/worker@sha256:` + 'a'.repeat(64) + `
+    expose: ["8080"]
+x-platfolio:
+  resources:
+    volumes:
+      - { name: state, service: worker, mountPath: /var/lib/state, retention: survive }
+  metadata: { name: hibernate-demo, version: 0.1.0, title: Hibernate demo, archetype: api-service, summary: s }
+  environments: { production: { enabled: true }, staging: { enabled: false }, preview: { enabled: false } }
+`;
+  const parsed = parseCompose(base);
+  assert.deepEqual(parsed.issues.map((i) => i.code), [], JSON.stringify(parsed.issues));
+  const declared = parsed.manifest!.spec.resources.volumes;
+  assert.equal(declared.length, 1);
+  assert.equal(declared[0]!.retention, 'survive');
+  void applyInventory;
+});

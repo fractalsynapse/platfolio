@@ -219,6 +219,18 @@ export function validateManifest(unknown: unknown): Issue[] {
     if (services.length > 2) issues.push({ path: 'spec.services', code: 'archetype-api-service', message: `api-service expects an API plus at most one worker, got ${services.length}` });
     if (services.some(([, s]) => /(:3000|_web|frontend)$/i.test(s.image))) issues.push({ path: 'spec.services', code: 'archetype-api-service', message: 'api-service should not ship a web frontend; use full-stack-web' });
   }
+  if (m.metadata.archetype === 'worker') {
+    // The shape's whole point is that nothing connects inbound: a worker exposing a host is either mislabelled
+    // or about to be reachable without anyone deciding it. Hosts live on services, so that is the check.
+    const exposed = services.filter(([, s]) => s.domains.length > 0).map(([name]) => name);
+    if (exposed.length > 0) issues.push({ path: 'spec.services', code: 'archetype-worker', message: `a worker archetype takes no inbound connections, but ${exposed.join(', ')} ${exposed.length === 1 ? 'publishes' : 'publish'} a host; use api-service or full-stack-web if it serves traffic` });
+  }
+  if (m.metadata.archetype === 'shared-service') {
+    // A team service exists to be reached by other applications: one reachable thing, kept small so its
+    // blast radius is legible. Binding (D34) is how consumers find it.
+    if (publicCount === 0) issues.push({ path: 'spec.services', code: 'archetype-shared-service', message: 'a shared service must expose at least one public service, or nothing can bind to it' });
+    if (services.length > 2) issues.push({ path: 'spec.services', code: 'archetype-shared-service', message: `a shared service should stay at 1-2 services; this declares ${String(services.length)}` });
+  }
   if (m.metadata.archetype === 'full-stack-web') {
     if (services.length < 2) issues.push({ path: 'spec.services', code: 'archetype-full-stack', message: 'full-stack-web needs at least a UI and an API service' });
     if (publicCount === 0) issues.push({ path: 'spec.services', code: 'archetype-full-stack', message: 'full-stack-web needs at least one service with a domain (session/cookie origin rules derive from it)' });

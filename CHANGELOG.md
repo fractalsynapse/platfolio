@@ -7,6 +7,35 @@ change; entries describe merged intent, not aspirations.
 
 ### Added
 
+- **Volumes can outlive their service (#137, measured).** `retention: 'instance' | 'survive'` on plan and
+  manifest volume entries; `provisionVolume` matches an existing volume **on its mount** and re-attaches it via
+  `volumeInstanceUpdate` instead of creating a second disk; `deleteInstance(instanceId, { retainMounts })`
+  keeps what it's told to and reports it in `retained`. Mounts rather than names because Railway assigns
+  `<service>-volume` itself and the plan's label is a tenant-facing string — my first version matched on the
+  label, looked correct, passed review, and could never have fired.
+- **Two new archetypes, each with a rule**: `worker` (refuses an exposed host) and `shared-service` (requires
+  one, since nothing can bind to an unreachable service).
+- **`DeleteResult.retained`** — a third category, distinct from `removed` and `orphans`: kept on purpose.
+
+### Corrected
+
+- **#107's diagnosis was overstated.** Measured: an ordinary service deletes fine with its volume attached;
+  only a template-created database refuses. The double enforced the over-generalisation ("any attached volume
+  → refuse"), which made the provider's blanket volumes-first ordering look like a requirement rather than a
+  caution; now scoped to template services.
+- **`volumeDelete` schedules rather than completes** (`isPendingDeletion`, `deletedAt` ~2 days out, volume
+  still listed). Anywhere that read the `true` as done — including #111's clean teardown claim — now reports
+  what is actually known.
+
+### Measured live
+
+- Volumes survive `serviceDelete`; `volumeInstanceUpdate` re-attaches a survivor (confirmed by read-back);
+  project tokens may `volumeCreate` but not `volumeDelete`. Evidence and cleanup:
+  [research record](docs/research/railway-volume-lifecycle-2026-11-10.md).
+
+
+### Added
+
 - **An attestation can report `partial` (D37, #123 protocol half).** `result` was `ok | failed | noop`; a
   three-of-four apply is neither — `ok` hides drift forever, `failed` discards resources that are running and
   makes the next apply try to create them twice. New schema rules: `partial` must carry an `errorCode`, and
