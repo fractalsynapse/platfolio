@@ -150,11 +150,12 @@ test('revocation accepts the states that mean "no longer valid"', async () => {
   await assert.rejects(() => revokeInstallationAccessToken({ token: 't', fetch: loud }), /returned 500/);
 });
 
-test('the local manifest asks for repository_creation, and would fail loudly if GitHub rejects it', () => {
-  // The key is unverified from outside a registration. The registration page is therefore the test, and this
-  // assertion exists so the request is deliberate rather than accidental -- dropping it would silently
-  // regress to "we can create repos we cannot see" (#130).
+test('the manifest does not invent permission keys GitHub has never heard of', () => {
+  // #125 asked for a "Repository creation" permission; grep of GitHub's published REST description finds 0
+  // occurrences of repository_creation against 34 for administration, so the key does not exist on this API
+  // surface. An unknown manifest key is what made GitHub reject the first registration outright
+  // (single_file_permissions), so the guard belongs in a test, not in someone's memory.
   const m = localDevManifest({ port: 8077 }) as unknown as { default_permissions: Record<string, string> };
-  assert.equal(m.default_permissions.repository_creation, 'write');
-  assert.ok(Object.keys(m.default_permissions).includes('administration'), 'administration stays: environments still need it');
+  assert.equal(m.default_permissions.repository_creation, undefined);
+  assert.equal(m.default_permissions.administration, 'write', 'the real grant stays; #130 remains open');
 });
