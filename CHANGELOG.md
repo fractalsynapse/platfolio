@@ -5,6 +5,25 @@ change; entries describe merged intent, not aspirations.
 
 "## [Unreleased]
 
+### Added
+
+- **Required reviewers can be attached when creating an environment (#126, measured live).** `ensureEnvironment`
+  now accepts `reviewers: [{type: 'User'|'Team', id}]`; GitHub rejects `type: 'App'` — an app must not approve
+  its own deployments — so platfolio can hand a tenant a production environment that already has its human gate
+  instead of a half-configured one. `PUT` replaces rather than patches: an omitted `reviewers` leaves the gate
+  alone, `reviewers: []` removes it, and both answer 200.
+
+### Found
+
+- **A repository the app creates is invisible to the app.** Org repository creation works (201) with
+  `administration: write`, but every follow-up call — `PATCH`, template `generate`, `DELETE` — answers **404**
+  even with an unscoped token, because the installation's selection never includes it. That makes GitHub's
+  `repository_creation` permission (which "automatically gives access to repositories it creates") load-bearing
+  rather than merely narrower, and it is #125's justification. "Not visible" and "does not exist" share a 404.
+  Evidence and the cleanup debt this left behind:
+  [research record](docs/research/github-environment-and-repo-provisioning-2026-11-10.md).
+
+
 ### Changed
 
 - **The GitHub App now requests `administration: write` (D35), and platfolio provisions environments itself.**
