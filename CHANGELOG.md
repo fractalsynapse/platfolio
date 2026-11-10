@@ -5,6 +5,28 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-10
+
+Range reviewed: `0.3.0..staging`, 8 commits closing #92, #93, #94 (planned work from D32–D34).
+**Minor, derived:** the contract diff against `0.3.0` is 104 added declarations and **zero removals** — new
+capability surface only (`binding`, `secret-writer`), so no consumer narrows against anything that changed.
+Had a refactor widened a literal as it nearly did before `0.3.0`, this number would have been `1.0.0`.
+
+**Shipped and verified live.** The write-once secret path: a repository secret was placed, presence moved
+`missing → set`, a `GET` returned only `name, created_at, updated_at` with the value appearing in no
+response, a second write rotated, and removal returned it to `missing`. The writer exposes no read method
+and a test asserts that shape rather than trusting GitHub's write-only API.
+
+**Shipped as logic, exercised by the catalog.** The environment inventory (typed obligations versus wiring,
+with named refusals and an idempotent fold into the service model) and cross-instance capability binding
+(requires-by-name, generation-tracked drift, secret outputs representable only as state). Both reference
+templates now declare the two halves of one capability so the shape is not fixture-only.
+
+**Not claimed.** No binding or inventory screen exists yet; the execution split (C5) is decided but not
+implemented; no tenant has been hosted; there is still no full-scope live conformance pass; and the daily
+deploy ceiling remains unreadable from the API, so the dashboard is the only authority on it.
+
+
 ### Added
 
 - **Cross-instance outputs and binding (D34, #94).** `packages/contracts/src/binding.ts`: dependents
