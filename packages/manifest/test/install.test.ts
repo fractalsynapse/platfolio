@@ -106,3 +106,47 @@ test('staging is omitted from triggers when the platform does not enable it', ()
   assert.deepEqual(doc.on.push.branches, ['production']);
   assert.deepEqual(doc.on.workflow_dispatch.inputs.environment.options, ['production']);
 });
+
+test('every steps.<id> reference resolves to a step that declares that id', () => {
+  // Found by reading my own generated workflow rather than trusting it: the report step referenced
+  // `steps.apply.outcome` while the apply step had no `id`, so the outcome would have been silently empty --
+  // valid YAML, correct syntax, meaningless data. An empty `${{ }}` gate (#9) could not catch that, so the
+  // rule is general: collect the ids that exist, then check every reference against them.
+  const m = manifest('templates/example-web-app/manifest.yaml');
+  const workflow = renderInstallPullRequest(m, OPTS).files[WORKFLOW_PATH]!;
+  const doc = yamlParse(workflow) as { jobs?: Record<string, { steps?: { id?: string }[] }> };
+  const declared = new Set<string>();
+  for (const job of Object.values(doc.jobs ?? {})) {
+    for (const step of job.steps ?? []) if (typeof step.id === 'string') declared.add(step.id);
+  }
+  const referenced = [...workflow.matchAll(/steps\.([a-zA-Z0-9_-]+)\./g)].map((x) => x[1] as string);
+  assert.ok(referenced.length > 0, 'the fixture must exercise the reference path at all');
+  for (const ref of referenced) assert.ok(declared.has(ref), `steps.${ref} is referenced but no step declares that id`);
+});
+
+test('the tenant-facing document never names a file the install PR does not emit', () => {
+  // The prose used to say the workflow applies `.railway/railway.ts`, which the renderer never produced: a
+  // tenant following those words would look for a file that does not exist. Desired state lives with
+  // platfolio and is fetched per run, so the document says that instead.
+  const m = manifest('templates/example-web-app/manifest.yaml');
+  const out = renderInstallPullRequest(m, OPTS);
+  assert.deepEqual(Object.keys(out.files).sort(), ['.github/workflows/platfolio-managed.yml', 'PLATFOLIO.md']);
+  assert.ok(!out.files['PLATFOLIO.md']!.includes('.railway/railway.ts'), 'no claim about a file that is not shipped');
+  assert.match(out.files['PLATFOLIO.md']!, /fetched per run and checked against a hash/);
+});
+
+test('D36: the removal steps say plainly that platfolio never deletes the repository', () => {
+  const m = manifest('templates/example-web-app/manifest.yaml');
+  const doc = renderInstallPullRequest(m, OPTS).files['PLATFOLIO.md']!;
+  assert.match(doc, /Your repository is never deleted/);
+  assert.ok(!/delete (your|the) repo/i.test(doc), 'and no step asks the tenant to expect deletion');
+});
+
+test('the outcome reaches platfolio through a step output, not a log line', () => {
+  // D30 law 2: logs are never read. The report step is convenience for a human staring at a run; the machine
+  // path is the action's own `outcome` output, which is why the id above matters rather than being cosmetic.
+  const m = manifest('templates/example-web-app/manifest.yaml');
+  const workflow = renderInstallPullRequest(m, OPTS).files[WORKFLOW_PATH]!;
+  assert.match(workflow, /- name: Apply desired state[\s\S]{0,80}id: apply/);
+  assert.match(workflow, /steps\.apply\.outcome/);
+});

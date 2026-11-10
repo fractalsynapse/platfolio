@@ -13,7 +13,10 @@ export interface InstallFiles {
 }
 
 export const WORKFLOW_PATH = '.github/workflows/platfolio-managed.yml';
-export const IAC_PATH = '.railway/railway.ts';
+// No IaC file ships in the install PR. The desired state lives with platfolio and is fetched per run, so a
+// constant naming `.railway/railway.ts` was a trap: the tenant-facing document referenced it while nothing
+// emitted it. If a future design writes plans into tenant repos, it will need to add the file AND the code
+// that produces it, not resurrect this path.
 
 /** Least privilege for the managed workflow. Anything broader is a regression, and a test says so. */
 export const WORKFLOW_PERMISSIONS: Record<string, string> = {
@@ -98,6 +101,7 @@ export function renderInstallPullRequest(m: Manifest, opts: InstallOptions): Ins
     '      - uses: actions/checkout@v7',
     '',
     "      - name: Apply desired state with this repository's own credentials",
+    '        id: apply',
     `        uses: ${opts.actionRepo}@${opts.actionSha}`,
     '        with:',
     `          action: ${EXPR.action}`,
@@ -124,8 +128,10 @@ export function renderInstallPullRequest(m: Manifest, opts: InstallOptions): Ins
     '',
     '## What runs here',
     '',
-    `- \`${WORKFLOW_PATH}\` applies \`${IAC_PATH}\` using **this repository's** credentials. platfolio`,
+    `- \`${WORKFLOW_PATH}\` applies the desired state platfolio holds, using **this repository's** credentials. platfolio`,
     '  dispatches it and verifies the result; it never writes to your infrastructure itself.',
+    '  The plan is fetched per run and checked against a hash before anything is applied, so this',
+    '  repository holds the trigger and the identity rather than a second copy of the desired state.',
     '- The provider credential is a per-environment project token stored as a GitHub environment',
     '  secret. platfolio stores no infrastructure credential of any kind.',
     '- Ordinary `git push` deploys still work, including when platfolio is offline.',
@@ -145,8 +151,9 @@ export function renderInstallPullRequest(m: Manifest, opts: InstallOptions): Ins
     '',
     `1. Delete \`${WORKFLOW_PATH}\`.`,
     '2. Revoke the platfolio GitHub App installation.',
-    '3. Nothing else changes. The stack keeps deploying from your pushes and the desired-state file',
-    '   remains yours.',
+    '3. platfolio removes its own management records. **Your repository is never deleted** — keep it,',
+    '   archive it, or delete it yourself; platfolio does not have that capability and will not ask for it.',
+    '4. Nothing else changes. Ordinary pushes keep deploying, and every file here remains yours.',
     '',
   ].join('\n');
 

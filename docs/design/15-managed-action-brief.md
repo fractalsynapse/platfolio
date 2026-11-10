@@ -39,7 +39,8 @@ Read first: `packages/manifest/src/render-install.ts` — that workflow *is* the
 
 ## Design questions to settle in #123 before writing code
 
-- **Packaging**: composite action in this repository (`uses: ./`) versus a published action repo. #130 matters
+- **Packaging (settled, D37)**: composite action in this repository, pinned by commit SHA. #130 matters
+  here -- and in-repo packaging sidesteps it, because this repository already exists and is installed onto.
   here: if platfolio cannot operate on a repository it creates, it cannot own a published action repo either.
 - Where the control-plane URL comes from (per-tenant? in the workflow? in the plan?).
 - **D36 is settled while this is written**: platfolio creates and updates tenant repositories and does not
@@ -47,7 +48,8 @@ Read first: `packages/manifest/src/render-install.ts` — that workflow *is* the
   so the action must never issue a repository delete, and no design here should reintroduce that capability.
   The one that removes infrastructure -- `deleteInstance` -- deletes provider resources (services, volumes,
   databases, the project), never source.
-- Behaviour when `plan_hash` is stale: refuse and report, or apply the current plan and report the mismatch.
+- Behaviour when `plan_hash` is stale (settled, D37): **refuse and report**. Applying the current plan would
+  let a queued dispatch move infrastructure to a state an operator has since superseded.
 - How a **partial** apply is distinguished from a total failure in the outcome — otherwise the controller
   collapses two different states, which is the recurring sin in this codebase.
 
