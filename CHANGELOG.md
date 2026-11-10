@@ -7,6 +7,17 @@ change; entries describe merged intent, not aspirations.
 
 ### Fixed
 
+- **The manifest exchange demanded a field GitHub does not send (#113).** The docs say the exchange response
+  includes `id`, `pem` and `webhook_secret`; an app registered without `hook_attributes` — which the local flow
+  does deliberately — returns no `webhook_secret`. The required-field check treated a sentence as a schema and
+  failed the run *after* the code had been consumed, discarding credentials for an app that now exists with no
+  key held. `webhookSecret` is now optional (absent, not an empty string that would pass a signature check it
+  should fail), and a failure names the keys that arrived — never their values — because a one-shot exchange
+  that fails on validation is otherwise undiagnosable.
+
+
+### Fixed
+
 - **The GitHub App manifest was full of invented fields (#113).** GitHub rejected the first real attempt:
   `single_file_permissions` is not a permitted key — and it was one of four (`request_verification`,
   `webhook_active`, and a `permissions` map beside `default_permissions`, which the docs define as an object

@@ -243,9 +243,20 @@ export function localManifestTarget(org?: string): string {
  * in the imperative, so this is the one inference here and a 401 would be evidence against it rather than a
  * mystery. The values are returned and written by the caller to a 0600 file; they are never logged.
  */
-export async function exchangeManifestCode(code: string, fetchImpl: typeof globalThis.fetch = globalThis.fetch): Promise<{
-  appId: number; slug: string; clientId: string; clientSecret: string; webhookSecret: string; privateKeyPem: string;
-}> {
+export interface ManifestExchangeResult {
+  appId: number;
+  slug: string;
+  clientId: string;
+  clientSecret: string;
+  /**
+   * Absent when the app registers with no webhook -- measured, because platfolio's local manifest omits
+   * `hook_attributes`. Requiring it here turned a successful registration into a failed run.
+   */
+  webhookSecret?: string;
+  privateKeyPem: string;
+}
+
+export async function exchangeManifestCode(code: string, fetchImpl: typeof globalThis.fetch = globalThis.fetch): Promise<ManifestExchangeResult> {
   if (!/^[0-9a-f]{20,}$/i.test(code)) throw new Error('manifest code is not well-formed');
   const response = await fetchImpl(`https://api.github.com/app-manifests/${encodeURIComponent(code)}/conversions`, {
     method: 'POST',
@@ -254,14 +265,19 @@ export async function exchangeManifestCode(code: string, fetchImpl: typeof globa
   });
   if (!response.ok) throw new Error(`manifest exchange failed (${String(response.status)})`);
   const body = await response.json() as Record<string, unknown>;
-  const missing = ['id', 'slug', 'client_id', 'client_secret', 'webhook_secret', 'pem'].filter((k) => typeof body[k] !== 'string' && typeof body[k] !== 'number');
-  if (missing.length) throw new Error(`manifest exchange response missing ${missing.join(', ')}`);
+  const missing = ['id', 'slug', 'client_id', 'client_secret', 'pem'].filter((k) => typeof body[k] !== 'string' && typeof body[k] !== 'number');
+  if (missing.length) {
+    // Key names only, never values. Without this a shape mismatch is unrecoverable, because the code has
+    // already been consumed by the call that failed -- the first version of this function turned a
+    // successful registration into a lost app by asserting a field GitHub does not send.
+    throw new Error(`manifest exchange response missing ${missing.join(', ')} (received keys: ${Object.keys(body).sort().join(', ') || 'none'})`);
+  }
   return {
     appId: Number(body.id),
     slug: String(body.slug),
     clientId: String(body.client_id),
     clientSecret: String(body.client_secret),
-    webhookSecret: String(body.webhook_secret),
+    ...(typeof body.webhook_secret === 'string' ? { webhookSecret: body.webhook_secret } : {}),
     privateKeyPem: String(body.pem),
   };
 }
