@@ -5,6 +5,21 @@ change; entries describe merged intent, not aspirations.
 
 "## [Unreleased]
 
+### Added
+
+- **`pnpm run app:check`** — verifies platfolio's GitHub App state from the command line: app-JWT auth against
+  `GET /app`, installation count from `/app/installations`, and installed repositories, reporting each
+  separately so "app authenticates" and "app is installed" stop being conflated. Prints identifiers only; the
+  private key, client secret and webhook secret never reach a log line.
+
+### Verified live
+
+- **The local registration flow works end to end** (#113). App id 5693967 / slug `platfolio-local`, credentials
+  in a `0600` untracked file, and `GET /app` under an app JWT returning **200** — the first time `createAppJwt`
+  was checked against GitHub rather than only against its own public key, and the point where the
+  unauthenticated-exchange inference became evidence. Installation is the remaining human step.
+
+
 ### Fixed
 
 - **The manifest exchange demanded a field GitHub does not send (#113).** The docs say the exchange response

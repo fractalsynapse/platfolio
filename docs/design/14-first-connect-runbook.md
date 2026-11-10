@@ -27,6 +27,16 @@ pleasant to author. The offline half is done (`platforms/platfolio/`); the live 
 Everything after these is platfolio's work: environments on the tenant repository, the install pull request,
 `workflow_dispatch`, the runner claim, attestation verification, then `applyPlan` with the tenant's own grant.
 
+## Status of the first two steps
+
+Step 1 is **done and verified live**: the app registered from a laptop with no tunnel, and `GET /app` under an
+app JWT returned 200 as `platfolio-local` (app id 5693967) -- which is also the first live proof that
+`createAppJwt` meets GitHub's expectations rather than only our own. `pnpm run app:check` re-verifies this at
+any time and reports `/app` and `/app/installations` separately, because "app works" and "app is installed"
+are different states and the second was `0 installations` when last checked.
+
+Step 2 -- installing on this repository -- is the remaining human action.
+
 ## What each step is meant to falsify
 
 | Step | The assumption it tests |
