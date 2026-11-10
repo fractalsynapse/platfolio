@@ -111,8 +111,12 @@ test('when both delete attempts fail the orphan is reported with its reason (#80
   });
   await provider.applyPlan(p);
   const deleted = await provider.deleteInstance(p.instanceId);
-  assert.ok(deleted.orphans.some((o) => o.includes('app-db')), JSON.stringify(deleted));
+  // #80's guarantee is unchanged: a real refusal is recorded with its reason. What #111 corrected is the
+  // label -- after a successful projectDelete the resource is unreachable, so it is "released with the
+  // project", not an orphan. Renaming must not be confused with relaxing: failures still carries the reason.
   assert.ok(deleted.failures?.some((f) => /TimeoutError|serviceDelete/.test(f.message)), JSON.stringify(deleted.failures ?? []));
+  assert.ok((deleted.releasedWithProject ?? []).some((r) => r.includes('app-db')), `not accounted for: ${JSON.stringify(deleted)}`);
+  assert.deepEqual(deleted.orphans, [], 'nothing is reachable, so nothing earns the name orphan');
 });
 
 test('a refused database delete is reported WITH the reason, not as a bare orphan (#80)', async () => {
@@ -125,9 +129,12 @@ test('a refused database delete is reported WITH the reason, not as a bare orpha
   });
   await provider.applyPlan(p);
   const deleted = await provider.deleteInstance(p.instanceId);
-  assert.ok(deleted.orphans.length, 'the template-created service survives, as it did live');
+  // Same shift as above: the refusal is still reported, and the service is still accounted for. A resource
+  // that survives *individually deletable but refused* and a resource that goes with the project are
+  // different claims, and #111 is precisely the distinction that used to be invisible.
   assert.ok(deleted.failures?.length, `no failures recorded: ${JSON.stringify(deleted)}`);
   assert.match(deleted.failures![0]!.message, /Bad Access for template-created service/);
+  assert.ok((deleted.releasedWithProject ?? []).some((r) => r.includes('app-db')), JSON.stringify(deleted));
   assert.ok(deleted.failures![0]!.step.startsWith('service:'), deleted.failures![0]!.step);
 });
 

@@ -5,6 +5,20 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Teardown now accounts for what it actually did (#111).** The survivor sweep ran *after* `projectDelete`,
+  so with the project unreadable nothing could be distinguished — the first tenant-shaped run reported
+  `orphans: []` while its database appeared in neither list. `deleteInstance` snapshots every resource before
+  removing anything and classifies each one: `removed` (deleted individually), `releasedWithProject` (existed,
+  not individually deleted, now unreachable — every bucket lands here, since no bucket delete mutation
+  exists), or `orphans` (**still reachable** after `projectDelete` — the only case that earns the word).
+  Refusals still record their reason in `failures`, so #80's guarantee is unchanged and only the label moved.
+  Verified live: service `removed`, bucket `released`, `orphans: []` as a probed claim. Two test-harness bugs
+  surfaced: the double answered reads for a deleted project (making correct code look wrong), and the mock's
+  option whitelist silently dropped a new flag — the recurrence that once made a test vacuous.
+
+
 ### Added
 
 - **platfolio described as a platform (#113, offline half).** `platforms/platfolio/` is a Compose document
