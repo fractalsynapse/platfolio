@@ -77,6 +77,7 @@ function writeSecrets(values: Record<string, unknown>): void {
   const previous = existsSync(secretsFile)
     ? JSON.parse(readFileSync(secretsFile, 'utf8')) as Record<string, unknown>
     : {};
+  // Names are merged, values are never echoed to the console.
   writeFileSync(secretsFile, `${JSON.stringify({ ...previous, ...values, registeredAt: new Date().toISOString() }, null, 2)}\n`, { mode: 0o600 });
 }
 

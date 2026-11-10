@@ -69,3 +69,30 @@ The flow itself is also wrong in the earlier helper: it emitted `?manifest=<base
 flow posts the manifest as a form field, which is what `app:local` does; `registrationUrl` now returns only
 the POST target plus `state`, and a test asserts the manifest is *absent* from the URL — otherwise the test
 cannot distinguish the two flows.
+
+## Second live attempt: the manifest passed, the exchange answered, my validation lost the run
+
+The maintainer got past the form this time — so `MANIFEST_KEYS` was right — and the script reported:
+
+> Manifest exchange failed: manifest exchange response missing webhook_secret
+
+**GitHub's documentation says the exchange response "will include the `id`, `pem`, and `webhook_secret`."** In
+practice, an app registered **without** `hook_attributes` — which is what the local flow does on purpose —
+returns no `webhook_secret` at all. My required-field list treated the docs' sentence as a schema and the run
+failed on a field that cannot exist.
+
+The cost was real and worth naming: **the manifest code is single-use.** The HTTP call succeeded, so the app
+was created and the code was consumed; validation threw *after* that, which means the credentials arrived and
+were discarded. The app now exists in the account with a key nobody holds. Recovery is to delete it (or leave
+it) and run the flow again — the second run will succeed, and that is the point of the fix.
+
+Two changes, then:
+
+- `webhookSecret` is optional in the result. Not defaulted to `''`, because an empty secret would later pass a
+  signature check that should have failed loudly.
+- A failure now lists the **key names that arrived** (never values), because a mismatch discovered after the
+  code is spent is otherwise undiagnosable from the error text alone.
+
+Lessons kept: a documented response description is evidence about a shape, not the shape; and a one-shot
+credential exchange has to validate *after* reading and *before* discarding, with enough in the error to
+reconstruct what happened.

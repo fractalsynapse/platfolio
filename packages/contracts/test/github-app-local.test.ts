@@ -67,5 +67,28 @@ test('a malformed or short code is refused locally rather than sent', async () =
 
 test('a truncated exchange response is named, not defaulted to empty strings', async () => {
   const fetchImpl = (async () => ({ ok: true, status: 201, async json() { return { id: 9, slug: 's' }; } }) ) as unknown as typeof globalThis.fetch;
-  await assert.rejects(() => exchangeManifestCode('a'.repeat(40), fetchImpl), /missing client_id, client_secret, webhook_secret, pem/);
+  await assert.rejects(() => exchangeManifestCode('a'.repeat(40), fetchImpl), /missing client_id, client_secret, pem/);
+});
+
+test('the measured response shape: no webhook_secret when no webhook was registered', async () => {
+  // Real outcome from the first live attempt: the exchange answered with id, slug, client_id,
+  // client_secret and pem, and nothing else. Requiring webhook_secret turned a successful app creation
+  // into a failed run whose code could not be replayed.
+  const fetchImpl = (async () => ({
+    ok: true, status: 201,
+    async json() { return { id: 9, slug: 'platfolio-local', client_id: 'Iv1.x', client_secret: 'sec', pem: '-----BEGIN RSA PRIVATE KEY-----' }; },
+  })) as unknown as typeof globalThis.fetch;
+  const creds = await exchangeManifestCode('a'.repeat(40), fetchImpl);
+  assert.equal(creds.webhookSecret, undefined, 'absent, not an empty string that later fails signature checks');
+  assert.equal(creds.appId, 9);
+});
+
+test('a genuinely missing field names what arrived, keys only', async () => {
+  const fetchImpl = (async () => ({ ok: true, status: 201, async json() { return { id: 9, slug: 's', client_id: 'c' }; } })) as unknown as typeof globalThis.fetch;
+  await assert.rejects(() => exchangeManifestCode('b'.repeat(40), fetchImpl), /missing client_secret, pem \(received keys: client_id, id, slug\)/);
+});
+
+test('the error never carries a credential value', async () => {
+  const fetchImpl = (async () => ({ ok: true, status: 201, async json() { return { id: 9, slug: 's', client_id: 'c', secret_value: 'super-private' }; } })) as unknown as typeof globalThis.fetch;
+  await assert.rejects(() => exchangeManifestCode('c'.repeat(40), fetchImpl), (error: Error) => !error.message.includes('super-private'));
 });
