@@ -23,6 +23,7 @@ the check before implementing and 01 as the record of what was decided.
 | [10](10-cordis-kernel-and-extension-seams.md) | Cordis kernel and extension seams | What Cordis actually is (read from source), where it fits, the two-tier extension model that keeps the zero-secret invariant true, twelve capability seams, contract-derived versioning, eight named risks, OD6–OD7 |
 | [11](11-ui-components-and-page-model.md) | UI components and page model | Cordis is not the frontend answer; the component-library rules that make mobile cheap; pages as data with one deliberate escape hatch; app-store prerequisites |
 | [12](12-domains-and-dns.md) | Domains and DNS | Records are read from the provider, never synthesised; the tenant always manages their own DNS |
+| [13](13-compose-first-and-execution.md) | Compose-first authoring and execution split | The manifest is a Compose document plus `x-platfolio`; platfolio acts, the tenant's pipeline executes |
 
 Evidence base, not restated here:
 

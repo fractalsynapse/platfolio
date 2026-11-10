@@ -13,6 +13,18 @@ copy-pasted environment lists that only work on the day they were written. The m
 product's core IP; the admin UI is derivative. It must be reviewable, diffable and machine-validated
 before any customer-facing feature depends on it.
 
+## Format status (D29 — this document is becoming an input adapter)
+
+**Accepted 2026-11-09: Docker Compose is the authoring format** ([13](13-compose-first-and-execution.md)). The
+schema sketched below stays authoritative as the **intermediate model** — Compose parses into it, the
+renderers, validators and `buildPlan` keep consuming it, and nothing downstream changes. What is superseded is
+the idea that a human authors this YAML directly: a platform's source of truth becomes `compose.yaml` plus an
+`x-platfolio` block, and this document's job is to specify that model precisely because it is what an adapter
+must land on. Where a field below has a Compose-native equivalent (`image`, `build`, `environment`,
+`healthcheck`, volumes, `depends_on`, limits, replicas), Compose wins and the adapter maps it; where it does
+not (environment placement, ownership, custody sources, identity clients, DNS policy, lifecycle, plan,
+release pinning), it lives under `x-platfolio`.
+
 ## Design rules
 
 1. **Names, never values.** No field may hold a secret value. Secrets are declared by name with a

@@ -262,3 +262,19 @@ No billing decision blocks M1: OD1, OD3, OD4, OD5 and OI1–OI3 are accepted, an
 (D18, Apache-2.0)**. What remains before a release is not a decision but three details inside D18
 (§ Remaining under D18 in [08](08-distribution-and-licensing.md)): full license text, the
 `/proprietary` boundary, and the trademark policy — plus **OD9**, the core-lineage choice from E9.
+
+
+## Follow-on work accepted with D29–D31 (2026-11-09)
+
+Sequencing for the compose-first inversion. Step 7 is deliberately re-pointed: rather than writing
+platfolio's own manifest in the old format, platfolio's already-deployed service becomes the first thing
+authored in the new one, so the format is tested by a system we actually operate.
+
+| # | Work | Notes |
+| --- | --- | --- |
+| C1 | Compose input adapter | parse a Compose document into the existing intermediate model; subset acceptance plus named refusals; `x-platfolio` extension block |
+| C2 | Overlay generation | `compose.dev.yaml` and `compose.prod.yaml` produced, not hand-written; regenerate-and-compare as the drift gate |
+| C3 | Importer report | parse → merge → map → list every refusal and every behavioural difference before any plan is generated |
+| C4 | Step 7 as the experiment | `apps/status-api` authored in Compose, driven through provider to the same live state; compose-derived plan re-applied against the running instance must be a no-op |
+| C5 | Execution split | `workflow_dispatch` triggers, curated workflow updates as PRs, presence-only secret checks, structured workflow outputs, SHA-pinned actions |
+| C6 | Runner option, if ever | in-tenant-account managed runner only (D31); nothing may depend on it |
