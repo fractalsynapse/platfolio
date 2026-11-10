@@ -298,3 +298,74 @@ export function createAppJwt(input: { appId: number | string; privateKeyPem: str
   const signature = createSign('RSA-SHA256').update(signingInput).sign(input.privateKeyPem).toString('base64url');
   return `${signingInput}.${signature}`;
 }
+
+/**
+ * Mint a short-lived installation access token (D25's least-privilege boundary, in code).
+ *
+ * Everything platfolio does *to a repository* -- the install pull request, workflow dispatch, secret writes --
+ * runs on this token, not on the app credential and not on anything long-lived. Two properties matter more
+ * than convenience:
+ *
+ * - **It can be scoped to the repositories the tenant chose.** GitHub clamps `repository_ids` to the
+ *   installation's selection, so asking for a repository the app cannot see yields an error rather than a
+ *   quieter, wider token.
+ * - **It should be revoked when the work finishes.** One hour is GitHub's cap and our default; the caller can
+ *   delete it immediately, which is why the expiry is returned instead of being assumed.
+ */
+export interface InstallationTokenRequest {
+  appId: number;
+  privateKeyPem: string;
+  installationId: number;
+  /** Restrict to these repository names. Omit to accept the installation's own selection. */
+  repositories?: string[];
+  /** Narrow the permissions to what one operation needs; GitHub clamps to the installation's grants. */
+  permissions?: Record<string, 'read' | 'write'>;
+  fetch?: typeof globalThis.fetch;
+}
+
+export interface InstallationToken {
+  token: string;
+  expiresAt: string;
+  repositorySelection: string;
+}
+
+export async function createInstallationAccessToken(request: InstallationTokenRequest): Promise<InstallationToken> {
+  const fetchImpl = request.fetch ?? globalThis.fetch;
+  const body: Record<string, unknown> = {};
+  if (request.repositories) body.repository_names = request.repositories;
+  if (request.permissions) body.permissions = request.permissions;
+  const response = await fetchImpl(`https://api.github.com/app/installations/${String(request.installationId)}/access_tokens`, {
+    method: 'POST',
+    headers: {
+      // The app JWT authorizes the *request* for a token; it is never used to call repository endpoints.
+      authorization: `Bearer ${createAppJwt({ appId: request.appId, privateKeyPem: request.privateKeyPem })}`,
+      accept: 'application/vnd.github+json',
+      'content-type': 'application/json',
+      'user-agent': 'platfolio',
+    },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const detail = (await response.text().catch(() => '')).slice(0, 200).replace(/\s+/g, ' ');
+    throw new Error(`installation token request failed (${String(response.status)})${detail ? `: ${detail}` : ''}`);
+  }
+  const data = await response.json() as { token?: string; expires_at?: string; repository_selection?: string };
+  if (!data.token || !data.expires_at) throw new Error('installation token response missing token or expires_at');
+  return { token: data.token, expiresAt: data.expires_at, repositorySelection: data.repository_selection ?? 'unknown' };
+}
+
+/** Delete an installation token early. Success is 204 with no body; anything else is reported. */
+export async function revokeInstallationAccessToken(input: { token: string; fetch?: typeof globalThis.fetch }): Promise<void> {
+  const fetchImpl = input.fetch ?? globalThis.fetch;
+  const response = await fetchImpl('https://api.github.com/installation/token', {
+    method: 'DELETE',
+    headers: {
+      authorization: `Bearer ${input.token}`,
+      accept: 'application/vnd.github+json',
+      'user-agent': 'platfolio',
+    },
+  });
+  if (response.status !== 204 && response.status !== 401 && response.status !== 404) {
+    throw new Error(`installation token revocation returned ${String(response.status)}`);
+  }
+}

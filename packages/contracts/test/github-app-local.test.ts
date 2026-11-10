@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict';
 import { generateKeyPairSync, verify } from 'node:crypto';
 import { test } from 'node:test';
-import { createAppJwt, exchangeManifestCode, localDevManifest, localManifestTarget } from '../src/index.ts';
+import {
+  createAppJwt,
+  createInstallationAccessToken,
+  exchangeManifestCode,
+  localDevManifest,
+  localManifestTarget,
+  revokeInstallationAccessToken,
+} from '../src/index.ts';
 
 const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
 const PEM = privateKey.export({ type: 'pkcs1', format: 'pem' }).toString();
@@ -91,4 +98,54 @@ test('a genuinely missing field names what arrived, keys only', async () => {
 test('the error never carries a credential value', async () => {
   const fetchImpl = (async () => ({ ok: true, status: 201, async json() { return { id: 9, slug: 's', client_id: 'c', secret_value: 'super-private' }; } })) as unknown as typeof globalThis.fetch;
   await assert.rejects(() => exchangeManifestCode('c'.repeat(40), fetchImpl), (error: Error) => !error.message.includes('super-private'));
+});
+
+test('an installation token is requested against the installation, scoped when asked', async () => {
+  const calls: { url: string; method: string; body?: string; auth?: string }[] = [];
+  const fetchImpl = (async (url: string, init?: { method?: string; body?: string; headers?: Record<string, string> }) => {
+    calls.push({ url, method: init?.method ?? 'GET', ...(init?.body ? { body: init.body } : {}), ...(init?.headers?.authorization ? { auth: init.headers.authorization.slice(0, 7) } : {}) });
+    return { ok: true, status: 201, async json() { return { token: 'ghs_secret', expires_at: '2026-01-01T00:00:00Z', repository_selection: 'selected' }; } } as Response;
+  }) as unknown as typeof globalThis.fetch;
+  const minted = await createInstallationAccessToken({ appId: 1, privateKeyPem: PEM, installationId: 42, repositories: ['acme/widgets'], permissions: { contents: 'write' }, fetch: fetchImpl });
+  assert.equal(calls[0]?.url, 'https://api.github.com/app/installations/42/access_tokens');
+  assert.equal(calls[0]?.method, 'POST');
+  assert.equal(calls[0]?.auth, 'Bearer ', 'authorized with the app JWT, not with a user token');
+  assert.deepEqual(JSON.parse(calls[0]!.body ?? '{}'), { repository_names: ['acme/widgets'], permissions: { contents: 'write' } });
+  assert.deepEqual(minted, { token: 'ghs_secret', expiresAt: '2026-01-01T00:00:00Z', repositorySelection: 'selected' });
+});
+
+test('an unscoped request sends no body keys, so the installation selection governs', async () => {
+  const calls: string[] = [];
+  const fetchImpl = (async (url: string, init?: { body?: string }) => {
+    calls.push(init?.body ?? '');
+    return { ok: true, status: 201, async json() { return { token: 't', expires_at: '2026-01-01T00:00:00Z' }; } } as Response;
+  }) as unknown as typeof globalThis.fetch;
+  await createInstallationAccessToken({ appId: 1, privateKeyPem: PEM, installationId: 7, fetch: fetchImpl });
+  assert.equal(calls[0], '{}', 'an empty object, not a null body: GitHub treats them differently');
+});
+
+test('a refused token request carries GitHub reason, never the credentials we sent', async () => {
+  const fetchImpl = (async () => ({
+    ok: false, status: 422,
+    async text() { return '{"message":"Validation Failed","errors":[{"message":"repository_names: not found"}]}'; },
+    async json() { return {}; },
+  })) as unknown as typeof globalThis.fetch;
+  await assert.rejects(
+    () => createInstallationAccessToken({ appId: 1, privateKeyPem: PEM, installationId: 7, repositories: ['nobody/else'], fetch: fetchImpl }),
+    /installation token request failed \(422\).*not found/,
+  );
+});
+
+test('a token response missing expiry is refused, because callers schedule revocation on it', async () => {
+  const fetchImpl = (async () => ({ ok: true, status: 201, async json() { return { token: 't' }; } })) as unknown as typeof globalThis.fetch;
+  await assert.rejects(() => createInstallationAccessToken({ appId: 1, privateKeyPem: PEM, installationId: 7, fetch: fetchImpl }), /missing token or expires_at/);
+});
+
+test('revocation accepts the states that mean "no longer valid"', async () => {
+  for (const status of [204, 401, 404]) {
+    const fetchImpl = (async () => ({ ok: status === 204, status, async json() { return {}; } })) as unknown as typeof globalThis.fetch;
+    await revokeInstallationAccessToken({ token: 't', fetch: fetchImpl });
+  }
+  const loud = (async () => ({ ok: false, status: 500, async json() { return {}; } })) as unknown as typeof globalThis.fetch;
+  await assert.rejects(() => revokeInstallationAccessToken({ token: 't', fetch: loud }), /returned 500/);
 });

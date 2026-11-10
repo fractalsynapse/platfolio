@@ -164,3 +164,28 @@ Two artifacts of this discovery, both worth keeping:
 
 The personal-account app should be deleted once the org app exists; it holds credentials that are unusable
 for the only target that matters, and leaving a write-capable app installed nowhere is just a wider surface.
+
+## Step 2 done: an org-owned app, installed on the tenant repository, verified by the API
+
+```
+Registered: platfolio-local (app id 5694176)
+Installed: installation 180457153 on fractalsynapse
+installation token minted: expires 2026-11-10T09:56:20Z, selection selected (value not printed)
+GET /installation/repositories (installation token): 200 -> 1 repository(ies)
+  fractalsynapse/platfolio
+installation token revoked after the read
+```
+
+**`selection: "selected"` and exactly one repository is the point.** The installation was scoped to
+`fractalsynapse/platfolio`, and the token minted for it can see nothing else — D25's least-privilege claim is
+now a measured property rather than a design intention. The token was deleted immediately after the read.
+
+`GET /installation/repositories` answered **401 with the app JWT**, and 200 with an installation token. That is
+a credential-type error wearing the costume of a permissions error, and it is worth recording because the two
+have completely different fixes: the app JWT authorizes *requests about the app*, and repository operations
+require a token minted from an installation. `createInstallationAccessToken` / `revokeInstallationAccessToken`
+are now in the SCM seam, scoping to `repository_names` and narrowed `permissions` when asked, and an
+unscoped request sends `{}` rather than `null` because GitHub treats those differently.
+
+Nothing from this run prints a credential: the token value never left the process, and the private key stays
+in the `0600` file.

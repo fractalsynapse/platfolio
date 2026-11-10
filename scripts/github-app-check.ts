@@ -11,13 +11,18 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { createAppJwt } from '../packages/contracts/src/index.ts';
+import { createAppJwt, createInstallationAccessToken, revokeInstallationAccessToken } from '../packages/contracts/src/index.ts';
 
 const file = resolve(process.argv[2] ?? '.secrets/platfolio-app.json');
 if (!existsSync(file)) {
   console.error(`  No credentials file at ${file}. Run "pnpm run app:local" first.`);
   process.exit(1);
 }
+const argList = (name: string): string[] | undefined => {
+  const i = process.argv.slice(2).findIndex((a) => a === `--${name}`);
+  return i >= 0 ? process.argv.slice(2).slice(i + 1).filter((a) => !a.startsWith('--')) : undefined;
+};
+const reposFlag = argList('repos');
 const creds = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
 const keys = Object.keys(creds).sort();
 console.log(`  file: ${file}`);
@@ -68,9 +73,23 @@ if (list.length === 0) {
 }
 
 const first = list[0]!;
-const repos = await call(`/installation/repositories`);
+// /installation/repositories needs an INSTALLATION token; the app JWT gets a 401 here, which is a
+// credential-type error, not a permissions one -- the distinction the first run of this script taught.
+const minted = await createInstallationAccessToken({
+  appId: creds.appId as number,
+  privateKeyPem: creds.privateKeyPem as string,
+  installationId: first.id,
+  // Scoped to the repositories this check needs, when the caller names them; otherwise the installation's own
+  // selection applies. Widening by default would be the wrong direction for a diagnostic.
+  ...(reposFlag ? { repositories: reposFlag } : {}),
+});
+console.log(`  installation token minted: expires ${minted.expiresAt}, selection ${minted.repositorySelection} (value not printed)`);
+const reposResponse = await fetch('https://api.github.com/installation/repositories', { headers: { authorization: `Bearer ${minted.token}`, accept: 'application/vnd.github+json', 'user-agent': 'platfolio' } });
+const repos = { status: reposResponse.status, body: await reposResponse.json().catch(() => null) };
+await revokeInstallationAccessToken({ token: minted.token });
+console.log('  installation token revoked after the read');
 const repoList = (repos.body as { repositories?: { full_name: string }[] }).repositories ?? [];
-console.log(`  GET /installation/repositories: ${String(repos.status)} -> ${String(repoList.length)} repository(ies)`);
+console.log(`  GET /installation/repositories (installation token): ${String(repos.status)} -> ${String(repoList.length)} repository(ies)`);
 for (const r of repoList.slice(0, 10)) console.log(`    ${r.full_name}`);
 
 const recorded = { installationId: first.id, account: first.account.login };
