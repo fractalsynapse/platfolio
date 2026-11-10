@@ -11,8 +11,8 @@ change; entries describe merged intent, not aspirations.
   `applyPlan` against Railway: two services `live`, managed database `live`, volume attached, bucket created,
   generated domain with certificate read back as `issued`. `verified` stayed **false** for the correct
   reason — an unmet tenant obligation, named with environment and service — which is the point: a green here
-  would have meant deploying without a signing key. Teardown exposed two gaps now filed (#107 buckets are
-  never deleted, #108 `serviceDelete` refuses a template-created database that owns a volume). The image
+  would have meant deploying without a signing key. Teardown exposed two gaps now filed (#106 buckets are
+  never deleted, #107 `serviceDelete` refuses a template-created database that owns a volume). The image
   was platfolio's own published build in place of the templates' placeholder digests, so this proves the
   hosting mechanism, not a real platform boot — said in the record as well as here.
 
