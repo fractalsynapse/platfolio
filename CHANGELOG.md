@@ -7,6 +7,18 @@ change; entries describe merged intent, not aspirations.
 
 ### Added
 
+- **Execution split, trigger half (C5, D30).** `GithubWorkflowRunner` dispatches a curated workflow with ref
+  and inputs, normalises run state from status **and** conclusion (neither alone is trusted — `completed`
+  with no conclusion proves nothing), correlates a run to its head commit so a stale green cannot be read as
+  current, and classifies drift in curated files by git blob hash. `classifyDrift` keeps `unknown` distinct
+  from `missing`, because a failed read is not a tenant edit and the two ask for opposite responses.
+  **There is no log access at any layer**: no method on the interface, and a test asserting no request it
+  makes can reach a logs or artifacts path — workflow logs routinely contain resolved environment values, so
+  a log reader would be a secret reader wearing a costume.
+
+
+### Added
+
 - **Binding panel for the page model (#94 UI half).** `buildBindingPanel(bindings, { providers, instanceId })`
   renders capability counts ("2 of 3 need attention"), per-consumer status, and rebind / re-issue actions —
   using only components the registry already defines, so no renderer or SDK has to grow. It emits no `value`
