@@ -1,0 +1,55 @@
+# Managed by platfolio. Review before merging.
+# Deleting this file stops platfolio managing the stack; ordinary deploys keep working,
+# because the push triggers below are the same ones your own workflow used.
+name: platfolio managed
+
+on:
+  workflow_dispatch:
+    inputs:
+      instance_id: { required: true, type: string }
+      dispatch_id: { required: true, type: string }
+      nonce: { required: true, type: string, description: "single-use, echoed back in the attestation" }
+      plan_hash: { required: true, type: string }
+      action: { required: true, type: choice, options: [apply, check, drift, suspend, export] }
+      environment: { required: true, type: choice, options: [production] }
+  push:
+    branches:
+      - production
+
+permissions:
+  checks: write
+  contents: read
+  id-token: write
+  statuses: write
+
+concurrency:
+  group: platfolio-${{ inputs.dispatch_id || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  managed:
+    name: platfolio ${{ inputs.action || 'deploy' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Apply desired state with this repository's own credentials
+        uses: fractalsynapse/platfolio@82c9a6a49e7f5b824274edee934a10f4dd6d4220
+        with:
+          action: ${{ inputs.action || 'deploy' }}
+          environment: ${{ inputs.environment }}
+          instance_id: ${{ inputs.instance_id }}
+          dispatch_id: ${{ inputs.dispatch_id }}
+          nonce: ${{ inputs.nonce }}
+          plan_hash: ${{ inputs.plan_hash }}
+          platfolio_url: https://status-production.up.railway.app
+
+      - name: Report the outcome for platfolio to verify by read-back
+        if: always()
+        run: echo "outcome=${{ steps.apply.outcome }}"
+        # The runner posts a signed attestation to platfolio from the action above; the control
+        # plane treats it as a claim and re-verifies against the provider before advancing.
+
