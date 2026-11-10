@@ -137,6 +137,38 @@ export class GithubRepositoryWrites {
   }
 
   /**
+   * Create or update a repository environment (needs `administration: write`; measured 403 without it).
+   * Idempotent by design: GitHub answers 200 when it already exists and 201 when created, and neither is a
+   * signal worth carrying into a plan.
+   */
+  async ensureEnvironment(repo: string, name: string, protection: EnvironmentProtection = {}): Promise<void> {
+    Repo.parse(repo);
+    await this.call(`/repos/${repo}/environments/${encodeURIComponent(name)}`, { method: 'PUT', body: environmentBody(protection) });
+  }
+
+  /**
+   * Create a repository in an organization from a platform template (D35). PENDING LIVE CHECK: whether an
+   * installation token may generate from a template, and whether `repository_creation` (the narrow grant) is
+   * sufficient or `administration` is required. The call shape follows GitHub's documented endpoint; the
+   * authorization answer has to come from a registration that carries the grants.
+   */
+  async createRepositoryFromTemplate(request: TemplateRepositoryRequest): Promise<{ fullName: string; url: string; cloneUrl: string }> {
+    const body: Record<string, unknown> = {
+      owner: request.owner,
+      name: request.name,
+      private: request.private ?? true,
+      include_all_branches: request.includeAllBranches ?? false,
+    };
+    if (request.description) body.description = request.description;
+    const created = await this.call<{ full_name: string; html_url: string; clone_url: string }>(
+      `/repos/${request.templateOwner}/${request.templateRepo}/generate`,
+      { method: 'POST', body },
+    );
+    if (!created.full_name) throw new Error('github: template generation returned no repository');
+    return { fullName: created.full_name, url: created.html_url ?? '', cloneUrl: created.clone_url ?? '' };
+  }
+
+  /**
    * Presence check for an environment secret. Deliberately the only read in this class, because it returns a
    * 204/404 and no value -- see D32. There is no method here that could return a secret.
    */
@@ -148,3 +180,43 @@ export class GithubRepositoryWrites {
     throw new Error(`github: environment secret presence check returned ${String(response.status)}`);
   }
 }
+
+/**
+ * Environment and repository provisioning (D35).
+ *
+ * Both operations are added because a control plane that cannot create the objects it manages is not a
+ * control plane -- a tenant would leave platfolio to click "Add environment", which contradicts the product
+ * promise. The trade-off is explicit: repository environments require `administration: write`, a broader
+ * grant than we would choose, so the compensating control is that these methods are only ever reached with a
+ * token minted for the specific call and revoked at the end of it.
+ *
+ * What remains unproven is stated in the code, not hidden: creating a repository **from a template** with an
+ * installation token, and setting environment *required reviewers* through the API, are both pending a live
+ * check against a registration that carries these grants. Neither is faked in a test.
+ */
+export interface EnvironmentProtection {
+  /** Minutes GitHub waits before allowing a deployment. Settable via API; required reviewers may not be. */
+  waitTimerMinutes?: number;
+}
+
+export function environmentBody(protection: EnvironmentProtection): { wait_timer: number } {
+  return { wait_timer: protection.waitTimerMinutes ?? 0 };
+}
+
+export interface TemplateRepositoryRequest {
+  templateOwner: string;
+  templateRepo: string;
+  /** The organization (or user) that will own the new repository. */
+  owner: string;
+  name: string;
+  description?: string;
+  private?: boolean;
+  /** Templates copy only the default branch unless this is true. */
+  includeAllBranches?: boolean;
+}
+
+export const TEMPLATE_REPO_BODY_CONSTRAINTS = {
+  /** `git_ref` selects the template's branch/tag/SHA; omitted means the template's default branch. */
+  gitRef: 'optional',
+  owner: 'required for an installation token, because the app must be installed on the target owner',
+} as const;

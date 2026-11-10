@@ -92,18 +92,21 @@ const minted = await createInstallationAccessToken({
   // "resource not accessible" that a permissions gap produces -- unless the token carries workflows:write.
   // An install PR without the workflow is not an install PR, so the grant is required, and it is requested
   // here rather than held longer-lived: this token is revoked at the end of the run.
-  permissions: { contents: 'write', workflows: 'write', pull_requests: 'write' },
+  // D35 grants in use: environments cannot be created without administration, and the workflow path needs
+  // workflows:write. Both are requested per operation and the token is revoked at the end of this run.
+  permissions: { contents: 'write', workflows: 'write', pull_requests: 'write', environments: 'write', administration: 'write' },
 });
 console.log(`\n  installation token minted (expires ${minted.expiresAt}, selection ${minted.repositorySelection})`);
 
 try {
   const writes = new GithubRepositoryWrites({ token: minted.token });
-  // Presence only, never creation: an environment is a repository-administration object, and the tenant owns
-  // the review gate that makes it worth having. See GithubRepositoryWrites.environmentExists for the 403 that
-  // established this.
+  // D35: platfolio creates the environments it manages. The grant that makes this possible
+  // (administration: write) was the measured requirement; what platfolio still cannot do through the API is
+  // attach required reviewers, so that gate is reported as the tenant's action rather than silently skipped.
   for (const name of environments) {
-    const exists = await writes.environmentExists(repo, name);
-    console.log(`  environment ${name}: ${exists ? 'present' : 'ABSENT -- create it, with required reviewers, before merging'}`);
+    const existed = await writes.environmentExists(repo, name);
+    await writes.ensureEnvironment(repo, name);
+    console.log(`  environment ${name}: ${existed ? 'already present' : 'created'} (required reviewers are a tenant setting, not an API setting)`);
   }
 
   const branch = `platfolio/install-${manifest.metadata.name}`;

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { GithubRepositoryWrites } from '../src/index.ts';
+import { DEFAULT_APP_PERMISSIONS, GithubRepositoryWrites, localDevManifest } from '../src/index.ts';
 
 interface Sent { method: string; path: string; body?: Record<string, unknown> }
 function harness(handlers: Record<string, () => unknown> = {}) {
@@ -96,4 +96,46 @@ test('there is no method here that can return a secret value', () => {
     assert.ok(!/getSecret|readSecret|secretValue|fetchSecret|listSecrets/i.test(name), `${name} could return a value`);
   }
   assert.ok(proto.includes('hasEnvironmentSecret'), 'presence only');
+});
+
+test('D35: platfolio creates environments, and the body carries only what the API accepts', async () => {
+  const { sent, writes } = harness();
+  await writes.ensureEnvironment('o/r', 'staging');
+  const put = sent.find((s) => s.method === 'PUT');
+  assert.equal(put?.path, '/repos/o/r/environments/staging');
+  assert.deepEqual(put?.body, { wait_timer: 0 }, 'wait_timer is the documented field; nothing is invented');
+  await writes.ensureEnvironment('o/r', 'production', { waitTimerMinutes: 30 });
+  const timed = sent.filter((s) => s.method === 'PUT').at(-1);
+  assert.deepEqual(timed?.body, { wait_timer: 30 });
+});
+
+test('a tenant repository is generated from a template with an explicit owner', async () => {
+  const { sent, writes } = harness({
+    // The harness default of 204-with-no-body is right for a ref creation and wrong here: generating a
+    // repository returns the repository object, and asserting against the wrong shape proves nothing.
+    'POST /repos/fractalsynapse/platfolio-template-web/generate': () => ({ full_name: 'fractalsynapse/widgets', html_url: 'https://github.com/fractalsynapse/widgets', clone_url: 'https://github.com/fractalsynapse/widgets.git' }),
+  });
+  const created = await writes.createRepositoryFromTemplate({
+    templateOwner: 'fractalsynapse', templateRepo: 'platfolio-template-web', owner: 'fractalsynapse', name: 'widgets', description: 'd',
+  });
+  const post = sent.find((s) => s.path === '/repos/fractalsynapse/platfolio-template-web/generate');
+  assert.equal(post?.method, 'POST');
+  assert.deepEqual(post?.body, { owner: 'fractalsynapse', name: 'widgets', private: true, include_all_branches: false, description: 'd' },
+    'private by default: a tenant repository is not public until they say otherwise');
+  assert.deepEqual(created, { fullName: 'fractalsynapse/widgets', url: 'https://github.com/fractalsynapse/widgets', cloneUrl: 'https://github.com/fractalsynapse/widgets.git' });
+});
+
+test('template generation failure names the endpoint, and carries no token', async () => {
+  const fetchImpl = (async () => ({ ok: false, status: 403, async json() { return {}; }, async text() { return '{"message":"Resource not accessible by integration"}'; } })) as unknown as typeof globalThis.fetch;
+  const writes = new GithubRepositoryWrites({ token: 'ghs_shouldnotappear', fetch: fetchImpl });
+  await assert.rejects(
+    () => writes.createRepositoryFromTemplate({ templateOwner: 'a', templateRepo: 'b', owner: 'c', name: 'd' }),
+    (error: Error) => /generate failed \(403\)/.test(error.message) && !error.message.includes('ghs_shouldnotappear'),
+  );
+});
+
+test('the app asks for the grant that provisioning environments needs, visibly', () => {
+  assert.equal(DEFAULT_APP_PERMISSIONS.administration, 'write', 'D35: without it environment creation is 403');
+  const manifest = localDevManifest({ port: 8077 }) as unknown as { default_permissions: Record<string, string> };
+  assert.equal(manifest.default_permissions.administration, 'write', 'and it reaches the registration manifest, not just the schema');
 });

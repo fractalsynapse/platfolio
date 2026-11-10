@@ -53,7 +53,13 @@ values, installation token revoked afterwards. It is a **draft**, because the ma
 implemented (#123), and merging it today would add a workflow that cannot run. Refusing or closing it is also
 a valid result; that is why it is a pull request.
 
-Also learned the hard way, and recorded with its experiments in
+**Amended by D35:** platfolio now *does* create environments, and the app asks for `administration: write` to
+do it. Granting it is a two-part change: widen the permission on the app registration, then have the
+organization owner **approve the new permissions** — an installation keeps its old grant until that happens,
+which `pnpm run app:check` now shows by printing what the installation actually has. Required reviewers may
+still be a UI-only setting; `wait_timer` is confirmed settable, the reviewer gate is an open check.
+
+Recorded with its experiments in
 [github-install-write-path-2026-11-10.md](../research/github-install-write-path-2026-11-10.md): a tree
 containing a `.github/workflows/` path needs `workflows: write`, and **platfolio does not create environments**
 — creation requires `administration: write`, which we deliberately do not hold, so the tenant configures the
