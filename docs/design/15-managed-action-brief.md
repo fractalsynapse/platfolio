@@ -20,6 +20,23 @@ Read first: `packages/manifest/src/render-install.ts` — that workflow *is* the
 `workflow-runner.ts` (dispatch, `runState` — still has no caller; this action is its first consumer),
 `github-writes.ts`, `secret-writer.ts`, `binding.ts`, `railway-provider.ts`.
 
+## Credential tier: measured and decided (was the blocker)
+
+#135 resolved toward **B**, with the boundary measured in
+[railway-project-token-capability-2026-11-10.md](../research/railway-project-token-capability-2026-11-10.md):
+a project token may upsert/delete variables, create and delete services, create volumes, and read templates;
+it may **not** delete volumes, create buckets, create environments, or read domain availability. The
+create-without-delete asymmetry on volumes is why **all deletion stays in the workspace tier**.
+
+- **Connect (workspace grant, platfolio, once):** project, environments, buckets, volumes, domains, deletions.
+- **Per dispatch (project token, runner):** variables, service definitions, deploys, template reads. The plan
+  handed down must already reference existing environments and volumes.
+
+The open refactor: `applyPlan` calls `credentials.workspace()` for project lookup every run, so option B needs
+the provisioning path split, not a flag. Three operations remain unmeasured because each costs a deploy or
+needs a real domain -- `serviceInstanceDeploy`, `customDomainCreate`, `serviceInstanceUpdate` -- and the
+runner's first live dispatch is where they get recorded, not assumed.
+
 ## The sequence the action must implement
 
 1. Read the dispatch inputs: `instance_id`, `dispatch_id`, `nonce`, `plan_hash`, `action`, `environment`.
