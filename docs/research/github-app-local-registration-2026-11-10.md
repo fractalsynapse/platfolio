@@ -43,3 +43,29 @@ run with a new state.
 missing code (400), unknown path (404), and that it is **still listening** afterwards (200). The JWT test
 verifies the signature against its own public key rather than asserting a shape. The exchange endpoint and
 the browser leg are **not yet exercised** — that is the step this hands over.
+
+## Update, same day: the manifest was full of invented fields
+
+The first real attempt was rejected by GitHub with:
+
+> Error "single_file_permissions" is not a permitted key.
+
+That key — plus `request_verification`, `webhook_active`, and a `permissions` map next to
+`default_permissions: 'read'` — came from the offline seam, written before any of it had been checked against
+the manifest schema. **`default_permissions` is documented as an object of permission-name to access level; we
+sent the string `'read'`.** The tests passed because they asserted the fields we had invented, in the shapes we
+had invented them — the same failure family as a mock with a fabricated `serviceInstances` field, one layer
+further out.
+
+Two properties of this failure worth writing down:
+
+- **GitHub names only the first offending key.** Fixing one and retrying would have produced a second error,
+  then a third. So the schema below rejects *all* unknown keys locally and lists the permitted set in the
+  message, which is the only way the operator sees the whole problem at once.
+- **The docs page is the schema.** `MANIFEST_KEYS` is transcribed from it, and a test asserts every key either
+  emitter produces is in that list — so a future invention fails CI rather than a browser session.
+
+The flow itself is also wrong in the earlier helper: it emitted `?manifest=<base64>` on a GET. The documented
+flow posts the manifest as a form field, which is what `app:local` does; `registrationUrl` now returns only
+the POST target plus `state`, and a test asserts the manifest is *absent* from the URL — otherwise the test
+cannot distinguish the two flows.

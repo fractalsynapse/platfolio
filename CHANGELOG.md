@@ -5,6 +5,18 @@ change; entries describe merged intent, not aspirations.
 
 "## [Unreleased]
 
+### Fixed
+
+- **The GitHub App manifest was full of invented fields (#113).** GitHub rejected the first real attempt:
+  `single_file_permissions` is not a permitted key — and it was one of four (`request_verification`,
+  `webhook_active`, and a `permissions` map beside `default_permissions`, which the docs define as an object
+  of access levels and we sent as the string `'read'`). The tests had been asserting the invented shapes, so
+  nothing could catch it. Added `AppManifestSchema` + `MANIFEST_KEYS` transcribed from the documentation, with
+  `.strict()` so unknown keys fail locally and the error lists **every** offender — GitHub names only the
+  first. A test now asserts every emitted key is documented, and `registrationUrl` returns the POST target
+  only (no `?manifest=` on a GET, which is not the documented flow).
+
+
 ### Added
 
 - **Local GitHub App registration for M2's first step.** `pnpm run app:local` serves a page that POSTs

@@ -35,12 +35,68 @@ export const RegistrationConfigSchema = z.object({
   url: z.string().url(),
   /** Where GitHub hands the one-time code back. Must be reachable by the operator's browser. */
   callbackUrl: z.string().url(),
+  /**
+   * A webhook target that can actually receive deliveries -- a public host, or a smee.io channel while
+   * developing. Omitted means the app registers with no webhook at all, which is correct for v1.
+   */
+  webhookUrl: z.string().url().optional(),
+  /** Register under an organization rather than a personal account. */
+  org: z.string().min(1).optional(),
   setupUrl: z.string().url().optional(),
   description: z.string().min(1).default('Managed hosting control plane'),
   permissions: z.record(z.string(), z.string()).default({ ...DEFAULT_APP_PERMISSIONS }),
   /** v1 needs no inbound webhooks: connect reconciles by polling installations. */
   webhookActive: z.boolean().default(false),
 }).strict();
+
+/**
+ * GitHub's manifest keys, exactly as documented -- nothing else. Enforced by a strict schema because GitHub's
+ * rejection is one opaque line ("`single_file_permissions` is not a permitted key") naming only the **first**
+ * offender: three invented keys were shipped here before any could be observed, and `default_permissions` was
+ * a string where the docs define an object. An unknown key must fail locally, not in a browser screenshot.
+ *
+ * Source: https://docs.github.com/en/apps/sharing-github-apps/registering-a-github-app-from-a-manifest
+ */
+export const MANIFEST_KEYS = [
+  'name', 'url', 'hook_attributes', 'redirect_url', 'callback_urls', 'setup_url', 'description',
+  'public', 'default_events', 'default_permissions', 'request_oauth_on_install', 'setup_on_update',
+] as const;
+
+const PermissionAccess = z.enum(['read', 'write', 'admin']);
+
+export const AppManifestSchema = z.object({
+  name: z.string().min(1).optional(),
+  /** Required by GitHub: the app's homepage. */
+  url: z.string().url(),
+  /**
+   * Omit rather than point at a host that cannot answer. GitHub requires `url` *inside* this object, which
+   * is why an unused webhook is absent here instead of present and empty.
+   */
+  hook_attributes: z.object({ url: z.string().url(), active: z.boolean().default(true) }).strict().optional(),
+  redirect_url: z.string().url().optional(),
+  callback_urls: z.array(z.string().url()).max(10).optional(),
+  setup_url: z.string().url().optional(),
+  description: z.string().min(1).optional(),
+  public: z.boolean().optional(),
+  default_events: z.array(z.string().min(1)).optional(),
+  default_permissions: z.record(z.string(), PermissionAccess).optional(),
+  request_oauth_on_install: z.boolean().optional(),
+  setup_on_update: z.boolean().optional(),
+}).strict();
+export type AppManifest = z.infer<typeof AppManifestSchema>;
+
+/** The only exit for a manifest: validated against the documented key set before anything sees it. */
+export function buildAppManifest(candidate: Record<string, unknown>): AppManifest {
+  const parsed = AppManifestSchema.safeParse(candidate);
+  if (!parsed.success) {
+    const detail = parsed.error.issues.map((i) => `${i.path.map(String).join('.') || '(root)'}: ${i.message}`).join('; ');
+    throw new Error(`invalid GitHub App manifest -- ${detail}. Permitted keys: ${MANIFEST_KEYS.join(', ')}.`);
+  }
+  if (parsed.data.callback_urls && !parsed.data.redirect_url) {
+    throw new Error('invalid GitHub App manifest -- callback_urls without redirect_url leaves the one-time code nowhere to land');
+  }
+  return parsed.data;
+}
 
 export interface ScmDescriptor {
   kind: 'github-app' | 'github-pat';
@@ -71,32 +127,40 @@ export class GithubAppProvider implements ScmProvider {
     };
   }
 
-  appManifest(configInput: z.input<typeof RegistrationConfigSchema>): Record<string, unknown> {
+  appManifest(configInput: z.input<typeof RegistrationConfigSchema>): AppManifest {
     const c = RegistrationConfigSchema.parse(configInput);
-    return {
+    return buildAppManifest({
       name: c.name,
       url: c.url,
       description: c.description,
-      // GitHub's manifest shape: hook_attributes carries the webhook URL; v1 registers none it depends on.
-      hook_attributes: { url: c.callbackUrl },
+      // Webhooks are registered only when something can answer them. v1 polls installations, so the default
+      // is to omit the object entirely rather than accumulate failed deliveries in the tenant's UI.
+      ...(c.webhookUrl ? { hook_attributes: { url: c.webhookUrl, active: false } } : {}),
       redirect_url: c.callbackUrl,
       callback_urls: [c.callbackUrl],
       ...(c.setupUrl ? { setup_url: c.setupUrl } : {}),
       public: false,
-      default_permissions: 'read',
-      permissions: c.permissions,
-      events: [],
-      single_file_permissions: false,
-      request_verification: false,
-      // Recorded so a reviewer can see that nothing in v1 waits on an inbound delivery.
-      webhook_active: c.webhookActive,
-    };
+      // `default_permissions` is the documented object of permission-name to access level. This used to be
+      // `default_permissions: 'read'` with a separate `permissions` map, neither of which GitHub accepts --
+      // a shape invented before anything was checked against the schema.
+      default_permissions: c.permissions,
+      default_events: [],
+      request_oauth_on_install: false,
+    });
   }
 
+  /**
+   * The POST target for the manifest flow. GitHub's docs describe a link that **sends a POST** with the
+   * manifest as a form field; a GET with `?manifest=<base64>` is not the flow, and produced the "not a valid
+   * manifest" page we hit. `state` rides in the query, exactly as the documented form shows.
+   */
   registrationUrl(config: z.input<typeof RegistrationConfigSchema>, state: string): string {
     if (!/^[A-Za-z0-9._-]{16,}$/.test(state)) throw new Error('state must be an unguessable CSRF token');
-    const manifest = Buffer.from(JSON.stringify(this.appManifest(config)), 'utf8').toString('base64url');
-    return `https://github.com/settings/apps/new?manifest=${manifest}&socket=${encodeURIComponent(state)}`;
+    RegistrationConfigSchema.parse(config);
+    const org = z.string().min(1).optional().parse(config.org);
+    return org
+      ? `https://github.com/organizations/${org}/settings/apps/new?state=${encodeURIComponent(state)}`
+      : `https://github.com/settings/apps/new?state=${encodeURIComponent(state)}`;
   }
 
   consumeRegistrationCallback(query: Record<string, string>, expectedState: string): { code: string } {
@@ -149,9 +213,10 @@ export interface LocalManifestOptions {
   org?: string;
 }
 
-export function localDevManifest(options: LocalManifestOptions): Record<string, unknown> {
+export function localDevManifest(options: LocalManifestOptions): AppManifest {
   const origin = `http://${options.hostname ?? 'localhost'}:${String(options.port)}`;
-  return {
+  // Same validated exit as the hosted path: a shape mistake should surface here, not as GitHub's page.
+  return buildAppManifest({
     name: options.name ?? 'platfolio (local)',
     url: origin,
     description: options.description ?? 'Managed hosting control plane -- local development registration',
@@ -160,12 +225,11 @@ export function localDevManifest(options: LocalManifestOptions): Record<string, 
     redirect_url: `${origin}/platfolio/callback`,
     ...(options.webhookUrl ? { hook_attributes: { url: options.webhookUrl, active: false } } : {}),
     default_permissions: { ...DEFAULT_APP_PERMISSIONS },
-    // No events: an app that polls does not need deliveries to fail against a laptop, and an inactive
-    // webhook with subscribed events just produces redelivery noise in the tenant's UI.
+    // No events: a polling app needs no deliveries, and an inactive webhook with subscribed events only
+    // produces redelivery noise in the tenant's UI.
     default_events: [],
     request_oauth_on_install: false,
-    single_file_permissions: false,
-  };
+  });
 }
 
 /** Where GitHub wants the POST, and the state it must echo back. */
