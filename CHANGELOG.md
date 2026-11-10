@@ -5,6 +5,17 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+### Added
+
+- **Binding panel for the page model (#94 UI half).** `buildBindingPanel(bindings, { providers, instanceId })`
+  renders capability counts ("2 of 3 need attention"), per-consumer status, and rebind / re-issue actions —
+  using only components the registry already defines, so no renderer or SDK has to grow. It emits no `value`
+  field for a secret output and never a `secret-field` input, and the tests assert that structurally: a label
+  reading `client_secret: needs re-issue` looks like a leak to a text search and is not one, so the previous
+  assertion proved nothing. Rebind is offered rather than applied, because rewriting where a running platform
+  points is the tenant's call.
+
+
 ## [0.4.0] - 2026-11-10
 
 Range reviewed: `0.3.0..staging`, 8 commits closing #92, #93, #94 (planned work from D32–D34).
