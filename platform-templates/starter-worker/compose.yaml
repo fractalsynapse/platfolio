@@ -1,0 +1,41 @@
+# Starter worker platform: scaled background processing with state on a volume that outlives the container.
+# Nothing here accepts inbound connections, and that absence is the archetype -- platfolio refuses this
+# template if a host is ever attached to it.
+name: starter-worker
+
+services:
+  queue:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      NODE_ENV: production
+    expose: ["8080"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+    volumes:
+      # The hibernate case: platfolio may destroy this service to save money and hand the same disk to the
+      # next one. Compose's short syntax names the volume and the mount; retention for it is declared once,
+      # under x-platfolio.resources.volumes, because Compose has no word for "keep this after the service".
+      - job-state:/var/lib/starter-worker
+    x-platfolio:
+      environments: [production]
+
+x-platfolio:
+  metadata:
+    name: starter-worker
+    version: 0.1.0
+    title: Starter Worker Service
+    summary: Scaled background workers that keep their state on a retained volume.
+    archetype: worker
+  requires:
+    platfolio: ">=0.4.0 <1"
+  resources:
+    volumes:
+      - { name: job-state, service: queue, mountPath: /var/lib/starter-worker, sizeGB: 5, retention: survive }
+  environments:
+    production: { enabled: true, branch: main }
+    staging: { enabled: false }
+    preview: { enabled: false }
+  dns: { ownershipVerification: txt, apexPolicy: cname-flattening-only }
+  lifecycle: { onSuspend: scale-to-zero, onEject: [compose, data-export], onDelete: { graceDays: 30, backupAgeOutDays: 90 } }

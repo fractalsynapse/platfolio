@@ -1,0 +1,53 @@
+# Shared identity: the one platform every other platfolio application trusts. It is here to exercise the
+# capability the other two cannot -- publishing outputs that other instances bind to (D34) -- so it is kept
+# as close to stock Keycloak as possible and configured by environment, not by a fork.
+#
+# No digest pin in this file. The image is third-party and this repository's CI does not build it, so the
+# pin is generated when the template is instantiated for a tenant, from the digest that registry returns at
+# that moment. An unpinned hosted image is refused by design, and that refusal is what forces the decision
+# to be made in one place and recorded, rather than a floating tag drifting under a running stack.
+name: shared-identity
+
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    command: ["start", "--http-port=8080", "--proxy-edges=encrypted"]
+    environment:
+      KC_DB: postgres
+      KC_HEALTH_ENABLED: "true"
+      KEYCLOAK_ADMIN: admin
+    expose: ["8080"]
+    healthcheck:
+      test: ["CMD", "sh", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /auth/realms/master/protocol/openid-connect/certs HTTP/1.0\\r\\n\\r\\n' >&3 && head -1 <&3 | grep -q 200"]
+    x-platfolio:
+      public: true
+      environments: [production]
+
+x-platfolio:
+  metadata:
+    name: shared-identity
+    version: 0.1.0
+    title: Shared Identity (Keycloak)
+    summary: One OIDC issuer for a team's web, worker and shared services, with realms as the tenant unit.
+    archetype: shared-service
+    license: Apache-2.0
+  requires:
+    platfolio: ">=0.4.0 <1"
+  # What consumers require by capability rather than by instance id, so the team can move identity without
+  # editing every application (D34). `client_secret` is a generated credential: platfolio relays it once and
+  # keeps nothing, so losing it means re-issue -- replay is impossible by construction, not by convention.
+  provides:
+    name: identity
+    outputs:
+      - { output: issuer, kind: url, description: "Realm issuer URL consumers point their OIDC client at." }
+      - { output: jwks_uri, kind: url, description: "Signing keys, for consumers that verify tokens themselves." }
+      - { output: client_id, kind: value, description: "Public client identifier issued to one consumer." }
+      - { output: client_secret, kind: secret, description: "Confidential client secret, relayed once and never stored." }
+  resources:
+    database: { name: keycloak-db, kind: postgres }
+  environments:
+    production: { enabled: true, branch: main }
+    staging: { enabled: false }
+    preview: { enabled: false }
+  dns: { ownershipVerification: txt, apexPolicy: cname-flattening-only }
+  lifecycle: { onSuspend: scale-to-zero, onEject: [compose, data-export, realm-export], onDelete: { graceDays: 30, backupAgeOutDays: 90 } }

@@ -4,6 +4,29 @@ Notable changes to the platfolio project. One human-readable entry per user- or 
 change; entries describe merged intent, not aspirations.
 
 "## [Unreleased]
+
+### Added
+
+- **Three platform templates (`platform-templates/`, D38)** — one per kind of thing platfolio hosts:
+  `starter-web` (public UI + API with a managed Postgres, proving domains and provider-resolved
+  `DATABASE_URL`), `starter-worker` (no inbound, `retention: survive` on its volume — the hibernate case),
+  and `shared-identity` (stock Keycloak declaring `provides: identity`, including a `client_secret` output
+  that is relayed and never stored). `pnpm run templates:publish` writes them into tenant repositories, dry
+  run by default, and refuses to create or delete a repository (#130, D36).
+- **`provides` and `capabilities` are now authorable in Compose** — they reached the manifest only through
+  hand-written YAML, which is the path D29 retired.
+- **`createInitialCommit` and `repositoryVisible`** in the write seam: an empty repository has no base ref,
+  so a publish path that assumed one could not bootstrap anything; visibility is now reported as the fact
+  #130 makes it (a 404 means *not installed*, not *absent*).
+- **`worker` and `shared-service` archetypes** carried their own validation rules from the start.
+
+### Fixed
+
+- **A volume declared in Compose and in `x-platfolio.resources` produced two plan entries**, and the
+  mount-derived one had no `retention` — so a disk declared to survive could be deleted by whichever entry
+  teardown matched first. The arrays were also the *same object*, so the dedupe was comparing a list against
+  itself; declared and derived are now separate, merged on the mount, with the declaration winning.
+
 ### Corrected
 
 - **`repository_creation` was an invented permission key, and is reverted.** #125 asked for it on the strength

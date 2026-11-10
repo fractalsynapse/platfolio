@@ -1,0 +1,6 @@
+# Obligations, wiring and defaults (D33). DATABASE_URL below is *wiring*: platfolio resolves it from the
+# managed database, so it must never appear on the panel that asks the tenant to supply something.
+- { name: APP_SESSION_KEY,  kind: secret, required: true,  rotate: on-demand, service: web, description: Signs session cookies. Rotating it signs every user out. }
+- { name: DATABASE_URL,     kind: reference, service: web, database: app-db, output: DATABASE_URL }
+- { name: UI_BRAND,         kind: value, default: Starter, service: web, description: Shown in the page header; safe to change per deployment. }
+- { name: LOG_LEVEL,        kind: value, default: info, service: web }

@@ -1,0 +1,5 @@
+# Nothing here is a value the tenant types except the admin bootstrap secret, which exists only to create the
+# first realm and should be rotated away afterwards. Everything else is wiring platfolio resolves.
+- { name: KEYCLOAK_ADMIN_PASSWORD, kind: secret, required: true, rotate: on-demand, service: keycloak, description: "Bootstrap administrator password. Set it once, create your realm, then rotate it out of use." }
+- { name: KC_DB_URL,   kind: reference, service: keycloak, database: keycloak-db, output: DATABASE_URL }
+- { name: KC_HOSTNAME, kind: value, default: "", service: keycloak, description: Externally reachable host. Empty means use the provider's generated host until your own DNS is delegated. }
