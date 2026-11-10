@@ -41,3 +41,45 @@ different way — the bucket really was not deleted by us — which is the same 
 false above.
 
 Deploys consumed by the run: three (two services and one database provisioning). No quota rejection.
+
+## Follow-up: the two teardown findings, resolved by measurement
+
+**#107 was ordering, not a capability limit.** Two experiments on existing resources: a template-created
+database that still owned a volume was refused by `serviceDelete` ("Problem processing request"), and an
+identical volume-less one deleted cleanly on the first try. The previous code deleted services first and
+volumes after, which guaranteed the refusal every time. Reordered, and the double now enforces the rule (a
+service with an attached volume cannot be deleted), because the double previously enforced neither — which
+is how an entire live run went by without noticing.
+
+**#106 is not implementable, and the honest fix is reporting.** The mutation list was enumerated: there is
+no bucket delete of any kind. `projectDelete` is the only mechanism that releases one, so the provider now
+names those resources explicitly in `removed`:
+
+```
+bucket:53056cda-… (released with the project; no delete mutation exists)
+```
+
+Listing it as an *orphan* beforehand was accurate and misleading at once: the bucket really was not deleted
+by us, and it really is gone.
+
+## Live verification after the fix
+
+```
+ 69s apply: verified=true services=[["api","live"],["worker","live"]] failures=[]
+141s removed: volume:worker-volume, volume:app-db-volume, service:production/api,
+              service:production/worker, project:platfolio-teardown-check,
+              bucket:53056cda-… (released with the project; no delete mutation exists)
+141s orphans: []  delete failures: []
+141s state after delete: railway readState: no project for instance "teardown-check"
+```
+
+**First `verified=true` for a manifest-derived plan**, with obligations cleared for the purpose (secrets
+emptied in this run; the previous run's `false` was the correct answer to an unsupplied key).
+
+**A reporting gap this run exposed, and it is a real one:** `app-db` is not in `removed`, yet `orphans` is
+empty. The survivor sweep runs *after* `projectDelete`, so once the project is unreadable nothing can be
+distinguished — a clean list here could be concealing a resource we never removed. Accounting has to be done
+before the project goes, then re-checked against what is now unreachable. Filed as #110; the honest summary
+is that teardown released everything, not that the provider can prove it removed each item.
+
+Deploys consumed by the verification: three (two services and one database provisioning).
