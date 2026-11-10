@@ -112,6 +112,10 @@ Integration into `staging` does not close an implementation issue. When a releas
 - **Cut no tag on a commit that has not passed the Production workflow on `main`.** `production.yml`
   enforces this and also requires a root license file (D18: present on `staging`, reaches `main` with
   the next production integration).
+- **A release merge never deletes a branch.** On a `staging → main` PR the head branch *is* `staging`, so
+  merging with branch deletion removes the long-lived integration branch — which happened while cutting
+  `0.3.0` and had to be repaired by pushing the pre-merge head back. Delete task branches only, on PRs whose
+  head is a task branch.
 - Published tag identities are retained; corrections ship as a new version. Refresh candidate scope and
   checks when its sources change.
 - Licences are already on `main` as of `0.2.0` (`LICENSE` Apache-2.0 and `vendor/cordis/LICENSE` MIT), so `production.yml`'s licence requirement is satisfied on both branches; nothing in a release is expected to touch either file.
