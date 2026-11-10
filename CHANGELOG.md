@@ -3,7 +3,21 @@
 Notable changes to the platfolio project. One human-readable entry per user- or developer-visible
 change; entries describe merged intent, not aspirations.
 
-## [Unreleased]
+"## [Unreleased]
+
+### Added
+
+- **Local GitHub App registration for M2's first step.** `pnpm run app:local` serves a page that POSTs
+  platfolio's manifest to GitHub and receives the one-time code back on `http://localhost:<port>`, then
+  exchanges it for the app id, client id and private key into `.secrets/platfolio-app.json` (mode 0600, never
+  printed) and polls installations with a short-lived RS256 app JWT to record the installation id by itself.
+  `localDevManifest`, `exchangeManifestCode` and `createAppJwt` are in the SCM seam; `app:local:check` shows
+  the manifest without touching the network. This replaces the earlier GET link with the manifest encoded,
+  which is not the documented flow, and drops the webhook block instead of pointing it at a host with no such
+  route. A bad callback no longer kills the run — the operator's fix is a second click, not a new state.
+  [Research record](docs/research/github-app-local-registration-2026-11-10.md), including the one inference
+  (the exchange endpoint needs no credentials) and what remains unexercised.
+
 
 ### Fixed
 
