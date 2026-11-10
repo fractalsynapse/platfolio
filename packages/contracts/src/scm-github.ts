@@ -22,12 +22,31 @@ export const AppPermissionsSchema = z.object({
   secrets: z.literal('write'),
   statuses: z.literal('write'),
   checks: z.literal('write'),
+  /**
+   * Held so platfolio can create the repository environments it manages secrets for, and so it can create
+   * tenant repositories in an organization. Measured: `PUT …/environments/{name}` answers 403 with
+   * `environments: write` alone, and requesting `administration` on a token that lacks it answers 422 -- so
+   * this grant is not optional for the capability, it is the only door. Accepted as D35 on the maintainer's
+   * decision that a control plane which cannot create a tenant's environments is not a control plane.
+   *
+   * Compensating controls, both already true of the write path: runtime tokens are minted per operation with
+   * the narrowest permission subset that works (measured: requesting contents/workflows/pull_requests yields
+   * exactly that) and are revoked at the end of the call; and OAuth/user consent remains outside platfolio.
+   *
+   * GitHub recommends the narrower `repository_creation` permission when creating repositories is all an app
+   * needs. Its manifest parameter name cannot be validated from outside a registration -- GitHub answers the
+   * identical 422 for an unknown permission and an ungranted one -- so it is NOT requested here, and the
+   * narrowing attempt is filed as a follow-up rather than risk breaking registration on an unproven key.
+   */
+  administration: z.literal('write'),
 }).strict();
 
 /** What platfolio asks GitHub for. Kept one line per capability so a widening is a visible diff. */
 export const DEFAULT_APP_PERMISSIONS = {
   metadata: 'read', contents: 'write', pull_requests: 'write', workflows: 'write',
   actions: 'read', environments: 'write', secrets: 'write', statuses: 'write', checks: 'write',
+  // D35: environments and tenant repositories. See AppPermissionsSchema for why no narrower grant works.
+  administration: 'write',
 } as const satisfies z.infer<typeof AppPermissionsSchema>;
 
 export const RegistrationConfigSchema = z.object({

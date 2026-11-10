@@ -33,7 +33,10 @@ test('a webhook is registered only when given a URL that can receive it', () => 
 test('a permission widening is a visible diff, not a silent one', () => {
   const wider = app.appManifest!({ ...CONFIG, permissions: { ...DEFAULT_APP_PERMISSIONS, administration: 'write' } }) as unknown as { default_permissions?: Record<string, string> };
   assert.equal(wider.default_permissions?.administration, 'write');
-  assert.ok(!('administration' in DEFAULT_APP_PERMISSIONS), 'administration must not be in the default set');
+  // D35: administration IS in the default set now, so the visible-diff property is asserted by adding a key
+  // that is not in it at all. The guarantee is "a widening shows up in the emitted manifest", not "this
+  // particular permission is absent".
+  assert.ok(!('security_events' in DEFAULT_APP_PERMISSIONS), 'a permission outside the default set stays outside');
 });
 
 test('the registration URL is the POST target, with no manifest encoded into a GET', () => {

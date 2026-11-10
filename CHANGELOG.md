@@ -5,6 +5,24 @@ change; entries describe merged intent, not aspirations.
 
 "## [Unreleased]
 
+### Changed
+
+- **The GitHub App now requests `administration: write` (D35), and platfolio provisions environments itself.**
+  A tenant must be able to manage everything inside platfolio except granting OAuth consent; creating a
+  repository environment is a repository-administration act (measured: 403 with `environments: write` alone),
+  so the grant is required rather than chosen. Blast radius is limited by how it is used: tokens are minted
+  per operation with the narrowest working subset and revoked immediately, and `app:check` prints the
+  installation's **actual** granted set — a widened manifest does not take effect until the account owner
+  approves the new permissions. GitHub's narrower `repository_creation` permission is deliberately *not*
+  requested yet: its manifest key cannot be validated from outside a registration, because GitHub answers the
+  identical 422 for an unknown permission and an ungranted one.
+
+### Added
+
+- **`ensureEnvironment` and `createRepositoryFromTemplate`** in the repository-write seam. Template generation
+  and required-reviewer configuration carry explicit PENDING LIVE CHECK notes rather than passing tests.
+
+
 ### Added
 
 - **The install write path (`GithubRepositoryWrites`, `pnpm run install:pr`).** One atomic tree commit over all

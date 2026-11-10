@@ -48,6 +48,12 @@ const whoami = await call('/app');
 console.log(`  GET /app (app JWT): ${String(whoami.status)}${whoami.status === 200 ? ` as ${JSON.stringify((whoami.body as { slug?: string }).slug)}` : ` -- ${(JSON.stringify(whoami.body) ?? '').slice(0, 120)}`}`);
 
 type Installation = { id: number; account: { login: string }; repositories_selection?: string; suspended_at?: string | null };
+// Granted permissions are printed because a widened manifest does not mean a widened INSTALLATION: GitHub
+// asks the account owner to approve new permissions, and until that happens the token simply lacks them.
+// Reading the installation is the only way to tell "we asked" from "we have".
+const inst = await call(`/app/installations/${String(creds.installationId ?? 0)}`);
+const granted = (inst.body as { permissions?: Record<string, string> } | null)?.permissions;
+if (granted) console.log(`  granted to the installation: ${Object.entries(granted).map(([k, v]) => `${k}=${v}`).sort().join(', ')}`);
 const installations = await call('/app/installations');
 // GitHub returns a bare array for this endpoint under app auth; the wrapped shape is what a paginated
 // client would see, so both are handled and neither is assumed.
