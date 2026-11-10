@@ -40,7 +40,10 @@ app JWT returned 200 as `platfolio-local` (app id 5693967) -- which is also the 
 any time and reports `/app` and `/app/installations` separately, because "app works" and "app is installed"
 are different states and the second was `0 installations` when last checked.
 
-Step 2 -- installing on this repository -- is the remaining human action.
+Step 2 is **done and verified live**: app id 5694176, installation 180457153 on `fractalsynapse`,
+`repository_selection: "selected"` yielding exactly `fractalsynapse/platfolio`, with an installation token
+minted for the read and revoked immediately after. The next step is platfolio's own: environments on the
+tenant repository and the install pull request.
 
 ## What each step is meant to falsify
 

@@ -7,6 +7,21 @@ change; entries describe merged intent, not aspirations.
 
 ### Added
 
+- **Installation access tokens in the SCM seam.** `createInstallationAccessToken` mints a short-lived,
+  repository-scoped token from an installation (the app JWT authorizes the request; it is never used on
+  repository endpoints), and `revokeInstallationAccessToken` deletes it when the work finishes. `app:check` now
+  uses this pair to list the repositories an installation actually covers, and prints only expiry and selection.
+
+### Verified live
+
+- **Step 2 of the connect flow.** Org-owned app `platfolio-local` (5694176), installation 180457153 on
+  `fractalsynapse`, token minted with `repository_selection: "selected"`, `GET /installation/repositories`
+  returning exactly `fractalsynapse/platfolio`, then revoked. The least-privilege claim in D25 is now measured
+  rather than intended.
+
+
+### Added
+
 - **`app:local -- --org <ORG>` is now the documented path for tenant repositories, and `app:check` says why.**
   A GitHub App registered as private can only be installed on the account that *owns* it (GitHub's visibility
   docs), so the app created through the personal settings page — `owner.type = "User"`, confirmed via `GET
