@@ -19,8 +19,13 @@ pleasant to author. The offline half is done (`platforms/platfolio/`); the live 
    [github-app-local-registration-2026-11-10.md](../research/github-app-local-registration-2026-11-10.md).
    GitHub will not accept the registration from an API call; it is a consent screen by design, and all three
    legs of the handshake must finish within an hour.
-2. **Install it on `fractalsynapse/platfolio`** at `https://github.com/apps/<slug>/installations/new` and
-   approve the permission set. The script is still listening and polls `GET /app/installations` with a
+2. **Register it under the organization, then install it.** A private app can only be installed on the
+   account that *owns* it, so an app created through the personal `settings/apps/new` page cannot be
+   installed on `fractalsynapse` repositories at all — the symptom is an install page listing only personal
+   repos, with no error. `pnpm run app:local -- --org fractalsynapse` posts the same manifest to the
+   organization's endpoint instead. (Note the bare `--`: `pnpm run` does not forward flags without it, and a
+   dropped `--org` silently produces a personal-owned app.) Then install at
+   `https://github.com/apps/<slug>/installations/new` and approve the permission set. The script is still listening and polls `GET /app/installations` with a
    short-lived app JWT, so it records the installation id by itself — this is the step where a too-broad
    grant becomes visible.
 

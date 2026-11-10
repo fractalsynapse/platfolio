@@ -53,6 +53,17 @@ for (const i of list) console.log(`    installation ${String(i.id)} on ${i.accou
 
 if (list.length === 0) {
   console.log(`\n  Not installed yet: https://github.com/apps/${String(creds.slug)}/installations/new`);
+  // Measured rule: a PRIVATE app can only be installed on the account that owns it. An app registered under a
+  // personal account therefore cannot be installed on organization repositories at all -- no permission grant
+  // changes that, and "make it public" would expose a development app holding contents/secrets write access.
+  // The fix is to register it under the organization: pnpm run app:local -- --org <ORG>.
+  if (whoami.status === 200) {
+    const owner = (whoami.body as { owner?: { login?: string; type?: string }; public?: boolean } | null)?.owner;
+    if (owner?.type === 'User' && (whoami.body as { public?: boolean }).public !== true) {
+      console.log(`  Owner is ${String(owner.login)} (a personal account) and the app is private, so it can ONLY be installed on that account.`);
+      console.log(`  For organization repositories, register it under the organization instead: pnpm run app:local -- --org <ORG>`);
+    }
+  }
   process.exit(0);
 }
 

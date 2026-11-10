@@ -7,6 +7,24 @@ change; entries describe merged intent, not aspirations.
 
 ### Added
 
+- **`app:local -- --org <ORG>` is now the documented path for tenant repositories, and `app:check` says why.**
+  A GitHub App registered as private can only be installed on the account that *owns* it (GitHub's visibility
+  docs), so the app created through the personal settings page — `owner.type = "User"`, confirmed via `GET
+  /app` — cannot be installed on `fractalsynapse` repositories at all. The install page simply omits the org,
+  which reads like a permissions bug and no grant fixes it. Making the app public is not the answer either:
+  this is a development app holding `contents: write` and `secrets: write`. `app:check` now prints the rule
+  when it detects a private, personally-owned app with zero installations.
+- **`pnpm run` flag forwarding footgun closed.** `pnpm run app:local --org x` drops `--org` silently; the
+  script tolerates a leading bare `--` and the runbook writes the command with it.
+
+### Verified live
+
+- **The manifest flow, the unauthenticated exchange and `createAppJwt` all work.** App `platfolio-local`
+  (id 5693967) registered from a laptop; `GET /app` under our own app JWT answered 200 and returned the slug.
+
+
+### Added
+
 - **`pnpm run app:check`** — verifies platfolio's GitHub App state from the command line: app-JWT auth against
   `GET /app`, installation count from `/app/installations`, and installed repositories, reporting each
   separately so "app authenticates" and "app is installed" stop being conflated. Prints identifiers only; the
