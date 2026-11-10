@@ -4,6 +4,15 @@ Notable changes to the platfolio project. One human-readable entry per user- or 
 change; entries describe merged intent, not aspirations.
 
 "## [Unreleased]
+### Corrected
+
+- **`repository_creation` was an invented permission key, and is reverted.** #125 asked for it on the strength
+  of a docs sentence about a feature-flagged "Repository creation"; GitHub's published REST description contains
+  **zero** occurrences of the key (against 34 for `administration`), and an unknown manifest permission is what
+  made GitHub reject the first registration outright (`single_file_permissions`). Removing it leaves **#130
+  open as the real limitation**: the app can create an org repository and cannot see it afterwards, so tenant
+  repositories need the installation's repository access set to all repositories, or they are created by the
+  tenant. No permission-shaped workaround exists.
 
 ### Added
 

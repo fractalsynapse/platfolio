@@ -17,10 +17,13 @@ pleasant to author. The offline half is done (`platforms/platfolio/`); the live 
    host, no webhook: localhost callbacks are what GitHub's own tutorial uses, and platfolio polls
    installations rather than receiving deliveries. Details and sources:
    [github-app-local-registration-2026-11-10.md](../research/github-app-local-registration-2026-11-10.md).
-      The manifest now also requests `repository_creation` (#125), because with `administration` alone platfolio
-   can create an org repository (201) and then cannot see it again (every follow-up is 404, #130). If GitHub's
-   form rejects that key, delete the line from `DEFAULT_APP_PERMISSIONS` and treat repository creation as a
-   manual step — nothing else in the flow depends on the answer.
+      No `repository_creation` permission is requested, because **that permission does not exist** on GitHub's
+   published API surface — I asked for it once from a docs sentence about a feature-flagged "Repository
+   creation", and an unknown manifest key is precisely what made GitHub reject the first registration. The
+   consequence is #130, unresolved: the app can create an organization repository (201) and cannot see it
+   afterwards (every follow-up 404). So either the installation's repository access is set to **All
+   repositories**, or tenant repositories are created by the tenant and installed onto. There is no
+   permission-shaped workaround.
 
    GitHub will not accept the registration from an API call; it is a consent screen by design, and all three
    legs of the handshake must finish within an hour.
