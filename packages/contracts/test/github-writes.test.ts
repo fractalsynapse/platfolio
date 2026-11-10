@@ -153,3 +153,67 @@ test('required reviewers are part of the environment body, with the measured typ
   const bare = sent.filter((s) => s.method === 'PUT').at(-1);
   assert.deepEqual(bare?.body, { wait_timer: 0 }, 'omitting reviewers must not send an empty list, which means "remove the gate"');
 });
+
+test('a second install run moves the existing branch instead of failing', async () => {
+  // Measured behavior of GitHub's data API: POST /git/refs on an existing branch is 422 "Reference already
+  // exists". The install path has to survive being run twice, because re-offering an install PR is normal.
+  let first = true;
+  const sent: { method: string; path: string }[] = [];
+  const fetchImpl = (async (url: string, init?: { method?: string }) => {
+    const path = url.replace('https://api.github.com', '');
+    const method = init?.method ?? 'GET';
+    sent.push({ method, path });
+    if (method === 'POST' && path.endsWith('/git/refs') && !first) throw new Error('unreachable');
+    if (method === 'POST' && path.endsWith('/git/refs')) {
+      if (first) { first = false; return { ok: false, status: 422, async json() { return {}; }, async text() { return '{"message":"Reference already exists"}'; } } as Response; }
+      return { ok: true, status: 201, async json() { return {}; } } as Response;
+    }
+    if (method === 'PATCH' && path.includes('/git/refs/heads/')) return { ok: true, status: 200, async json() { return { ref: path }; } } as Response;
+    if (path === '/repos/o/r/git/ref/heads/main') return { ok: true, status: 200, async json() { return { object: { sha: 'base1' } }; } } as Response;
+    if (path.endsWith('/git/blobs')) return { ok: true, status: 201, async json() { return { sha: 'b1' }; } } as Response;
+    if (path.endsWith('/git/trees')) return { ok: true, status: 201, async json() { return { sha: 't1' }; } } as Response;
+    if (path.endsWith('/git/commits')) return { ok: true, status: 201, async json() { return { sha: 'c1' }; } } as Response;
+    return { ok: true, status: 204, async json() { return {}; }, async text() { return ''; } } as Response;
+  }) as unknown as typeof globalThis.fetch;
+  const writes = new GithubRepositoryWrites({ token: 't', fetch: fetchImpl });
+  await writes.commitFiles({ repo: 'o/r', baseBranch: 'main', branch: 'platfolio/install', message: 'm', files: { 'a.yml': 'a' } });
+  assert.ok(sent.some((s) => s.method === 'PATCH' && s.path === '/repos/o/r/git/refs/heads/platfolio%2Finstall'), `expected a force-update of the branch: ${JSON.stringify(sent)}`);
+  assert.ok(!sent.some((s) => s.method === 'POST' && s.path === '/repos/o/r/git/refs/heads/platfolio/install'), 'the update is addressed by ref name, not created fresh');
+});
+
+test('a ref failure that is not "already exists" is not swallowed', async () => {
+  const fetchImpl = (async (url: string, init?: { method?: string }) => {
+    const path = url.replace('https://api.github.com', '');
+    if (path === '/repos/o/r/git/ref/heads/main') return { ok: true, status: 200, async json() { return { object: { sha: 'base1' } }; } } as Response;
+    if (path.endsWith('/git/blobs')) return { ok: true, status: 201, async json() { return { sha: 'b1' }; } } as Response;
+    if (path.endsWith('/git/trees')) return { ok: true, status: 201, async json() { return { sha: 't1' }; } } as Response;
+    if (path.endsWith('/git/commits')) return { ok: true, status: 201, async json() { return { sha: 'c1' }; } } as Response;
+    if (init?.method === 'POST' && path.endsWith('/git/refs')) return { ok: false, status: 403, async json() { return {}; }, async text() { return '{"message":"Resource not accessible by integration"}'; } } as Response;
+    return { ok: true, status: 204, async json() { return {}; }, async text() { return ''; } } as Response;
+  }) as unknown as typeof globalThis.fetch;
+  const writes = new GithubRepositoryWrites({ token: 't', fetch: fetchImpl });
+  await assert.rejects(() => writes.commitFiles({ repo: 'o/r', baseBranch: 'main', branch: 'x', message: 'm', files: { a: '1' } }), /failed \(403\)/);
+});
+
+test('a duplicate install PR updates the existing one instead of splitting the review', async () => {
+  const sent: { method: string; path: string }[] = [];
+  const fetchImpl = (async (url: string, init?: { method?: string }) => {
+    const path = url.replace('https://api.github.com', '');
+    const method = init?.method ?? 'GET';
+    sent.push({ method, path });
+    if (method === 'POST' && path === '/repos/o/r/pulls') return { ok: false, status: 422, async json() { return {}; }, async text() { return '{"message":"A pull request already exists for o/r:branch."}'; } } as Response;
+    if (method === 'GET' && path.startsWith('/repos/o/r/pulls?state=open')) return { ok: true, status: 200, async json() { return [{ number: 122 }]; } } as Response;
+    if (method === 'PATCH' && path === '/repos/o/r/pulls/122') return { ok: true, status: 200, async json() { return { number: 122, html_url: 'https://github.com/o/r/pull/122', head: { sha: 'h' }, base: { sha: 'b' } }; } } as Response;
+    return { ok: true, status: 204, async json() { return {}; }, async text() { return ''; } } as Response;
+  }) as unknown as typeof globalThis.fetch;
+  const writes = new GithubRepositoryWrites({ token: 't', fetch: fetchImpl });
+  const pr = await writes.openPullRequest({ repo: 'o/r', title: 'install', body: 'b', head: 'branch', base: 'main' });
+  assert.equal(pr.number, 122, 'the existing review is the one updated');
+  assert.ok(sent.some((s) => s.method === 'PATCH' && s.path === '/repos/o/r/pulls/122'), JSON.stringify(sent));
+});
+
+test('an unrelated PR failure is not treated as a duplicate', async () => {
+  const fetchImpl = (async () => ({ ok: false, status: 403, async json() { return {}; }, async text() { return '{"message":"Resource not accessible by integration"}'; } })) as unknown as typeof globalThis.fetch;
+  const writes = new GithubRepositoryWrites({ token: 't', fetch: fetchImpl });
+  await assert.rejects(() => writes.openPullRequest({ repo: 'o/r', title: 't', body: 'b', head: 'h', base: 'main' }), /failed \(403\)/);
+});

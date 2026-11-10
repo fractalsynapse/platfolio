@@ -106,7 +106,10 @@ try {
   for (const name of environments) {
     const existed = await writes.environmentExists(repo, name);
     await writes.ensureEnvironment(repo, name);
-    console.log(`  environment ${name}: ${existed ? 'already present' : 'created'} (required reviewers are a tenant setting, not an API setting)`);
+        // Measured in #126: required reviewers ARE settable through the API (type User or Team; App refused). The
+    // gate is not attached here because *which* humans approve production is the tenant's decision to make,
+    // not a default platfolio should pick on their behalf.
+    console.log(`  environment ${name}: ${existed ? 'already present' : 'created'} (reviewers can be attached by API; left to the tenant to choose)`);
   }
 
   const branch = `platfolio/install-${manifest.metadata.name}`;

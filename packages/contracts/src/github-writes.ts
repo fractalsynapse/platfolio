@@ -94,16 +94,38 @@ export class GithubRepositoryWrites {
       method: 'POST',
       body: { message: input.message, parents: [baseSha], tree: tree.sha },
     });
-    await this.call(`/repos/${input.repo}/git/refs`, { method: 'POST', body: { ref: `refs/heads/${input.branch}`, sha: commit.sha } });
+    // Create-or-update. A first run creates the ref; every later run -- a plan changed, an approval came
+    // back, the tenant asked for a fresh PR -- must move it. POST on an existing branch answers 422
+    // "Reference already exists", which made a second install attempt against the same tenant fail outright.
+    try {
+      await this.call(`/repos/${input.repo}/git/refs`, { method: 'POST', body: { ref: `refs/heads/${input.branch}`, sha: commit.sha } });
+    } catch (error) {
+      const message = (error as Error).message;
+      if (!/Reference already exists/.test(message)) throw error;
+      await this.call(`/repos/${input.repo}/git/refs/heads/${encodeURIComponent(input.branch)}`, { method: 'PATCH', body: { sha: commit.sha, force: true } });
+    }
     return { headSha: commit.sha, baseSha };
   }
 
   async openPullRequest(input: { repo: string; title: string; body: string; head: string; base: string; draft?: boolean }): Promise<PullRequestResult> {
     Repo.parse(input.repo);
-    const pr = await this.call<{ number: number; url?: string; html_url?: string; head?: { sha?: string }; base?: { sha?: string } }>(
-      `/repos/${input.repo}/pulls`,
-      { method: 'POST', body: { title: input.title, body: input.body, head: input.head, base: input.base, draft: input.draft ?? false } },
-    );
+    let pr: { number: number; url?: string; html_url?: string; head?: { sha?: string }; base?: { sha?: string } };
+    try {
+      pr = await this.call<typeof pr>(
+        `/repos/${input.repo}/pulls`,
+        { method: 'POST', body: { title: input.title, body: input.body, head: input.head, base: input.base, draft: input.draft ?? false } },
+      );
+    } catch (error) {
+      // Re-offering an install is normal -- the plan changed, an approval came back -- and GitHub refuses a
+      // second PR from the same head to the same base. Updating the existing review is the right answer;
+      // opening a duplicate would split the conversation a human is reading.
+      if (!/A pull request already exists/i.test((error as Error).message)) throw error;
+      const existing = await this.call<{ number?: number }[]>(`/repos/${input.repo}/pulls?state=open&head=${encodeURIComponent(`${input.repo.split('/')[0]}:${input.head}`)}`);
+      const number = Array.isArray(existing) ? existing[0]?.number : undefined;
+      if (typeof number !== 'number') throw new Error('github: an install PR already exists for this branch but it could not be found');
+      pr = await this.call<typeof pr>(`/repos/${input.repo}/pulls/${String(number)}`, { method: 'PATCH', body: { title: input.title, body: input.body } });
+      if (typeof pr?.number !== 'number') pr = { number, head: { sha: '' }, base: { sha: '' } };
+    }
     if (typeof pr.number !== 'number') throw new Error('github: pull request response had no number');
     return {
       number: pr.number,
