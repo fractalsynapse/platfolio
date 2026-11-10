@@ -1,0 +1,51 @@
+# platfolio, described the way platfolio describes everything else (D29): plain Compose for topology,
+# x-platfolio for hosting semantics. This is a first-party deployment, not a catalog entry -- D28 keeps the
+# shipped catalog free of platform identities, and this one is deliberately excluded from it.
+#
+# The point of authoring it this way is that step 7 stops being an exception: the control plane is hosted by
+# the same code path a tenant uses, so any rough edge in the format is found here rather than by a tenant.
+name: platfolio-control-plane
+
+services:
+  status:
+    build:
+      context: ../../
+      dockerfile: apps/status-api/Dockerfile
+    expose: ["8080"]
+    environment:
+      NODE_ENV: production
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+    x-platfolio:
+      public: true
+      # No custom domain until DNS ownership of platfolio.dev is confirmed. Measured (E27): attaching a host
+      # we cannot verify sticks at `applying` forever and the certificate never issues -- a state that looks
+      # like progress and is not. The first self-host run uses Railway's generated host, which does reach
+      # `active` + a valid certificate without any delegation.
+      # domains: [status.platfolio.dev]
+      environments: [production]
+
+x-platfolio:
+  metadata:
+    name: platfolio-control-plane
+    version: 0.4.0
+    title: Platfolio Control Plane
+    summary: The control plane hosting itself, so the hosting path is tested on software we own.
+    archetype: api-service
+    repository: https://github.com/fractalsynapse/platfolio
+  capabilities: []
+  environments:
+    production: { enabled: true, branch: staging }
+    staging: { enabled: false }
+    preview: { enabled: false }
+  dns:
+    ownershipVerification: txt
+    apexPolicy: cname-flattening-only
+  lifecycle:
+    onSuspend: scale-to-zero
+    onEject: [compose, data-export]
+    onDelete: { graceDays: 30, backupAgeOutDays: 90 }
+  release:
+    registryImage: ghcr.io/fractalsynapse/platfolio-status-api
+    dockerfile: apps/status-api/Dockerfile
+    tagPattern: "{branch}"

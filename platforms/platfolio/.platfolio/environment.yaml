@@ -1,0 +1,20 @@
+# Obligations for the control plane, in the same inventory format every platform uses (D33).
+# Declaring these for ourselves is the cheap way to find out whether the format answers the questions an
+# operator actually asks; a first-party deployment that skips it proves nothing about ergonomics.
+- name: SESSION_SIGNING_KEY
+  kind: secret
+  required: true
+  rotate: on-demand
+  service: status
+  description: Signs control-plane session tokens. Rotating it signs every tenant out.
+- name: KEYCLOAK_ISSUER
+  kind: output
+  from: identity#issuer
+  service: status
+  description: Provided by the team Keycloak realm once it is hosted (D34). Optional until then.
+- name: PUBLIC_ORIGIN
+  kind: value
+  # Matches the generated host for now; becomes the custom origin once DNS is delegated.
+  default: https://status-production.up.railway.app
+  service: status
+  description: Canonical origin used for OIDC redirects and deep links.
