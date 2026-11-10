@@ -150,3 +150,22 @@ test('the outcome reaches platfolio through a step output, not a log line', () =
   assert.match(workflow, /- name: Apply desired state[\s\S]{0,80}id: apply/);
   assert.match(workflow, /steps\.apply\.outcome/);
 });
+
+test('the apply step is given the provider credential, by name', () => {
+  // Without this the action could not have applied anything: the plan, identity and trigger were all wired,
+  // and the credential the step runs on was absent from the manifest entirely.
+  const m = manifest('templates/example-web-app/manifest.yaml');
+  const workflow = renderInstallPullRequest(m, OPTS).files[WORKFLOW_PATH]!;
+  const doc = yamlParse(workflow) as { jobs: Record<string, { steps?: { id?: string; env?: Record<string, string>; with?: Record<string, string> }[] }> };
+  const apply = doc.jobs.managed!.steps!.find((s) => s.id === 'apply');
+  assert.ok(apply, 'the apply step exists');
+  assert.deepEqual(apply!.env, { RAILWAY_TOKEN: '${{ secrets.RAILWAY_TOKEN }}' }, 'resolved by GitHub into the step process, never stored by platfolio');
+  assert.ok(!Object.values(apply!.env ?? {}).some((v) => !v.includes('${{')), 'names in the manifest, never values');
+  assert.ok(workflow.includes('instance_id'), 'and the identity inputs are still passed');
+});
+
+test('the tenant document tells them which environment secret to set', () => {
+  const m = manifest('templates/example-web-app/manifest.yaml');
+  const doc = renderInstallPullRequest(m, OPTS).files['PLATFOLIO.md']!;
+  assert.match(doc, /RAILWAY_TOKEN/, 'the name the workflow resolves must appear where the tenant reads instructions');
+});

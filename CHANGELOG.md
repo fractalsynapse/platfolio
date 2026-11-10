@@ -7,6 +7,32 @@ change; entries describe merged intent, not aspirations.
 
 ### Added
 
+- **An attestation can report `partial` (D37, #123 protocol half).** `result` was `ok | failed | noop`; a
+  three-of-four apply is neither — `ok` hides drift forever, `failed` discards resources that are running and
+  makes the next apply try to create them twice. New schema rules: `partial` must carry an `errorCode`, and
+  `partial` with nothing landed is rejected as "failed, not partial". Widening a response union tightens any
+  consumer switching exhaustively over it; there are none outside this repository yet, which is why it is a
+  minor with the widening stated instead of a breaking major.
+- **Action-side helpers on the existing contract** (`parseDispatchIntent`, `staleIntent`,
+  `attestationFromApply`, `normalizeHash`, `assertAttestationClean`). No new schema: `attestation.ts` already
+  owned the trust model, and a parallel shape on the runner side is how two versions of "the same" contract
+  drift apart. An attestation now carries the digest of the plan that **ran**, not the one requested, and a
+  stale dispatch is refused before anything mutates with both hashes named.
+- **The install workflow was given the credential it needs.** The apply step had none at all (plan, identity
+  and trigger present; the ability to act absent), and `PLATFOLIO.md` listed platform secrets while omitting
+  `RAILWAY_TOKEN` that the step resolves — an install that reads complete and fails on first dispatch. Names
+  in the manifest, values resolved by GitHub into the step process.
+
+### Found
+
+- **#135 blocks the runner.** The provider is built around a workspace grant while the tenant-facing document
+  promises a per-environment project token; those cannot both be true, so the credential scope is a decision
+  with three priced options rather than an implementation detail. The protocol half deliberately imports no
+  credential so it can be decided on its own terms.
+
+
+### Added
+
 - **Required reviewers can be attached when creating an environment (#126, measured live).** `ensureEnvironment`
   now accepts `reviewers: [{type: 'User'|'Team', id}]`; GitHub rejects `type: 'App'` — an app must not approve
   its own deployments — so platfolio can hand a tenant a production environment that already has its human gate
