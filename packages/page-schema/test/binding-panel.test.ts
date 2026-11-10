@@ -20,7 +20,10 @@ const bind = (dependent: string): Binding => {
   return binding;
 };
 
-const nodes = (b: Binding[], i?: string) => buildBindingPanel(b, { providers: PROVIDERS, instanceId: i }).children;
+// Built conditionally: under exactOptionalPropertyTypes, `instanceId: undefined` is not the same as
+// omitting it, and the optional-parameter shape here is exactly what a caller is most likely to get wrong.
+const nodes = (b: Binding[], i?: string) =>
+  buildBindingPanel(b, i === undefined ? { providers: PROVIDERS } : { providers: PROVIDERS, instanceId: i }).children;
 
 test('an instance with no bindings says so instead of showing a blank page', () => {
   const rendered = nodes([]);
