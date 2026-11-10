@@ -45,6 +45,20 @@ Step 2 is **done and verified live**: app id 5694176, installation 180457153 on 
 minted for the read and revoked immediately after. The next step is platfolio's own: environments on the
 tenant repository and the install pull request.
 
+## Step 3: the install pull request
+
+**Done as a write, open as a review.** platfolio opened [#122](https://github.com/fractalsynapse/platfolio/pull/122)
+against this repository — one commit, `.github/workflows/platfolio-managed.yml` + `PLATFOLIO.md`, no secret
+values, installation token revoked afterwards. It is a **draft**, because the managed action it pins is not
+implemented (#123), and merging it today would add a workflow that cannot run. Refusing or closing it is also
+a valid result; that is why it is a pull request.
+
+Also learned the hard way, and recorded with its experiments in
+[github-install-write-path-2026-11-10.md](../research/github-install-write-path-2026-11-10.md): a tree
+containing a `.github/workflows/` path needs `workflows: write`, and **platfolio does not create environments**
+— creation requires `administration: write`, which we deliberately do not hold, so the tenant configures the
+production gate or it appears on first run.
+
 ## What each step is meant to falsify
 
 | Step | The assumption it tests |

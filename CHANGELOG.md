@@ -7,6 +7,23 @@ change; entries describe merged intent, not aspirations.
 
 ### Added
 
+- **The install write path (`GithubRepositoryWrites`, `pnpm run install:pr`).** One atomic tree commit over all
+  install files on a fresh branch, a reviewable draft pull request, and repository-environment **presence**
+  checks. Default is a dry run that prints the file set and refuses to proceed if anything in it looks like a
+  credential value; `--apply` is required to write. Installation tokens are minted per operation with the
+  narrow grants measured to be necessary (`contents · workflows · pull_requests`) and revoked at the end.
+
+### Verified live
+
+- **Runbook step 3.** platfolio opened its first install PR against a tenant repository: #122, one commit, two
+  files, no secret values, token revoked. Three distinct causes behind the same `Resource not accessible by
+  integration` message were separated by experiment, including that workflow paths require `workflows: write`,
+  and the decision that platfolio does not create environments — creation needs `administration: write`, which
+  D25 declines to hold, leaving the production review gate to the human who owns it.
+
+
+### Added
+
 - **Installation access tokens in the SCM seam.** `createInstallationAccessToken` mints a short-lived,
   repository-scoped token from an installation (the app JWT authorizes the request; it is never used on
   repository endpoints), and `revokeInstallationAccessToken` deletes it when the work finishes. `app:check` now

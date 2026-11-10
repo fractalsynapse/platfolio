@@ -12,3 +12,4 @@ export * from './secret-writer.ts';
 export * from './binding.ts';
 export * from './workflow-runner.ts';
 export { localDevManifest, localManifestTarget, exchangeManifestCode, createAppJwt, buildAppManifest, createInstallationAccessToken, revokeInstallationAccessToken, MANIFEST_KEYS, AppManifestSchema, type LocalManifestOptions, type AppManifest, type InstallationTokenRequest, type InstallationToken } from './scm-github.ts';
+export { GithubRepositoryWrites, type WriteConfig, type PullRequestResult } from './github-writes.ts';
