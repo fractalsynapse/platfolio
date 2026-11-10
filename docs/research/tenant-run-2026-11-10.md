@@ -79,7 +79,7 @@ emptied in this run; the previous run's `false` was the correct answer to an uns
 **A reporting gap this run exposed, and it is a real one:** `app-db` is not in `removed`, yet `orphans` is
 empty. The survivor sweep runs *after* `projectDelete`, so once the project is unreadable nothing can be
 distinguished — a clean list here could be concealing a resource we never removed. Accounting has to be done
-before the project goes, then re-checked against what is now unreachable. Filed as #110; the honest summary
+before the project goes, then re-checked against what is now unreachable. Filed as #111; the honest summary
 is that teardown released everything, not that the provider can prove it removed each item.
 
 Deploys consumed by the verification: three (two services and one database provisioning).
