@@ -1,0 +1,34 @@
+# Environment inventory (D33). What this platform needs, not what it holds: a `secret` entry is a name and
+# metadata only -- the value exists solely inside the request that writes it into the tenant's execution
+# plane. Entries marked `reference` or `output` are wiring, so they never appear on the checklist that asks
+# a tenant to supply something.
+- name: APP_API_SIGNING_KEY
+  kind: secret
+  required: true
+  rotate: on-demand
+  description: Signs bearer tokens issued by the API. Rotating it invalidates existing sessions.
+  service: api
+- name: GIT_PROVIDER_TOKEN
+  kind: secret
+  required: false
+  description: Optional read-only token for private repository mirrors; omitted means public sources only.
+  service: worker
+- name: DATABASE_URL
+  kind: reference
+  service: api
+  database: app-db
+  output: DATABASE_URL
+- name: CONTEXT_BUDGET_TOKENS
+  kind: value
+  default: "120000"
+  service: api
+  description: Upper bound on tokens per generated context.
+- name: LOG_LEVEL
+  kind: value
+  default: info
+- name: OIDC_ISSUER
+  kind: output
+  from: identity#issuer
+  service: api
+  environments: [production]
+  description: Provided by the team identity service when one is bound (D34).

@@ -7,6 +7,19 @@ change; entries describe merged intent, not aspirations.
 
 ### Added
 
+- **Environment inventory (D33, #92).** `.platfolio/environment.yaml` declares what a platform needs — typed
+  `reference` / `secret` / `value` / `output` entries with defaults, applicability and descriptions — and
+  `deriveObligations` splits **what a tenant must supply** from **what the provider resolves**, so a
+  provider-wired `DATABASE_URL` can never appear on the checklist asking a tenant to type it.
+  `applyInventory` folds entries into the service model (idempotent, because install can be re-run), so the
+  plan builder and provider are untouched. Refusals are named, not generic: a secret entry carrying a value,
+  a missing `kind`, an unknown service or environment, a reference to an undeclared database, and a
+  credential-shaped default on a `value` entry. The generic reference template now ships one, so the
+  document format is exercised by the catalog.
+
+
+### Added
+
 - **Write-once secret path (D32, #93).** `GithubActionsSecretWriter` places a secret the tenant just
   supplied, checks presence (`set` / `missing` / `unverifiable`), and rotates by delete-and-reissue. It has
   no read method, and a test asserts that absence rather than trusting GitHub's write-only API. Verified
