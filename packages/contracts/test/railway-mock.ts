@@ -228,9 +228,9 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
       }
       case 'volumeDelete': {
         const volumeId = v.volumeId as string;
-        const before = this.volumes.length;
+        const volumesBefore = this.volumes.length;
         this.volumes = this.volumes.filter((x) => x.id !== volumeId);
-        if (this.volumes.length === before) throw new Error('railway volumeDelete: no such volume [NOT_FOUND]');
+        if (this.volumes.length === volumesBefore) throw new Error('railway volumeDelete: no such volume [NOT_FOUND]');
         return { volumeDelete: true } as T;
       }
       case 'project.services': {
@@ -449,6 +449,12 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
         return { customDomainCreate: { id: `dom-${this.sequence++}`, domain: input.domain } } as T;
       }
       case 'serviceDelete': {
+        // Measured ordering (#107): a template-created database that still owns a volume is refused by
+        // serviceDelete; the same service deletes cleanly once its volume is released. The double enforced
+        // neither rule, which is how the provider's teardown order went unnoticed for a full live run.
+        if (this.volumes.some((x) => x.serviceId === v.id)) {
+          throw new Error('railway serviceDelete: Problem processing request [UNPROCESSABLE]');
+        }
         if (this.options.refuseTemplateServiceDelete && this.templateServiceIds.has(v.id as string)) {
           throw new Error('railway serviceDelete: Bad Access for template-created service [FORBIDDEN]');
         }

@@ -5,6 +5,22 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Teardown order, and what it actually was (#107).** A template-created database that still owned a volume
+  was refused by `serviceDelete`; a volume-less one deleted cleanly. The provider deleted services first and
+  volumes second, so the refusal was guaranteed on every run. Volumes are now released first, and the double
+  enforces the rule — it previously enforced neither, which is how a full live run passed unnoticed.
+- **Bucket teardown reported truthfully (#106).** There is no bucket delete mutation on this API at all
+  (the mutation list was enumerated to check), so `projectDelete` is the only mechanism. A bucket is now
+  named in `removed` as released with the project rather than counted as an orphan before the project is
+  gone — accurate but misleading, which is a distinction this project has kept having to learn.
+- **A new accounting gap found while proving the fix (#110).** The survivor sweep runs *after*
+  `projectDelete`, so an empty orphan list can't distinguish "everything was removed" from "everything is
+  now unreachable": the provisioned database appeared in neither list. Accounting must snapshot before the
+  project goes and then re-check against unreachability.
+
+
 ### Added
 
 - **First tenant-shaped live run (2026-11-10).** A reference platform manifest drove `buildPlan` →

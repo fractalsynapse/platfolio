@@ -403,6 +403,17 @@ export class RailwayInfraProvider implements InfraProvider {
 
     const environments = await this.environments(project.id, credential);
     const services = await this.listServices(project.id, credential);
+
+      // Volumes are released BEFORE the services they are attached to. Measured: a template-created database
+      // whose volume still existed was refused by serviceDelete ("Problem processing request"), while an
+      // identical volume-less one deleted cleanly -- so #107 was ordering, not a capability limit, and the
+      // previous order (services first, volumes after) guaranteed the refusal at every attempt.
+      for (const volume of await this.listVolumes(project.id, credential)) {
+        await this.transport.graphql({ operation: 'volumeDelete', credential, query: 'mutation ($volumeId: String!) { volumeDelete(volumeId: $volumeId) }', variables: { volumeId: volume.id } })
+          .then(() => { removed.push(`volume:${volume.name}`); })
+          .catch(() => { orphans.push(`volume:${volume.name}`); });
+      }
+
     for (const environment of environments) {
       for (const service of services) {
         try {
@@ -431,15 +442,12 @@ export class RailwayInfraProvider implements InfraProvider {
     // Anything still there is reported, never counted as gone.
     // Volumes are project-level and outlive the service they were attached to, so they are removed
     // explicitly and anything left is reported. "Removed everything" has to mean everything we can create.
-    // Volumes first: a volume is attached to its service, so releasing the attachment before the service is
-    // the order a template-created database is most likely to accept (#80's survivor still held its volume).
-    for (const volume of await this.listVolumes(project.id, credential)) {
-      await this.transport.graphql({ operation: 'volumeDelete', credential, query: 'mutation ($volumeId: String!) { volumeDelete(volumeId: $volumeId) }', variables: { volumeId: volume.id } })
-        .then(() => { removed.push(`volume:${volume.name}`); })
-        .catch(() => { orphans.push(`volume:${volume.name}`); });
-    }
+    // There is no bucketDelete mutation on this API -- the full *Delete set was enumerated while filing
+    // #106 -- so a bucket cannot be released individually and projectDelete is the mechanism that takes it.
+    // Reporting one as an orphan before the project is gone was accurate but misleading: nothing is left
+    // reachable afterwards. Anything that outlives a successful projectDelete is a genuine survivor.
     for (const leftover of await this.listServices(project.id, credential)) orphans.push(`service:${leftover.name}`);
-    for (const bucket of await this.buckets(project.id, credential)) orphans.push(`bucket:${bucket}`);
+    const survivingBuckets = await this.buckets(project.id, credential);
 
     await this.transport.graphql({
       operation: 'projectDelete',
@@ -448,6 +456,10 @@ export class RailwayInfraProvider implements InfraProvider {
       variables: { id: project.id },
     });
     removed.push(`project:${project.name}`);
+    // Named explicitly rather than counted as a clean delete: these had no individual delete available, so
+    // they left because the project did. A reader can tell the difference between what we removed and what
+    // was taken along, which is the distinction #106 exists to keep visible.
+    for (const bucket of survivingBuckets) removed.push(`bucket:${bucket} (released with the project; no delete mutation exists)`);
     return { instanceId, removed, orphans, ...(deleteFailures.length ? { failures: deleteFailures } : {}) };
   }
 
