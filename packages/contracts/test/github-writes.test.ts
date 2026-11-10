@@ -218,33 +218,50 @@ test('an unrelated PR failure is not treated as a duplicate', async () => {
   await assert.rejects(() => writes.openPullRequest({ repo: 'o/r', title: 't', body: 'b', head: 'h', base: 'main' }), /failed \(403\)/);
 });
 
-test('an initial commit has no parents and no base tree, because the repository is empty', async () => {
+test('an empty repository is seeded through the contents endpoint, because blobs are 409 until then', async () => {
+  // The fake that used to sit here accepted `POST /git/blobs` on an empty repository, which is exactly the
+  // thing GitHub refuses -- so it proved the shape of my code and nothing about whether it could run. This
+  // fake reproduces the 409, which is the only reason the bug surfaced.
   const sent: { method: string; path: string; body?: Record<string, unknown> }[] = [];
+  let hasCommits = false;
   const fetchImpl = (async (url: string, init?: { method?: string; body?: string }) => {
     const path = url.replace('https://api.github.com', '');
     const method = init?.method ?? 'GET';
     sent.push({ method, path, ...(init?.body ? { body: JSON.parse(init.body) as Record<string, unknown> } : {}) });
-    if (path.endsWith('/git/blobs')) return { ok: true, status: 201, async json() { return { sha: 'b1' }; } } as Response;
+    if (path.includes('/git/ref/heads/')) return hasCommits ? { ok: true, status: 200, async json() { return { object: { sha: 'seed1' } }; } } as Response : { ok: false, status: 404, async json() { return {}; }, async text() { return ''; } } as Response;
+    if (method === 'PUT' && path.includes('/contents/')) { hasCommits = true; return { ok: true, status: 201, async json() { return { content: { sha: 'c1' } }; } } as Response; }
+    if (method === 'POST' && path.endsWith('/git/blobs')) {
+      if (!hasCommits) return { ok: false, status: 409, async json() { return {}; }, async text() { return '{"message":"Git Repository is empty."}'; } } as Response;
+      return { ok: true, status: 201, async json() { return { sha: 'b1' }; } } as Response;
+    }
     if (path.endsWith('/git/trees')) return { ok: true, status: 201, async json() { return { sha: 'tree1' }; } } as Response;
     if (path.endsWith('/git/commits')) return { ok: true, status: 201, async json() { return { sha: 'commit1' }; } } as Response;
     return { ok: true, status: 201, async json() { return {}; }, async text() { return ''; } } as Response;
   }) as unknown as typeof globalThis.fetch;
   const writes = new GithubRepositoryWrites({ token: 't', fetch: fetchImpl });
-  const sha = await writes.createInitialCommit({ repo: 'o/r', branch: 'main', message: 'platfolio starter', files: { 'README.md': 'a', 'compose.yaml': 'b' } });
-  assert.equal(sha, 'commit1');
-  const tree = sent.find((s) => s.path.endsWith('/git/trees'));
-  assert.equal('base_tree' in (tree?.body ?? {}), false, 'no base tree exists in an empty repository');
-  const commit = sent.find((s) => s.path.endsWith('/git/commits'));
-  assert.deepEqual((commit?.body as { parents: string[] }).parents, [], 'the first commit is parentless by definition');
-  const ref = sent.find((s) => s.path === '/repos/o/r/git/refs');
-  assert.equal((ref?.body as { ref: string }).ref, 'refs/heads/main');
+  const result = await writes.seedAndCommit({
+    repo: 'o/r', branch: 'main', seedFile: { path: 'README.md', content: '# seed\n' },
+    message: 'platfolio starter', files: { 'compose.yaml': 'a', 'Dockerfile': 'b' },
+  });
+  assert.equal(result.seeded, true, 'the repository started empty');
+  assert.equal(result.headSha, 'commit1');
+  const seedPut = sent.find((s) => s.method === 'PUT');
+  assert.equal(seedPut?.path, '/repos/o/r/contents/README.md', 'the contents endpoint is the only way in');
+  assert.equal(typeof (seedPut?.body as { content?: string }).content, 'string', 'contents API takes base64, not raw text');
+  assert.ok((seedPut?.body as { content: string }).content === Buffer.from('# seed\n').toString('base64'));
+  const firstBlob = sent.findIndex((s) => s.path.endsWith('/git/blobs'));
+  assert.ok(firstBlob > sent.indexOf(seedPut!), 'no blob may be attempted before the seed commit exists');
+
+  // Second call: the repository already has a branch, so nothing is seeded and no PUT goes out.
+  const again = await writes.seedAndCommit({ repo: 'o/r', branch: 'main', seedFile: { path: 'README.md', content: 'x' }, message: 'm', files: { 'a': '1' } });
+  assert.equal(again.seeded, false);
 });
 
 test('an empty file set is refused before a request goes out', async () => {
   const calls: string[] = [];
   const fetchImpl = (async (url: string) => { calls.push(url); return { ok: true, status: 204, async json() { return {}; } } as Response; }) as unknown as typeof globalThis.fetch;
   const writes = new GithubRepositoryWrites({ token: 't', fetch: fetchImpl });
-  await assert.rejects(() => writes.createInitialCommit({ repo: 'o/r', branch: 'main', message: 'm', files: {} }), /empty initial commit/);
+  await assert.rejects(() => writes.seedAndCommit({ repo: 'o/r', branch: 'main', seedFile: { path: 'R', content: 'x' }, message: 'm', files: {} }), /empty commit/);
   assert.equal(calls.length, 0);
 });
 
@@ -256,4 +273,24 @@ test('visibility is reported as a fact, not as a guess, because 404 means two di
   assert.equal(await forStatus(200).repositoryVisible('o/r'), true);
   assert.equal(await forStatus(404).repositoryVisible('o/r'), false, '404 is what #130 looks like from the outside');
   await assert.rejects(() => forStatus(401).repositoryVisible('o/r'), /returned 401/, 'a credential failure must not be read as "not installed"');
+});
+
+test('listCommits reads the bare array GitHub actually returns', async () => {
+  // Reading `.commits` produced undefined for a valid 200 response, which looked identical to "the
+  // repository has no history" and silently routed two real publishes down the wrong path.
+  const bare = new GithubRepositoryWrites({
+    token: 't',
+    fetch: (async () => ({ ok: true, status: 200, async json() { return [{ commit: { message: 'chore(platfolio): publish\n\nbody' } }, { commit: { message: 'initial' } }]; } })) as unknown as typeof globalThis.fetch,
+  });
+  assert.deepEqual(await bare.listCommits('o/r', 'main'), ['chore(platfolio): publish', 'initial']);
+  const wrapped = new GithubRepositoryWrites({
+    token: 't',
+    fetch: (async () => ({ ok: true, status: 200, async json() { return { commits: [{ commit: { message: 'a' } }] }; } })) as unknown as typeof globalThis.fetch,
+  });
+  assert.deepEqual(await wrapped.listCommits('o/r', 'main'), ['a']);
+  const failed = new GithubRepositoryWrites({
+    token: 't',
+    fetch: (async () => ({ ok: false, status: 403, async json() { return {}; }, async text() { return ''; } })) as unknown as typeof globalThis.fetch,
+  });
+  await assert.rejects(() => failed.listCommits('o/r', 'main'), /failed \(403\)/, 'a refused read is not "no history"');
 });

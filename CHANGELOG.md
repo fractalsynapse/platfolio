@@ -15,9 +15,13 @@ change; entries describe merged intent, not aspirations.
   run by default, and refuses to create or delete a repository (#130, D36).
 - **`provides` and `capabilities` are now authorable in Compose** — they reached the manifest only through
   hand-written YAML, which is the path D29 retired.
-- **`createInitialCommit` and `repositoryVisible`** in the write seam: an empty repository has no base ref,
-  so a publish path that assumed one could not bootstrap anything; visibility is now reported as the fact
-  #130 makes it (a 404 means *not installed*, not *absent*).
+- **`seedAndCommit` and `repositoryVisible`** in the write seam. Bootstrapping is the interesting part: the
+  Git data API refuses to create the first object in an empty repository (409), so the branch is seeded through
+  the contents endpoint and the file set follows as one commit. Visibility is now reported as the fact #130
+  makes it — a 404 means *not installed*, not *absent*.
+- **`pnpm run templates:publish`** put the three templates into `fractalsynapse`: seeded-and-published onto
+  `main` for repositories platfolio owns the history of, branch + pull request for anyone else's, dry run by
+  default, and it never creates or deletes a repository.
 - **`worker` and `shared-service` archetypes** carried their own validation rules from the start.
 
 ### Fixed
