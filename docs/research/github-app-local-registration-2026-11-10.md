@@ -96,3 +96,32 @@ Two changes, then:
 Lessons kept: a documented response description is evidence about a shape, not the shape; and a one-shot
 credential exchange has to validate *after* reading and *before* discarding, with enough in the error to
 reconstruct what happened.
+
+## Third attempt: registered, and the app key authenticates
+
+The flow completed after the response-shape fix. `pnpm run app:check` (which exists so this is
+re-checkable rather than remembered) reports:
+
+```
+  file: .secrets/platfolio-app.json          (-rw------- , gitignored by .secrets/)
+  fields present: appId, clientId, clientSecret, privateKeyPem, registeredAt, slug
+  GET /app (app JWT): 200 as "platfolio-local"
+  GET /app/installations: 200 -> 0 installation(s)
+```
+
+What that establishes, precisely:
+
+- **The manifest shape is GitHub-accepted** and the **exchange endpoint works unauthenticated** -- the one
+  inference in this design is now evidence rather than reasoning, and the `webhook_secret` absence was real,
+  not a truncated response.
+- **`createAppJwt` is correct against the live API.** `GET /app` under app authentication is the strictest
+  easy test of it: a wrong signature, a bad `iss`, or an expired token all answer 401. It answered 200 and
+  identified the app by slug. Until this run, that function had only ever been verified against its own
+  public key -- which proves the signature, not that GitHub's expectations were met.
+- **The credentials file is a 0600 untracked file with no value in any log line.** The check script prints
+  identifiers (app id, slug) and never the key, client secret or webhook secret.
+- **`0 installation(s)` is the honest current state**, not a failure: the app exists, nobody has installed it
+  yet. That distinction is the whole reason the check reports the two endpoints separately.
+
+App id `5693967`, slug `platfolio-local` -- identifiers, safe to record. The next step is installation, which
+only the maintainer's browser can do.

@@ -22,7 +22,8 @@
     "graphql:check": "tsx scripts/check-graphql-schema.ts",
     "graphql:snapshot": "tsx scripts/refresh-railway-schema.ts",
     "app:local": "tsx scripts/github-app-local.ts",
-    "app:local:check": "tsx scripts/github-app-local.ts --check"
+    "app:local:check": "tsx scripts/github-app-local.ts --check",
+    "app:check": "tsx scripts/github-app-check.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
