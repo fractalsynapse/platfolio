@@ -7,6 +7,18 @@ change; entries describe merged intent, not aspirations.
 
 ### Added
 
+- **First tenant-shaped live run (2026-11-10).** A reference platform manifest drove `buildPlan` →
+  `applyPlan` against Railway: two services `live`, managed database `live`, volume attached, bucket created,
+  generated domain with certificate read back as `issued`. `verified` stayed **false** for the correct
+  reason — an unmet tenant obligation, named with environment and service — which is the point: a green here
+  would have meant deploying without a signing key. Teardown exposed two gaps now filed (#107 buckets are
+  never deleted, #108 `serviceDelete` refuses a template-created database that owns a volume). The image
+  was platfolio's own published build in place of the templates' placeholder digests, so this proves the
+  hosting mechanism, not a real platform boot — said in the record as well as here.
+
+
+### Added
+
 - **Execution split, trigger half (C5, D30).** `GithubWorkflowRunner` dispatches a curated workflow with ref
   and inputs, normalises run state from status **and** conclusion (neither alone is trusted — `completed`
   with no conclusion proves nothing), correlates a run to its head commit so a stale green cannot be read as
