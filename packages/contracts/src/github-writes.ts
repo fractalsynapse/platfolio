@@ -108,24 +108,48 @@ export class GithubRepositoryWrites {
   }
 
   /**
-   * The very first commit into an empty repository.
+   * Get the first commit into a repository that has none.
    *
-   * A repository created by platfolio has no branches at all, so `commitFiles` -- which resolves a base ref
-   * -- cannot run against it, and a publish path that only works on non-empty repositories is one that
-   * cannot bootstrap anything. `parents: []` and no base tree is the documented shape for an initial commit.
+   * The Git data API cannot be used to bootstrap an empty repository: `POST /git/blobs` answers
+   * **409 "Git Repository is empty"** -- measured, against a repository created seconds earlier. So the
+   * branch has to be brought into existence through the contents endpoint, which does permit a first write,
+   * and only then can the tree path do what it is good at: one commit carrying every remaining file.
+   *
+   * Two commits rather than one is the cost, and it is worth paying deliberately rather than pretending:
+   * the alternative is a repository whose history starts with a commit that says "seed", which is honest
+   * about what happened, versus a publisher that cannot publish at all.
+   *
+   * Returns the head sha after the full file set is committed.
    */
-  async createInitialCommit(input: { repo: string; branch: string; message: string; files: Record<string, string> }): Promise<string> {
+  async seedAndCommit(input: { repo: string; branch: string; seedFile: { path: string; content: string }; message: string; files: Record<string, string> }): Promise<{ headSha: string; seeded: boolean }> {
     Repo.parse(input.repo);
     const paths = Object.keys(input.files).sort();
-    if (paths.length === 0) throw new Error('github: refusing to create an empty initial commit');
-    const blobs = await Promise.all(paths.map(async (path) => {
-      const blob = await this.call<{ sha: string }>(`/repos/${input.repo}/git/blobs`, { method: 'POST', body: { content: input.files[path] } });
-      return { path, sha: blob.sha, mode: '100644' as const };
-    }));
-    const tree = await this.call<{ sha: string }>(`/repos/${input.repo}/git/trees`, { method: 'POST', body: { tree: blobs } });
-    const commit = await this.call<{ sha: string }>(`/repos/${input.repo}/git/commits`, { method: 'POST', body: { message: input.message, tree: tree.sha, parents: [] } });
-    await this.call(`/repos/${input.repo}/git/refs`, { method: 'POST', body: { ref: `refs/heads/${input.branch}`, sha: commit.sha } });
-    return commit.sha;
+    if (paths.length === 0) throw new Error('github: refusing to create an empty commit');
+    let seeded = false;
+    try {
+      await this.branchSha(input.repo, input.branch);
+    } catch {
+      await this.call<unknown>(`/repos/${input.repo}/contents/${input.seedFile.path.split('/').map(encodeURIComponent).join('/')}`, {
+        method: 'PUT',
+        body: { message: `${input.message} (initial branch)`, content: Buffer.from(input.seedFile.content, 'utf8').toString('base64'), branch: input.branch },
+      });
+      seeded = true;
+    }
+    const { headSha } = await this.commitFiles({ ...input, baseBranch: input.branch });
+    return { headSha, seeded };
+  }
+
+  /** First-line messages on a branch, newest first. Used to tell "ours" from "theirs" before pushing. */
+  async listCommits(repo: string, branch: string): Promise<string[]> {
+    Repo.parse(repo);
+    // The endpoint answers with a bare array, not an object -- reading `.commits` returned undefined, which
+    // looked like "no history", which silently routed both publish cases down the pull-request path. A
+    // response-shape assumption that fails *quietly* is worse than one that throws, so both shapes are read.
+    const data = await this.call<{ commits?: { commit?: { message?: string } }[] } | { commit?: { message?: string } }[]>(
+      `/repos/${repo}/commits?sha=${encodeURIComponent(branch)}&per_page=20`,
+    );
+    const list = Array.isArray(data) ? data : (data.commits ?? []);
+    return list.map((c) => (c.commit?.message ?? '').split('\n')[0] ?? '');
   }
 
   /** Whether the installation can see a repository at all -- the #130 check, made explicit. */

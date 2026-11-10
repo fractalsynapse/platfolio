@@ -71,7 +71,9 @@ if (!apply) {
 
 const token = await createInstallationAccessToken({
   appId: creds.appId, privateKeyPem: creds.privateKeyPem, installationId: creds.installationId,
-  permissions: { contents: 'write' },
+  // pull_requests too: publishing into a repository with someone else's history must arrive as a review,
+  // and a token without the grant answers 403 on POST /pulls -- measured, same family as workflows:write.
+  permissions: { contents: 'write', pull_requests: 'write' },
 });
 const writes = new GithubRepositoryWrites({ token: token.token });
 console.log(`\n  token minted (expires ${token.expiresAt}, selection ${token.repositorySelection})`);
@@ -88,7 +90,29 @@ try {
     }
     let exists = true;
     try { await writes.branchSha(repo, branch); } catch { exists = false; }
-    if (exists) {
+    if (!exists) {
+      // Empty repository: the Git data API refuses to make the first object (409 "Git Repository is
+      // empty"), so the branch is created through the contents endpoint and the rest follows as one commit.
+      const { headSha, seeded } = await writes.seedAndCommit({
+        repo,
+        branch,
+        seedFile: { path: 'README.md', content: `# ${p.repo}\n\nPublished by platfolio from \`platform-templates/${p.dir}\`. Fork it and make it yours.\n` },
+        message: `chore(platfolio): publish the ${p.dir} template`,
+        files: p.files,
+      });
+      console.log(`  ${repo}: ${seeded ? 'seeded empty repo, then ' : ''}initial content commit ${headSha.slice(0, 10)} on ${branch}`);
+      continue;
+    }
+    // Distinguishing who owns the history decides how the write arrives. A repository whose only commits are
+    // platfolio's is being *updated* -- a pull request against our own output would ask a human to approve a
+    // no-op diff every publish. A repository with someone else's history is a contribution and gets reviewed,
+    // which is what the pull_requests grant is for.
+    const history = await writes.listCommits(repo, branch);
+    const oursSoFar = history.length > 0 && history.every((m) => m.startsWith('chore(platfolio)'));
+    if (oursSoFar) {
+      const { headSha } = await writes.commitFiles({ repo, baseBranch: branch, branch, message: `chore(platfolio): update the ${p.dir} template`, files: p.files });
+      console.log(`  ${repo}: republished onto ${branch} at ${headSha.slice(0, 10)}`);
+    } else {
       const b = `platfolio/publish-${p.dir}`;
       const { headSha } = await writes.commitFiles({ repo, baseBranch: branch, branch: b, message: `chore(platfolio): publish the ${p.dir} template`, files: p.files });
       const pr = await writes.openPullRequest({
@@ -96,9 +120,6 @@ try {
         body: `Written by platfolio from \`platform-templates/${p.dir}\` in platfolio's own repository.\n\nThis is ${p.label}. The source of truth stays in platfolio; this repository is the artifact, so a team that wants a different starting point forks it and owns the result.`,
       });
       console.log(`  ${repo}: commit ${headSha.slice(0, 10)} -> PR #${String(pr.number)} ${pr.htmlUrl}`);
-    } else {
-      const sha = await writes.createInitialCommit({ repo, branch, message: `chore(platfolio): publish the ${p.dir} template`, files: p.files });
-      console.log(`  ${repo}: initial commit ${sha.slice(0, 10)} on ${branch}`);
     }
   }
 } finally {

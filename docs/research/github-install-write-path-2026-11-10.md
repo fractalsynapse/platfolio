@@ -42,3 +42,30 @@ written" would have been false. No commit was created by the probes — only by 
 
 The generated workflow pins the managed action by commit SHA, and **that action does not exist yet** — so #122
 is a draft that proves the write path and must not be merged. Filed as #123.
+
+
+## Update: publishing into an empty repository (same day)
+
+Three template repositories were published with this path, and two assumptions died on contact.
+
+**The Git data API cannot bootstrap an empty repository.** `POST /git/blobs` answers **409 "Git Repository is
+empty"** — no blob, therefore no tree, commit or ref. My `createInitialCommit` was written against a fake that
+happily accepted blobs on an empty repo, so its tests passed and it could never have run. The branch now comes
+into existence through the contents endpoint (`PUT /contents/{path}`), which does permit a first write, and the
+full file set follows as one commit — two commits, honestly labelled, rather than a publisher that cannot
+publish.
+
+**"No history" and "I could not read the history" looked identical.** `GET /repos/…/commits` returns a **bare
+array**; reading `.commits` gave `undefined`, which fell through to "not platfolio's", which routed both real
+publishes down the pull-request path — creating two PRs that should never have existed. The same class of bug
+as the first one: a response-shape assumption that fails quietly. Both shapes are now read, a 403 throws
+instead of returning an empty list, and the closed PRs carry the explanation.
+
+What the policy is now, and why: an empty repo is seeded and committed onto its default branch; a repo whose
+commits are all `chore(platfolio)` is republished the same way (a pull request against our own output would ask
+a human to approve a no-op every time); anything with someone else's history gets a branch and a PR, which is
+what the `pull_requests` grant is for.
+
+Final state: `platfolio-starter-web` (6 files), `platfolio-starter-worker` (6), `platfolio-shared-identity` (4),
+each private, empty at first, with the template content verified by reading the tree and the bytes back from
+the API rather than trusting the commit succeeded.
