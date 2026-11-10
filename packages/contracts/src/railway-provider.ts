@@ -388,7 +388,20 @@ export class RailwayInfraProvider implements InfraProvider {
     };
   }
 
-  async deleteInstance(instanceId: string): Promise<DeleteResult> {
+  /**
+   * Tear an instance down. `retainMounts` names the mount paths whose volumes stay behind, attached to
+   * nothing -- the state half of the hibernate pattern, where compute is destroyed and the disk is kept for a
+   * future service to mount.
+   *
+   * Mounts, not names, because a name is not a shared identity: Railway names volumes itself as
+   * `<service>-volume` while the plan's `name` is a tenant-facing label, so an option keyed on either one
+   * would silently match nothing the other was called. The mount is what the plan declares and what the
+   * provider reads back, so it is the only thing both sides can agree on.
+   *
+   * The caller supplies it because retention is a plan decision and deleteInstance receives only an instance
+   * id; storing retention state inside the provider would be a second source of truth for a fact the plan owns.
+   */
+  async deleteInstance(instanceId: string, options: { retainMounts?: string[] } = {}): Promise<DeleteResult> {
     // Resolve in the order the mapping guarantees: our derived name, then a stored Railway id, then a bare
     // name for projects a tenant created by hand. applyPlan creates by derived name, so the first lookup is
     // the one that makes read-back work -- and read-back is the whole point of the controller loop.
@@ -422,7 +435,21 @@ export class RailwayInfraProvider implements InfraProvider {
       // whose volume still existed was refused by serviceDelete ("Problem processing request"), while an
       // identical volume-less one deleted cleanly -- so #107 was ordering, not a capability limit, and the
       // previous order (services first, volumes after) guaranteed the refusal at every attempt.
+      // Instance rows carry the mounts; a volume with no live instance has no mount to match and is treated
+      // as already-orphaned, which is the state a retained volume reaches once its service is gone.
+      const instancesByVolume = new Map<string, string>();
+      for (const environment of environments) {
+        for (const row of await this.volumeInstances(project.id, environment.id, credential)) instancesByVolume.set(row.volumeId, row.mountPath);
+      }
+      const retain = new Set(options.retainMounts ?? []);
+      const retained: string[] = [];
       for (const volume of volumesAtStart) {
+        const mount = instancesByVolume.get(volume.id);
+        if (mount && retain.has(mount)) { retained.push(`${volume.name} (mounted at ${mount})`); continue; }
+        // `volumeDelete` answers true and *schedules* removal: measured, the volume keeps `isPendingDeletion`
+        // with a `deletedAt` about two days out and stays listed meanwhile. So "removed" here means "we asked",
+        // which is why a retained volume is reported as retained rather than conflated with either outcome.
+        if (retain.has(volume.name)) { retained.push(volume.name); continue; }
         await this.transport.graphql({ operation: 'volumeDelete', credential, query: 'mutation ($volumeId: String!) { volumeDelete(volumeId: $volumeId) }', variables: { volumeId: volume.id } })
           .then(() => { removed.push(`volume:${volume.name}`); })
           .catch(() => { /* unresolved: classified after the project goes */ });
@@ -471,6 +498,8 @@ export class RailwayInfraProvider implements InfraProvider {
 
     // Classify against the snapshot. Reachability after the delete is the only way to tell "released with
     // the project" from "still out there", so it is probed rather than assumed.
+    // A retained volume is not an orphan and was not released with the project; it is a decision. Reported
+    // that way so the platform's own accounting cannot quietly turn "we kept it" into "it is gone".
     const reachable = await this.reachableResources(project.id, credential);
     for (const item of expected) {
       if (removed.includes(item)) continue;
@@ -481,7 +510,7 @@ export class RailwayInfraProvider implements InfraProvider {
     if (orphans.length) {
       deleteFailures.push({ step: "orphans", code: "teardown-incomplete", message: `${String(orphans.length)} resource(s) still reachable after projectDelete: ${orphans.join(", ")}` });
     }
-    return { instanceId, removed, orphans, ...(releasedWithProject.length ? { releasedWithProject } : {}), ...(deleteFailures.length ? { failures: deleteFailures } : {}) };
+    return { instanceId, removed, orphans, ...(retained.length ? { retained } : {}), ...(releasedWithProject.length ? { releasedWithProject } : {}), ...(deleteFailures.length ? { failures: deleteFailures } : {}) };
   }
 
   // --- internals -------------------------------------------------------------------------------
@@ -1137,6 +1166,29 @@ export class RailwayInfraProvider implements InfraProvider {
       failures.push({ step, code: 'unknown-service', message: `volume "${volume.name}" targets service "${volume.service}", which is not resolved in "${envName}"` });
       return;
     }
+    // Reuse before create, matched on the MOUNT, not the declared name. Measured on the live API: Railway
+    // names volumes itself, as `<service>-volume` -- `state-cache` never appears anywhere -- so a plan's
+    // `name` is a label for the tenant and not an identity. Matching on it looked correct, passed review, and
+    // could never fire: the provider would have created a second disk beside the survivor in exactly the
+    // hibernate case this exists to support.
+    const instances = await this.volumeInstances(projectId, environmentId, credential);
+    const survivor = instances.find((i) => i.mountPath === volume.mountPath);
+    if (survivor) {
+      if (survivor.serviceId === serviceId) return;
+      try {
+        await this.transport.graphql({
+          operation: 'volumeInstanceUpdate',
+          credential,
+          query: 'mutation ($environmentId: String!, $volumeId: String!, $input: VolumeInstanceUpdateInput!) { volumeInstanceUpdate(environmentId: $environmentId, volumeId: $volumeId, input: $input) }',
+          variables: { environmentId, volumeId: survivor.volumeId, input: { serviceId, mountPath: volume.mountPath } },
+        });
+        notes.push({ step, code: 'volume-reused', message: `volume at ${volume.mountPath} already existed (${survivor.volumeName}); re-attached to "${volume.service}" instead of creating a second disk -- the state from its previous service is intact` });
+      } catch (error) {
+        failures.push({ step, code: 'volume-reattach-failed', message: `existing volume at ${volume.mountPath} could not be attached to "${volume.service}": ${(error as Error).message.slice(0, 160)}` });
+      }
+      return;
+    }
+
     try {
       await this.transport.graphql({
         operation: 'volumeCreate',
@@ -1201,6 +1253,25 @@ export class RailwayInfraProvider implements InfraProvider {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * The per-environment attachments. `Volume` carries no service and no mount path -- that lives on
+   * `VolumeInstance`, per environment -- which is both why a volume can outlive its service and why the mount
+   * is the only stable identity a plan can match on. An unreadable answer is empty rather than an error: a
+   * volume is created in that case, and the duplicate it might have caused is reported by the read-back below.
+   */
+  private async volumeInstances(projectId: string, environmentId: string, credential: RailwayCredential): Promise<{ volumeId: string; volumeName: string; serviceId: string; mountPath: string }[]> {
+    const data = await this.transport.graphql<{ environment: { volumeInstances?: { edges: { node: { serviceId?: string | null; mountPath?: string | null; volumeId?: string | null; volume?: { name?: string | null } | null } }[] } | null } | null }>({
+      operation: 'environment.volumeInstances',
+      credential,
+      query: 'query ($environmentId: String!) { environment(id: $environmentId) { volumeInstances(first: 50) { edges { node { serviceId mountPath volumeId volume { name } } } } } }',
+      variables: { environmentId },
+    }).catch(() => null);
+    return (data?.environment?.volumeInstances?.edges ?? [])
+      .map((e) => e.node)
+      .filter((n): n is { serviceId: string; mountPath: string; volumeId: string; volume?: { name?: string | null } | null } => Boolean(n.serviceId && n.mountPath && n.volumeId))
+      .map((n) => ({ volumeId: n.volumeId, volumeName: n.volume?.name ?? n.volumeId, serviceId: n.serviceId, mountPath: n.mountPath }));
   }
 
   private async listVolumes(projectId: string, credential: RailwayCredential): Promise<{ id: string; name: string }[]> {

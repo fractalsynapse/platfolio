@@ -136,6 +136,17 @@ spec:
 
 An archetype is a defaults module plus a validation rule set — not a separate format.
 
+### Archetypes and volume retention
+
+`archetype` gates validation, so a new value has to carry a rule or it is just a label: `worker` is refused
+if any service publishes a host (nothing connects inbound), `shared-service` requires one (an unreachable
+team service cannot be bound to). Both were added for the template set; `api-service` and `full-stack-web`
+keep their existing rules.
+
+`resources.volumes` entries accept `retention: instance | survive` — `survive` keeps the disk when the
+instance is torn down, so a later service can mount the same state. The **mount** is the identity used
+throughout, because Railway names volumes itself and ignores the declared label.
+
 ### Environment inventory (D33, implemented)
 
 Obligations live beside the manifest, not inside it: `templates/*/.platfolio/environment.yaml` declares

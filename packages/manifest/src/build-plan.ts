@@ -96,7 +96,7 @@ export function buildPlan(manifest: Manifest, config: InstanceConfig): InfraPlan
       buckets: storage && placedNames.size ? [{ name: storage.name, ...(storage.region ? { region: storage.region } : {}) }] : [],
       volumes: declaredVolumes
         .filter((v) => placedNames.has(v.service))
-        .map((v) => ({ name: v.name, service: v.service, mountPath: v.mountPath, ...(v.sizeGB ? { sizeMB: v.sizeGB * 1024 } : {}) })),
+        .map((v) => ({ name: v.name, service: v.service, mountPath: v.mountPath, ...(v.sizeGB ? { sizeMB: v.sizeGB * 1024 } : {}), ...(v.retention ? { retention: v.retention } : {}) })),
     };
   });
 
