@@ -6,6 +6,11 @@
   "description": "API-stable capability contracts for platfolio: interfaces, config schemas and conformance suites. The only surface provider implementations are written against.",
   "license": "Apache-2.0",
   "main": "./src/index.ts",
-  "exports": { ".": "./src/index.ts" },
-  "dependencies": { "zod": "^4.6.7" }
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "libsodium-wrappers-sumo": "^0.8.4",
+    "zod": "^4.6.7"
+  }
 }

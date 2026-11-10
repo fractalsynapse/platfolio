@@ -5,6 +5,17 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+### Added
+
+- **Write-once secret path (D32, #93).** `GithubActionsSecretWriter` places a secret the tenant just
+  supplied, checks presence (`set` / `missing` / `unverifiable`), and rotates by delete-and-reissue. It has
+  no read method, and a test asserts that absence rather than trusting GitHub's write-only API. Verified
+  live: `missing → write → set`, `GET` returns `name, created_at, updated_at` and the value appears in no
+  response, a second write rotates, `remove → missing`.
+  [Research record](docs/research/github-actions-secret-write-2026-11-09.md) — three base64 and endpoint
+  details that cost time, and the two ways my own test double was more forgiving than the real API.
+
+
 ## [0.3.0] - 2026-11-09
 
 Range reviewed: `0.2.0..staging`, 40 commits, closing #69, #70, #71, #72, #75, #77, #78, #80, #82–#91.
