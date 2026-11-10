@@ -76,6 +76,18 @@ export const ManifestSchema = z.object({
     }).strict(),
     resources: Resources.default({ volumes: [] } as never),
     services: z.record(z.string(), Service),
+    /**
+     * How the release pipeline produces the image a plan is allowed to pin (D16, D29). The authouring file
+     * names the registry and the recipe; the digest arrives in the generated prod overlay, never here --
+     * which is what makes "nobody maintains the prod file by hand" checkable rather than aspirational.
+     */
+    release: z.object({
+      registryImage: z.string().min(3),
+      buildPath: z.string().min(1).optional(),
+      dockerfile: z.string().min(1).optional(),
+      /** Branch/tag pattern the pipeline builds. A pattern that can yield `:latest` is refused. */
+      tagPattern: z.string().min(1).optional(),
+    }).strict().optional(),
     dns: z.object({
       ownershipVerification: z.enum(['txt']).default('txt'),
       apexPolicy: z.enum(['cname-flattening-only', 'forbidden']).default('cname-flattening-only'),

@@ -1,0 +1,8 @@
+# Dev overlay: build from source, no pins, host ports. Never used to derive hosted state.
+services:
+  status:
+    build:
+      context: ../..
+      dockerfile: apps/status-api/Dockerfile
+    ports:
+      - "8080:8080"
