@@ -15,6 +15,7 @@ selections it has already made are recorded, not improvised:
 | Kind of fact | Canonical location |
 | --- | --- |
 | Accepted decisions and open ones | [docs/design/01 § Decision register](docs/design/01-product-and-decisions.md) |
+| Entity model and its known limits (persons, teams, instances, templates, bindings) | [docs/design/17-object-model.md](docs/design/17-object-model.md) — labelled implemented / contract-only / absent |
 | Goal, invariants, and what is out of scope | [docs/design/00-target-architecture.md](docs/design/00-target-architecture.md) — check a change against it before implementing |
 | Architecture and contracts | [docs/design/README.md](docs/design/README.md), then [02](docs/design/02-architecture.md), [03](docs/design/03-manifest-spec.md), [10](docs/design/10-cordis-kernel-and-extension-seams.md) |
 | Verified provider constraints and evidence | [docs/platfolio-feasibility.md](docs/platfolio-feasibility.md), [docs/research/](docs/research/) |

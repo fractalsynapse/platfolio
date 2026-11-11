@@ -27,6 +27,7 @@ the check before implementing and 01 as the record of what was decided.
 | [14](14-first-connect-runbook.md) | First connect runbook | The ordered M2 steps with the two browser-only consent actions marked, and the assumption each later step is meant to falsify |
 | [15](15-managed-action-brief.md) | The managed action brief | State at the handoff point, the sequence #123 must implement, the open design questions, and the constraints that do not bend |
 | [16](16-foundation-build-order.md) | Foundation build order | Interfaces first: why identity and the API are one build, the four slices to a self-hosted platfolio, and the rule that keeps us out of side bugs |
+| [17](17-object-model.md) | Object model | Persons, teams, instances and templates in plain terms; what is implemented, contract-only, or absent, and the five places the model will not stretch |
 
 Evidence base, not restated here:
 
