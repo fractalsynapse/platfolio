@@ -75,7 +75,7 @@ test('in-team sharing works, and both sides can see the dependency', async () =>
     const consumers = await app.call(`/api/v1/instances/${idp.id}/consumers`);
     app.againstSpec('listConsumers', 200, consumers.body);
     const listed = consumers.body as Array<{ consumerInstanceId: string; capability: string }>;
-    assert.equal(listed.length, 1, 'the provider side must answer "what depends on me" -- the question #177 exists to serve');
+    assert.equal(listed.length, 1, 'the provider side must answer "what depends on me" -- the question #176 exists to serve');
     assert.equal(listed[0]?.consumerInstanceId, web.id);
 
     const mine = await app.call(`/api/v1/instances/${web.id}/bindings`);
@@ -126,7 +126,7 @@ test('a cross-team bind needs a live share, and the refusal names the gate rathe
     const stale = await app.call(`/api/v1/instances/${consumerTeam.instance.id}/bindings`);
     const rows = stale.body as Array<{ state: string }>;
     assert.equal(rows.length, 1, 'revoking a share must not delete the binding record');
-    assert.equal(rows[0]?.state, 'stale', 'the dependency stays visible: an invisible binding is the failure #177 exists to prevent');
+    assert.equal(rows[0]?.state, 'stale', 'the dependency stays visible: an invisible binding is the failure #176 exists to prevent');
     const afterRevoke = await app.call('/api/v1/capabilities?capability=identity');
     assert.equal((afterRevoke.body as unknown[]).length, 0, 'a revoked offer should withdraw from discovery');
   } finally {

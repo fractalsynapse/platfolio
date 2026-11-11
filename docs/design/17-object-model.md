@@ -28,9 +28,9 @@ instances, and a person is never a billing unit.
 | Dispatch | `id` | nonce, plan hash, action, environment, expiry, consumedAt | implemented |
 | Attestation | `dispatchId` | result, resources, release, actor kind | implemented |
 | Audit | `id` | actor kind + ref, action, target, detail | implemented |
-| Capability offer | `(instanceId, capability)` | outputs as names + kinds + placement state | implemented (#177) |
+| Capability offer | `(instanceId, capability)` | outputs as names + kinds + placement state | implemented (#176) |
 | Capability share | `(instanceId, capability, toTeamId)` | cross-team grant; `*` is recorded, never implied | implemented (D42) |
-| Binding | `(consumerInstanceId, capability)` | provider instance, destinations, bound/stale | implemented (#177) |
+| Binding | `(consumerInstanceId, capability)` | provider instance, destinations, bound/stale | implemented (#176) |
 | Environment state | — | per-environment health (staging vs production) | **absent** |
 | Entitlement / plan limits | — | seats, instance caps, features | **absent** |
 
@@ -66,10 +66,12 @@ bound to team A's Keycloak. Consequences of leaving that in the manifest only:
 
 Ordered by how much damage they do if we build the CLI and API on top of them as they are.
 
-**1. Bindings are not records.** Add `capability_providers` (instance, capability name, outputs as JSONB) and
-`capability_bindings` (consumer instance, provider instance, output → destination name, state). Both are
-`Store` methods with conformance cases, so the second driver proves the shape. Cross-team provisioning is a
-later, separate decision — the table that permits it should exist before we decide whether to.
+**1. Bindings are not records.** → **Done (#176).** `capability_offers`, `capability_shares` and
+  `capability_bindings` exist (migration `006`), one `checkBindingPolicy` shared by both drivers, and eight
+  operations on the API. The provider side answers "what breaks if I remove this?" -- which is what D43's
+  destroy consults before it refuses. Cross-team sharing is a grant, and revoking ages bindings to `stale`
+  instead of deleting them.
+
 
 **2. `Instance.platform` is a template id in a field called platform.** Rename to `template`, and add
 `templateRef` (repository + commit SHA) so the origin is recorded the way the action's pin is -- by commit, not

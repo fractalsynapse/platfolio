@@ -383,7 +383,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
     },
   };
 
-  // Bindings (#177, D42). The provider side and the consumer side are separate routes because the question
+  // Bindings (#176, D42). The provider side and the consumer side are separate routes because the question
   // asked of each is opposite: "what do I depend on" versus "what breaks if I go away".
   const bindings: ExtensionDescriptor = {
     id: 'bindings',

@@ -7,7 +7,7 @@ change; entries describe merged intent, not aspirations.
 
 ### Added
 
-- **Capability bindings are records (#177, D42).** `capability_offers`, `capability_shares` and
+- **Capability bindings are records (#176, D42).** `capability_offers`, `capability_shares` and
   `capability_bindings` (migration `006`), `Store` methods for both drivers, and the shared
   `checkBindingPolicy` that gates them -- one function, so no driver can drift on a security decision. Eight
   operations designed in the OpenAPI document before any handler existed (21 operations now, `api:check`
