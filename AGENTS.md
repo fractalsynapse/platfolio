@@ -38,7 +38,9 @@ run, cross-team reads answer 404 rather than 403 so existence is not leakable, a
 walked by a test so a future instance-scoped route cannot skip the guard.
 
 What is still **not** delivered, stated because the earlier version of this paragraph was the first thing an
-agent read and it had gone stale: no Stripe integration, no CLI or web UI, A person is a `persons` row with proofs in `identities`, and membership attaches to the person (#177), so a second issuer or a machine client does not need a parallel scheme.
+agent read and it had gone stale: no Stripe integration, no CLI or web UI, and no tenant on either service.
+A person is now a `persons` row with proofs in `identities`, and membership attaches to the person (#177), so a
+second issuer or a machine client does not need a parallel authorization scheme.
 The deployed control plane is still the older in-memory `status-api`; the cutover to `apps/control-plane`
 needs a hosted Keycloak first (#172). Do not describe planned behavior as delivered, and prefer the evidence
 tier a claim actually holds: measured, tested, or designed-and-unexercised. Provider-specific claims need a
