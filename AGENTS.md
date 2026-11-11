@@ -21,6 +21,7 @@ selections it has already made are recorded, not improvised:
 | Vendored framework provenance and rules | [vendor/CORDIS.md](vendor/CORDIS.md) |
 | Change, review, check and release policy | [docs/MAINTAINING.md](docs/MAINTAINING.md) |
 | Project-specific procedures | [.agents/skills/README.md](.agents/skills/README.md) |
+| Control-plane API design (the validation mechanism itself) | [api/control-plane.openapi.yaml](api/control-plane.openapi.yaml) — spec first, then the handler |
 
 Status: foundation being poured, interfaces first (D40, [16](docs/design/16-foundation-build-order.md)).
 `packages/contracts`, `packages/manifest`, `packages/kernel` and `packages/page-schema` are implemented and
@@ -33,6 +34,26 @@ claims need a live check, and CI substitutes for none of them.
 Run `pnpm run verify` for the whole gate set. The skills under
 `.agents/skills/` inherited from the starter package stay identical to their source; project
 guidance is added beside them, never by editing them.
+
+## API rule: design in OpenAPI first, and let the spec validate
+
+Every control-plane HTTP operation is **designed before it is implemented**, in
+`api/control-plane.openapi.yaml`. The specification is not documentation that drifts behind the code; it is
+the validation mechanism for every endpoint:
+
+- **Nothing is added to the API by writing a handler.** A route that is not in the spec fails
+  `pnpm run api:check`, and an operation in the spec with no route fails it too. Both directions are checked,
+  because one-sided validation only catches half the drift.
+- **Responses are validated against the spec**, not against a second hand-written schema. Where a shape is
+  shared with a capability contract, the StandardSchema definition stays the source and the spec is generated
+  or compared against it — never re-invented (see the seam rule: one shape, one definition).
+- **Auth is described, not assumed.** Every operation declares its security scheme; an endpoint that requires
+  no auth is an explicit, reviewable exception rather than an oversight.
+- `pnpm run api:check` runs inside `pnpm run verify`, so a spec that has become fiction fails the gate that
+  every merge must pass.
+
+This exists because an API invented in handlers becomes a description of one implementation, and a platform
+whose value is pluggability needs the contract to be the thing that is checked.
 
 ## Authority and scope
 

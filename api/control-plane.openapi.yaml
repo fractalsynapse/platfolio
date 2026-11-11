@@ -1,0 +1,249 @@
+openapi: 3.1.0
+info:
+  title: platfolio control-plane API
+  version: 0.1.0
+  description: |
+    The control plane's public HTTP surface. **This file is the validation mechanism, not documentation**
+    (D41): `pnpm run api:check` fails if a handler exists without an operation here, if an operation here has
+    no route, or if a response body does not validate against its schema below.
+
+    Scope of this revision is [16 § Slice 1](../docs/design/16-foundation-build-order.md): liveness, the
+    build identity, and one authenticated operation that proves token **verification** rather than token
+    parsing. Instance, team, dispatch and secret operations are deliberately absent — they arrive with the
+    records that make them truthful, and an API designed before its data model is a description of a hope.
+
+    What authenticated means here: a bearer JWT whose signature, `iss`, `aud`, `exp`/`nbf` and `sub` have been
+    checked against JWKS pinned to the configured issuer (the `identity.provider` seam, docs/design/10). A
+    token that merely decodes is unauthenticated, and a claim of identity from one is the failure mode this
+    whole slice exists to make impossible.
+
+    The secret rule holds here too (D4): no operation accepts, returns or echoes a secret **value**. Names,
+    presence and provenance only, from the API up.
+  contact:
+    name: platfolio
+servers:
+  - url: http://localhost:8080
+    description: local Compose stack (docker compose up — Postgres, Keycloak, control-plane)
+tags:
+  - name: operational
+    description: Unauthenticated liveness and build identity. Safe to probe; carries no tenant data.
+  - name: identity
+    description: Operations that require a verified token.
+
+paths:
+  /healthz:
+    get:
+      operationId: getHealth
+      tags: [operational]
+      summary: Liveness
+      description: |
+        Fixed payload on purpose: an operator can compare instances without reading a value that varies per
+        deployment. `livenessToken` is a digest of commit and version — it identifies the build without
+        exposing the version string in environments where that is unwanted, and it is not a credential.
+      security: []
+      responses:
+        '200':
+          description: Process is up.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Health' }
+              example: { status: ok, livenessToken: c914f7c467eeb7e4 }
+
+  /readyz:
+    get:
+      operationId: getReady
+      tags: [operational]
+      summary: Readiness, per dependency, with honest absence
+      description: |
+        Every declared dependency reports one of `ok`, `degraded`, `failed`, or `not-configured`. The last is
+        not a synonym for `ok`: a control plane that starts happily without its database is how a deployment
+        reaches a green dashboard and a red reality. `status` is `ready` only when no check is `failed`, and
+        a `degraded` check must carry a `detail` a human can act on.
+
+        This endpoint answers 503 when not ready, so a load balancer can act on it.
+      security: []
+      responses:
+        '200':
+          description: Ready to serve.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Ready' }
+        '503':
+          description: 'Not ready. Same shape, with status not-ready and the failing or degraded checks named.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Ready' }
+
+  /version:
+    get:
+      operationId: getVersion
+      tags: [operational]
+      summary: Which build this is, and which provider contract it speaks
+      description: |
+        The provider contract version is part of the build's identity: an operator comparing a tenant's
+        instance state against a control-plane version needs to know which contract produced it
+        (docs/design/02). Values come from the build environment, never from a request.
+      security: []
+      responses:
+        '200':
+          description: Build identity.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Version' }
+
+  /api/v1/whoami:
+    get:
+      operationId: getWhoami
+      tags: [identity]
+      summary: Echo the claims of the verified token — the smallest proof that verification works
+      description: |
+        Returns the claims **after** signature and validity checks, not the parsed payload. Two properties
+        make this endpoint worth having at all:
+
+        - A forged, expired, wrong-audience, wrong-issuer or signature-mismatched token yields **401**, not a
+          body. An endpoint that decodes and echoes would pass a naive test and be the weakest link in the
+          platform, which is precisely the mistake #159 documents for the runner path.
+        - The `sub` here is a platfolio-user subject from platfolio's own realm. It is never accepted as, and
+          never carries, authority over tenant infrastructure: platfolio-user identity and tenant identity do
+          not share a realm, audience or token (docs/design/05). A token for this API must be useless against
+          a tenant's provider — and `tenantAuthority: false` states that refusal as data rather than as policy.
+
+        Echoed claims are allow-listed. Unknown claim names are not returned, so a token cannot use this API to
+        smuggle content into a log or a UI.
+      security:
+        - bearerJwt: []
+      responses:
+        '200':
+          description: Verified identity.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Whoami' }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          description: Token verified but lacks a required scope for this operation.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: insufficient-scope, message: 'token lacks the platfolio.user scope' }
+
+components:
+  securitySchemes:
+    bearerJwt:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        Access token issued by platfolio's Keycloak realm. Verified against JWKS pinned to the configured
+        issuer; `RS256` only, and `alg: none` or an HMAC-shaped token is refused regardless of what the
+        attacker's header claims (algorithm-confusion is the reason the allowed set is checked, not assumed).
+
+  responses:
+    Unauthenticated:
+      description: No token, a token that failed verification, or one that is expired or not yet valid.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: unauthenticated, message: 'token signature does not match the pinned issuer key set' }
+      headers:
+        WWW-Authenticate:
+          description: The challenge, so a client can distinguish "no credentials" from "bad credentials".
+          schema: { type: string }
+          example: 'Bearer realm="platfolio", error="invalid_token"'
+
+  schemas:
+    Health:
+      type: object
+      additionalProperties: false
+      required: [status, livenessToken]
+      properties:
+        status: { type: string, enum: [ok] }
+        livenessToken:
+          type: string
+          pattern: '^[0-9a-f]{16}$'
+          description: sha256(commit + version), truncated. Not a credential.
+
+    Ready:
+      type: object
+      additionalProperties: false
+      required: [status, checks]
+      properties:
+        status: { type: string, enum: [ready, not-ready] }
+        checks:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/ReadinessCheck' }
+    ReadinessCheck:
+      type: object
+      additionalProperties: false
+      required: [name, status]
+      properties:
+        name:
+          type: string
+          description: Dependency identifier, stable across builds (`database`, `identity`).
+        status: { type: string, enum: [ok, degraded, failed, not-configured] }
+        detail:
+          type: string
+          description: |
+            Present for `degraded` and `failed`, and it must not contain a credential, DSN or connection
+            string — names and reasons only (D4).
+
+    Version:
+      type: object
+      additionalProperties: false
+      required: [name, version, commit, buildTime, providerContract]
+      properties:
+        name: { type: string, enum: [control-plane] }
+        version: { type: string, minLength: 1 }
+        commit:
+          type: string
+          pattern: '^[0-9a-f]{7,40}$'
+        buildTime: { type: string, format: date-time }
+        providerContract:
+          type: object
+          additionalProperties: false
+          required: [name, version]
+          properties:
+            name: { type: string, enum: [infra.provider] }
+            version: { type: string, pattern: '^[0-9]+\.[0-9]+\.[0-9]+' }
+
+    Whoami:
+      type: object
+      additionalProperties: false
+      required: [subject, issuer, audience, clientId, scope, expiresAt, tenantAuthority]
+      properties:
+        subject: { type: string, minLength: 1, description: 'The token `sub`. Never a secret.' }
+        issuer: { type: string, description: 'The `iss` that was checked against the pinned issuer.' }
+        audience:
+          type: array
+          items: { type: string }
+          minItems: 1
+          description: 'The `aud` claim(s) that satisfied the required audience.'
+        clientId: { type: string, description: 'Authorized party (`azp` or `client_id`).' }
+        scope:
+          type: array
+          items: { type: string }
+          description: Empty when the token carries none; absence is not the same as `all`.
+        expiresAt: { type: string, format: date-time }
+        tenantAuthority:
+          type: boolean
+          const: false
+          description: |
+            Always false, and asserted rather than implied: this token authenticates a platfolio user to
+            platfolio and confers no authority over tenant infrastructure (docs/design/05 invariants).
+
+    Error:
+      type: object
+      additionalProperties: false
+      required: [error, message]
+      properties:
+        error:
+          type: string
+          description: Machine-readable code. Stable, so clients branch on it rather than on prose.
+        message:
+          type: string
+          maxLength: 300
+          description: |
+            Human-readable, and credential-safe by construction: the server redacts credential-shaped text
+            before writing it (the same `redactCredentialShaped` rule the managed action applies to
+            attestation fields).
