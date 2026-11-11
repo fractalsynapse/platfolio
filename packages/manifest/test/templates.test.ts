@@ -8,7 +8,7 @@ import {
   type Manifest,
 } from '../src/index.ts';
 
-const ROOT = path.resolve('platform-templates');
+const ROOT = path.resolve('templates');
 // A real digest of a real image, standing in for what the tenant's release pipeline would pin. The
 // assertions below are about the plan's shape, not about which bytes that image contains.
 const PIN = { image: 'ghcr.io/fractalsynapse/platfolio-status-api', tag: 'staging', digest: 'sha256:704e2d24f888e2502e27271723cdd8d7493b1a7fd8530a93f25ab916c2e7df95' };

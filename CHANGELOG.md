@@ -5,6 +5,26 @@ change; entries describe merged intent, not aspirations.
 
 "## [Unreleased]
 
+### Changed
+
+- **Repository layout, following the duplication through to its cause.** `platform-templates/` is now
+  `templates/` (the only thing that is a template, published into the organization's repositories); the two
+  illustrative manifests under `templates/example-*` are now `samples/web-app` and `samples/full-stack`
+  (inputs for tests and [03](docs/design/03-manifest-spec.md), never templates); platfolio's own deployment
+  description moved from `platforms/platfolio/` to `selfhost/`, which is what it always was -- a first-party
+  deployment, not a catalog entry with one member.
+- **One service definition instead of two.** `apps/status-api/compose.yaml`, `compose.prod.yaml` and
+  `compose.dev.yaml` are deleted: the first duplicated `selfhost/compose.yaml` line for line with only its
+  comments differing, and the two `compose.prod.yaml` files were **byte-identical**. That duplication is why
+  every image pin had to be regenerated in two places, and why a forgotten second file would have quietly
+  deployed a superseded digest. The app keeps its Dockerfile and source; deployment shape lives in `selfhost/`.
+- **Deleted the dead realm file** `platforms/platfolio/identity/platfolio-realm.json` -- zero references, and
+  Keycloak 26.8.2 would not import it (#168). The realm is created by `identity:seed`, which works.
+- `examples/` is untouched and remains gitignored: it holds reference clones (the Cordis checkout, a
+  scaffold), not platfolio's own material. Earlier entries in this file describe the layout as it was when they
+  were written and have deliberately not been rewritten to match.
+
+
 ### Added
 
 - **Slice 2 (#162): the control plane has records, and they are a capability.** `packages/contracts` gains

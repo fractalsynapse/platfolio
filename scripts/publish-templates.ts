@@ -57,9 +57,9 @@ const creds = JSON.parse(readFileSync(credsPath, 'utf8')) as { appId: number; pr
 if (!creds.installationId) { console.error('  No installationId recorded; install the app, then re-run.'); process.exit(1); }
 
 console.log(`  organization: ${org}   branch: ${branch}   ${apply ? 'APPLY' : 'DRY RUN (no writes)'}`);
-const plans = TEMPLATES.map((t) => ({ ...t, files: collect(`platform-templates/${t.dir}`) }));
+const plans = TEMPLATES.map((t) => ({ ...t, files: collect(`templates/${t.dir}`) }));
 for (const p of plans) {
-  console.log(`  ${p.repo}  <- platform-templates/${p.dir}  (${String(Object.keys(p.files).length)} files: ${p.label})`);
+  console.log(`  ${p.repo}  <- templates/${p.dir}  (${String(Object.keys(p.files).length)} files: ${p.label})`);
   console.log(`      ${Object.keys(p.files).sort().join(', ')}`);
 }
 if (!apply) {
@@ -96,7 +96,7 @@ try {
       const { headSha, seeded } = await writes.seedAndCommit({
         repo,
         branch,
-        seedFile: { path: 'README.md', content: `# ${p.repo}\n\nPublished by platfolio from \`platform-templates/${p.dir}\`. Fork it and make it yours.\n` },
+        seedFile: { path: 'README.md', content: `# ${p.repo}\n\nPublished by platfolio from \`templates/${p.dir}\`. Fork it and make it yours.\n` },
         message: `chore(platfolio): publish the ${p.dir} template`,
         files: p.files,
       });
@@ -117,7 +117,7 @@ try {
       const { headSha } = await writes.commitFiles({ repo, baseBranch: branch, branch: b, message: `chore(platfolio): publish the ${p.dir} template`, files: p.files });
       const pr = await writes.openPullRequest({
         repo, title: `Publish the ${p.dir} platform template`, base: branch, head: b,
-        body: `Written by platfolio from \`platform-templates/${p.dir}\` in platfolio's own repository.\n\nThis is ${p.label}. The source of truth stays in platfolio; this repository is the artifact, so a team that wants a different starting point forks it and owns the result.`,
+        body: `Written by platfolio from \`templates/${p.dir}\` in platfolio's own repository.\n\nThis is ${p.label}. The source of truth stays in platfolio; this repository is the artifact, so a team that wants a different starting point forks it and owns the result.`,
       });
       console.log(`  ${repo}: commit ${headSha.slice(0, 10)} -> PR #${String(pr.number)} ${pr.htmlUrl}`);
     }

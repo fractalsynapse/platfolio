@@ -20,7 +20,7 @@ Two facts make the ordering concrete:
 Cordis kernel (`apps/control-plane`), Postgres, Astro site later, containerized, **Docker Compose for local
 development**, and its own Railway project for staging and production — the same architecture it will sell.
 platfolio's own identity is Keycloak (D40), the same shared-service shape a tenant gets from
-`platform-templates/shared-identity`.
+`templates/shared-identity`.
 
 ## Slice 1 — a service that starts, locally, with real tokens
 
@@ -31,7 +31,7 @@ token from Keycloak returns something true.
   (contract + commit), and `GET /api/v1/whoami` echoing verified token claims — the smallest surface that
   proves verification works rather than accepting strings.
 - Compose: postgres, keycloak (seeded realm `platfolio`, dev clients, one import file under
-  `platforms/platfolio/identity/` so the realm is declarative, not clicking), control-plane. Seed two demo
+  `selfhost/identity/` so the realm is declarative, not clicking), control-plane. Seed two demo
   users and a device-flow client so the CLI path is testable on day one.
 - Verification, not parsing: JWKS pinned to the configured issuer; `iss`, `aud`, `exp`/`nbf`, and a
   required `sub`. **A token that merely decodes is not authenticated** — that distinction is the whole point

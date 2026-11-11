@@ -12,7 +12,7 @@ function load(p: string): Manifest {
   assert.equal(r.issues.length, 0, JSON.stringify(r.issues));
   return r.manifest!;
 }
-const fullStack = load('templates/example-full-stack/manifest.yaml');
+const fullStack = load('samples/full-stack/manifest.yaml');
 
 test('external services default to production-only, maintained ones to every enabled environment', () => {
   const enabled = enabledEnvironments(fullStack);

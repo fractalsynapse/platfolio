@@ -6,7 +6,7 @@ the runbook exists so those steps are one action each rather than a scavenger hu
 
 **First tenant: platfolio hosting platfolio.** Chosen over a throwaway repository because every resource is
 ours to create, destroy and refuse, and because issue #113 was already asking whether the Compose format is
-pleasant to author. The offline half is done (`platforms/platfolio/`); the live half is this list.
+pleasant to author. The offline half is done (`selfhost/`); the live half is this list.
 
 ## Steps requiring a human
 

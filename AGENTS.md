@@ -23,17 +23,45 @@ selections it has already made are recorded, not improvised:
 | Project-specific procedures | [.agents/skills/README.md](.agents/skills/README.md) |
 | Control-plane API design (the validation mechanism itself) | [api/control-plane.openapi.yaml](api/control-plane.openapi.yaml) — spec first, then the handler |
 
-Status: foundation being poured, interfaces first (D40, [16](docs/design/16-foundation-build-order.md)).
-`packages/contracts`, `packages/manifest`, `packages/kernel` and `packages/page-schema` are implemented and
-tested (288 tests); `apps/status-api` and the managed action in `apps/managed-action` exist and have run a
-real GitHub-initiated dispatch against a deployed control plane, which is the one end-to-end loop proven so
-far. There is still **no persistent control plane** (no database, entities, auth or tenancy), no Stripe
-integration, no CLI or web UI, and no tenant — so do not describe planned behavior as delivered, and prefer
-the evidence tier a claim actually holds: measured, tested, or designed-and-unexercised. Provider-specific
-claims need a live check, and CI substitutes for none of them.
+Status: foundation poured, interfaces first (D40, [16](docs/design/16-foundation-build-order.md)). Slices 1
+and 2 of that plan are delivered (326 tests): `apps/control-plane` boots on the vendored runtime with
+Keycloak-verified bearer auth, persistent records (`Store` as a capability with a Postgres implementation and
+an in-memory double under one conformance suite, gated in CI against a live database) and a controller that
+turns accepted attestations into stored state. `apps/status-api` plus the managed action have run a real
+GitHub-initiated dispatch end to end, which remains the only full loop proven against a deployed control plane.
+
+What is still **not** delivered, stated because the earlier version of this paragraph was the first thing an
+agent read and it had gone stale: no Stripe integration, no CLI or web UI, no tenant on either service, and
+**no team-scoping in the control-plane API** — records carry a `teamId`, but list and get endpoints do not yet
+filter by the caller's team, so the service is operator-only until that closes. The deployed control plane is
+still the older in-memory `status-api`; the cutover to `apps/control-plane` needs a hosted Keycloak first
+(#172). Do not describe planned behavior as delivered, and prefer the evidence tier a claim actually holds:
+measured, tested, or designed-and-unexercised. Provider-specific claims need a live check, and CI substitutes
+for none of them.
 Run `pnpm run verify` for the whole gate set. The skills under
 `.agents/skills/` inherited from the starter package stay identical to their source; project
 guidance is added beside them, never by editing them.
+
+## Repository layout: one thing, one home
+
+Duplication here has already caused a near-downgrade (two prod overlays, one forgotten) and a stale-pin loop.
+The layout is therefore explicit, and a new file goes where its **kind** goes:
+
+| Path | What lives there | Rule it enforces |
+| --- | --- | --- |
+| `templates/` | The three platform templates published to `fractalsynapse/platfolio-*` repositories | The only thing called a template is a template |
+| `samples/` | Illustrative manifests used by tests and [03](docs/design/03-manifest-spec.md) | Test input is not a catalog entry |
+| `selfhost/` | platfolio's own deployment: Compose service, `x-platfolio` hosting semantics, generated prod overlay, environment inventory | One service definition, not one per app directory |
+| `apps/<name>/` | Source, Dockerfile, `package.json` -- the deployable artifact itself | Deployment *shape* does not live with the app |
+| `packages/contracts/` | Capability interfaces, DTO schemas, conformance suites, provider implementations | Framework-free; the only place a seam is defined |
+| `packages/kernel/` | The only package permitted to import Cordis (D15) | Plugin wiring, never business rules |
+| `api/` | `control-plane.openapi.yaml` (design and validation, D41), `contracts.api.md`, provider schema snapshot | Spec precedes handler |
+| `db/` | Forward-only migrations and Postgres init scripts | Readiness comes from the migrations ledger |
+| `platform-templates`, `platforms/` | **gone** (Nov 2026): see CHANGELOG's layout entry | A directory with one member that duplicates another app's file was the bug |
+| `examples/` | Third-party reference clones (Cordis at its tag, a scaffold). Gitignored | Reference material is not project source |
+
+If a change would create a second copy of a fact -- a digest, a service definition, a schema, a permission
+list -- fix the ownership instead of adding a file and keeping them in step.
 
 ## API rule: design in OpenAPI first, and let the spec validate
 
