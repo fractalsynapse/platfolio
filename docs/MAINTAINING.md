@@ -109,6 +109,12 @@ Integration into `staging` does not close an implementation issue. When a releas
 - Prepare version and changelog updates on an issue branch with a `staging` PR. Only the maintainer
   approves and merges the release PR to `main`, and only they authorize publication. An agent may do
   that specific production merge only on express permission for that release.
+  - **Review gates are waived for the agent's own PRs while the first implementation is being built**
+    (D39). The agent merges to `staging` on green tests without waiting for a human and does not stop to
+    ask. This is process easing for a platform with no tenants, not an architecture change: the install PR
+    keeps its review shape because that is what a tenant will meet, and the two rules above still hold --
+    a Production run gates a tag, and a release to `main` needs the maintainer's permission for that
+    release. Revisit when the first real platform is hosted.
 - **Cut no tag on a commit that has not passed the Production workflow on `main`.** `production.yml`
   enforces this and also requires a root license file (D18: present on `staging`, reaches `main` with
   the next production integration).
