@@ -1,0 +1,31 @@
+# platfolio's managed-deployment action (D30, #123). Composite, and shipped from this repository: the
+# workflow that consumes it is generated into a tenant repository and pins this one by commit SHA, so a
+# force-push to a tag cannot change what runs in a tenant's account.
+name: platfolio managed
+description: Apply the desired state platfolio dispatched, with this repository's own credentials.
+author: platfolio
+inputs:
+  action: { description: 'apply | check | drift | suspend | export', required: true }
+  environment: { description: 'Target environment name', required: true }
+  instance_id: { description: 'platfolio instance', required: true }
+  dispatch_id: { description: 'One dispatch, echoed in the attestation', required: true }
+  nonce: { description: 'Single-use value platfolio issued', required: true }
+  plan_hash: { description: 'Digest of the plan this dispatch must apply', required: true }
+  platfolio_url: { description: 'Control-plane origin', required: true }
+outputs:
+  outcome: { description: 'ok | partial | failed | noop', value: ${{ steps.run.outputs.outcome }} }
+  changed: { description: 'Count of resources reported live', value: ${{ steps.run.outputs.changed }} }
+runs:
+  using: composite
+  steps:
+    - name: Run the dispatch
+      id: run
+      shell: bash
+      # No env: here. RAILWAY_TOKEN is set on the step that *uses* this action, in the tenant's workflow,
+      # from their own environment secret -- a composite action inherits that step env. Restating it with a
+      # mapping expression would resolve to empty and silently blank the credential every run needs.
+      # The bundle is generated from apps/managed-action by `pnpm run action:bundle` and committed so the
+      # action needs no package installation at run time. `pnpm run action:check` fails CI if it drifts,
+      # which is the same rule that governs a generated Compose prod overlay (D29).
+      run: node "$GITHUB_ACTION_PATH/dist/managed-action.mjs"
+branding: { icon: 'box', color: 'blue' }

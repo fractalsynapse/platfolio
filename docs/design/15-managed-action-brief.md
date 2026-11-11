@@ -4,6 +4,10 @@ This file exists because the session that got platfolio to this point ran out of
 action. Everything below was true at `staging = e059bef`; verify it rather than trusting it — that is the
 habit this project has been paying to build.
 
+## Status: written, tested, executed offline
+
+The action exists (`apps/managed-action`, `.github/actions/platfolio-managed`). Its remaining gap is not code: nothing answers the two endpoints it calls, so the first real dispatch waits on the control-plane service (M4) or on #113's self-host, whichever lands first.
+
 ## State to know before touching anything
 
 | Fact | Where to confirm |

@@ -13,6 +13,8 @@ export interface InstallFiles {
 }
 
 export const WORKFLOW_PATH = '.github/workflows/platfolio-managed.yml';
+/** Where the action lives inside platfolio's repository; the install workflow references it by path. */
+export const ACTION_PATH = '.github/actions/platfolio-managed';
 // No IaC file ships in the install PR. The desired state lives with platfolio and is fetched per run, so a
 // constant naming `.railway/railway.ts` was a trap: the tenant-facing document referenced it while nothing
 // emitted it. If a future design writes plans into tenant repos, it will need to add the file AND the code
@@ -102,7 +104,9 @@ export function renderInstallPullRequest(m: Manifest, opts: InstallOptions): Ins
     '',
     "      - name: Apply desired state with this repository's own credentials",
     '        id: apply',
-    `        uses: ${opts.actionRepo}@${opts.actionSha}`,
+    // Path-qualified: the action ships inside platfolio's own repository, so a bare `owner/repo@sha` would
+    // look for an action.yml at the root that is not there.
+    `        uses: ${opts.actionRepo}/${ACTION_PATH}@${opts.actionSha}`,
     // The provider credential comes from the repository environment's own secret. Without this block the
     // action had no way to reach the provider at all -- plan, identity and trigger were all present, and the
     // one thing needed to act was missing. Names in the manifest, never values: GitHub resolves the secret

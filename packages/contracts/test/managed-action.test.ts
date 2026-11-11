@@ -81,12 +81,18 @@ test('credential-shaped text in an outgoing errorCode is stopped at the source',
     ...attestationFromApply({ intent, appliedPlanHash: HASH, result: apply({ failures: [{ step: 'env', code: 'x', message: 'y' }] }), release: RELEASE, durationMs: 1, finishedAt: intent.expiresAt }),
     errorCode: 'ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123 rejected',
   };
-  assert.throws(() => assertAttestationClean(leaky), /looks like a credential/);
+  // Redaction, then refusal: the first attempt sanitizes what it recognizes (a provider echoing back a
+  // token is the common case), and anything that survives is an error rather than a warning.
+  const cleaned = assertAttestationClean(leaky);
+  assert.ok(!JSON.stringify(cleaned).includes('ghp_ABCDEF'), JSON.stringify(cleaned.errorCode));
+  assert.match(String(cleaned.errorCode), /\[redacted-token\]/);
   for (const harmless of ['deploy-timeout@services.production.worker', 'stale-plan-hash:requested-aaaa-found-bbbb']) {
     assert.equal(containsCredentialShapedText(harmless), false, harmless);
   }
   assert.equal(containsCredentialShapedText('Bearer supersercriticaltokenvalue'), true);
   assert.equal(containsCredentialShapedText('-----BEGIN RSA PRIVATE KEY-----'), true);
+  // A key fragment that redaction cannot match still has to stop the attestation, not pass through cleaned.
+  assert.throws(() => assertAttestationClean({ ...leaky, errorCode: '-----BEGIN RSA PRIVATE KEY----- truncated' }), /even after redaction/);
 });
 
 test('normalizeHash accepts both spellings and never lengthens a digest', () => {

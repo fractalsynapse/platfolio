@@ -14,6 +14,9 @@ examples/
 # Build and dependency artifacts
 node_modules/
 dist/
+# The managed action's bundle is a committed artifact on purpose: `action:check` proves it matches source,
+# and a runner that installs packages at run time is a supply chain nobody reviewed.
+!.github/actions/**/dist/
 coverage/
 *.tsbuildinfo
 
