@@ -5,6 +5,21 @@ change; entries describe merged intent, not aspirations.
 
 "## [Unreleased]
 
+### Verified live
+
+- **A dispatch launched by GitHub Actions, end to end (#123).** `workflow_dispatch` started a runner in
+  environment `production`; the committed action bundle authenticated with the shared dispatch token, carried
+  its GitHub-minted OIDC token, fetched the plan, applied it through the real provider, and the attestation
+  was **accepted and stored** (`ok`, one resource live, 884 ms) — independently confirmed by a `readState`
+  showing the service on the pinned digest. Six defects stood in the way, each found only by running: an
+  unparseable action manifest, a workflow aimed at a 404 host, a pin naming a commit without the action,
+  composite inputs that never reached the process, a missing provider workspace coordinate, and a control
+  plane running a build from before the plan-hash fix.
+- Two things this does **not** prove, filed rather than glossed: the runner's identity is recorded and not
+  verified (#159), and the attestation's release fields read `0.0.0-dev` because pins still come from a
+  laptop, not a release job (#146).
+
+
 ### Fixed
 
 - **`.github/actions/platfolio-managed/action.yml` did not parse.** The `outputs:` values held `${{ … }}`

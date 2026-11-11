@@ -76,39 +76,26 @@ workflow needs id-token: write`), reads a plan, refuses to act when the hash mov
 that echoes a token, and sets `outcome` for the workflow. The chain has now been run against the live control plane, end to end: register a plan, issue a
 single-use dispatch, execute the committed bundle (`outcome=ok`, one resource live, 1080ms), and have the
 attestation accepted and stored with the hash it should carry. Replaying the consumed dispatch returns 409.
-What is still **not** proven: a dispatch launched by GitHub Actions itself — the runner has been started
-from a shell with a locally-minted OIDC stand-in, so the workflow trigger, the environment-secret resolution,
-and real JWKS verification are untested. Notably, a duplicate attestation was refused with 400 (schema)
-rather than 409 (already-attested) because the probe sent an empty body; the 409 path is covered by tests,
-not yet by this run.
+**Proven since: a dispatch launched by GitHub Actions, end to end (2026-11-11).** `workflow_dispatch` started a
+runner in environment `production`; the committed bundle authenticated with the shared dispatch token, carried
+its GitHub-minted OIDC token, fetched the plan, applied it through the real provider, and the **attestation was
+accepted and stored** (`ok`, one resource live, 884 ms) -- then independently confirmed by `readState` showing
+the service on the pinned digest. Six defects stood between the first attempt and the run that worked: an
+unparseable `action.yml`, a workflow aimed at a host that answers 404, a pin naming a commit that lacks the
+action, composite inputs that never reach the process, a missing provider workspace coordinate, and a control
+plane running a build older than the plan-hash fix. Every one was invisible from its own file.
 
-What was NOT proven, before that run: The endpoints now exist and are tested
-(`apps/status-api/src/dispatch-api.ts`) — plan registration, single-use dispatch, attestation with
-nonce/hash/replay checks — and they state their own gap: OIDC audience, issuer, repository and signature
-verification are **not** implemented, which is `/api/v1/attestations/capabilities` saying so rather than an
-absence someone has to discover. Until the runner's token is verified, an attestation is a claim checked for
-consistency, not for identity.
+What it does not prove, stated as three limits rather than one success:
 
-## Attestation outcomes, and why `partial` exists
-
-A runner's report has four states, and the fourth is the one that keeps infrastructure honest:
-
-| `result` | Means | Rule enforced by the schema |
-| --- | --- | --- |
-| `ok` | the plan applied and read-back confirmed it | must name at least one resource for an `apply`; must not carry `errorCode` |
-| `partial` | some resources landed, something did not | must carry `errorCode`, must name at least one resource — "partial with nothing landed" is `failed` |
-| `failed` | nothing landed | must carry `errorCode` |
-| `noop` | the plan needed no change | an empty successful apply is this, never `ok` |
-
-Collapsing `partial` into `ok` hides drift permanently; collapsing it into `failed` discards resources that
-exist and are running, which the next apply then tries to create twice. The enum was widened for this
-(D37), which technically tightens any consumer switching exhaustively — there are none outside this
-repository yet, so it ships as a minor with the widening stated rather than filed under "additive".
-
-`planHash` in an attestation is the digest of **the plan that ran**, not the one that was requested: echoing
-the request would prove nothing about which plan executed. A dispatch whose fetched plan no longer matches is
-refused before anything mutates (`staleIntent`), which is the only safe answer to a queued dispatch: applying
-"whatever is current" could move a tenant to a state an operator superseded between queue and run.
+- **Identity is recorded, not verified.** The runner's GitHub OIDC token is sent and stored; audience, issuer,
+  repository binding and signature are unimplemented (#159). What authenticates today is a shared dispatch
+  secret, which means anyone holding it can post a claim -- defended only by the rule that platfolio
+  re-verifies against the provider, so a false attestation misleads nothing that survives contact.
+- **Not a tenant.** The dispatched repository is platfolio's own, and the instance is the control plane hosting
+  itself. A tenant repository, tenant workspace and tenant-owned secrets are still ahead.
+- **Pins came from a laptop.** The attestation's `release` fields read `0.0.0-dev`: the action SHA, the image
+  digest and the provenance were chosen by hand, which is #146's gap surfacing as data rather than as an
+  argument.
 
 ## Custody tiers, and what the runner is for (D24)
 
