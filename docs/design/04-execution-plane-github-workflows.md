@@ -73,10 +73,12 @@ fails if it drifts from source, which is the same rule that governs a generated 
 
 What is proven: the committed bundle boots, refuses legibly without OIDC (`no OIDC id token available; the
 workflow needs id-token: write`), reads a plan, refuses to act when the hash moved, redacts a provider error
-that echoes a token, and sets `outcome` for the workflow. What is **not** proven: a real dispatch against a
-real control plane. That needs the HTTP endpoints the runner calls (`GET /api/v1/instances/{id}/dispatches/{id}`,
-`POST /api/v1/attestations`) to exist, which is M4 — so the honest status is implemented and executable, not
-integrated.
+that echoes a token, and sets `outcome` for the workflow. What is **not** proven: a real dispatch against a live provider. The endpoints now exist and are tested
+(`apps/status-api/src/dispatch-api.ts`) — plan registration, single-use dispatch, attestation with
+nonce/hash/replay checks — and they state their own gap: OIDC audience, issuer, repository and signature
+verification are **not** implemented, which is `/api/v1/attestations/capabilities` saying so rather than an
+absence someone has to discover. Until the runner's token is verified, an attestation is a claim checked for
+consistency, not for identity.
 
 ## Attestation outcomes, and why `partial` exists
 
