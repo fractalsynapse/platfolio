@@ -22,10 +22,14 @@ selections it has already made are recorded, not improvised:
 | Change, review, check and release policy | [docs/MAINTAINING.md](docs/MAINTAINING.md) |
 | Project-specific procedures | [.agents/skills/README.md](.agents/skills/README.md) |
 
-Status: design phase, with the contract layer implemented. `packages/contracts`, `packages/manifest`,
-`packages/kernel` and `packages/page-schema` exist and are tested (98 tests); there is no service, no
-deployed resource and no external provider approval yet, so do not describe planned behavior as
-delivered. Provider-specific claims need a live check, and CI substitutes for none of them.
+Status: foundation being poured, interfaces first (D40, [16](docs/design/16-foundation-build-order.md)).
+`packages/contracts`, `packages/manifest`, `packages/kernel` and `packages/page-schema` are implemented and
+tested (288 tests); `apps/status-api` and the managed action in `apps/managed-action` exist and have run a
+real GitHub-initiated dispatch against a deployed control plane, which is the one end-to-end loop proven so
+far. There is still **no persistent control plane** (no database, entities, auth or tenancy), no Stripe
+integration, no CLI or web UI, and no tenant — so do not describe planned behavior as delivered, and prefer
+the evidence tier a claim actually holds: measured, tested, or designed-and-unexercised. Provider-specific
+claims need a live check, and CI substitutes for none of them.
 Run `pnpm run verify` for the whole gate set. The skills under
 `.agents/skills/` inherited from the starter package stay identical to their source; project
 guidance is added beside them, never by editing them.

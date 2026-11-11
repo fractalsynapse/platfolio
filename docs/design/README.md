@@ -26,6 +26,7 @@ the check before implementing and 01 as the record of what was decided.
 | [13](13-compose-first-and-execution.md) | Compose-first authoring and execution split | The manifest is a Compose document plus `x-platfolio`; platfolio acts, the tenant's pipeline executes |
 | [14](14-first-connect-runbook.md) | First connect runbook | The ordered M2 steps with the two browser-only consent actions marked, and the assumption each later step is meant to falsify |
 | [15](15-managed-action-brief.md) | The managed action brief | State at the handoff point, the sequence #123 must implement, the open design questions, and the constraints that do not bend |
+| [16](16-foundation-build-order.md) | Foundation build order | Interfaces first: why identity and the API are one build, the four slices to a self-hosted platfolio, and the rule that keeps us out of side bugs |
 
 Evidence base, not restated here:
 
