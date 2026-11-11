@@ -35,7 +35,13 @@ if (!creds.installationId) {
 }
 
 const repo = flag('repo', 'fractalsynapse/platfolio')!;
-const base = flag('branch', 'staging')!;
+// The base must be the repository's DEFAULT branch. Measured (#149): GitHub enumerates workflows from the
+// default branch only, so a workflow that lives elsewhere is not listed, cannot be dispatched by name or by
+// id, and answers 404 -- a silent "invisible", not an error about branches. An install PR based on a
+// development branch therefore produces a platform that looks managed and never is.
+const defaultBranch = execFileSync('gh', ['api', `repos/${repo}`, '--jq', '.default_branch'], { encoding: 'utf8' }).trim();
+const base = flag('branch', defaultBranch || 'main')!;
+if (base !== defaultBranch) console.log(`  warning: base ${base} is not the default branch (${defaultBranch}) -- the workflow will not be dispatchable there`);
 const platformDir = flag('platform', 'platforms/platfolio')!;
 const apply = has('apply');
 
