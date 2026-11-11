@@ -28,8 +28,20 @@ async function idToken(): Promise<string> {
   return value;
 }
 
-const bearer = await idToken();
-const headers = { authorization: `Bearer ${bearer}`, accept: 'application/json', 'content-type': 'application/json', 'user-agent': 'platfolio-managed-action' };
+// Two credentials, two purposes, and the distinction is the point. The shared dispatch token is what
+// authenticates today; the OIDC id token is the runner's identity, sent so it can be recorded and -- once
+// JWKS verification exists -- checked. Presenting only the OIDC token looked like the stronger design and
+// answered 401, because nothing verifies it yet: an unverified identity is a claim, not a credential.
+const idTokenValue = await idToken();
+const dispatchToken = process.env.PLATFOLIO_DISPATCH_TOKEN;
+if (!dispatchToken) throw new Error('PLATFOLIO_DISPATCH_TOKEN is not available to this job; set it as an environment secret');
+const headers = {
+  authorization: `Bearer ${dispatchToken}`,
+  'x-platfolio-runner-token': idTokenValue,
+  accept: 'application/json',
+  'content-type': 'application/json',
+  'user-agent': 'platfolio-managed-action',
+};
 
 await runManagedAction({
   env: process.env as Record<string, string | undefined>,

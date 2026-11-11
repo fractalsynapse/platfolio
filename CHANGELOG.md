@@ -5,6 +5,15 @@ change; entries describe merged intent, not aspirations.
 
 "## [Unreleased]
 
+### Fixed
+
+- **The dispatch API had a second, competing plan-hash implementation.** `buildPlan` computes a plan's digest
+  once and the plan carries it; `dispatch-api.ts` re-derived its own canonicalization instead. The two
+  disagreed, so a runner that applied the right plan and attested honestly was rejected 400 on every
+  attempt — found only by running the chain against the live control plane. The API now reads the plan's own
+  `planHash` and refuses a plan that arrives without one: one truth, one place.
+
+
 ### Added
 
 - **The dispatch and attestation surface the managed action calls (#123).** Served beside the existing

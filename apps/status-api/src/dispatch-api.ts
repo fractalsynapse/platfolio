@@ -55,12 +55,15 @@ export interface DispatchApiConfig {
   token: string | undefined;
 }
 
-export function planHashOf(plan: unknown): string {
-  const canonical = JSON.stringify(plan, (_key, value) =>
-    value && typeof value === 'object' && !Array.isArray(value)
-      ? Object.keys(value as object).sort().reduce<Record<string, unknown>>((acc, k) => ({ ...acc, [k]: (value as Record<string, unknown>)[k] }), {})
-      : value);
-  return sha256Hex(canonical);
+// No hash here. `buildPlan` computes the plan's digest once, in one place, and the plan carries it; a second
+// implementation -- even a deterministic one -- is a second truth, and the two disagreed within minutes of
+// this file existing (the runner attested buildPlan's hash, the API expected its own, and every attestation
+// was rejected 400). Reading the plan's own field is the fix; inventing another canonicalization is the bug.
+export function planHashOf(plan: { planHash?: unknown }): string {
+  if (typeof plan.planHash !== 'string' || plan.planHash.length < 16) {
+    throw new Error('plan must carry the planHash computed by buildPlan');
+  }
+  return plan.planHash.replace(/^sha256:/, '').toLowerCase();
 }
 
 /** Returns true when the request was handled here (a /api/v1 path), false for the caller's routes. */
@@ -86,7 +89,8 @@ export async function handleDispatchApi(req: IncomingMessage, res: ServerRespons
     reply(res, 200, {
       checks: ['nonce-replay', 'plan-hash-agreement', 'dispatch-known', 'schema'],
       notImplemented: ['oidc-audience', 'oidc-issuer', 'repository-binding', 'signature'],
-      note: 'A token is required and compared as a shared secret; the runner identity is not yet verified against JWKS.',
+      note: 'The Authorization bearer is a shared dispatch secret and is what authenticates; the runner sends its OIDC token in x-platfolio-runner-token, which is recorded, not verified.',
+      headers: { authenticate: 'authorization: Bearer <shared>', identityEvidence: 'x-platfolio-runner-token (unverified)' },
     });
     return true;
   }
@@ -99,7 +103,7 @@ export async function handleDispatchApi(req: IncomingMessage, res: ServerRespons
       const plan = body.plan;
       if (!plan || typeof plan !== 'object') throw new Error('expected { plan }');
       if (plan.instanceId !== instanceId) { reply(res, 400, { error: 'instance-mismatch', hint: `path says ${instanceId}, plan says ${String(plan.instanceId)}` }); return true; }
-      const hash = planHashOf(plan);
+      const hash = planHashOf(plan as { planHash?: unknown });
       config.store.plans.set(instanceId, { plan, planHash: hash });
       reply(res, 201, { instanceId, planHash: hash });
     } catch (error) {
