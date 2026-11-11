@@ -147,6 +147,13 @@ export class ServerService extends Service<z.infer<typeof ServerConfigSchema>> {
           method: req.method ?? 'GET', path: url.pathname, url: req.url ?? '/', query: url.searchParams,
           headers: req.headers, body, ...(bodyError === undefined ? {} : { bodyError }), raw: req,
         });
+        // 204 means no body, so sending `null` would be a lie the client has to special-case. The spec
+        // declares which operations answer 204; the transport respects it.
+        if (response.status === 204 || response.status === 304) {
+          res.writeHead(response.status, { 'cache-control': 'no-store', ...(response.headers ?? {}) });
+          res.end();
+          return;
+        }
         const payload = JSON.stringify(response.body ?? null);
         res.writeHead(response.status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...(response.headers ?? {}) });
         res.end(payload);

@@ -1,7 +1,7 @@
 import { Pool, type PoolClient } from 'pg';
 import {
-  AttestationRecordSchema, AuditEntrySchema, DispatchRecordSchema, TeamMemberSchema, InstanceSchema, ProviderConnectionSchema, RepoConnectionSchema, TeamSchema, newId,
-  type AttestationRecord, type AuditEntry, type DispatchRecord, type Instance, type ProviderConnection, type RepoConnection, type Store, type StoreError, type StoreResult, type Team, type TeamMember,
+  AttestationRecordSchema, AuditEntrySchema, BindingRecordSchema, CapabilityOfferSchema, CapabilityShareSchema, DispatchRecordSchema, TeamMemberSchema, InstanceSchema, ProviderConnectionSchema, RepoConnectionSchema, TeamSchema, newId,
+  type AttestationRecord, type AuditEntry, type BindingRecord, type CapabilityOffer, type CapabilityShare, type NewBinding, type NewCapabilityOffer, type NewCapabilityShare, type DispatchRecord, type Instance, type ProviderConnection, type RepoConnection, type Store, type StoreError, type StoreResult, type Team, type TeamMember,
 } from './persistence.ts';
 import { checkAttestationPolicy } from './dispatch-policy.ts';
 import type { Attestation } from './attestation.ts';
@@ -255,6 +255,154 @@ export class PostgresStore implements Store {
       secrets: row.secrets, connectedAt: iso(row.connected_at),
     }, 'provider connection row');
     return admitted.accepted ? ok(admitted.value) : err({ code: 'conflict', reason: admitted.reason });
+  }
+
+  async publishCapability(offer: NewCapabilityOffer) {
+    const admitted = admit(CapabilityOfferSchema, { ...offer, publishedAt: offer.publishedAt ?? new Date().toISOString() }, 'capability offer');
+    if (!admitted.accepted) return err({ code: 'conflict', reason: admitted.reason });
+    const o = admitted.value;
+    try {
+      await this.pool.query(
+        `INSERT INTO ${this.q('capability_offers')} (instance_id, capability, team_id, outputs, published_at)
+         VALUES ($1,$2,$3,$4::jsonb,$5)
+         ON CONFLICT (instance_id, capability) DO UPDATE SET outputs = EXCLUDED.outputs, published_at = now()`,
+        [o.instanceId, o.capability, o.teamId, JSON.stringify(o.outputs), o.publishedAt]);
+    } catch (error) {
+      if ((error as { code?: string }).code === '23503') return err({ code: 'not-found', what: 'instance', id: o.instanceId });
+      throw error;
+    }
+    return ok(o);
+  }
+
+  async getCapabilityOffer(instanceId: string, capability: string) {
+    const rows = (await this.pool.query(`SELECT * FROM ${this.q('capability_offers')} WHERE instance_id = $1 AND capability = $2`, [instanceId, capability])).rows as Row[];
+    const row = rows[0];
+    return row ? this.asOffer(row) : err({ code: 'not-found', what: 'capability offer', id: `${instanceId}/${capability}` });
+  }
+
+  private asOffer(row: Row): StoreResult<CapabilityOffer> {
+    const admitted = admit(CapabilityOfferSchema, { instanceId: row.instance_id, capability: row.capability, teamId: row.team_id, outputs: row.outputs, publishedAt: iso(row.published_at) }, 'capability offer row');
+    return admitted.accepted ? ok(admitted.value) : err({ code: 'conflict', reason: admitted.reason });
+  }
+
+  async listCapabilityOffers(teamId?: string) {
+    const sql = teamId ? `SELECT * FROM ${this.q('capability_offers')} WHERE team_id = $1 ORDER BY published_at ASC` : `SELECT * FROM ${this.q('capability_offers')} ORDER BY published_at ASC`;
+    const rows = (await this.pool.query(sql, teamId ? [teamId] : [])).rows as Row[];
+    return values(rows.map((r) => this.asOffer(r)));
+  }
+
+  async shareCapability(share: NewCapabilityShare) {
+    const admitted = admit(CapabilityShareSchema, { ...share, sharedAt: share.sharedAt ?? new Date().toISOString() }, 'capability share');
+    if (!admitted.accepted) return err({ code: 'conflict', reason: admitted.reason });
+    const s = admitted.value;
+    try {
+      await this.pool.query(
+        `INSERT INTO ${this.q('capability_shares')} (instance_id, capability, to_team_id, shared_at, shared_by) VALUES ($1,$2,$3,$4,$5)
+         ON CONFLICT (instance_id, capability, to_team_id) DO UPDATE SET shared_at = now(), shared_by = EXCLUDED.shared_by`,
+        [s.instanceId, s.capability, s.toTeamId, s.sharedAt, s.sharedBy]);
+    } catch (error) {
+      if ((error as { code?: string }).code === '23503') return err({ code: 'not-found', what: 'capability offer', id: `${s.instanceId}/${s.capability}` });
+      throw error;
+    }
+    return ok(s);
+  }
+
+  /**
+   * Revocation propagates to bindings as `stale`, not deletion (D42): a running application keeps its
+   * configuration while the *intent* to share is withdrawn. Done as one statement, because a read-then-write
+   * here would let a concurrent bind slip through as `bound` against a share that had just gone.
+   */
+  async revokeCapabilityShare(instanceId: string, capability: string, toTeamId: string) {
+    const deleted = await this.pool.query(`DELETE FROM ${this.q('capability_shares')} WHERE instance_id = $1 AND capability = $2 AND to_team_id = $3`, [instanceId, capability, toTeamId]);
+    if (((deleted.rowCount ?? 0) === 0)) return err({ code: 'not-found', what: 'capability share', id: `${instanceId}/${capability}/${toTeamId}` });
+    await this.pool.query(
+      `UPDATE ${this.q('capability_bindings')} b SET state = 'stale'
+        WHERE b.provider_instance_id = $1 AND b.capability = $2 AND b.state = 'bound'
+          AND NOT EXISTS (
+            SELECT 1 FROM ${this.q('capability_shares')} s
+             WHERE s.instance_id = $1 AND s.capability = $2
+               AND (s.to_team_id = (SELECT i.team_id FROM ${this.q('instances')} i WHERE i.id = b.consumer_instance_id) OR s.to_team_id = '*')
+          )`,
+      [instanceId, capability]);
+    return ok({ revoked: true });
+  }
+
+  async listCapabilityShares(instanceId: string, capability?: string) {
+    const sql = capability
+      ? `SELECT * FROM ${this.q('capability_shares')} WHERE instance_id = $1 AND capability = $2 ORDER BY shared_at ASC`
+      : `SELECT * FROM ${this.q('capability_shares')} WHERE instance_id = $1 ORDER BY shared_at ASC`;
+    const rows = (await this.pool.query(sql, capability ? [instanceId, capability] : [instanceId])).rows as Row[];
+    return values(rows.map((r) => {
+      const admitted = admit(CapabilityShareSchema, { instanceId: r.instance_id, capability: r.capability, toTeamId: r.to_team_id, sharedAt: iso(r.shared_at), sharedBy: r.shared_by }, 'capability share row');
+      return admitted.accepted ? ok(admitted.value) : err({ code: 'conflict', reason: admitted.reason });
+    }));
+  }
+
+  async availableOffersForTeam(teamId: string, capability?: string) {
+    const cap = capability ? ' AND o.capability = $3' : '';
+    const params = capability ? [teamId, teamId, capability] : [teamId, teamId];
+    const rows = (await this.pool.query(
+      `SELECT o.* FROM ${this.q('capability_offers')} o
+        WHERE (o.team_id = $1 OR EXISTS (
+                 SELECT 1 FROM ${this.q('capability_shares')} s
+                  WHERE s.instance_id = o.instance_id AND s.capability = o.capability
+                    AND (s.to_team_id = $2 OR s.to_team_id = '*')))${cap}
+        ORDER BY o.published_at ASC`, params)).rows as Row[];
+    return values(rows.map((r) => this.asOffer(r)));
+  }
+
+  async bindCapability(binding: NewBinding) {
+    const admitted = admit(BindingRecordSchema, { ...binding, boundAt: binding.boundAt ?? new Date().toISOString() }, 'binding');
+    if (!admitted.accepted) return err({ code: 'conflict', reason: admitted.reason });
+    const b = admitted.value;
+    try {
+      await this.pool.query(
+        `INSERT INTO ${this.q('capability_bindings')} (consumer_instance_id, capability, provider_instance_id, destinations, state, bound_at, bound_by)
+         VALUES ($1,$2,$3,$4::jsonb,$5,$6,$7)
+         ON CONFLICT (consumer_instance_id, capability) DO UPDATE SET provider_instance_id = EXCLUDED.provider_instance_id,
+                                                                    destinations = EXCLUDED.destinations, state = EXCLUDED.state,
+                                                                    bound_at = now(), bound_by = EXCLUDED.bound_by`,
+        [b.consumerInstanceId, b.capability, b.providerInstanceId, JSON.stringify(b.destinations), b.state, b.boundAt, b.boundBy]);
+    } catch (error) {
+      const code = (error as { code?: string }).code;
+      if (code === '23503') return err({ code: 'not-found', what: 'capability offer', id: `${b.providerInstanceId}/${b.capability}` });
+      if (code === '23514') return err({ code: 'conflict', reason: 'the provider instance cannot be deleted while this binding exists (RESTRICT)' });
+      throw error;
+    }
+    return ok(b);
+  }
+
+  async getBinding(consumerInstanceId: string, capability: string) {
+    const rows = (await this.pool.query(`SELECT * FROM ${this.q('capability_bindings')} WHERE consumer_instance_id = $1 AND capability = $2`, [consumerInstanceId, capability])).rows as Row[];
+    const row = rows[0];
+    return row ? this.asBinding(row) : err({ code: 'not-found', what: 'binding', id: `${consumerInstanceId}/${capability}` });
+  }
+
+  private asBinding(row: Row): StoreResult<BindingRecord> {
+    const admitted = admit(BindingRecordSchema, {
+      consumerInstanceId: row.consumer_instance_id, capability: row.capability, providerInstanceId: row.provider_instance_id,
+      destinations: row.destinations, state: row.state, boundAt: iso(row.bound_at), boundBy: row.bound_by,
+    }, 'binding row');
+    return admitted.accepted ? ok(admitted.value) : err({ code: 'conflict', reason: admitted.reason });
+  }
+
+  async listBindings(consumerInstanceId: string) {
+    const rows = (await this.pool.query(`SELECT * FROM ${this.q('capability_bindings')} WHERE consumer_instance_id = $1 ORDER BY bound_at ASC`, [consumerInstanceId])).rows as Row[];
+    return values(rows.map((r) => this.asBinding(r)));
+  }
+
+  async listConsumers(providerInstanceId: string, capability?: string) {
+    const sql = capability
+      ? `SELECT * FROM ${this.q('capability_bindings')} WHERE provider_instance_id = $1 AND capability = $2 ORDER BY bound_at ASC`
+      : `SELECT * FROM ${this.q('capability_bindings')} WHERE provider_instance_id = $1 ORDER BY bound_at ASC`;
+    const rows = (await this.pool.query(sql, capability ? [providerInstanceId, capability] : [providerInstanceId])).rows as Row[];
+    return values(rows.map((r) => this.asBinding(r)));
+  }
+
+  async unbindCapability(consumerInstanceId: string, capability: string) {
+    const removed = await this.pool.query(`DELETE FROM ${this.q('capability_bindings')} WHERE consumer_instance_id = $1 AND capability = $2`, [consumerInstanceId, capability]);
+    if ((removed.rowCount ?? 0) === 0) return err({ code: 'not-found', what: 'binding', id: `${consumerInstanceId}/${capability}` });
+    return ok({ removed: true });
   }
 
   async putTeamMember(member: Omit<TeamMember, 'addedAt'> & { addedAt?: string }) {

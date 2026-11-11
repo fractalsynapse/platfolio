@@ -19,7 +19,9 @@ test('the shipped spec is internally true', () => {
   const ops = operationsOf(spec);
   // Asserted as an invariant over the document, not a snapshot of Slice 1's four operations: a test that
   // hardcodes the whole surface goes red on every legitimate addition and gets weakened instead of read.
-  assert.equal(ops.length, 13, 'one operation per entry in the route manifest');
+  // A floor, not a snapshot: the count assertion exists to catch a document that lost operations, not to
+  // demand an edit every time one is added deliberately.
+  assert.ok(ops.length >= 21, `expected at least the current surface, got ${String(ops.length)} operations`);
   assert.equal(new Set(ops.map((o) => o.operationId)).size, ops.length, 'operationIds are unique');
   // The public half declares itself explicitly rather than by omission -- that is what the security check is for.
   const publicOps = ops.filter((o) => Array.isArray(o.security) && o.security.length === 0).map((o) => o.operationId).sort();

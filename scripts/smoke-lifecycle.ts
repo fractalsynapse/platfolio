@@ -145,6 +145,30 @@ if (otherTeams.length === 1) {
   check('another teams instance is absent from the list', false, `expected one other-workspace team, found ${String(otherTeams.length)} -- run pnpm run db:seed-dev`);
 }
 
+// Capabilities and bindings, live (#177): publish, discover, bind, and see the dependency from both ends.
+// This runs against the container, so it proves the routes are wired and the Postgres tables exist -- not
+// merely that the handlers compile against a map.
+const second = await call('/api/v1/instances', { method: 'POST', body: JSON.stringify({ teamId, name: `identity-${suffix}`, platform: 'shared-identity' }) }, accessToken);
+const providerId = (second.json as { id?: string } | undefined)?.id;
+if (typeof providerId === 'string') {
+  const published = await call(`/api/v1/instances/${providerId}/capability`, { method: 'POST', body: JSON.stringify({ capability: 'identity', outputs: [{ output: 'issuer', kind: 'url', state: 'issued-and-placed' }] }) }, accessToken);
+  check('capability published', published.status === 200, `${String(published.status)} ${published.text.slice(0, 70)}`);
+  const discovered = await call('/api/v1/capabilities?capability=identity', {}, accessToken);
+  const offers = Array.isArray(discovered.json) ? discovered.json : [];
+  check('own-team offer is discoverable', offers.some((o: Record<string, unknown>) => o.instanceId === providerId), `${String(offers.length)} offer(s)`);
+  const bound = await call(`/api/v1/instances/${instanceId}/bindings/identity`, { method: 'PUT', body: JSON.stringify({ providerInstanceId: providerId, destinations: [{ output: 'issuer', into: ['OIDC_ISSUER'] }] }) }, accessToken);
+  check('binding created', bound.status === 200, `${String(bound.status)} ${bound.text.slice(0, 90)}`);
+  const consumers = await call(`/api/v1/instances/${providerId}/consumers`, {}, accessToken);
+  const list = Array.isArray(consumers.json) ? consumers.json : [];
+  check('the provider can see who depends on it', list.some((b: Record<string, unknown>) => b.consumerInstanceId === instanceId), `${String(list.length)} consumer(s) -- the question #177 exists to answer`);
+  const persisted = await reader.listConsumers(providerId);
+  check('bindings survive as rows, read from a second process', persisted.length === 1, `${String(persisted.length)} row(s) in capability_bindings`);
+  const unbound = await call(`/api/v1/instances/${instanceId}/bindings/identity`, { method: 'DELETE' }, accessToken);
+  check('unbind answers 204 with no body', unbound.status === 204 && unbound.text === '', `${String(unbound.status)} body=${JSON.stringify(unbound.text).slice(0, 20)}`);
+} else {
+  check('capability published', false, `second instance could not be created: ${String(second.status)}`);
+}
+
 await reader.close();
 const failed = results.filter((r) => !r.ok);
 process.stdout.write(`L ${String(results.length - failed.length)}/${String(results.length)} checks passed\n`);

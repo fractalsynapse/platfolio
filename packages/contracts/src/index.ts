@@ -87,3 +87,15 @@ export { MemoryStore, type MemoryStoreOptions } from './memory-store.ts';
 export { PostgresStore, type PostgresStoreOptions } from './postgres-store.ts';
 export { applyMigrations, dropSchema, safeSchema, type MigrateOptions, type MigrateResult } from './migrations.ts';
 export { runStoreConformance, type StoreCaseResult, type StoreReport } from './store-conformance.ts';
+export {
+  BindingRecordSchema,
+  CapabilityOfferSchema,
+  CapabilityShareSchema,
+  type BindingRecord,
+  type CapabilityOffer,
+  type CapabilityShare,
+  type NewBinding,
+  type NewCapabilityOffer,
+  type NewCapabilityShare,
+} from './persistence.ts';
+export { checkBindingPolicy, bindingImpact, type BindingRequest, type BindingVerdict } from './binding-policy.ts';

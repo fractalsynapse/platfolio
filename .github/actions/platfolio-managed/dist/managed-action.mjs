@@ -26823,6 +26823,39 @@ var TeamMemberSchema = external_exports.object({
   role: TeamRoleSchema,
   addedAt: external_exports.string().min(1)
 }).strict();
+var CapabilityOfferSchema = external_exports.object({
+  instanceId: external_exports.string().min(1),
+  teamId: external_exports.string().min(1),
+  capability: external_exports.string().min(1).max(60),
+  outputs: external_exports.array(external_exports.object({
+    output: external_exports.string().min(1).max(80),
+    kind: external_exports.enum(["url", "value", "secret"]),
+    state: external_exports.enum(["not-issued", "issued-and-placed", "placement-unknown", "re-issue-required"]).default("not-issued")
+  }).strict()).default([]),
+  publishedAt: external_exports.string().min(1)
+}).strict();
+var CapabilityShareSchema = external_exports.object({
+  instanceId: external_exports.string().min(1),
+  capability: external_exports.string().min(1).max(60),
+  /** A team identifier, or `*` for "any team" -- the wildcard is recorded, never implied. */
+  toTeamId: external_exports.string().min(1).max(120),
+  sharedAt: external_exports.string().min(1),
+  sharedBy: external_exports.string().min(1).max(200)
+}).strict();
+var BindingRecordSchema = external_exports.object({
+  consumerInstanceId: external_exports.string().min(1),
+  capability: external_exports.string().min(1).max(60),
+  providerInstanceId: external_exports.string().min(1),
+  destinations: external_exports.array(external_exports.object({
+    output: external_exports.string().min(1).max(80),
+    /** Environment entry name(s) the value is written to, as declared in the consumer's inventory. */
+    into: external_exports.array(external_exports.string().min(1).max(120)).min(1)
+  }).strict()).default([]),
+  /** `stale` means the share was revoked: the app keeps running, the intent is withdrawn (D42). */
+  state: external_exports.enum(["bound", "stale"]).default("bound"),
+  boundAt: external_exports.string().min(1),
+  boundBy: external_exports.string().min(1).max(200)
+}).strict();
 
 // node_modules/.pnpm/pg@8.23.1/node_modules/pg/esm/index.mjs
 var import_lib = __toESM(require_lib2(), 1);

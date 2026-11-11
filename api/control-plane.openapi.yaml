@@ -464,6 +464,264 @@ paths:
           $ref: '#/components/responses/Unauthenticated'
 
 
+  /api/v1/capabilities:
+    get:
+      operationId: listAvailableCapabilities
+      summary: What this team may bind to right now
+      description: |
+        The caller's own offers plus anything another team has shared with them (D42). Discovery is the
+        *consequence* of a share, so revoking withdraws both at once -- an offer that cannot be bound should not
+        remain in a list someone will try to bind to.
+      security:
+        - bearerJwt: []
+      parameters:
+        - { name: capability, in: query, required: false, schema: { type: string, maxLength: 60 } }
+      responses:
+        '200':
+          description: Offers available to the caller's teams. May be empty.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/CapabilityOffer' }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+
+  /api/v1/instances/{instanceId}/capability:
+    parameters:
+      - { name: instanceId, in: path, required: true, schema: { type: string, minLength: 1 } }
+    post:
+      operationId: publishCapability
+      summary: Record that this instance offers a capability to other platforms
+      description: |
+        Publishing is what makes an instance a shared service rather than a private one (D42): the manifest
+        already declares `provides:`, and this records it so platfolio can answer questions about it. Outputs
+        are names and kinds with a placement state -- there is no field for a value, and the absence is the
+        rule (D4). Idempotent by (instance, capability): republishing refreshes the outputs.
+      security:
+        - bearerJwt: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [capability]
+              properties:
+                capability: { type: string, minLength: 1, maxLength: 60 }
+                outputs:
+                  type: array
+                  maxItems: 40
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [output, kind]
+                    properties:
+                      output: { type: string, minLength: 1, maxLength: 80 }
+                      kind: { type: string, enum: [url, value, secret] }
+                      state: { type: string, enum: [not-issued, issued-and-placed, placement-unknown, re-issue-required], default: not-issued }
+            example: { capability: identity, outputs: [{ output: issuer, kind: url, state: issued-and-placed }, { output: client_secret, kind: secret }] }
+      responses:
+        '200':
+          description: Offer recorded.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CapabilityOffer' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/instances/{instanceId}/capability/{capability}/shares:
+    parameters:
+      - { name: instanceId, in: path, required: true, schema: { type: string, minLength: 1 } }
+      - { name: capability, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 60 } }
+    # Only PUT lives here. Revocation addresses the share itself -- see the path below -- because the
+    # transport does not read a DELETE body (a body on a method whose semantics are "delete this resource"
+    # invites two sources of truth), and a revoke that cannot say *which* share it means is a foot-gun.
+    put:
+      operationId: shareCapability
+      summary: Let another team bind to this capability
+      description: |
+        The explicit grant behind D42. A capability that is merely reachable is not offered: without this row,
+        a cross-team bind is refused, which is what stops any instance in the system from pointing at someone
+        else's identity provider and being handed its configuration.
+      security:
+        - bearerJwt: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [toTeamId]
+              properties:
+                toTeamId: { type: string, minLength: 1, maxLength: 120, description: 'A team id, or `*` to offer it to every team. Recorded, never implied.' }
+            example: { toTeamId: team-2f7c }
+      responses:
+        '200':
+          description: Shared.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CapabilityShare' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/instances/{instanceId}/capability/{capability}/shares/{toTeamId}:
+    parameters:
+      - { name: instanceId, in: path, required: true, schema: { type: string, minLength: 1 } }
+      - { name: capability, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 60 } }
+      - name: toTeamId
+        in: path
+        required: true
+        schema: { type: string, minLength: 1, maxLength: 120 }
+        description: The team whose grant is withdrawn, or `*` for the open offer.
+    delete:
+      operationId: revokeCapabilityShare
+      summary: Withdraw a share without breaking the consumer that already relies on it
+      description: |
+        Revocation ages existing bindings to `stale` rather than deleting them (D42): a running application keeps
+        working, the intent is withdrawn, and the gap becomes visible instead of silent. A deleted binding would
+        leave the consumer pointing at a URL nothing recorded -- the exact failure this table exists to prevent.
+      security:
+        - bearerJwt: []
+      responses:
+        '200':
+          description: Revoked.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [revoked]
+                properties:
+                  revoked: { type: boolean, const: true }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/instances/{instanceId}/bindings:
+    parameters:
+      - { name: instanceId, in: path, required: true, schema: { type: string, minLength: 1 } }
+    get:
+      operationId: listBindings
+      summary: What this platform consumes
+      security:
+        - bearerJwt: []
+      responses:
+        '200':
+          description: Bindings, oldest first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/BindingRecord' }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/instances/{instanceId}/bindings/{capability}:
+    parameters:
+      - { name: instanceId, in: path, required: true, schema: { type: string, minLength: 1 } }
+      - { name: capability, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 60 } }
+    put:
+      operationId: bindCapability
+      summary: Consume another platform's capability
+      description: |
+        Validated by `checkBindingPolicy` before anything is written: the offer must exist, every destination
+        the consumer declares must be satisfied by an output the provider actually publishes (a binding that
+        cannot fill its own variables is a broken promise, not a partial success), self-binding is refused, and
+        a cross-team bind needs a live share.
+      security:
+        - bearerJwt: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [providerInstanceId, destinations]
+              properties:
+                providerInstanceId: { type: string, minLength: 1 }
+                destinations:
+                  type: array
+                  maxItems: 40
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [output, into]
+                    properties:
+                      output: { type: string, minLength: 1, maxLength: 80 }
+                      into:
+                        type: array
+                        minItems: 1
+                        maxItems: 20
+                        items: { type: string, minLength: 1, maxLength: 120 }
+            example: { providerInstanceId: inst-410f, destinations: [{ output: issuer, into: [OIDC_ISSUER] }] }
+      responses:
+        '200':
+          description: Bound.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BindingRecord' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      operationId: unbindCapability
+      summary: Stop consuming a capability
+      description: |
+        204 on success, and 404 when there was no such binding. Nothing is destroyed here -- the consumer's
+        configuration is theirs to remove; this withdraws platfolio's record of the dependency.
+      security:
+        - bearerJwt: []
+      responses:
+        '204':
+          description: Unbound.
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/instances/{instanceId}/consumers:
+    parameters:
+      - { name: instanceId, in: path, required: true, schema: { type: string, minLength: 1 } }
+    get:
+      operationId: listConsumers
+      summary: What breaks if this platform is removed
+      description: |
+        The question the teardown issues (#106, #107) were opened to ask, which was unanswerable before #177 --
+        the wiring existed only inside rendered manifests. A destroy consults this before it goes anywhere
+        (D43), and a non-empty list is the reason it refuses.
+      security:
+        - bearerJwt: []
+      responses:
+        '200':
+          description: Consumers of this instance's capabilities, oldest first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/BindingRecord' }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+
 components:
   securitySchemes:
     bearerJwt:
@@ -476,6 +734,15 @@ components:
         attacker's header claims (algorithm-confusion is the reason the allowed set is checked, not assumed).
 
   responses:
+    NotFound:
+      description: |
+        No such resource, or a resource belonging to a team the caller is not a member of -- one answer for
+        both, because the difference is itself information (#173).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: not-found, message: 'no such resource for this principal' }
+
     BadRequest:
       description: 'The request was well-formed HTTP but did not satisfy the schema: names and reasons, never values.'
       content:
@@ -496,6 +763,58 @@ components:
           example: 'Bearer realm="platfolio", error="invalid_token"'
 
   schemas:
+    CapabilityOffer:
+      type: object
+      additionalProperties: false
+      required: [instanceId, teamId, capability, outputs, publishedAt]
+      properties:
+        instanceId: { type: string }
+        teamId: { type: string }
+        capability: { type: string, maxLength: 60 }
+        outputs:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [output, kind, state]
+            properties:
+              output: { type: string }
+              kind: { type: string, enum: [url, value, secret] }
+              state: { type: string, enum: [not-issued, issued-and-placed, placement-unknown, re-issue-required] }
+        publishedAt: { type: string, format: date-time }
+
+    CapabilityShare:
+      type: object
+      additionalProperties: false
+      required: [instanceId, capability, toTeamId, sharedAt, sharedBy]
+      properties:
+        instanceId: { type: string }
+        capability: { type: string, maxLength: 60 }
+        toTeamId: { type: string, maxLength: 120 }
+        sharedAt: { type: string, format: date-time }
+        sharedBy: { type: string, maxLength: 200 }
+
+    BindingRecord:
+      type: object
+      additionalProperties: false
+      required: [consumerInstanceId, capability, providerInstanceId, destinations, state, boundAt, boundBy]
+      properties:
+        consumerInstanceId: { type: string }
+        capability: { type: string, maxLength: 60 }
+        providerInstanceId: { type: string }
+        destinations:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [output, into]
+            properties:
+              output: { type: string }
+              into: { type: array, items: { type: string } }
+        state: { type: string, enum: [bound, stale] }
+        boundAt: { type: string, format: date-time }
+        boundBy: { type: string, maxLength: 200 }
+
     Instance:
       type: object
       additionalProperties: false

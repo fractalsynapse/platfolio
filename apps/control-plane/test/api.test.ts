@@ -8,7 +8,7 @@ import {
   createIdentityFixture, defaultIdentityConfig, reasonOf, signToken,
   type DispatchIntent, type StoreResult,
 } from '@platfolio/contracts';
-import { loadSpec, validateResponse, type RouteManifestEntry, type SpecDocument } from '@platfolio/api-contract';
+import { loadSpec, operationsOf, validateResponse, type RouteManifestEntry, type SpecDocument } from '@platfolio/api-contract';
 import { ROUTE_MANIFEST } from '../src/routes.ts';
 
 const spec: SpecDocument = loadSpec(fs.readFileSync(path.resolve(import.meta.dirname, '../../../api/control-plane.openapi.yaml'), 'utf8'));
@@ -63,8 +63,15 @@ const againstSpec = (operationId: string, status: number, body: unknown) => {
 
 test('the route manifest matches the document, and both cover the same surface', () => {
   const ops = (ROUTE_MANIFEST as RouteManifestEntry[]).map((r) => r.operationId).sort();
-  assert.deepEqual(ops, ['createDispatch', 'createInstance', 'getDispatchPlan', 'getHealth', 'getInstance', 'getLatestAttestation', 'getReady', 'getVersion', 'getWhoami', 'listAudit', 'listInstances', 'postAttestation', 'putPlan']);
-  assert.equal(ops.length, 13, 'one per operation in api/control-plane.openapi.yaml');
+  // Compared against the document, not a snapshot of it: a hardcoded list has to be remembered, and a test
+  // that must be edited every time the API grows is a test that gets skipped. api:check enforces the same
+  // agreement in CI; this one catches it at the unit level with the manifest the app actually exports.
+  const declared = operationsOf(spec).map((o) => o.operationId).sort();
+  assert.deepEqual(ops, declared, 'the route manifest and the document disagree');
+  assert.ok(ops.length >= 21, `expected the whole surface, got ${String(ops.length)} operations`);
+  for (const bindingOp of ['publishCapability', 'shareCapability', 'revokeCapabilityShare', 'listBindings', 'bindCapability', 'unbindCapability', 'listConsumers', 'listAvailableCapabilities']) {
+    assert.ok(ops.includes(bindingOp), `${bindingOp} is missing from the manifest`);
+  }
 });
 
 test('Slice 1 behaviour survives the refactor to plugins', async () => {

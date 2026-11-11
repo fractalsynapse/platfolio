@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import {
-  AttestationSchema, CONTRACT_NAME, CONTRACT_VERSION, DispatchIntentSchema, InstanceSchema,
-  reasonOf, type VerifiedClaims,
+  AttestationSchema, checkBindingPolicy, CONTRACT_NAME, CONTRACT_VERSION, DispatchIntentSchema, InstanceSchema,
+  reasonOf, type BindingRecord, type CapabilityOffer, type VerifiedClaims,
 } from '@platfolio/contracts';
 import type { ExtensionDescriptor, KernelContext, Request, Response_, RouteDefinition } from '@platfolio/kernel';
 import { badRequest, bearerToken, notFound, send, unauthorized, type Authorizer } from './respond.ts';
@@ -383,7 +383,98 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
     },
   };
 
-  return [core, instances, dispatches, audit, controller];
+  // Bindings (#177, D42). The provider side and the consumer side are separate routes because the question
+  // asked of each is opposite: "what do I depend on" versus "what breaks if I go away".
+  const bindings: ExtensionDescriptor = {
+    id: 'bindings',
+    requires: ['store', 'identity'],
+    routes: [
+      {
+        method: 'GET', path: '/api/v1/capabilities', operationId: 'listAvailableCapabilities',
+        handle: async (request, _params, context) => {
+          const auth = await authorize(context, request);
+          if (auth.ok === false) return auth.response;
+          const teams = await context.store.teamsForSubject(auth.claims.subject);
+          const wanted = request.query.get('capability') ?? undefined;
+          const perTeam = await Promise.all(teams.map((teamId) => context.store.availableOffersForTeam(teamId, wanted)));
+          const seen = new Map<string, CapabilityOffer>();
+          for (const offer of perTeam.flat()) seen.set(`${offer.instanceId}/${offer.capability}`, offer);
+          return send('listAvailableCapabilities', 200, [...seen.values()]);
+        },
+      },
+      scoped('POST', '/api/v1/instances/{instanceId}/capability', 'publishCapability', async (scope, request, params) => {
+        const parsed = bodyOf<{ capability?: unknown; outputs?: unknown }>(request);
+        if (parsed.ok === false) return badRequest(parsed.error);
+        const capability = parsed.value?.capability;
+        if (typeof capability !== 'string' || capability.length === 0) return badRequest('capability is required');
+        const outputs = Array.isArray(parsed.value?.outputs) ? parsed.value.outputs : [];
+        const published = await scope.context.store.publishCapability({ instanceId: params.instanceId ?? '', teamId: scope.teamId, capability, outputs: outputs as CapabilityOffer['outputs'] });
+        if (published.ok === false) return { status: published.code === 'not-found' ? 404 : 400, body: { error: published.code, message: reasonOf(published) } };
+        await scope.context.store.appendAudit({ actorKind: 'user', actorRef: scope.claims.subject, action: 'capability.publish', target: params.instanceId ?? '', detail: { capability } });
+        return send('publishCapability', 200, published.value);
+      }),
+      scoped('PUT', '/api/v1/instances/{instanceId}/capability/{capability}/shares', 'shareCapability', async (scope, request, params) => {
+        const parsed = bodyOf<{ toTeamId?: unknown }>(request);
+        if (parsed.ok === false) return badRequest(parsed.error);
+        const toTeamId = parsed.value?.toTeamId;
+        if (typeof toTeamId !== 'string' || toTeamId.length === 0) return badRequest('toTeamId is required (a team id, or * for every team)');
+        const shared = await scope.context.store.shareCapability({ instanceId: params.instanceId ?? '', capability: params.capability ?? '', toTeamId, sharedBy: scope.claims.subject });
+        if (shared.ok === false) return { status: shared.code === 'not-found' ? 404 : 400, body: { error: shared.code, message: reasonOf(shared) } };
+        await scope.context.store.appendAudit({ actorKind: 'user', actorRef: scope.claims.subject, action: 'capability.share', target: params.instanceId ?? '', detail: { capability: params.capability ?? '', toTeamId } });
+        return send('shareCapability', 200, shared.value);
+      }),
+      scoped('DELETE', '/api/v1/instances/{instanceId}/capability/{capability}/shares/{toTeamId}', 'revokeCapabilityShare', async (scope, _request, params) => {
+        // The team is in the path, not a body: the transport does not read DELETE bodies, and a revoke that
+        // cannot say which share it means is a foot-gun rather than a convenience.
+        const toTeamId = params.toTeamId;
+        if (typeof toTeamId !== 'string' || toTeamId.length === 0) return badRequest('toTeamId is required to revoke one specific share');
+        const revoked = await scope.context.store.revokeCapabilityShare(params.instanceId ?? '', params.capability ?? '', toTeamId);
+        if (revoked.ok === false) return { status: revoked.code === 'not-found' ? 404 : 400, body: { error: revoked.code, message: reasonOf(revoked) } };
+        await scope.context.store.appendAudit({ actorKind: 'user', actorRef: scope.claims.subject, action: 'capability.revoke', target: params.instanceId ?? '', detail: { capability: params.capability ?? '', toTeamId } });
+        return send('revokeCapabilityShare', 200, { revoked: true });
+      }),
+      scoped('GET', '/api/v1/instances/{instanceId}/bindings', 'listBindings', async (scope, _request, params) => {
+        return send('listBindings', 200, await scope.context.store.listBindings(params.instanceId ?? ''));
+      }),
+      scoped('PUT', '/api/v1/instances/{instanceId}/bindings/{capability}', 'bindCapability', async (scope, request, params) => {
+        const parsed = bodyOf<{ providerInstanceId?: unknown; destinations?: unknown }>(request);
+        if (parsed.ok === false) return badRequest(parsed.error);
+        const providerInstanceId = parsed.value?.providerInstanceId;
+        if (typeof providerInstanceId !== 'string' || providerInstanceId.length === 0) return badRequest('providerInstanceId is required');
+        const consumer = await scope.context.store.getInstance(params.instanceId ?? '');
+        if (consumer.ok === false) return notFound('instance', params.instanceId ?? '');
+        const provider = await scope.context.store.getInstance(providerInstanceId);
+        if (provider.ok === false) return notFound('instance', providerInstanceId);
+        const capability = params.capability ?? '';
+        const offer = await scope.context.store.getCapabilityOffer(providerInstanceId, capability);
+        const destinations = Array.isArray(parsed.value?.destinations) ? parsed.value.destinations as BindingRecord['destinations'] : [];
+        // Policy before write, and the same function the stores are tested with: a binding that cannot fill
+        // every destination the consumer declares is a broken promise, not a partial success.
+        const verdict = checkBindingPolicy({
+          consumer: consumer.value, provider: provider.value, offer: offer.ok ? offer.value : null,
+          required: destinations.map((d: { output: string; into: string[] }) => ({ output: d.output, into: d.into })),
+          shares: await scope.context.store.listCapabilityShares(providerInstanceId, capability),
+        });
+        if (verdict.ok === false) return { status: verdict.error.code === 'not-found' ? 404 : 400, body: { error: verdict.error.code, message: reasonOf(verdict.error) } };
+        const bound = await scope.context.store.bindCapability({ consumerInstanceId: consumer.value.id, capability, providerInstanceId, destinations, boundBy: scope.claims.subject });
+        if (bound.ok === false) return { status: 400, body: { error: bound.code, message: reasonOf(bound) } };
+        await scope.context.store.appendAudit({ actorKind: 'user', actorRef: scope.claims.subject, action: 'capability.bind', target: consumer.value.id, detail: { capability, providerInstanceId } });
+        return send('bindCapability', 200, bound.value);
+      }),
+      scoped('DELETE', '/api/v1/instances/{instanceId}/bindings/{capability}', 'unbindCapability', async (scope, _request, params) => {
+        const removed = await scope.context.store.unbindCapability(params.instanceId ?? '', params.capability ?? '');
+        if (removed.ok === false) return { status: removed.code === 'not-found' ? 404 : 400, body: { error: removed.code, message: reasonOf(removed) } };
+        await scope.context.store.appendAudit({ actorKind: 'user', actorRef: scope.claims.subject, action: 'capability.unbind', target: params.instanceId ?? '', detail: { capability: params.capability ?? '' } });
+        return { status: 204, body: undefined };
+      }),
+      scoped('GET', '/api/v1/instances/{instanceId}/consumers', 'listConsumers', async (scope, _request, params) => {
+        // The deletion-guard answer (D43): refuse a destroy while this is non-empty.
+        return send('listConsumers', 200, await scope.context.store.listConsumers(params.instanceId ?? ''));
+      }),
+    ],
+  };
+
+  return [core, instances, dispatches, audit, bindings, controller];
 }
 
 export type { VerifiedClaims };
