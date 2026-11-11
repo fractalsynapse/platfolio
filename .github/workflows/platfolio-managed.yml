@@ -37,7 +37,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Apply desired state with this repository's own credentials
-        uses: fractalsynapse/platfolio@82c9a6a49e7f5b824274edee934a10f4dd6d4220
+        uses: fractalsynapse/platfolio/.github/actions/platfolio-managed@de13f10f7b995352cb34c1fed5c704b36f148771
         with:
           action: ${{ inputs.action || 'deploy' }}
           environment: ${{ inputs.environment }}
