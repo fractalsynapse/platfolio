@@ -1,7 +1,7 @@
 import { Pool, type PoolClient } from 'pg';
 import {
-  AttestationRecordSchema, AuditEntrySchema, DispatchRecordSchema, InstanceSchema, ProviderConnectionSchema, RepoConnectionSchema, TeamSchema, newId,
-  type AttestationRecord, type AuditEntry, type DispatchRecord, type Instance, type ProviderConnection, type RepoConnection, type Store, type StoreError, type StoreResult, type Team,
+  AttestationRecordSchema, AuditEntrySchema, DispatchRecordSchema, TeamMemberSchema, InstanceSchema, ProviderConnectionSchema, RepoConnectionSchema, TeamSchema, newId,
+  type AttestationRecord, type AuditEntry, type DispatchRecord, type Instance, type ProviderConnection, type RepoConnection, type Store, type StoreError, type StoreResult, type Team, type TeamMember,
 } from './persistence.ts';
 import { checkAttestationPolicy } from './dispatch-policy.ts';
 import type { Attestation } from './attestation.ts';
@@ -255,6 +255,43 @@ export class PostgresStore implements Store {
       secrets: row.secrets, connectedAt: iso(row.connected_at),
     }, 'provider connection row');
     return admitted.accepted ? ok(admitted.value) : err({ code: 'conflict', reason: admitted.reason });
+  }
+
+  async putTeamMember(member: Omit<TeamMember, 'addedAt'> & { addedAt?: string }) {
+    const admitted = admit(TeamMemberSchema, { ...member, addedAt: member.addedAt ?? new Date().toISOString() }, 'team member');
+    if (!admitted.accepted) return err({ code: 'conflict', reason: admitted.reason });
+    const m = admitted.value;
+    try {
+      await this.pool.query(
+        `INSERT INTO ${this.q('team_members')} (team_id, subject, role, added_at) VALUES ($1,$2,$3,$4)
+         ON CONFLICT (team_id, subject) DO UPDATE SET role = EXCLUDED.role`,
+        [m.teamId, m.subject, m.role, m.addedAt]);
+    } catch (error) {
+      if ((error as { code?: string }).code === '23503') return err({ code: 'not-found', what: 'team', id: m.teamId });
+      throw error;
+    }
+    return ok(m);
+  }
+
+  async getTeamMember(teamId: string, subject: string) {
+    const rows = (await this.pool.query(`SELECT * FROM ${this.q('team_members')} WHERE team_id = $1 AND subject = $2`, [teamId, subject])).rows as Row[];
+    const row = rows[0];
+    return row ? this.asMember(row) : err({ code: 'not-found', what: 'team membership', id: `${teamId}/${subject}` });
+  }
+
+  private asMember(row: Row): StoreResult<TeamMember> {
+    const admitted = admit(TeamMemberSchema, { teamId: row.team_id, subject: row.subject, role: row.role, addedAt: iso(row.added_at) }, 'team member row');
+    return admitted.accepted ? ok(admitted.value) : err({ code: 'conflict', reason: admitted.reason });
+  }
+
+  async listTeamMembers(teamId: string) {
+    const rows = (await this.pool.query(`SELECT * FROM ${this.q('team_members')} WHERE team_id = $1 ORDER BY added_at ASC`, [teamId])).rows as Row[];
+    return rows.map((r) => this.asMember(r)).filter((r): r is { ok: true; value: TeamMember } => r.ok).map((r) => r.value);
+  }
+
+  async teamsForSubject(subject: string) {
+    const rows = (await this.pool.query(`SELECT team_id FROM ${this.q('team_members')} WHERE subject = $1 ORDER BY added_at ASC`, [subject])).rows as Row[];
+    return rows.map((r) => String(r.team_id));
   }
 
   async putPlan(instanceId: string, plan: unknown, planHash: string) {

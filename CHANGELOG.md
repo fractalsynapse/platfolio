@@ -5,6 +5,31 @@ change; entries describe merged intent, not aspirations.
 
 "## [Unreleased]
 
+### Fixed
+
+- **Audit rows addressed to a dispatch were invisible to authorization.** `dispatch.create` recorded its
+  target as the dispatch id, while the audit list filters by instances the caller's teams own — so a
+  team member could not see an action their own team had taken. Found by the filter, not by eye: audit
+  targets are now the team-owned instance, with the dispatch id in `detail`.
+- **A `typecheck errors: 0` reading was false.** It came from grepping the output of a `pnpm run` whose
+  wrapper had already died on the sandbox's unwritable engine store, so there were no TS lines to count.
+  Measured with `tsc` directly from here on (documented in MAINTAINING).
+
+### Added
+
+- **Team membership and the authorization boundary (#173).** `Store` gains `putTeamMember`, `getTeamMember`,
+  `listTeamMembers` and `teamsForSubject` (implemented by both drivers, covered by two new conformance cases);
+  migration `005_team_members.sql` keys membership on the IdP's `sub`, not a username or email. In
+  `apps/control-plane`, team-scoped routes are built with a `scoped()` wrapper that resolves authentication and
+  membership **before** the handler runs — handlers receive a scope or never execute, so forgetting the check
+  is not available. Cross-team reads answer **404, not 403**: a 403 confirms the record exists, which is a
+  finding an attacker can enumerate. `GET /api/v1/instances` and `/api/v1/audit` are filtered by the caller's
+  teams; a caller with no teams sees an empty list, the same shape a member of an empty team sees.
+- `db:seed-dev` resolves the subject id from Keycloak rather than hard-coding one, and creates a second team
+  with no members so the cross-team refusal can be proven live instead of asserted.
+- A route-table-driven test walks every instance-scoped operation and asserts the non-member gets 404, so the
+  next such route fails CI if it skips the guard.
+
 ### Changed
 
 - **Repository layout, following the duplication through to its cause.** `platform-templates/` is now

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { Attestation } from './attestation.ts';
-import { AttestationRecordSchema, AuditEntrySchema, DispatchRecordSchema, InstanceSchema, ProviderConnectionSchema, RepoConnectionSchema, TeamSchema, newId,
-  type AttestationRecord, type AuditEntry, type DispatchRecord, type Instance, type ProviderConnection, type RepoConnection, type Store, type StoreError, type StoreResult, type Team } from './persistence.ts';
+import { AttestationRecordSchema, AuditEntrySchema, TeamMemberSchema, DispatchRecordSchema, InstanceSchema, ProviderConnectionSchema, RepoConnectionSchema, TeamSchema, newId,
+  type AttestationRecord, type AuditEntry, type DispatchRecord, type Instance, type ProviderConnection, type RepoConnection, type Store, type StoreError, type StoreResult, type Team, type TeamMember } from './persistence.ts';
 import { checkAttestationPolicy } from './dispatch-policy.ts';
 
 /**
@@ -36,6 +36,7 @@ export class MemoryStore implements Store {
   private readonly providers = new Map<string, ProviderConnection>();
   private readonly dispatches = new Map<string, DispatchRecord>();
   private readonly plans = new Map<string, { instanceId: string; planHash: string; plan: unknown }>();
+  private readonly members = new Map<string, TeamMember>();
   private readonly attestations = new Map<string, AttestationRecord>();
   private readonly auditLog: AuditEntry[] = [];
   private readonly clock: () => string;
@@ -136,6 +137,25 @@ export class MemoryStore implements Store {
     return found ? ok(copy(found)) : err({ code: 'not-found', what: 'provider connection', id: instanceId });
   }
 
+  async putTeamMember(member: Omit<TeamMember, 'addedAt'> & { addedAt?: string }) {
+    if (this.closed) return this.refuse('putTeamMember');
+    if (!this.teams.has(member.teamId)) return err({ code: 'not-found', what: 'team', id: member.teamId });
+    const admitted = admit(TeamMemberSchema, { ...member, addedAt: member.addedAt ?? this.clock() }, 'team member');
+    if (!admitted.accepted) return err({ code: 'conflict', reason: admitted.reason });
+    this.members.set(`${admitted.value.teamId}\u0000${admitted.value.subject}`, admitted.value);
+    return ok(admitted.value);
+  }
+  async getTeamMember(teamId: string, subject: string) {
+    const found = this.members.get(`${teamId}\u0000${subject}`);
+    return found ? ok(copy(found)) : err({ code: 'not-found', what: 'team membership', id: `${teamId}/${subject}` });
+  }
+  async listTeamMembers(teamId: string) {
+    return [...this.members.values()].filter((m) => m.teamId === teamId).map(copy);
+  }
+  async teamsForSubject(subject: string) {
+    return [...this.members.values()].filter((m) => m.subject === subject).map((m) => m.teamId);
+  }
+
   async putPlan(instanceId: string, plan: unknown, planHash: string) {
     if (this.closed) return this.refuse('putPlan');
     if (!this.instances.has(instanceId)) return err({ code: 'not-found', what: 'instance', id: instanceId });
@@ -224,6 +244,7 @@ export class MemoryStore implements Store {
     this.closed = true;
     this.teams.clear();
     this.plans.clear();
+    this.members.clear();
     this.instances.clear();
     this.dispatches.clear();
     this.attestations.clear();

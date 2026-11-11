@@ -30,14 +30,16 @@ an in-memory double under one conformance suite, gated in CI against a live data
 turns accepted attestations into stored state. `apps/status-api` plus the managed action have run a real
 GitHub-initiated dispatch end to end, which remains the only full loop proven against a deployed control plane.
 
+Team membership is enforced at the capability boundary (#173): handlers receive a resolved scope or never
+run, cross-team reads answer 404 rather than 403 so existence is not leakable, and the route table itself is
+walked by a test so a future instance-scoped route cannot skip the guard.
+
 What is still **not** delivered, stated because the earlier version of this paragraph was the first thing an
-agent read and it had gone stale: no Stripe integration, no CLI or web UI, no tenant on either service, and
-**no team-scoping in the control-plane API** — records carry a `teamId`, but list and get endpoints do not yet
-filter by the caller's team, so the service is operator-only until that closes. The deployed control plane is
-still the older in-memory `status-api`; the cutover to `apps/control-plane` needs a hosted Keycloak first
-(#172). Do not describe planned behavior as delivered, and prefer the evidence tier a claim actually holds:
-measured, tested, or designed-and-unexercised. Provider-specific claims need a live check, and CI substitutes
-for none of them.
+agent read and it had gone stale: no Stripe integration, no CLI or web UI, and no tenant on either service.
+The deployed control plane is still the older in-memory `status-api`; the cutover to `apps/control-plane`
+needs a hosted Keycloak first (#172). Do not describe planned behavior as delivered, and prefer the evidence
+tier a claim actually holds: measured, tested, or designed-and-unexercised. Provider-specific claims need a
+live check, and CI substitutes for none of them.
 Run `pnpm run verify` for the whole gate set. The skills under
 `.agents/skills/` inherited from the starter package stay identical to their source; project
 guidance is added beside them, never by editing them.

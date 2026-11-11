@@ -125,6 +125,26 @@ check('the attestation is a row, not a memory', persisted.ok && persisted.value.
 const listAfterRestart = await call('/api/v1/instances', {}, accessToken);
 check('authenticated list reflects the record', listAfterRestart.status === 200 && JSON.stringify(listAfterRestart.json ?? []).includes(instanceId), `${String(listAfterRestart.status)}`);
 
+// Cross-team authorization, against a team this caller is NOT a member of. The foreign instance is written
+// through the database from this process, because the whole point is that the API cannot create it.
+const otherTeams = (await reader.listTeams()).filter((x) => x.name === 'other-workspace');
+if (otherTeams.length === 1) {
+  const foreign = await reader.createInstance({ teamId: otherTeams[0]?.id ?? '', name: `foreign-${suffix}`, platform: 'starter-web' });
+  if (foreign.ok) {
+    const listed = await call('/api/v1/instances', {}, accessToken);
+    const ids = JSON.stringify(listed.json ?? []);
+    check('another teams instance is absent from the list', listed.status === 200 && !ids.includes(foreign.value.id), `${String(listed.status)} ids contain foreign=${ids.includes(foreign.value.id)}`);
+    const probe = await call(`/api/v1/instances/${foreign.value.id}`, {}, accessToken);
+    check('reading it is a 404, not a 403', probe.status === 404, `${String(probe.status)} ${probe.text.slice(0, 70)} -- a 403 would confirm it exists`);
+    const plant = await call(`/api/v1/instances/${foreign.value.id}/plan`, { method: 'PUT', body: JSON.stringify({ plan: { instanceId: foreign.value.id, planHash: 'b'.repeat(64) } }) }, accessToken);
+    check('writing to it is refused the same way', plant.status === 404, `${String(plant.status)}`);
+  } else {
+    check('another teams instance is absent from the list', false, 'could not create the foreign instance');
+  }
+} else {
+  check('another teams instance is absent from the list', false, `expected one other-workspace team, found ${String(otherTeams.length)} -- run pnpm run db:seed-dev`);
+}
+
 await reader.close();
 const failed = results.filter((r) => !r.ok);
 process.stdout.write(`L ${String(results.length - failed.length)}/${String(results.length)} checks passed\n`);

@@ -26816,6 +26816,13 @@ var AuditEntrySchema = external_exports.object({
   /** Structured, bounded, and never a credential: reason codes and ids, not payloads. */
   detail: external_exports.record(external_exports.string(), external_exports.union([external_exports.string().max(300), external_exports.number(), external_exports.boolean()])).default({})
 }).strict();
+var TeamRoleSchema = external_exports.enum(["owner", "member"]);
+var TeamMemberSchema = external_exports.object({
+  teamId: external_exports.string().min(1),
+  subject: external_exports.string().min(1).max(200),
+  role: TeamRoleSchema,
+  addedAt: external_exports.string().min(1)
+}).strict();
 
 // node_modules/.pnpm/pg@8.23.1/node_modules/pg/esm/index.mjs
 var import_lib = __toESM(require_lib2(), 1);

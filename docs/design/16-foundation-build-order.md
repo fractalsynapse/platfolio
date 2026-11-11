@@ -76,6 +76,12 @@ in OIDC the client is the boundary, not a claim the caller names.
   → failed) and signs its own rows in the audit trail as `controller`/`sweep-N`.
 - Migrations are forward-only, recorded in-schema, and applied by `db:migrate` -- not as a side effect of boot,
   except in the local compose file where that is explicitly labelled a convenience.
+- **Authorization, added after the fact (#173):** verified authentication turned out not to be authorization.
+  Team-scoped routes are built with a `scoped()` wrapper that resolves membership before the handler runs,
+  cross-team reads answer 404 rather than 403, and a route-table-driven test walks every instance-scoped
+  operation so a new route cannot skip the guard. The audit filter found a second bug on the way:
+  `dispatch.create` rows targeted the dispatch id and were therefore invisible to the caller who took the
+  action.
 - **Not here yet:** commit statuses back to GitHub (item 5) and the connect pairing, because they need a
   repository connection written by something other than a smoke script. Dispatch issuance is still an operator
   action over the API rather than a reaction to a push.

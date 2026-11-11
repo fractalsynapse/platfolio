@@ -117,6 +117,26 @@ export const AuditEntrySchema = z.object({
 }).strict();
 export type AuditEntry = z.infer<typeof AuditEntrySchema>;
 
+/**
+ * Who belongs to which team, and in what role.
+ *
+ * This exists because verified authentication is not authorization: the control plane could already prove a
+ * token was genuine and signed by the right issuer, and still answer `GET /api/v1/instances` with every
+ * team's rows (#173). `subject` is the IdP's stable user id -- the token's `sub` -- because that is the only
+ * identity claim this platform is willing to trust, and a second mapping from username or email would be a
+ * second source of who someone is.
+ */
+export const TeamRoleSchema = z.enum(['owner', 'member']);
+export type TeamRole = z.infer<typeof TeamRoleSchema>;
+
+export const TeamMemberSchema = z.object({
+  teamId: z.string().min(1),
+  subject: z.string().min(1).max(200),
+  role: TeamRoleSchema,
+  addedAt: z.string().min(1),
+}).strict();
+export type TeamMember = z.infer<typeof TeamMemberSchema>;
+
 export type StoreError =
   | { code: 'not-found'; what: string; id: string }
   | { code: 'conflict'; reason: string }
@@ -177,6 +197,20 @@ export interface Store {
    */
   putPlan(instanceId: string, plan: unknown, planHash: string): Promise<StoreResult<{ instanceId: string; planHash: string }>>;
   getPlan(instanceId: string): Promise<StoreResult<{ instanceId: string; planHash: string; plan: unknown }>>;
+
+  /**
+   * Membership. `put` is idempotent by (teamId, subject): re-adding a member updates the role rather than
+   * accumulating rows, because an audit of "who could see this" must have one answer.
+   */
+  putTeamMember(member: Omit<TeamMember, 'addedAt'> & { addedAt?: string }): Promise<StoreResult<TeamMember>>;
+  getTeamMember(teamId: string, subject: string): Promise<StoreResult<TeamMember>>;
+  listTeamMembers(teamId: string): Promise<TeamMember[]>;
+  /**
+   * The authorization question, asked once: which teams may this subject act for? An empty array means the
+   * caller is authenticated and belongs to nothing -- which is a valid state, not an error, and the reason
+   * this returns a list instead of throwing.
+   */
+  teamsForSubject(subject: string): Promise<string[]>;
 
   createDispatch(input: Omit<DispatchRecord, 'id' | 'consumedAt'> & { id?: string }): Promise<StoreResult<DispatchRecord>>;
   getDispatch(id: string): Promise<StoreResult<DispatchRecord>>;

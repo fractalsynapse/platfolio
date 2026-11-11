@@ -72,6 +72,10 @@ export class StoreService extends Service<z.infer<typeof StoreConfigSchema>> {
   getRepoConnection(instanceId: string) { return this.inner.getRepoConnection(instanceId); }
   putProviderConnection(conn: Parameters<Store['putProviderConnection']>[0]) { return this.inner.putProviderConnection(conn); }
   getProviderConnection(instanceId: string) { return this.inner.getProviderConnection(instanceId); }
+  putTeamMember(...args: Parameters<Store['putTeamMember']>) { return this.inner.putTeamMember(...args); }
+  getTeamMember(...args: Parameters<Store['getTeamMember']>) { return this.inner.getTeamMember(...args); }
+  listTeamMembers(...args: Parameters<Store['listTeamMembers']>) { return this.inner.listTeamMembers(...args); }
+  teamsForSubject(...args: Parameters<Store['teamsForSubject']>) { return this.inner.teamsForSubject(...args); }
   putPlan(instanceId: string, plan: unknown, planHash: string) { return this.inner.putPlan(instanceId, plan, planHash); }
   getPlan(instanceId: string) { return this.inner.getPlan(instanceId); }
   createDispatch(input: Parameters<Store['createDispatch']>[0]) { return this.inner.createDispatch(input); }
