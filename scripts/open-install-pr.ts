@@ -18,7 +18,7 @@ import {
   createInstallationAccessToken,
   revokeInstallationAccessToken,
 } from '../packages/contracts/src/index.ts';
-import { applyInventory, parseCompose, parseInventory, renderInstallPullRequest } from '../packages/manifest/src/index.ts';
+import { ACTION_PATH, applyInventory, parseCompose, parseInventory, renderInstallPullRequest } from '../packages/manifest/src/index.ts';
 
 const args = process.argv.slice(2).filter((a) => a !== '--');
 const flag = (name: string, fallback?: string): string | undefined => {
@@ -62,6 +62,28 @@ const manifest = applyInventory(composed.manifest, entries);
 // The action pin must be a real commit that contains the action. Until the managed action exists this names
 // the commit we would pin to, and the PR says so rather than pretending the dependency is satisfied.
 const actionSha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+// A pin is only a trust anchor if the commit it names actually contains the action. The first real run failed
+// at "Set up job" because the install workflow was generated before .github/actions/platfolio-managed
+// existed, so GitHub resolved a real, signed commit to a missing file -- D30 law 3 satisfied, and useless.
+// Check it at the source of truth rather than trusting that HEAD is the right answer.
+
+/** Does the pinned commit actually carry the action? Fails the run before a workflow can be opened against a
+ * commit that GitHub will resolve to nothing. */
+function refHasAction(repo: string, sha: string): boolean {
+  try {
+    execFileSync('gh', ['api', `repos/${repo}/contents/${ACTION_PATH}/action.yml?ref=${sha}`, '--jq', '.name'], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+if (!refHasAction(repo, actionSha)) {
+  console.error(`  refusing to pin ${actionSha.slice(0, 12)}: that commit does not contain ${ACTION_PATH}/action.yml.`);
+  console.error('  the workflow would fail at "Set up job" with a missing-action error. Land the action on the');
+  console.error('  repository default branch first (the pin must name a commit that has it), then re-run.');
+  process.exit(1);
+}
+
 const installed = renderInstallPullRequest(manifest, {
   actionRepo: 'fractalsynapse/platfolio',
   actionSha,
