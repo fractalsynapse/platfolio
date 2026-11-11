@@ -182,6 +182,19 @@ Depends on E1/E2/E5/E6.
 *Accept:* with platfolio's API stopped, `git push` still deploys; with platfolio running, a dispatch
 applies a plan and the attestation matches read-back state; a stale/forged attestation is rejected.
 
+## The connect loop has run once, end to end (2026-11-11)
+
+A `workflow_dispatch` against this repository started a GitHub-hosted job in environment `production`; the
+committed managed action fetched the plan from the live control plane, applied it through the real provider,
+and posted an attestation that was **accepted and stored** -- confirmed independently by `readState` on the
+provider. M2's flow in miniature, on platfolio's own tenant-shaped instance.
+
+Three limits, named rather than implied: it is not a tenant's repository; the runner's identity is **recorded
+and not verified** (#159); and the attestation's `release` fields read `0.0.0-dev` because a laptop chose the
+pins, not a release job (#146). What it establishes is that the parts fit -- dispatch inputs, hash comparison,
+credential boundary, single-use nonce, attestation round trip -- which is what the milestones assumed without
+evidence.
+
 ## Milestone 3 — control plane surface (2–3 weeks)
 
 1. Teams, members, roles; instance CRUD; the connect wizard (repo → platform → Railway connect →
