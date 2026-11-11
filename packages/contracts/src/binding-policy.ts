@@ -1,7 +1,7 @@
 import type { CapabilityOffer, CapabilityShare, Instance, StoreError } from './persistence.ts';
 
 /**
- * Whether a binding may exist, as one pure function (#177, D42).
+ * Whether a binding may exist, as one pure function (#176, D42).
  *
  * Same reasoning as `checkAttestationPolicy`: a decision this consequential cannot be re-implemented per store
  * driver, because the two implementations would drift in exactly the way nobody notices until a tenant binds

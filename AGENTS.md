@@ -29,7 +29,7 @@ and 2 of that plan are delivered (333 tests): `apps/control-plane` boots on the 
 Keycloak-verified bearer auth, persistent records (`Store` as a capability with a Postgres implementation and
 an in-memory double under one conformance suite, gated in CI against a live database), a controller
 that turns accepted attestations into stored state, and capability bindings that make shared services
-queryable (#177): what an instance offers, which teams may consume it, and who depends on it -- the question a
+queryable (#176): what an instance offers, which teams may consume it, and who depends on it -- the question a
 destroy must ask first. `apps/status-api` plus the managed action have run a real
 GitHub-initiated dispatch end to end, which remains the only full loop proven against a deployed control plane.
 

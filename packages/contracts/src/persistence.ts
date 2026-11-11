@@ -167,7 +167,7 @@ export type CapabilityShare = z.infer<typeof CapabilityShareSchema>;
 
 /**
  * The binding record: which instance consumes which capability, from which provider instance, and into which
- * destinations. This is the thing that made "what breaks if I delete this?" unanswerable (#177) -- it existed
+ * destinations. This is the thing that made "what breaks if I delete this?" unanswerable (#176) -- it existed
  * only inside rendered manifests, so platfolio could not see its own wiring.
  */
 export const BindingRecordSchema = z.object({
@@ -276,7 +276,7 @@ export interface Store {
   putPlan(instanceId: string, plan: unknown, planHash: string): Promise<StoreResult<{ instanceId: string; planHash: string }>>;
   getPlan(instanceId: string): Promise<StoreResult<{ instanceId: string; planHash: string; plan: unknown }>>;
 
-  // ---------- capability bindings (#177, D42) ----------
+  // ---------- capability bindings (#176, D42) ----------
   /** Idempotent by instance+capability: republishing refreshes outputs rather than accumulating offers. */
   publishCapability(offer: NewCapabilityOffer): Promise<StoreResult<CapabilityOffer>>;
   getCapabilityOffer(instanceId: string, capability: string): Promise<StoreResult<CapabilityOffer>>;
