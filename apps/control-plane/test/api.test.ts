@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import fs from 'node:fs';
 import path from 'node:path';
-import { createKernel, disposeKernel } from '@platfolio/kernel';
+import { createKernel, disposeKernel, type KernelContext } from '@platfolio/kernel';
 import { buildCapabilities } from '../src/capabilities.ts';
 import {
   createIdentityFixture, defaultIdentityConfig, reasonOf, signToken,
@@ -22,6 +22,13 @@ const build = { version: '9.9.9', commit: 'abcdef0123456789abcdef0123456789abcde
 function must<T>(result: StoreResult<T>, label: string): T {
   if (result.ok) return result.value;
   throw new Error(`${label} refused: ${reasonOf(result)}`);
+}
+
+/** A team the given token subject can act for. Membership is granted, never assumed. */
+async function createTeamWith(ctx: KernelContext, subject = 'user-conformance'): Promise<string> {
+  const team = must(await ctx.store.createTeam({ name: `t-${Math.random().toString(36).slice(2, 8)}` }), 'createTeam');
+  must(await ctx.store.putTeamMember({ teamId: team.id, subject, role: 'owner' }), 'putTeamMember');
+  return team.id;
 }
 
 async function startApp(options: { reconcileIntervalMs?: number } = {}) {
@@ -85,10 +92,10 @@ test('Slice 1 behaviour survives the refactor to plugins', async () => {
 test('the lifecycle: record, register a plan, dispatch, fetch once, attest, reconcile', async () => {
   const app = await startApp({ reconcileIntervalMs: 60 });
   try {
-    const team = must(await app.ctx.store.createTeam({ name: 'acme' }), 'createTeam');
+    const teamId = await createTeamWith(app.ctx);
     const post = { ...app.asUser(scoped()), method: 'POST' as const };
 
-    const created = await app.call('/api/v1/instances', { ...post, body: JSON.stringify({ teamId: team.id, name: 'marketing', platform: 'starter-web' }) });
+    const created = await app.call('/api/v1/instances', { ...post, body: JSON.stringify({ teamId, name: 'marketing', platform: 'starter-web' }) });
     againstSpec('createInstance', 201, created.body);
     const instance = created.body as { id: string; state: string };
     assert.equal(instance.state, 'pending', 'a 201 records intent; nothing was verified, so nothing may claim progress (D30 law 1)');
@@ -102,7 +109,7 @@ test('the lifecycle: record, register a plan, dispatch, fetch once, attest, reco
     assert.match((badHash.body as { message: string }).message, /buildPlan/, 'the refusal must name the one place a digest is computed');
 
     const plan = {
-      instanceId: instance.id, teamId: team.id, provider: 'railway', contract: '1.0.0', planHash: 'b'.repeat(64),
+      instanceId: instance.id, teamId, provider: 'railway', contract: '1.0.0', planHash: 'b'.repeat(64),
       manifestRef: { platform: 'starter-web', version: '1.0.0' },
       environments: [{ name: 'production', services: [], databases: [], volumes: [], buckets: [], domains: [] }],
     };
@@ -166,8 +173,8 @@ test('the lifecycle: record, register a plan, dispatch, fetch once, attest, reco
 test('a partial attestation degrades the instance rather than calling it live', async () => {
   const app = await startApp({ reconcileIntervalMs: 60 });
   try {
-    const team = must(await app.ctx.store.createTeam({ name: 'acme' }), 'createTeam');
-    const instance = must(await app.ctx.store.createInstance({ teamId: team.id, name: 'worker', platform: 'starter-worker' }), 'createInstance');
+    const teamId = await createTeamWith(app.ctx);
+    const instance = must(await app.ctx.store.createInstance({ teamId, name: 'worker', platform: 'starter-worker' }), 'createInstance');
     const planHash = 'a'.repeat(64);
     must(await app.ctx.store.putPlan(instance.id, { instanceId: instance.id, planHash }, planHash), 'putPlan');
     const dispatch = must(await app.ctx.store.createDispatch({
@@ -211,6 +218,82 @@ test('requests are bounded, and a malformed body refuses cleanly instead of thro
     assert.equal(auditLimit.status, 400, 'the limit is bounded, so a list endpoint cannot be asked for everything');
 
     againstSpec('listAudit', 200, (await app.call('/api/v1/audit?limit=5', app.asUser(scoped()))).body);
+  } finally {
+    await disposeKernel(app.ctx);
+  }
+});
+
+test('cross-team reads are indistinguishable from missing ones (#173)', async () => {
+  // The security property is not "the outsider is refused" -- a 403 would confirm the record exists. It is
+  // that the outsider learns nothing at all, so probing cannot enumerate teams' infrastructure. Every route
+  // that touches an instance is exercised here, by enumeration rather than by spot check, so the next
+  // instance-scoped route cannot quietly skip the guard.
+  const app = await startApp();
+  try {
+    const mine = await createTeamWith(app.ctx);
+    const theirs = must(await app.ctx.store.createTeam({ name: 'not-mine' }), 'createTeam').id;
+    const stranger = must(await app.ctx.store.createInstance({ teamId: theirs, name: 'secret-svc', platform: 'starter-web' }), 'createInstance');
+    const mineInstance = must(await app.ctx.store.createInstance({ teamId: mine, name: 'mine', platform: 'starter-web' }), 'createInstance');
+    const token = scoped();
+
+    const list = await app.call('/api/v1/instances', app.asUser(token));
+    assert.equal(list.status, 200);
+    const ids = (list.body as Array<{ id: string }>).map((i) => i.id);
+    assert.ok(ids.includes(mineInstance.id), 'own instance missing from the list');
+    assert.ok(!ids.includes(stranger.id), 'another team instance leaked into the list');
+
+    const scopedRoutes: Array<[string, string, RequestInit]> = [
+      ['GET', `/api/v1/instances/${stranger.id}`, {}],
+      ['PUT', `/api/v1/instances/${stranger.id}/plan`, { method: 'PUT', body: JSON.stringify({ plan: { instanceId: stranger.id, planHash: 'a'.repeat(64) } }) }],
+      ['POST', `/api/v1/instances/${stranger.id}/dispatches`, { method: 'POST', body: '{}' }],
+      ['GET', `/api/v1/instances/${stranger.id}/latest-attestation`, {}],
+    ];
+    for (const [method, path, init] of scopedRoutes) {
+      const r = await app.call(path, { ...init, method, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' } });
+      assert.equal(r.status, 404, `${method} ${path} returned ${String(r.status)} to a non-member; body ${r.text.slice(0, 90)}`);
+      assert.equal(r.status, 404, 'sanity');
+      assert.ok(!/stranger|secret-svc|not-mine/.test(r.text), `${method} ${path} echoed the other team's identifiers`);
+    }
+
+    // Existence of a team is the same question, asked at creation time.
+    const createTheirs = await app.call('/api/v1/instances', { ...app.asUser(token), method: 'POST', body: JSON.stringify({ teamId: theirs, name: 'x', platform: 'starter-web' }) });
+    assert.equal(createTheirs.status, 404, 'a caller was allowed to plant an instance in another team');
+
+    // Unauthenticated stays 401: the distinction is between "who are you" and "not yours", and the API must
+    // not blur them -- a 404 for a missing token would hide auth regressions behind authorization.
+    const anonymous = await app.call('/api/v1/instances');
+    assert.equal(anonymous.status, 401);
+
+    // Authenticated but belonging to nothing: an empty list, not an error, and the same shape as an empty team.
+    const lonely = await startApp();
+    try {
+      const empty = await lonely.call('/api/v1/instances', lonely.asUser(scoped()));
+      assert.equal(empty.status, 200);
+      assert.deepEqual(empty.body, [], 'a caller with no teams should see an empty list');
+    } finally {
+      await disposeKernel(lonely.ctx);
+    }
+  } finally {
+    await disposeKernel(app.ctx);
+  }
+});
+
+test('every instance-scoped route enforces membership rather than trusting the handler', async () => {
+  // Table-driven over the manifest itself: a route under /api/v1/instances that does not answer 404 to a
+  // non-member is a hole, and adding such a route without the guard fails here rather than in production.
+  const app = await startApp();
+  try {
+    const theirs = must(await app.ctx.store.createTeam({ name: 'enumerated' }), 'createTeam').id;
+    const foreign = must(await app.ctx.store.createInstance({ teamId: theirs, name: 'probe', platform: 'starter-web' }), 'createInstance');
+    const instanceRoutes = ROUTE_MANIFEST.filter((r) => r.path.startsWith('/api/v1/instances') && r.path !== '/api/v1/instances' && !r.path.includes('/dispatches/{dispatchId}'));
+    assert.ok(instanceRoutes.length >= 4, `expected the scoped routes to be enumerated, got ${String(instanceRoutes.length)}`);
+    for (const route of instanceRoutes) {
+      const path = route.path.replace('{instanceId}', foreign.id);
+      const init: RequestInit = { method: route.method, headers: { authorization: `Bearer ${scoped()}`, 'content-type': 'application/json' } };
+      if (route.method !== 'GET') init.body = JSON.stringify(route.operationId === 'putPlan' ? { plan: { instanceId: foreign.id, planHash: 'b'.repeat(64) } } : {});
+      const response = await app.call(path, init);
+      assert.equal(response.status, 404, `${route.operationId} answered ${String(response.status)} to a non-member -- the guard was skipped`);
+    }
   } finally {
     await disposeKernel(app.ctx);
   }

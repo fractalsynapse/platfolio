@@ -3,7 +3,7 @@ import {
   AttestationSchema, CONTRACT_NAME, CONTRACT_VERSION, DispatchIntentSchema, InstanceSchema,
   reasonOf, type VerifiedClaims,
 } from '@platfolio/contracts';
-import type { ExtensionDescriptor, KernelContext, Request, Response_ } from '@platfolio/kernel';
+import type { ExtensionDescriptor, KernelContext, Request, Response_, RouteDefinition } from '@platfolio/kernel';
 import { badRequest, bearerToken, notFound, send, unauthorized, type Authorizer } from './respond.ts';
 
 /**
@@ -47,6 +47,57 @@ const bodyOf = <T>(request: Request): Body<T> => {
   if (request.bodyError !== undefined) return { ok: false, error: request.bodyError };
   return { ok: true, value: request.body === undefined ? undefined : (request.body as T) };
 };
+
+type Scope = { context: KernelContext; claims: VerifiedClaims; teamId: string };
+type ScopedHandler = (scope: Scope, request: Request, params: Record<string, string>) => Promise<Response_>;
+
+/**
+ * The authorization boundary, resolved once per request.
+ *
+ * Handlers receive a scope or never run -- they cannot forget the check, because they are not given a context
+ * to reach through. That is the whole design decision behind #173: authentication was already verified and
+ * every team's rows still came back, so a rule that lives in each handler is a rule the next handler forgets.
+ *
+ * Cross-team reads answer 404, not 403. A 403 confirms the record exists, which is a finding in itself; the
+ * caller is told nothing about what they cannot see.
+ */
+async function resolveScope(context: KernelContext, request: Request, params: Record<string, string>, viaTeamId?: string): Promise<{ ok: true; scope: Scope } | { ok: false; response: Response_ }> {
+  const auth = await authorize(context, request);
+  if (auth.ok === false) return { ok: false, response: auth.response };
+  const subject = auth.claims.subject;
+  const teams = await context.store.teamsForSubject(subject);
+  if (teams.length === 0) {
+    // Authenticated, and member of nothing. Not an error to explain -- a 404 on a specific resource and an
+    // empty list on a collection, which is what an outsider is entitled to know.
+    return { ok: false, response: { status: 404, body: { error: 'not-found', message: 'no such resource for this principal' } } };
+  }
+  let teamId = viaTeamId ?? params.teamId;
+  if (teamId === undefined && params.instanceId !== undefined) {
+    const found = await context.store.getInstance(params.instanceId);
+    if (found.ok === false) return { ok: false, response: notFound('instance', params.instanceId) };
+    teamId = found.value.teamId;
+  }
+  if (teamId === undefined) return { ok: false, response: badRequest('this operation needs a team or an instance the caller belongs to') };
+  if (!teams.includes(teamId)) {
+    // Same 404 whether the resource exists or not, so the answer cannot be probed for membership.
+    return { ok: false, response: { status: 404, body: { error: 'not-found', message: 'no such resource for this principal' } } };
+  }
+  return { ok: true, scope: { context, claims: auth.claims, teamId } };
+}
+
+/** Wraps a handler so the scope is resolved before it runs. Team-scoped routes are built with this only. */
+function scoped(method: string, path: string, operationId: string, handler: ScopedHandler): RouteDefinition {
+  return {
+    method,
+    path,
+    operationId,
+    handle: async (request, params, context) => {
+      const resolved = await resolveScope(context, request, params);
+      if (resolved.ok === false) return resolved.response;
+      return handler(resolved.scope, request, params);
+    },
+  };
+}
 
 export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
   const now = () => nowOf(deps);
@@ -114,9 +165,6 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
   };
 
   const instances: ExtensionDescriptor = {
-    // Every capability that calls `authorize` must declare `identity` as well as `store`: Cordis checks access
-    // against the fiber's own inject list, so an undeclared dependency throws on the first request rather than
-    // at composition time. That refusal is correct and my descriptors were the bug -- measured, not theorised.
     id: 'instances',
     requires: ['store', 'identity'],
     routes: [
@@ -125,57 +173,56 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
         handle: async (request, _params, context) => {
           const auth = await authorize(context, request);
           if (auth.ok === false) return auth.response;
-          return send('listInstances', 200, await context.store.listInstances());
+          const teams = await context.store.teamsForSubject(auth.claims.subject);
+          // Filtered by membership, not by "there is only one team in the demo". An outsider sees an empty
+          // list, which is the same answer as a member of an empty team -- no signal about what exists.
+          const visible = await Promise.all(teams.map((teamId) => context.store.listInstances(teamId)));
+          return send('listInstances', 200, visible.flat());
         },
       },
       {
         method: 'POST', path: '/api/v1/instances', operationId: 'createInstance',
-        handle: async (request, _params, context) => {
-          const auth = await authorize(context, request);
-          if (auth.ok === false) return auth.response;
-          const parsed = bodyOf<{ teamId?: string; name?: string; platform?: string }>(request);
+        handle: async (request, params, context) => {
+          const parsed = bodyOf<{ teamId?: unknown; name?: unknown; platform?: unknown }>(request);
           if (parsed.ok === false) return badRequest(parsed.error);
           const input = InstanceSchema.pick({ teamId: true, name: true, platform: true }).safeParse(parsed.value ?? {});
           if (!input.success) return badRequest(input.error.issues.map((i) => `${i.path.join('.') || '<root>'} ${i.message}`).join('; '));
+          // Membership is checked against the team named in the body, which resolveScope cannot read from
+          // params. Passing it explicitly keeps the decision in one place: the caller may act for that team or
+          // get the same 404 as if the team did not exist.
+          const resolved = await resolveScope(context, request, params, input.data.teamId);
+          if (resolved.ok === false) return resolved.response;
           const created = await context.store.createInstance(input.data);
           if (created.ok === false) return { status: 400, body: { error: created.code, message: reasonOf(created) } };
-          await context.store.appendAudit({ actorKind: 'user', actorRef: auth.claims.subject, action: 'instance.create', target: created.value.id, detail: { platform: created.value.platform } });
-          // A 201 here records intent. Nothing about provisioning is claimed, because nothing was verified
-          // (D30 law 1): the state says `pending` and only the controller moves it.
+          await context.store.appendAudit({ actorKind: 'user', actorRef: resolved.scope.claims.subject, action: 'instance.create', target: created.value.id, detail: { platform: created.value.platform, teamId: created.value.teamId } });
+          // A 201 records intent. Nothing about provisioning is claimed, because nothing was verified
+          // (D30 law 1): state stays `pending` and only a reconciled attestation moves it.
           return send('createInstance', 201, created.value);
         },
       },
-      {
-        method: 'GET', path: '/api/v1/instances/{instanceId}', operationId: 'getInstance',
-        handle: async (request, params, context) => {
-          const auth = await authorize(context, request);
-          if (auth.ok === false) return auth.response;
-          const found = await context.store.getInstance(params.instanceId ?? '');
-          return found.ok ? send('getInstance', 200, found.value) : notFound('instance', params.instanceId ?? '');
-        },
-      },
-      {
-        method: 'PUT', path: '/api/v1/instances/{instanceId}/plan', operationId: 'putPlan',
-        handle: async (request, params, context) => {
-          const auth = await authorize(context, request);
-          if (auth.ok === false) return auth.response;
-          const parsed = bodyOf<{ plan?: unknown }>(request);
-          if (parsed.ok === false) return badRequest(parsed.error);
-          const plan = parsed.value?.plan;
-          if (!plan || typeof plan !== 'object') return badRequest('body must be { plan: object }');
-          const hash = (plan as { planHash?: unknown }).planHash;
-          if (typeof hash !== 'string' || !/^[0-9a-f]{64}$/.test(hash)) {
-            // The hash on the plan is authoritative. Re-deriving one here would recreate the bug that made
-            // every honest attestation fail with 400: two implementations of a digest that has one home.
-            return badRequest(`plan must carry a bare 64-hex planHash computed by buildPlan, got ${typeof hash === 'string' ? hash.slice(0, 24) : String(hash)}`);
-          }
-          const stored = await context.store.putPlan(params.instanceId ?? '', plan, hash);
-          if (stored.ok === false) return { status: stored.code === 'not-found' ? 404 : 400, body: { error: stored.code, message: reasonOf(stored) } };
-          await context.store.updateInstanceState(params.instanceId ?? '', 'pending', { desiredPlanHash: hash });
-          await context.store.appendAudit({ actorKind: 'user', actorRef: auth.claims.subject, action: 'plan.register', target: params.instanceId ?? '', detail: { planHash: hash.slice(0, 12) } });
-          return send('putPlan', 200, { instanceId: params.instanceId ?? '', planHash: hash });
-        },
-      },
+      scoped('GET', '/api/v1/instances/{instanceId}', 'getInstance', async (scope, _request, params) => {
+        const found = await scope.context.store.getInstance(params.instanceId ?? '');
+        // resolveScope already proved the instance exists and is the caller's team's; a mismatch here means the
+        // row went away mid-request, which is a 404 like any other missing record.
+        return found.ok ? send('getInstance', 200, found.value) : notFound('instance', params.instanceId ?? '');
+      }),
+      scoped('PUT', '/api/v1/instances/{instanceId}/plan', 'putPlan', async (scope, request, params) => {
+        const parsed = bodyOf<{ plan?: unknown }>(request);
+        if (parsed.ok === false) return badRequest(parsed.error);
+        const plan = parsed.value?.plan;
+        if (!plan || typeof plan !== 'object') return badRequest('body must be { plan: object }');
+        const hash = (plan as { planHash?: unknown }).planHash;
+        if (typeof hash !== 'string' || !/^[0-9a-f]{64}$/.test(hash)) {
+          // The digest on the plan is authoritative. Re-deriving one here would recreate the bug that made
+          // every honest attestation fail with 400: two implementations of a truth that has one home.
+          return badRequest(`plan must carry a bare 64-hex planHash computed by buildPlan, got ${typeof hash === 'string' ? hash.slice(0, 24) : String(hash)}`);
+        }
+        const stored = await scope.context.store.putPlan(params.instanceId ?? '', plan, hash);
+        if (stored.ok === false) return { status: 400, body: { error: stored.code, message: reasonOf(stored) } };
+        await scope.context.store.updateInstanceState(params.instanceId ?? '', 'pending', { desiredPlanHash: hash });
+        await scope.context.store.appendAudit({ actorKind: 'user', actorRef: scope.claims.subject, action: 'plan.register', target: params.instanceId ?? '', detail: { planHash: hash.slice(0, 12) } });
+        return send('putPlan', 200, { instanceId: params.instanceId ?? '', planHash: hash });
+      }),
     ],
   };
 
@@ -183,49 +230,48 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
     id: 'dispatches',
     requires: ['store', 'identity'],
     routes: [
-      {
-        method: 'POST', path: '/api/v1/instances/{instanceId}/dispatches', operationId: 'createDispatch',
-        handle: async (request, params, context) => {
-          const auth = await authorize(context, request);
-          if (auth.ok === false) return auth.response;
-          const instanceId = params.instanceId ?? '';
-          const plan = await context.store.getPlan(instanceId);
-          if (plan.ok === false) return notFound('plan', instanceId);
-          const parsed = bodyOf<{ action?: 'apply' | 'destroy'; environment?: string }>(request);
-          if (parsed.ok === false) return badRequest(parsed.error);
-          const action = parsed.value?.action ?? 'apply';
-          const environment = parsed.value?.environment ?? 'production';
-          const issued = now();
-          const ttl = deps.dispatchTtlMs ?? 15 * 60_000;
-          // The dispatch copies the plan at issue time. A runner that fetches after the desired state moved
-          // must not be authorised for the new plan -- the hash it attests against would no longer mean
-          // anything.
-          const created = await context.store.createDispatch({
-            instanceId,
-            nonce: randomBytes(16).toString('hex'),
-            planHash: plan.value.planHash,
-            action,
-            environment,
-            issuedAt: issued.toISOString(),
-            expiresAt: new Date(issued.getTime() + ttl).toISOString(),
-            plan: plan.value.plan,
-          });
-          if (created.ok === false) return { status: 400, body: { error: created.code, message: reasonOf(created) } };
-          const intent = DispatchIntentSchema.parse({
-            instanceId, teamId: (await context.store.getInstance(instanceId)).ok ? ((await context.store.getInstance(instanceId)) as { value: { teamId: string } }).value.teamId : 'unknown',
-            dispatchId: created.value.id, nonce: created.value.nonce, planHash: created.value.planHash,
-            action, environment, issuedAt: created.value.issuedAt, expiresAt: created.value.expiresAt,
-          });
-          await context.store.appendAudit({ actorKind: 'user', actorRef: auth.claims.subject, action: 'dispatch.create', target: created.value.id, detail: { instanceId, action, environment } });
-          return send('createDispatch', 201, { intent });
-        },
-      },
+      scoped('POST', '/api/v1/instances/{instanceId}/dispatches', 'createDispatch', async (scope, request, params) => {
+        const instanceId = params.instanceId ?? '';
+        const plan = await scope.context.store.getPlan(instanceId);
+        if (plan.ok === false) return notFound('plan', instanceId);
+        const parsed = bodyOf<{ action?: 'apply' | 'destroy'; environment?: string }>(request);
+        if (parsed.ok === false) return badRequest(parsed.error);
+        const action = parsed.value?.action ?? 'apply';
+        const environment = parsed.value?.environment ?? 'production';
+        const issued = now();
+        const ttl = deps.dispatchTtlMs ?? 15 * 60_000;
+        const created = await scope.context.store.createDispatch({
+          instanceId,
+          // The dispatch copies the plan at issue time: a runner must not be authorised for a desired state
+          // that moved while its workflow sat in a queue.
+          nonce: randomBytes(16).toString('hex'),
+          planHash: plan.value.planHash,
+          action,
+          environment,
+          issuedAt: issued.toISOString(),
+          expiresAt: new Date(issued.getTime() + ttl).toISOString(),
+          plan: plan.value.plan,
+        });
+        if (created.ok === false) return { status: 400, body: { error: created.code, message: reasonOf(created) } };
+        const instance = await scope.context.store.getInstance(instanceId);
+        const intent = DispatchIntentSchema.parse({
+          instanceId, teamId: instance.ok ? instance.value.teamId : 'unknown',
+          dispatchId: created.value.id, nonce: created.value.nonce, planHash: created.value.planHash,
+          action, environment, issuedAt: created.value.issuedAt, expiresAt: created.value.expiresAt,
+        });
+        // Target is the team-owned instance, not the dispatch id. The audit list is filtered by what the
+        // caller's teams own, so a row addressed to a dispatch would be invisible to the very people whose
+        // action it records -- which the authorization filter caught the first time it ran.
+        await scope.context.store.appendAudit({ actorKind: 'user', actorRef: scope.claims.subject, action: 'dispatch.create', target: instanceId, detail: { dispatchId: created.value.id, action, environment } });
+        return send('createDispatch', 201, { intent });
+      }),
       {
         method: 'GET', path: '/api/v1/instances/{instanceId}/dispatches/{dispatchId}', operationId: 'getDispatchPlan',
         handle: async (_request, params, context) => {
-          // The runner authenticates with the shared dispatch secret, not a user token: whoami-style scope
-          // checks here would reject the very job the platform exists to start. Identity of the runner is the
-          // #159 gap; the single-use nonce is what bounds the damage meanwhile.
+          // Deliberately not team-scoped: the caller is GitHub Actions, which holds the dispatch secret and
+          // no user token. Its authority is the single-use nonce, which the store enforces, and the runner's
+          // *identity* is the #159 gap. Wrapping this route in a user guard would break the one flow the
+          // platform exists to run.
           const dispatchId = params.dispatchId ?? '';
           const existing = await context.store.getDispatch(dispatchId);
           if (existing.ok === false) return notFound('dispatch', dispatchId);
@@ -242,6 +288,8 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
       {
         method: 'POST', path: '/api/v1/attestations', operationId: 'postAttestation',
         handle: async (request, _params, context) => {
+          // Same reasoning as the runner's fetch: bound by nonce, plan hash and one-row-per-dispatch, not by
+          // team membership. Acceptance policy is `checkAttestationPolicy`, shared by every store driver.
           const parsed = bodyOf<unknown>(request);
           if (parsed.ok === false) return badRequest(parsed.error);
           const attestation = AttestationSchema.safeParse(parsed.value ?? {});
@@ -255,15 +303,10 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
           return send('postAttestation', 202, { accepted: true, dispatchId: recorded.value.dispatchId, result: recorded.value.result });
         },
       },
-      {
-        method: 'GET', path: '/api/v1/instances/{instanceId}/latest-attestation', operationId: 'getLatestAttestation',
-        handle: async (request, params, context) => {
-          const auth = await authorize(context, request);
-          if (auth.ok === false) return auth.response;
-          const latest = await context.store.latestAttestation(params.instanceId ?? '');
-          return latest.ok ? send('getLatestAttestation', 200, latest.value) : notFound('attestation', params.instanceId ?? '');
-        },
-      },
+      scoped('GET', '/api/v1/instances/{instanceId}/latest-attestation', 'getLatestAttestation', async (scope, _request, params) => {
+        const latest = await scope.context.store.latestAttestation(params.instanceId ?? '');
+        return latest.ok ? send('getLatestAttestation', 200, latest.value) : notFound('attestation', params.instanceId ?? '');
+      }),
     ],
   };
 
@@ -277,7 +320,14 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
         if (auth.ok === false) return auth.response;
         const limit = Number(request.query.get('limit') ?? 50);
         if (!Number.isFinite(limit) || limit < 1 || limit > 200) return badRequest('limit must be between 1 and 200');
-        return send('listAudit', 200, await context.store.recentAudit(limit));
+        const teams = await context.store.teamsForSubject(auth.claims.subject);
+        const owned = new Set((await Promise.all(teams.map((teamId) => context.store.listInstances(teamId)))).flat().map((i) => i.id));
+        const rows = await context.store.recentAudit(200);
+        // Audit rows are addressed by instance id, or by the instance itself for dispatches. Anything not
+        // owned by one of the caller's teams is simply not in the answer -- including rows that mention
+        // resources that do not exist, which would otherwise be a way to probe for them.
+        const visible = rows.filter((row) => owned.has(row.target) || owned.has(row.target.replace(/^instance\//, '')));
+        return send('listAudit', 200, visible.slice(0, limit));
       },
     }],
   };

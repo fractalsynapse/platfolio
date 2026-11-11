@@ -102,6 +102,41 @@ export async function runStoreConformance(make: () => Promise<Store> | Store): P
     return expectErr(conn, 'not-found', 'repo connection for unknown instance');
   });
 
+  await add('membership answers the authorization question, and unknown subjects get nothing', async () => {
+    const { store, team } = await seed();
+    const orphan = await store.putTeamMember({ teamId: 'team-never-created', subject: 'sub-x', role: 'member' });
+    const guardVerdict = expectErr(orphan, 'not-found', 'membership for an unknown team');
+    if (guardVerdict.status === 'fail') return guardVerdict;
+
+    const added = await store.putTeamMember({ teamId: team.id, subject: 'sub-adrian', role: 'owner' });
+    if (!added.ok) return { status: 'fail', detail: `add refused: ${reasonOf(added)}` };
+    // Idempotent by (team, subject): a re-add updates the role rather than accumulating rows, because an audit
+    // of who could see a team's data must have exactly one answer per person.
+    const again = await store.putTeamMember({ teamId: team.id, subject: 'sub-adrian', role: 'member' });
+    if (!again.ok) return { status: 'fail', detail: `re-add refused: ${reasonOf(again)}` };
+    const members = await store.listTeamMembers(team.id);
+    if (members.length !== 1) return { status: 'fail', detail: `expected one row after re-add, got ${String(members.length)}` };
+    if (members[0]?.role !== 'member') return { status: 'fail', detail: `role was not updated on re-add: ${String(members[0]?.role)}` };
+
+    const teams = await store.teamsForSubject('sub-adrian');
+    if (teams.length !== 1 || teams[0] !== team.id) return { status: 'fail', detail: `teamsForSubject returned ${JSON.stringify(teams)}` };
+    const nobody = await store.teamsForSubject('sub-stranger');
+    if (nobody.length !== 0) return { status: 'fail', detail: `an unknown subject was granted ${JSON.stringify(nobody)}` };
+    return { status: 'pass', detail: 'one row, role updated, membership resolved, stranger gets nothing' };
+  });
+
+  await add('a refused write leaves no row readable afterwards', async () => {
+    // The two drivers differ here on purpose: Postgres enforces the foreign key, the double checks by hand.
+    // Both must refuse, because an orphaned membership would grant access to a team that does not exist.
+    const { store } = await seed();
+    const rejected = await store.putTeamMember({ teamId: 'team-does-not-exist', subject: 'sub-y', role: 'owner' });
+    if (rejected.ok) return { status: 'fail', detail: 'the write was accepted' };
+    const listed = await store.teamsForSubject('sub-y');
+    return listed.length === 0
+      ? { status: 'pass', detail: `refused as ${rejected.code} and nothing readable` }
+      : { status: 'fail', detail: `refused but granted: ${JSON.stringify(listed)}` };
+  });
+
   await add('a plan is stored by its own digest, and a malformed hash is refused', async () => {
     const { store, instance } = await seed();
     const bad = await store.putPlan(instance.id, { instanceId: instance.id }, 'sha256:abc');

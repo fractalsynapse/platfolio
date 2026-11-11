@@ -130,21 +130,26 @@ paths:
   /api/v1/instances:
     get:
       operationId: listInstances
-      summary: The teams platforms, oldest first
+      summary: The caller's platforms, oldest first
       description: |
-        Ordered by creation, not by recency: a tenants platform list should not reshuffle when something
-        reconciles. Ordering contracts belong in the interface, not in each driver -- the store conformance
-        suite caught exactly this disagreement between Postgres and the in-memory double.
+        Filtered by team membership, never returned whole. Ordered by creation, not by recency: a tenant's
+        platform list should not reshuffle when something reconciles -- ordering contracts belong in the
+        interface, which the store conformance suite learned the hard way.
+
+        An authenticated caller who belongs to no team receives an empty list rather than an error, which is
+        the same answer a member of an empty team gets. Distinguishing the two would leak membership.
       security:
         - bearerJwt: []
       responses:
         '200':
-          description: Instances for the authenticated principal.
+          description: Instances the caller's teams own. May be empty; emptiness is not an error.
           content:
             application/json:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/Instance' }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
     post:
       operationId: createInstance
       summary: Begin hosting a platform
@@ -180,6 +185,13 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
         '401':
           $ref: '#/components/responses/Unauthenticated'
+        '404':
+          description: |
+            No such team, or a team the caller is not a member of. One answer for both, because 403 would
+            confirm the team exists (#173).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /api/v1/instances/{instanceId}:
     parameters:
@@ -425,11 +437,12 @@ paths:
   /api/v1/audit:
     get:
       operationId: listAudit
-      summary: What the platform did, and who did it
+      summary: What the platform did to the caller's platforms, and who did it
       description: |
-        Newest first, bounded by `limit`. Detail carries ids and reason codes, never payloads, and never a
+        Newest first, bounded by `limit`, and filtered to rows about instances the caller's teams own -- an
+        audit trail is a disclosure surface. Detail carries ids and reason codes, never payloads, and never a
         credential: the store refuses an over-long detail value as a value rather than throwing, because an
-        audit write that aborts the loop it is recording makes the audit trail less trustworthy, not more.
+        audit write that aborts the loop it is recording makes the trail less trustworthy, not more.
       security:
         - bearerJwt: []
       parameters:
