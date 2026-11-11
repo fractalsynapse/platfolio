@@ -28,7 +28,9 @@ instances, and a person is never a billing unit.
 | Dispatch | `id` | nonce, plan hash, action, environment, expiry, consumedAt | implemented |
 | Attestation | `dispatchId` | result, resources, release, actor kind | implemented |
 | Audit | `id` | actor kind + ref, action, target, detail | implemented |
-| Shared-service binding | — | who provides which capability to whom | **absent** |
+| Capability offer | `(instanceId, capability)` | outputs as names + kinds + placement state | implemented (#177) |
+| Capability share | `(instanceId, capability, toTeamId)` | cross-team grant; `*` is recorded, never implied | implemented (D42) |
+| Binding | `(consumerInstanceId, capability)` | provider instance, destinations, bound/stale | implemented (#177) |
 | Environment state | — | per-environment health (staging vs production) | **absent** |
 | Entitlement / plan limits | — | seats, instance caps, features | **absent** |
 
@@ -121,9 +123,20 @@ Three properties the CLI inherits from the decisions above, and the reason to fi
   the published API, the API is missing an operation -- that is a defect in the API, not an excuse for a
   private back door.
 
-## Decisions this page asks for
+## The four decisions, answered (D42-D45)
 
-Not yet recorded in [01](01-product-and-decisions.md); filed as **#176** so they are explicit rather than
-accidental: can a capability be shared across teams, is `destroy` owner-only, does the first release need
-invitations, and is an instance's name unique per team (currently nothing enforces it, and `inst-<random>`
-ids make a collision invisible in every UI).
+Recorded in [01](01-product-and-decisions.md) after this page was written; the answers shape what got built:
+
+1. **Teams may share services with each other** -- but via an explicit `capability_shares` grant, not because a
+   capability happens to be reachable. Revoking ages bindings to `stale` rather than deleting them: a running
+   app keeps working, the intent is withdrawn, and the gap stays visible.
+2. **`destroy` is owner-only and destroys the managed service only** -- never the repository (D36), never their
+   workflow. Safety is structural: a destroy that would strand a consumer is refused with the consumer named,
+   which is why `/consumers` exists before the destroy route does.
+3. **Open SaaS needs invitations and self-service team creation** (#178 territory): an invited person is an
+   *intent* to become a member, so invitations need their own states and must be claimed against a verified
+   identity -- not an email someone typed.
+4. **Instances are addressed `team/name`**, unique per team, repository-style slugs (#181) -- enforced in the
+   schema and the database and exercised through the conformance suite, because an application-layer check would
+   be a second rule the in-memory double would not reproduce.
+

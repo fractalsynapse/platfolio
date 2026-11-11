@@ -7,6 +7,33 @@ change; entries describe merged intent, not aspirations.
 
 ### Added
 
+- **Capability bindings are records (#177, D42).** `capability_offers`, `capability_shares` and
+  `capability_bindings` (migration `006`), `Store` methods for both drivers, and the shared
+  `checkBindingPolicy` that gates them -- one function, so no driver can drift on a security decision. Eight
+  operations designed in the OpenAPI document before any handler existed (21 operations now, `api:check`
+  green in both directions). This makes two previously impossible questions answerable: *what does this
+  platform depend on*, and *what breaks if I remove it* -- the latter being the whole reason #106 and #107
+  were opened.
+- Cross-team sharing is explicit (D42): a capability reachable is not a capability offered. Revoking a share
+  ages existing bindings to `stale` instead of deleting them, and withdraws discovery -- a running application
+  keeps working while the intent is withdrawn, and the dependency stays visible rather than silently wrong.
+- `self-binding refused`, `destinations the provider does not publish refused`, and `unbind answers 204 with
+  no body` are now transport behaviour rather than convention: a 204 carrying `null` is a lie clients
+  special-case.
+
+### Changed
+
+- **Decisions recorded from the maintainer's answers: D42-D45** -- teams may share services via explicit
+  grant; `destroy` is owner-only and destroys the managed service only (never the repository, D36);
+  invitations and self-service team creation are in scope for an open SaaS; instances are addressed
+  `team/name` with repository-style slugs, unique per team and enforced in the schema.
+- Two tests that snapshotted the API's operation list now **derive** it from the document (with a floor rather
+  than an equality), because a test that must be edited every time the API grows deliberately is a test that
+  gets skipped.
+
+
+### Added
+
 - **[17 § Object model](docs/design/17-object-model.md)** — the plain-English version of persons → teams →
   instances → templates, and what "shared" actually means (an instance that provides a capability, not a third
   kind of object). Every relationship is labelled **implemented**, **contract-only**, or **absent**, because

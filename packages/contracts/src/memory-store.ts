@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { Attestation } from './attestation.ts';
-import { AttestationRecordSchema, AuditEntrySchema, TeamMemberSchema, DispatchRecordSchema, InstanceSchema, ProviderConnectionSchema, RepoConnectionSchema, TeamSchema, newId,
-  type AttestationRecord, type AuditEntry, type DispatchRecord, type Instance, type ProviderConnection, type RepoConnection, type Store, type StoreError, type StoreResult, type Team, type TeamMember } from './persistence.ts';
+import { AttestationRecordSchema, AuditEntrySchema, BindingRecordSchema, CapabilityOfferSchema, CapabilityShareSchema, TeamMemberSchema, DispatchRecordSchema, InstanceSchema, ProviderConnectionSchema, RepoConnectionSchema, TeamSchema, newId,
+  type AttestationRecord, type AuditEntry, type BindingRecord, type CapabilityOffer, type CapabilityShare, type NewBinding, type NewCapabilityOffer, type NewCapabilityShare, type DispatchRecord, type Instance, type ProviderConnection, type RepoConnection, type Store, type StoreError, type StoreResult, type Team, type TeamMember } from './persistence.ts';
 import { checkAttestationPolicy } from './dispatch-policy.ts';
 
 /**
@@ -37,6 +37,9 @@ export class MemoryStore implements Store {
   private readonly dispatches = new Map<string, DispatchRecord>();
   private readonly plans = new Map<string, { instanceId: string; planHash: string; plan: unknown }>();
   private readonly members = new Map<string, TeamMember>();
+  private readonly offers = new Map<string, CapabilityOffer>();
+  private readonly shares = new Map<string, CapabilityShare>();
+  private readonly bindings = new Map<string, BindingRecord>();
   private readonly attestations = new Map<string, AttestationRecord>();
   private readonly auditLog: AuditEntry[] = [];
   private readonly clock: () => string;
@@ -156,6 +159,87 @@ export class MemoryStore implements Store {
     return [...this.members.values()].filter((m) => m.subject === subject).map((m) => m.teamId);
   }
 
+  async publishCapability(offer: NewCapabilityOffer) {
+    if (this.closed) return this.refuse('publishCapability');
+    if (!this.instances.has(offer.instanceId)) return err({ code: 'not-found', what: 'instance', id: offer.instanceId });
+    const admitted = admit(CapabilityOfferSchema, { ...offer, publishedAt: offer.publishedAt ?? this.clock() }, 'capability offer');
+    if (!admitted.accepted) return err({ code: 'conflict', reason: admitted.reason });
+    this.offers.set(`${admitted.value.instanceId}\u0000${admitted.value.capability}`, admitted.value);
+    return ok(admitted.value);
+  }
+  async getCapabilityOffer(instanceId: string, capability: string) {
+    const found = this.offers.get(`${instanceId}\u0000${capability}`);
+    return found ? ok(copy(found)) : err({ code: 'not-found', what: 'capability offer', id: `${instanceId}/${capability}` });
+  }
+  async listCapabilityOffers(teamId?: string) {
+    return [...this.offers.values()].filter((o) => teamId === undefined || o.teamId === teamId).map(copy);
+  }
+
+  async shareCapability(share: NewCapabilityShare) {
+    if (this.closed) return this.refuse('shareCapability');
+    if (!this.offers.has(`${share.instanceId}\u0000${share.capability}`)) return err({ code: 'not-found', what: 'capability offer', id: `${share.instanceId}/${share.capability}` });
+    const admitted = admit(CapabilityShareSchema, { ...share, sharedAt: share.sharedAt ?? this.clock() }, 'capability share');
+    if (!admitted.accepted) return err({ code: 'conflict', reason: admitted.reason });
+    this.shares.set(`${admitted.value.instanceId}\u0000${admitted.value.capability}\u0000${admitted.value.toTeamId}`, admitted.value);
+    return ok(admitted.value);
+  }
+  async revokeCapabilityShare(instanceId: string, capability: string, toTeamId: string) {
+    if (this.closed) return this.refuse('revokeCapabilityShare');
+    const key = `${instanceId}\u0000${capability}\u0000${toTeamId}`;
+    const existed = this.shares.delete(key);
+    if (!existed) return err({ code: 'not-found', what: 'capability share', id: key.replace(/\u0000/g, '/') });
+    // D42: the running app keeps its configuration; the *intent* is withdrawn, so bindings that depended on
+    // this share go stale rather than vanishing.
+    for (const [key2, binding] of this.bindings.entries()) {
+      if (binding.providerInstanceId === instanceId && binding.capability === capability) {
+        const consumer = this.instances.get(binding.consumerInstanceId);
+        const stillShared = [...this.shares.values()].some((s) => s.instanceId === instanceId && s.capability === capability
+          && (s.toTeamId === (consumer?.teamId ?? '') || s.toTeamId === '*'));
+        if (!stillShared && binding.state === 'bound') {
+          this.bindings.set(key2, { ...binding, state: 'stale' });
+        }
+      }
+    }
+    return ok({ revoked: true });
+  }
+  async listCapabilityShares(instanceId: string, capability?: string) {
+    return [...this.shares.values()].filter((s) => s.instanceId === instanceId && (capability === undefined || s.capability === capability)).map(copy);
+  }
+  async availableOffersForTeam(teamId: string, capability?: string) {
+    const own = [...this.offers.values()].filter((o) => o.teamId === teamId);
+    const shared = [...this.offers.values()].filter((o) => o.teamId !== teamId
+      && [...this.shares.values()].some((s) => s.instanceId === o.instanceId && s.capability === o.capability && (s.toTeamId === teamId || s.toTeamId === '*')));
+    const all = [...own, ...shared].filter((o) => capability === undefined || o.capability === capability);
+    return all.map(copy);
+  }
+
+  async bindCapability(binding: NewBinding) {
+    if (this.closed) return this.refuse('bindCapability');
+    const admitted = admit(BindingRecordSchema, { ...binding, boundAt: binding.boundAt ?? this.clock() }, 'binding');
+    if (!admitted.accepted) return err({ code: 'conflict', reason: admitted.reason });
+    const b = admitted.value;
+    if (!this.instances.has(b.consumerInstanceId)) return err({ code: 'not-found', what: 'instance', id: b.consumerInstanceId });
+    this.bindings.set(`${b.consumerInstanceId}\u0000${b.capability}`, b);
+    return ok(b);
+  }
+  async getBinding(consumerInstanceId: string, capability: string) {
+    const found = this.bindings.get(`${consumerInstanceId}\u0000${capability}`);
+    return found ? ok(copy(found)) : err({ code: 'not-found', what: 'binding', id: `${consumerInstanceId}/${capability}` });
+  }
+  async listBindings(consumerInstanceId: string) {
+    return [...this.bindings.values()].filter((b) => b.consumerInstanceId === consumerInstanceId).map(copy);
+  }
+  async listConsumers(providerInstanceId: string, capability?: string) {
+    return [...this.bindings.values()].filter((b) => b.providerInstanceId === providerInstanceId && (capability === undefined || b.capability === capability)).map(copy);
+  }
+  async unbindCapability(consumerInstanceId: string, capability: string) {
+    if (this.closed) return this.refuse('unbindCapability');
+    const key = `${consumerInstanceId}\u0000${capability}`;
+    const existed = this.bindings.delete(key);
+    if (!existed) return err({ code: 'not-found', what: 'binding', id: key.replace(/\u0000/g, '/') });
+    return ok({ removed: true });
+  }
+
   async putPlan(instanceId: string, plan: unknown, planHash: string) {
     if (this.closed) return this.refuse('putPlan');
     if (!this.instances.has(instanceId)) return err({ code: 'not-found', what: 'instance', id: instanceId });
@@ -245,6 +329,9 @@ export class MemoryStore implements Store {
     this.teams.clear();
     this.plans.clear();
     this.members.clear();
+    this.offers.clear();
+    this.shares.clear();
+    this.bindings.clear();
     this.instances.clear();
     this.dispatches.clear();
     this.attestations.clear();

@@ -1,5 +1,6 @@
 import { AttestationSchema, type Attestation } from './attestation.ts';
-import { RepoConnectionSchema, reasonOf, type DispatchRecord, type Store, type StoreError } from './persistence.ts';
+import { RepoConnectionSchema, reasonOf, type CapabilityOffer, type DispatchRecord, type Store, type StoreError, type StoreResult } from './persistence.ts';
+import { checkBindingPolicy } from './binding-policy.ts';
 
 /**
  * The Store conformance suite -- the same cases for the memory double and Postgres (docs/design/10 OD8).
@@ -52,7 +53,13 @@ export async function runStoreConformance(make: () => Promise<Store> | Store): P
     }
   };
   const fresh = async () => await make();
-  const expectErr = (result: { ok: boolean; value?: unknown } & Partial<StoreError>, code: StoreError['code'], label: string) =>
+  /** Unwrap a StoreResult in a case body: a refused setup step is a failure with a reason, not a null. */
+function mustOk<T>(result: StoreResult<T>, label: string): T {
+  if (result.ok) return result.value;
+  throw new Error(`${label} refused: ${reasonOf(result)}`);
+}
+
+const expectErr = (result: { ok: boolean; value?: unknown } & Partial<StoreError>, code: StoreError['code'], label: string) =>
     result.ok ? { status: 'fail' as const, detail: `${label}: expected ${code}, got acceptance` }
       : result.code !== code ? { status: 'fail' as const, detail: `${label}: expected ${code}, got ${String(result.code)}` }
         : { status: 'pass' as const, detail: `${label} refused as ${code}` };
@@ -135,6 +142,75 @@ export async function runStoreConformance(make: () => Promise<Store> | Store): P
     return listed.length === 0
       ? { status: 'pass', detail: `refused as ${rejected.code} and nothing readable` }
       : { status: 'fail', detail: `refused but granted: ${JSON.stringify(listed)}` };
+  });
+
+  await add('bindings: same team binds, and both directions are queryable', async () => {
+    const { store, team } = await seed();
+    const providerInst = mustOk(await store.createInstance({ teamId: team.id, name: 'identity', platform: 'shared-identity' }), 'provider instance');
+    const consumerInst = mustOk(await store.createInstance({ teamId: team.id, name: 'app', platform: 'starter-web' }), 'consumer instance');
+    const offer = mustOk(await store.publishCapability({
+      instanceId: providerInst.id, teamId: team.id, capability: 'identity',
+      outputs: [{ output: 'issuer', kind: 'url', state: 'issued-and-placed' }, { output: 'client_secret', kind: 'secret', state: 'not-issued' }],
+    }), 'publishCapability');
+    mustOk(await store.bindCapability({
+      consumerInstanceId: consumerInst.id, capability: 'identity', providerInstanceId: offer.instanceId,
+      destinations: [{ output: 'issuer', into: ['OIDC_ISSUER'] }, { output: 'client_secret', into: ['OIDC_CLIENT_SECRET'] }],
+      boundBy: 'sub-test',
+    }), 'bindCapability');
+    const consumers = await store.listConsumers(providerInst.id);
+    if (consumers.length !== 1 || consumers[0]?.consumerInstanceId !== consumerInst.id) {
+      return { status: 'fail', detail: `listConsumers gave ${JSON.stringify(consumers.map((c) => c.consumerInstanceId))}` };
+    }
+    const mine = await store.listBindings(consumerInst.id);
+    if (mine.length !== 1 || mine[0]?.state !== 'bound') return { status: 'fail', detail: `consumer side: ${JSON.stringify(mine)}` };
+    const available = await store.availableOffersForTeam(team.id, 'identity');
+    if (available.length !== 1) return { status: 'fail', detail: `in-team discovery gave ${String(available.length)} offers` };
+    const republished = mustOk(await store.publishCapability({ instanceId: offer.instanceId, teamId: team.id, capability: 'identity', outputs: [{ output: 'issuer', kind: 'url', state: 'issued-and-placed' }] }), 'republish');
+    const offers = await store.listCapabilityOffers(team.id);
+    if (offers.length !== 1) return { status: 'fail', detail: `republish accumulated ${String(offers.length)} offers` };
+    return { status: 'pass', detail: 'bound, both directions listed, in-team discovery works, republish is idempotent' };
+  });
+
+  await add('bindings: self-binding is refused by the shared policy', async () => {
+    const { store, team, instance } = await seed();
+    const offer = mustOk(await store.publishCapability({ instanceId: instance.id, teamId: team.id, capability: 'identity', outputs: [{ output: 'issuer', kind: 'url', state: 'issued-and-placed' }] }), 'publish');
+    const verdict = checkBindingPolicy({
+      consumer: instance, provider: instance, offer,
+      required: [{ output: 'issuer', into: ['OIDC_ISSUER'] }], shares: [],
+    });
+    if (verdict.ok) return { status: 'fail', detail: 'policy allowed an instance to bind to its own capability' };
+    return { status: 'pass', detail: `refused: ${reasonOf(verdict.error)}` };
+  });
+
+  await add('bindings: cross-team needs a live share, and revoke ages rather than deletes (D42)', async () => {
+    const store = await fresh();
+    const teamA = mustOk(await store.createTeam({ name: 'team-a' }), 'teamA');
+    const teamB = mustOk(await store.createTeam({ name: 'team-b' }), 'teamB');
+    const providerInst = mustOk(await store.createInstance({ teamId: teamA.id, name: 'idp', platform: 'shared-identity' }), 'provider');
+    const consumerInst = mustOk(await store.createInstance({ teamId: teamB.id, name: 'app', platform: 'starter-web' }), 'consumer');
+    mustOk(await store.publishCapability({ instanceId: providerInst.id, teamId: teamA.id, capability: 'identity', outputs: [{ output: 'issuer', kind: 'url', state: 'issued-and-placed' }] }), 'publish');
+
+    const offerRead = await store.getCapabilityOffer(providerInst.id, 'identity');
+    if (!offerRead.ok) return { status: 'fail', detail: 'offer unreadable' };
+    const denied = checkBindingPolicy({ consumer: consumerInst, provider: providerInst, offer: offerRead.value, required: [{ output: 'issuer', into: ['OIDC_ISSUER'] }], shares: [] });
+    if (denied.ok) return { status: 'fail', detail: 'cross-team bind allowed with no share' };
+
+    mustOk(await store.shareCapability({ instanceId: providerInst.id, capability: 'identity', toTeamId: teamB.id, sharedBy: 'sub-a' }), 'share');
+    const shares = await store.listCapabilityShares(providerInst.id, 'identity');
+    const allowed = checkBindingPolicy({ consumer: consumerInst, provider: providerInst, offer: offerRead.value, required: [{ output: 'issuer', into: ['OIDC_ISSUER'] }], shares });
+    if (!allowed.ok) return { status: 'fail', detail: `share granted, policy still refuses: ${reasonOf(allowed.error)}` };
+    const discoverable = await store.availableOffersForTeam(teamB.id, 'identity');
+    if (discoverable.length !== 1) return { status: 'fail', detail: `shared offer not discoverable by team B (${String(discoverable.length)})` };
+
+    mustOk(await store.bindCapability({ consumerInstanceId: consumerInst.id, capability: 'identity', providerInstanceId: providerInst.id, destinations: [{ output: 'issuer', into: ['OIDC_ISSUER'] }], boundBy: 'sub-b' }), 'bind');
+    mustOk(await store.revokeCapabilityShare(providerInst.id, 'identity', teamB.id), 'revoke');
+    const after = await store.getBinding(consumerInst.id, 'identity');
+    if (!after.ok) return { status: 'fail', detail: 'revoking the share DELETED the binding -- the app loses its record of what it points at' };
+    if (after.value.state !== 'stale') return { status: 'fail', detail: `state after revoke is ${after.value.state}, expected stale` };
+    const hidden = await store.availableOffersForTeam(teamB.id, 'identity');
+    return hidden.length === 0
+      ? { status: 'pass', detail: 'share gates the bind; revoke ages to stale and withdraws discovery' }
+      : { status: 'fail', detail: 'the revoked offer is still discoverable to the former consumer' };
   });
 
   await add('a plan is stored by its own digest, and a malformed hash is refused', async () => {

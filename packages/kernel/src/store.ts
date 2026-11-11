@@ -76,6 +76,18 @@ export class StoreService extends Service<z.infer<typeof StoreConfigSchema>> {
   getTeamMember(...args: Parameters<Store['getTeamMember']>) { return this.inner.getTeamMember(...args); }
   listTeamMembers(...args: Parameters<Store['listTeamMembers']>) { return this.inner.listTeamMembers(...args); }
   teamsForSubject(...args: Parameters<Store['teamsForSubject']>) { return this.inner.teamsForSubject(...args); }
+  publishCapability(...args: Parameters<Store['publishCapability']>) { return this.inner.publishCapability(...args); }
+  getCapabilityOffer(...args: Parameters<Store['getCapabilityOffer']>) { return this.inner.getCapabilityOffer(...args); }
+  listCapabilityOffers(...args: Parameters<Store['listCapabilityOffers']>) { return this.inner.listCapabilityOffers(...args); }
+  shareCapability(...args: Parameters<Store['shareCapability']>) { return this.inner.shareCapability(...args); }
+  revokeCapabilityShare(...args: Parameters<Store['revokeCapabilityShare']>) { return this.inner.revokeCapabilityShare(...args); }
+  listCapabilityShares(...args: Parameters<Store['listCapabilityShares']>) { return this.inner.listCapabilityShares(...args); }
+  availableOffersForTeam(...args: Parameters<Store['availableOffersForTeam']>) { return this.inner.availableOffersForTeam(...args); }
+  bindCapability(...args: Parameters<Store['bindCapability']>) { return this.inner.bindCapability(...args); }
+  getBinding(...args: Parameters<Store['getBinding']>) { return this.inner.getBinding(...args); }
+  listBindings(...args: Parameters<Store['listBindings']>) { return this.inner.listBindings(...args); }
+  listConsumers(...args: Parameters<Store['listConsumers']>) { return this.inner.listConsumers(...args); }
+  unbindCapability(...args: Parameters<Store['unbindCapability']>) { return this.inner.unbindCapability(...args); }
   putPlan(instanceId: string, plan: unknown, planHash: string) { return this.inner.putPlan(instanceId, plan, planHash); }
   getPlan(instanceId: string) { return this.inner.getPlan(instanceId); }
   createDispatch(input: Parameters<Store['createDispatch']>[0]) { return this.inner.createDispatch(input); }

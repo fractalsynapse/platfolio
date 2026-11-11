@@ -137,6 +137,84 @@ export const TeamMemberSchema = z.object({
 }).strict();
 export type TeamMember = z.infer<typeof TeamMemberSchema>;
 
+/**
+ * A capability one instance offers to others (D42). Outputs are recorded as names and kinds, never values --
+ * the client secret a shared Keycloak mints lives in the tenant's provider, not here (D4).
+ */
+export const CapabilityOfferSchema = z.object({
+  instanceId: z.string().min(1),
+  teamId: z.string().min(1),
+  capability: z.string().min(1).max(60),
+  outputs: z.array(z.object({
+    output: z.string().min(1).max(80),
+    kind: z.enum(['url', 'value', 'secret']),
+    state: z.enum(['not-issued', 'issued-and-placed', 'placement-unknown', 're-issue-required']).default('not-issued'),
+  }).strict()).default([]),
+  publishedAt: z.string().min(1),
+}).strict();
+export type CapabilityOffer = z.infer<typeof CapabilityOfferSchema>;
+
+/** D42: cross-team consumption requires this row. Same-team bindings do not, which is why it is optional. */
+export const CapabilityShareSchema = z.object({
+  instanceId: z.string().min(1),
+  capability: z.string().min(1).max(60),
+  /** A team identifier, or `*` for "any team" -- the wildcard is recorded, never implied. */
+  toTeamId: z.string().min(1).max(120),
+  sharedAt: z.string().min(1),
+  sharedBy: z.string().min(1).max(200),
+}).strict();
+export type CapabilityShare = z.infer<typeof CapabilityShareSchema>;
+
+/**
+ * The binding record: which instance consumes which capability, from which provider instance, and into which
+ * destinations. This is the thing that made "what breaks if I delete this?" unanswerable (#177) -- it existed
+ * only inside rendered manifests, so platfolio could not see its own wiring.
+ */
+export const BindingRecordSchema = z.object({
+  consumerInstanceId: z.string().min(1),
+  capability: z.string().min(1).max(60),
+  providerInstanceId: z.string().min(1),
+  destinations: z.array(z.object({
+    output: z.string().min(1).max(80),
+    /** Environment entry name(s) the value is written to, as declared in the consumer's inventory. */
+    into: z.array(z.string().min(1).max(120)).min(1),
+  }).strict()).default([]),
+  /** `stale` means the share was revoked: the app keeps running, the intent is withdrawn (D42). */
+  state: z.enum(['bound', 'stale']).default('bound'),
+  boundAt: z.string().min(1),
+  boundBy: z.string().min(1).max(200),
+}).strict();
+export type BindingRecord = z.infer<typeof BindingRecordSchema>;
+
+/**
+ * Write shapes for the capability tables. Deliberately separate from the record types: a schema with defaults
+ * (`state: 'bound'`, `publishedAt: now()`) still requires those fields in its *output* type, and an interface
+ * that demands them forces every caller to supply values the store exists to decide.
+ */
+export interface NewCapabilityOffer {
+  instanceId: string;
+  teamId: string;
+  capability: string;
+  outputs?: CapabilityOffer['outputs'];
+  publishedAt?: string;
+}
+export interface NewCapabilityShare {
+  instanceId: string;
+  capability: string;
+  toTeamId: string;
+  sharedBy: string;
+  sharedAt?: string;
+}
+export interface NewBinding {
+  consumerInstanceId: string;
+  capability: string;
+  providerInstanceId: string;
+  destinations?: BindingRecord['destinations'];
+  state?: BindingRecord['state'];
+  boundBy: string;
+  boundAt?: string;
+}
+
 export type StoreError =
   | { code: 'not-found'; what: string; id: string }
   | { code: 'conflict'; reason: string }
@@ -197,6 +275,27 @@ export interface Store {
    */
   putPlan(instanceId: string, plan: unknown, planHash: string): Promise<StoreResult<{ instanceId: string; planHash: string }>>;
   getPlan(instanceId: string): Promise<StoreResult<{ instanceId: string; planHash: string; plan: unknown }>>;
+
+  // ---------- capability bindings (#177, D42) ----------
+  /** Idempotent by instance+capability: republishing refreshes outputs rather than accumulating offers. */
+  publishCapability(offer: NewCapabilityOffer): Promise<StoreResult<CapabilityOffer>>;
+  getCapabilityOffer(instanceId: string, capability: string): Promise<StoreResult<CapabilityOffer>>;
+  listCapabilityOffers(teamId?: string): Promise<CapabilityOffer[]>;
+
+  /** Grants or revokes cross-team consumption. Revoking marks bound consumers `stale`; it does not delete them. */
+  shareCapability(share: NewCapabilityShare): Promise<StoreResult<CapabilityShare>>;
+  revokeCapabilityShare(instanceId: string, capability: string, toTeamId: string): Promise<StoreResult<{ revoked: boolean }>>;
+  listCapabilityShares(instanceId: string, capability?: string): Promise<CapabilityShare[]>;
+  /** Which offers this team may bind to right now -- its own, plus anything shared to it. */
+  availableOffersForTeam(teamId: string, capability?: string): Promise<CapabilityOffer[]>;
+
+  /** Validated against offers and shares by `checkBindingPolicy` before it is ever reached. */
+  bindCapability(binding: NewBinding): Promise<StoreResult<BindingRecord>>;
+  getBinding(consumerInstanceId: string, capability: string): Promise<StoreResult<BindingRecord>>;
+  listBindings(consumerInstanceId: string): Promise<BindingRecord[]>;
+  /** The deletion guard's question, answered: who consumes this provider? */
+  listConsumers(providerInstanceId: string, capability?: string): Promise<BindingRecord[]>;
+  unbindCapability(consumerInstanceId: string, capability: string): Promise<StoreResult<{ removed: boolean }>>;
 
   /**
    * Membership. `put` is idempotent by (teamId, subject): re-adding a member updates the role rather than
