@@ -14,7 +14,7 @@ function manifest(p: string): Manifest {
   return r.manifest!;
 }
 
-const OPTS = { actionRepo: 'platfolio/action', actionSha: '0123456789abcdef0123456789abcdef01234567', platfolioUrl: 'https://api.platfolio.example' };
+const OPTS = { actionRepo: 'platfolio/action', actionSha: '0123456789abcdef0123456789abcdef01234567', platfolioUrl: 'https://api.platfolio.example', workspaceId: 'ws-123' };
 
 test('the generated workflow is valid YAML with the expected shape', () => {
   const out = renderInstallPullRequest(manifest('templates/example-full-stack/manifest.yaml'), OPTS);
@@ -153,43 +153,42 @@ test('the outcome reaches platfolio through a step output, not a log line', () =
   assert.match(workflow, /steps\.apply\.outcome/);
 });
 
-test('the apply step is given the provider credential, by name', () => {
-  // Without this the action could not have applied anything: plan, identity and trigger were wired, and the
-  // credential the step runs on was absent from the manifest entirely.
+test('the apply step is given its credentials, by name, and its configuration in the clear', () => {
+  // Measured failure: without RAILWAY_TOKEN the action has a plan, an identity, a trigger, and no way to act;
+  // without RAILWAY_WORKSPACE_ID it authenticates and then asks Railway for projects(workspaceId: "") --
+  // Not Authorized, indistinguishable from a bad credential (#161).
   const m = manifest('templates/example-web-app/manifest.yaml');
   const workflow = renderInstallPullRequest(m, OPTS).files[WORKFLOW_PATH]!;
   const doc = yamlParse(workflow) as { jobs: Record<string, { steps?: { id?: string; env?: Record<string, string> }[] }> };
-  const apply = doc.jobs.managed!.steps!.find((x) => x.id === 'apply');
+  const apply = doc.jobs.managed!.steps!.find((s) => s.id === 'apply');
   assert.ok(apply, 'the apply step exists');
-  assert.deepEqual(Object.keys(apply!.env ?? {}).sort(), ['PLATFOLIO_DISPATCH_TOKEN', 'RAILWAY_TOKEN'], 'both credentials, both by name');
-  assert.equal(apply!.env?.RAILWAY_TOKEN, '${{ secrets.RAILWAY_TOKEN }}', 'resolved by GitHub into the step process, never stored by platfolio');
-  assert.ok(!Object.values(apply!.env ?? {}).some((v) => !v.includes('${{')), 'names in the manifest, never values');
+  assert.deepEqual(Object.keys(apply!.env ?? {}).sort(), ['PLATFOLIO_DISPATCH_TOKEN', 'RAILWAY_TOKEN', 'RAILWAY_WORKSPACE_ID']);
   assert.ok(workflow.includes('instance_id'), 'and the identity inputs are still passed');
 });
 
-
-test('the tenant document tells them which environment secret to set', () => {
+test('credentials are secret expressions; provider configuration is a literal, and only that key may be', () => {
   const m = manifest('templates/example-web-app/manifest.yaml');
-  const doc = renderInstallPullRequest(m, OPTS).files['PLATFOLIO.md']!;
-  assert.match(doc, /RAILWAY_TOKEN/, 'the name the workflow resolves must appear where the tenant reads instructions');
-});
-
-test('the apply step receives both credentials it needs, by name', () => {
-  // The runner authenticates with the shared dispatch token and carries its OIDC token as identity evidence;
-  // a workflow without the first cannot reach its own control plane (measured: 401), so the install PR must
-  // supply it. Values are GitHub's to resolve -- asserted by shape, because a literal here would be the bug.
-  const m = manifest('templates/example-web-app/manifest.yaml');
-  const workflow = renderInstallPullRequest(m, OPTS).files[WORKFLOW_PATH]!;
-  const doc = yamlParse(workflow) as { jobs: Record<string, { steps?: { id?: string; env?: Record<string, string> }[] }> };
-  const apply = doc.jobs.managed!.steps!.find((x) => x.id === 'apply');
-  assert.deepEqual(Object.keys(apply!.env ?? {}).sort(), ['PLATFOLIO_DISPATCH_TOKEN', 'RAILWAY_TOKEN']);
-  for (const [name, value] of Object.entries(apply!.env ?? {})) {
-    // Built from concatenation so no template literal tries to interpolate the expression, and every check
-    // is capable of failing: the first draft of this used a ternary that could only ever produce '' and so
-    // asserted nothing at all -- the vacuous-assertion mistake this repo has now caught four times.
-    assert.ok(value.startsWith('${' + '{ secrets.'), `${name} must come from a secret, got ${value}`);
-    assert.ok(value.endsWith(' }' + '}'), `${name} must close the expression, got ${value}`);
-    assert.match(value, new RegExp('\\{\\{ secrets\\.[A-Z_]+ \\}\\}'), `${name} has an unexpected shape: ${value}`);
+  const doc = yamlParse(renderInstallPullRequest(m, OPTS).files[WORKFLOW_PATH]!) as { jobs: Record<string, { steps?: { id?: string; env?: Record<string, string> }[] }> };
+  const env = doc.jobs.managed!.steps!.find((s) => s.id === 'apply')!.env!;
+  // Two kinds of value with different rules. A blanket "everything must be a secret expression" was written
+  // before any legitimate literal existed and would have blocked the #161 fix outright.
+  const SECRET_KEYS = ['RAILWAY_TOKEN', 'PLATFOLIO_DISPATCH_TOKEN'];
+  for (const name of SECRET_KEYS) {
+    const value = env[name] ?? '';
+    assert.ok(value.startsWith('${' + '{ secrets.'), `${name} must resolve from a secret, got ${value}`);
+    assert.ok(value.endsWith(' }' + '}'), `${name} must close its expression, got ${value}`);
+  }
+  const literals = Object.entries(env).filter(([name]) => !SECRET_KEYS.includes(name));
+  assert.deepEqual(literals.map(([name]) => name).sort(), ['RAILWAY_WORKSPACE_ID'], 'only the named configuration may be literal');
+  for (const [name, value] of literals) {
+    assert.ok(!value.includes('secrets.'), `${name} is configuration, not a secret`);
+    assert.ok(value.trim().length > 3 && !/\s/.test(value.trim()), `${name} looks like a placeholder: ${value}`);
   }
 });
 
+test('the tenant document names every secret the workflow resolves', () => {
+  const m = manifest('templates/example-web-app/manifest.yaml');
+  const doc = renderInstallPullRequest(m, OPTS).files['PLATFOLIO.md']!;
+  assert.ok(doc.includes('RAILWAY_TOKEN'), 'the provider credential must appear where the tenant reads instructions');
+  assert.ok(doc.includes('PLATFOLIO_DISPATCH_TOKEN'), 'so must the control-plane credential');
+});
