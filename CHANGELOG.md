@@ -5,6 +5,20 @@ change; entries describe merged intent, not aspirations.
 
 "## [Unreleased]
 
+### Added
+
+- **[17 § Object model](docs/design/17-object-model.md)** — the plain-English version of persons → teams →
+  instances → templates, and what "shared" actually means (an instance that provides a capability, not a third
+  kind of object). Every relationship is labelled **implemented**, **contract-only**, or **absent**, because
+  extensibility is only a claim until it is checked against the schema. Added to the AGENTS.md canonical
+  locations table so an agent meets it before inventing a fourth entity.
+- Six issues from that reading, each executable and sequenced ahead of the first API/CLI release: bindings
+  are not records (#177), person identity is a bare `sub` from one issuer (#178), roles exist but nothing
+  enforces them (#179), state is per instance while tenants run two environments (#180), `Instance.platform`
+  is a template id in a field called platform (#181), and four decisions the model should not answer by
+  accident (#176).
+
+
 ### Fixed
 
 - **Audit rows addressed to a dispatch were invisible to authorization.** `dispatch.create` recorded its
