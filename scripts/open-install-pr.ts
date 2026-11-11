@@ -84,7 +84,9 @@ if (!refHasAction(repo, actionSha)) {
   process.exit(1);
 }
 
+const workspaceId = flag('workspace', process.env.RAILWAY_WORKSPACE_ID ?? '82ba4aff-61f3-4b19-b863-8b650ebb66b2')!;
 const installed = renderInstallPullRequest(manifest, {
+  workspaceId,
   actionRepo: 'fractalsynapse/platfolio',
   actionSha,
   platfolioUrl: flag('url', 'https://status-production-54d3.up.railway.app')!,

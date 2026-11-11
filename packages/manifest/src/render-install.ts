@@ -47,6 +47,13 @@ export interface InstallOptions {
   /** Commit SHA, not a tag: pinning by tag lets a later force-push change what runs. */
   actionSha: string;
   platfolioUrl: string;
+  /**
+   * Where the provider's projects live. Not a secret, and not derivable from one: the first real dispatch
+   * authenticated correctly and then asked Railway for projects(workspaceId: ""), which answers Not
+   * Authorized -- a credential with no coordinate is indistinguishable from a bad credential. It belongs in
+   * the workflow because it is part of this instance's provisioning, decided at connect.
+   */
+  workspaceId: string;
 }
 
 /**
@@ -114,6 +121,9 @@ export function renderInstallPullRequest(m: Manifest, opts: InstallOptions): Ins
     '        env:',
     '          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}',
     '          PLATFOLIO_DISPATCH_TOKEN: ${{ secrets.PLATFOLIO_DISPATCH_TOKEN }}',
+    // Plain text, deliberately: the workspace id is configuration a tenant should see and be able to change
+    // without touching any credential.
+    `          RAILWAY_WORKSPACE_ID: ${opts.workspaceId}`,
     '        with:',
     `          action: ${EXPR.action}`,
     `          environment: ${EXPR.environment}`,

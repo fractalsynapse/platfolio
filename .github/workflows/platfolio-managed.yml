@@ -42,6 +42,7 @@ jobs:
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
           PLATFOLIO_DISPATCH_TOKEN: ${{ secrets.PLATFOLIO_DISPATCH_TOKEN }}
+          RAILWAY_WORKSPACE_ID: 82ba4aff-61f3-4b19-b863-8b650ebb66b2
         with:
           action: ${{ inputs.action || 'deploy' }}
           environment: ${{ inputs.environment }}
