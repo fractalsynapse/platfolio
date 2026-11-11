@@ -37,3 +37,6 @@ Thumbs.db
 # Local development credentials: never committed, never logged, never pasted into chat
 .secrets/
 *.token
+
+# one-off framework probes that were never meant to be committed
+probe.ts
