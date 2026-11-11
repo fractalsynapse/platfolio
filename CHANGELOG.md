@@ -5,6 +5,18 @@ change; entries describe merged intent, not aspirations.
 
 "## [Unreleased]
 
+### Fixed
+
+- **`.github/actions/platfolio-managed/action.yml` did not parse.** The `outputs:` values held `${{ … }}`
+  unquoted inside a flow mapping, so the brace opened a nested mapping and GitHub's runner died at
+  `Set up job` with `Unexpected type '' encountered while reading 'action manifest root'` — an error that
+  names neither YAML nor the line. The first dispatch GitHub actually launched failed there. Quoted.
+- **`check` never looked at action manifests.** Workflows were linted; `action.yml` was not, so a file the
+  runner must parse was outside the only gate that would have caught this. Now validated: parse, required
+  keys, `runs.using`, composite steps needing `run`/`shell`, and the same placeholder-balance rules — with the
+  failure mode described in the message, since GitHub's own is useless.
+
+
 ### Verified live
 
 - **The dispatch chain runs end to end against the deployed control plane** (#123): plan registered,

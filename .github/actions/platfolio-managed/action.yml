@@ -13,8 +13,8 @@ inputs:
   plan_hash: { description: 'Digest of the plan this dispatch must apply', required: true }
   platfolio_url: { description: 'Control-plane origin', required: true }
 outputs:
-  outcome: { description: 'ok | partial | failed | noop', value: ${{ steps.run.outputs.outcome }} }
-  changed: { description: 'Count of resources reported live', value: ${{ steps.run.outputs.changed }} }
+  outcome: { description: 'ok | partial | failed | noop', value: '${{ steps.run.outputs.outcome }}' }
+  changed: { description: 'Count of resources reported live', value: '${{ steps.run.outputs.changed }}' }
 runs:
   using: composite
   steps:

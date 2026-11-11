@@ -17,6 +17,7 @@
 
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs/promises';
+import { parse as parseYaml } from 'yaml';
 import path from 'node:path';
 
 const argv = process.argv.slice(2);
@@ -255,6 +256,59 @@ async function checkWorkflows(): Promise<string[]> {
   return problems;
 }
 
+/**
+ * Action manifests are GitHub-parsed too, and a manifest that fails to parse surfaces as a runner setup error
+ * with no hint of YAML ("Unexpected type '' encountered while reading 'action manifest root'"). The first real
+ * dispatch died exactly that way, on an unquoted `${'{'}{ steps.run.outputs.outcome }`'}`'}` inside a flow
+ * mapping -- the brace starts a nested mapping. Workflows were linted; this file type was not.
+ */
+async function checkActionManifests(): Promise<string[]> {
+  const problems: string[] = [];
+  const candidates: string[] = [];
+  const walk = async (dir: string, allowHidden = false): Promise<void> => {
+    for (const entry of await fs.readdir(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) { if (entry.name !== 'node_modules' && (allowHidden || !entry.name.startsWith('.'))) await walk(full); }
+      else if (entry.name === 'action.yml' || entry.name === 'action.yaml') candidates.push(full);
+    }
+  };
+  await walk(path.join(ROOT, '.github'), true);
+
+
+  for (const file of candidates) {
+    const name = path.relative(ROOT, file);
+    const text = await fs.readFile(file, 'utf8');
+    let doc: Record<string, unknown>;
+    try {
+      doc = parseYaml(text) as Record<string, unknown>;
+    } catch (error) {
+      problems.push(`${name}: does not parse as YAML -- GitHub reports this as an opaque runner setup error: ${((error as Error).message.split('\n')[0] ?? '').slice(0, 110)}`);
+      continue;
+    }
+    if (!doc || typeof doc !== 'object') { problems.push(`${name}: parsed to nothing useful`); continue; }
+    for (const key of ['name', 'description', 'runs']) if (!Reflect.has(doc, key)) problems.push(`${name}: missing required key "${key}"`);
+    const runs = doc.runs as Record<string, unknown> | undefined;
+    const using = runs?.using;
+    if (typeof using !== 'string' || !['composite', 'node16', 'node20', 'docker'].includes(using)) {
+      problems.push(`${name}: runs.using must be composite/node16/node20/docker, got ${JSON.stringify(using)}`);
+    } else if (using === 'composite') {
+      const steps = Array.isArray(runs?.steps) ? (runs?.steps as Record<string, unknown>[]) : [];
+      if (steps.length === 0) problems.push(`${name}: a composite action needs at least one step`);
+      steps.forEach((s, i) => {
+        if (!s.run && !s.uses) problems.push(`${name}: step ${String(i + 1)} has neither run nor uses`);
+        if (s.run && !s.shell) problems.push(`${name}: step ${String(i + 1)} runs a script without a shell`);
+      });
+    }
+    for (const match of text.matchAll(/\$\{\{([^{}]*)\}\}/g)) {
+      if (!(match[1] ?? 'x').trim()) problems.push(`${name}: empty expression placeholder`);
+    }
+    const opens = (text.match(/\$\{\{/g) ?? []).length;
+    const closes = (text.match(/\}\}/g) ?? []).length;
+    if (opens !== closes) problems.push(`${name}: unbalanced expression placeholders (${opens} opening, ${closes} closing)`);
+  }
+  return problems;
+}
+
 const files = await markdownFiles(ROOT);
 say(`scanning ${files.length} markdown files under ${path.relative(ROOT, ROOT) || ROOT}`);
 
@@ -262,10 +316,12 @@ const docProblems = await checkDocuments(files);
 const { skills, problems: skillProblems } = await checkSkills();
 const workflowProblems = await checkWorkflows();
 const hygieneProblems = await checkCredentialHygiene();
+const actionProblems = await checkActionManifests();
 
-const all = [...docProblems, ...skillProblems, ...workflowProblems, ...hygieneProblems];
+const all = [...docProblems, ...skillProblems, ...workflowProblems, ...actionProblems, ...hygieneProblems];
 say(`skills checked: ${skills.length} (${skills.map((s) => s.name).join(', ')})`);
 say(`workflows linted: ${workflowProblems.length === 0 ? 'clean' : `${workflowProblems.length} problem(s)`}`);
+say(`action manifests checked: ${actionProblems.length === 0 ? 'clean' : `${actionProblems.length} problem(s)`}`);
 
 if (all.length) {
   console.error(`\n${all.length} problem(s):`);
