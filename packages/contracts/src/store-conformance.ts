@@ -287,6 +287,28 @@ export async function runStoreConformance(make: () => Promise<Store> | Store): P
     return { status: 'pass', detail: `${String(all.length)} recorded, newest-first, limit honoured` };
   });
 
+  await add('rows sharing one timestamp keep insertion order', async () => {
+    // The regression this file exists to catch, written as a case so it cannot come back: Postgres `now()` is
+    // a statement-time constant, so a burst of writes ties, and `ORDER BY at DESC` between ties is a coin flip.
+    // It passed on one machine and failed on another -- which is why the ordering rule is now in the interface
+    // and asserted here rather than left to whichever index the database happens to choose.
+    const store = await fresh();
+    const stamp = new Date('2026-05-05T05:05:05.000Z').toISOString();
+    const written: string[] = [];
+    for (let i = 1; i <= 5; i += 1) {
+      const label = `burst-${String(i)}`;
+      const result = await store.appendAudit({ actorKind: 'system', actorRef: 'regression', action: label, target: 'tie-test', at: stamp, detail: { i } });
+      if (!result.ok) return { status: 'fail', detail: `audit write ${label} refused: ${reasonOf(result)}` };
+      written.push(label);
+    }
+    const read = await store.recentAudit(50);
+    const mine = read.filter((r) => r.target === 'tie-test').map((r) => r.action).slice(0, 5);
+    const expected = [...written].reverse();
+    return JSON.stringify(mine) === JSON.stringify(expected)
+      ? { status: 'pass', detail: `five tied timestamps still read back newest-first: ${mine.join(', ')}` }
+      : { status: 'fail', detail: `expected ${JSON.stringify(expected)}, got ${JSON.stringify(mine)}` };
+  });
+
   await add('audit detail refuses an oversized blob', async () => {
     const store = await fresh();
     const before = (await store.recentAudit(500)).length;

@@ -196,10 +196,11 @@ export interface Store {
    *  to record, so a failed record must be a value the caller can decide about. */
   appendAudit(entry: Omit<AuditEntry, 'id' | 'at'> & { at?: string }): Promise<StoreResult<AuditEntry>>;
   /**
-   * Newest first, always. "Recent" without an agreed direction is how two implementations of one interface
-   * pass their own tests and disagree in production: Postgres answered `ORDER BY at DESC` and the in-memory
-   * double returned insertion order, and the conformance suite caught it only because it asserted an element
-   * position. Every list here is newest-first for the same reason.
+   * Newest first, always -- and ties are broken by insertion order rather than left to chance. Both halves were
+   * learned the hard way: the double returned insertion order where Postgres sorted by `at` (the suite caught
+   * that by asserting a position), and then CI caught the other half, where three rows shared one statement
+   * timestamp and `ORDER BY at DESC` between them was a coin flip. A contract that says "recent" has to say
+   * what happens when two things are equally recent.
    */
   recentAudit(limit?: number): Promise<AuditEntry[]>;
 

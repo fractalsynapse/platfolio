@@ -332,7 +332,7 @@ export class PostgresStore implements Store {
   }
 
   async listDispatches(instanceId: string, limit = 50) {
-    const rows = (await this.pool.query(`SELECT * FROM ${this.q('dispatches')} WHERE instance_id = $1 ORDER BY issued_at DESC LIMIT $2`, [instanceId, limit])).rows as Row[];
+    const rows = (await this.pool.query(`SELECT * FROM ${this.q('dispatches')} WHERE instance_id = $1 ORDER BY issued_at DESC, id DESC LIMIT $2`, [instanceId, limit])).rows as Row[];
     return values(rows.map((r) => this.asDispatch(r)));
   }
 
@@ -379,13 +379,13 @@ export class PostgresStore implements Store {
   }
 
   async latestAttestation(instanceId: string) {
-    const rows = (await this.pool.query(`SELECT * FROM ${this.q('attestations')} WHERE instance_id = $1 ORDER BY finished_at DESC LIMIT 1`, [instanceId])).rows as Row[];
+    const rows = (await this.pool.query(`SELECT * FROM ${this.q('attestations')} WHERE instance_id = $1 ORDER BY finished_at DESC, received_at DESC, dispatch_id DESC LIMIT 1`, [instanceId])).rows as Row[];
     const row = rows[0];
     return row ? this.asAttestation(row) : err({ code: 'not-found', what: 'attestation', id: instanceId });
   }
 
   async listAttestations(instanceId: string, limit = 50) {
-    const rows = (await this.pool.query(`SELECT * FROM ${this.q('attestations')} WHERE instance_id = $1 ORDER BY finished_at DESC LIMIT $2`, [instanceId, limit])).rows as Row[];
+    const rows = (await this.pool.query(`SELECT * FROM ${this.q('attestations')} WHERE instance_id = $1 ORDER BY finished_at DESC, received_at DESC, dispatch_id DESC LIMIT $2`, [instanceId, limit])).rows as Row[];
     return values(rows.map((r) => this.asAttestation(r)));
   }
 
@@ -399,8 +399,9 @@ export class PostgresStore implements Store {
     return ok(e);
   }
 
+  /** Ordered by the insertion counter, not by `at`: three rows sharing one statement timestamp made `at DESC` a coin flip, which CI caught and my laptop did not. */
   async recentAudit(limit = 50) {
-    const rows = (await this.pool.query(`SELECT * FROM ${this.q('audit_log')} ORDER BY at DESC LIMIT $1`, [limit])).rows as Row[];
+    const rows = (await this.pool.query(`SELECT * FROM ${this.q('audit_log')} ORDER BY seq DESC LIMIT $1`, [limit])).rows as Row[];
     return rows.map((r) => {
       const admitted = admit(AuditEntrySchema, { id: r.id, at: iso(r.at), actorKind: r.actor_kind, actorRef: r.actor_ref, action: r.action, target: r.target, detail: r.detail }, 'audit row');
       return admitted.accepted ? admitted.value : undefined;
