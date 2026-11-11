@@ -148,6 +148,8 @@ test('the outcome reaches platfolio through a step output, not a log line', () =
   const m = manifest('templates/example-web-app/manifest.yaml');
   const workflow = renderInstallPullRequest(m, OPTS).files[WORKFLOW_PATH]!;
   assert.match(workflow, /- name: Apply desired state[\s\S]{0,80}id: apply/);
+  assert.ok(workflow.includes(`uses: ${OPTS.actionRepo}/${'.github/actions/platfolio-managed'}@${OPTS.actionSha}`), 'the workflow must reference the action by path, since that is where it lives');
+  assert.match(workflow, /uses: [^@]+\/.github\/actions\/[^@]+@[0-9a-f]{40}/, 'path-qualified and SHA-pinned: a tag is not a trust anchor');
   assert.match(workflow, /steps\.apply\.outcome/);
 });
 

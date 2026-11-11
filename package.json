@@ -15,7 +15,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "tsx --test packages/*/test/*.test.ts apps/*/test/*.test.ts",
     "contracts:check": "tsx scripts/check-contracts.ts",
-    "verify": "pnpm run lock:check && pnpm run install:check && pnpm run check && pnpm run vendor:verify && pnpm run graphql:check && pnpm run typecheck && pnpm run test && pnpm run contracts:check",
+    "verify": "pnpm run lock:check && pnpm run install:check && pnpm run check && pnpm run vendor:verify && pnpm run graphql:check && pnpm run action:check && pnpm run typecheck && pnpm run test && pnpm run contracts:check",
     "render:example": "tsx packages/kernel/src/cli.ts render templates/example-web-app/manifest.yaml",
     "install:check": "pnpm install --frozen-lockfile --prefer-offline",
     "lock:check": "tsx scripts/check-lockfile.ts",
@@ -25,13 +25,16 @@
     "app:local:check": "tsx scripts/github-app-local.ts --check",
     "app:check": "tsx scripts/github-app-check.ts",
     "install:pr": "tsx scripts/open-install-pr.ts",
-    "templates:publish": "tsx scripts/publish-platform-templates.ts"
+    "templates:publish": "tsx scripts/publish-platform-templates.ts",
+    "action:bundle": "tsx scripts/bundle-action.ts",
+    "action:check": "tsx scripts/bundle-action.ts --check"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
+    "esbuild": "0.25.8",
+    "railway": "^3.16.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
-    "railway": "^3.16.0",
     "yaml": "^2.7.0"
   },
   "license": "Apache-2.0"

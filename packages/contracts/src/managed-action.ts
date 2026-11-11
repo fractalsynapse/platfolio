@@ -117,10 +117,20 @@ export function containsCredentialShapedText(text: string): boolean {
   return /(?:gh[pousr]_|github_pat_)[A-Za-z0-9]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|Bearer\s+[A-Za-z0-9._-]{16,}/.test(text);
 }
 
+export function redactCredentialShaped(text: string): string {
+  // Provider errors are assembled from responses that can echo back what was sent -- a token in a URL, a
+  // key in a rejected payload. Truncating is not enough, since the secret is usually near the start.
+  return text
+    .replace(/(?:gh[pousr]_|github_pat_)[A-Za-z0-9]{8,}/g, '[redacted-token]')
+    .replace(/Bearer\s+[A-Za-z0-9._-]{8,}/g, 'Bearer [redacted]')
+    .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\\s\\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, '[redacted-key]')
+    .replace(/([?&](?:access_token|token|password)=)[^&\\s]+/gi, '$1[redacted]');
+}
+
 export function assertAttestationClean(attestation: Attestation): Attestation {
-  const parsed = AttestationSchema.parse(attestation);
+  const parsed = AttestationSchema.parse({ ...attestation, errorCode: attestation.errorCode ? redactCredentialShaped(attestation.errorCode) : undefined });
   if (parsed.errorCode && containsCredentialShapedText(parsed.errorCode)) {
-    throw new Error('attestation errorCode looks like a credential; redact it at the source');
+    throw new Error('attestation errorCode looks like a credential even after redaction; redact it at the source');
   }
   return parsed;
 }

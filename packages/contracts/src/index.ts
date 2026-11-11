@@ -19,5 +19,6 @@ export {
   attestationFromApply,
   normalizeHash,
   containsCredentialShapedText,
+  redactCredentialShaped,
   assertAttestationClean,
 } from './managed-action.ts';
