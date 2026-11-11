@@ -5,6 +5,23 @@ change; entries describe merged intent, not aspirations.
 
 "## [Unreleased]
 
+### Added
+
+- **The `identity.provider` seam (#161, Slice 1).** `packages/contracts/src/identity.ts` defines a verifier
+  whose only job is to turn an untrusted string into verified claims or refuse: exact-issuer match, required
+  audience, `exp`/`nbf` with a bounded clock-skew window, non-empty subject, optional scope enforcement, and
+  claims that leave the verifier allow-listed — an unknown claim never escapes. The allowed algorithm set is
+  checked **before** any key lookup, so `alg: none` and HMAC-with-the-public-key (algorithm confusion) are
+  refused structurally rather than by luck. `JwksIdentityProvider` is the production class with a TTL-cached,
+  rotation-tolerant key source (`fetch` injected, so the same code runs in CI without network);
+  `StaticKeySource` is the conformance double.
+- **The identity conformance suite**, run identically against the production provider and the double, with
+  **two negative controls**: a provider that only decodes, and one that echoes every claim. Each must fail,
+  and the specific cases it must fail are asserted by name — the second control exists because my first draft
+  wrongly demanded a leakage failure from a provider that does not leak. Additive surface, so the contracts
+  bump is minor (baseline 1063 → 1088).
+
+
 ### Verified live
 
 - **A dispatch launched by GitHub Actions, end to end (#123).** `workflow_dispatch` started a runner in
