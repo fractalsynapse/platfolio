@@ -127,6 +127,330 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
               example: { error: insufficient-scope, message: 'token lacks the platfolio.user scope' }
 
+  /api/v1/instances:
+    get:
+      operationId: listInstances
+      summary: The teams platforms, oldest first
+      description: |
+        Ordered by creation, not by recency: a tenants platform list should not reshuffle when something
+        reconciles. Ordering contracts belong in the interface, not in each driver -- the store conformance
+        suite caught exactly this disagreement between Postgres and the in-memory double.
+      security:
+        - bearerJwt: []
+      responses:
+        '200':
+          description: Instances for the authenticated principal.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Instance' }
+    post:
+      operationId: createInstance
+      summary: Begin hosting a platform
+      description: |
+        Creates a record; provisioning is the controllers job. An instance is not "live" because this returned
+        201, and no field here implies progress -- `state` starts at `pending` and only a verified apply moves it
+        (D30 law 1: an action that cannot be verified returns a reference, not a claim).
+      security:
+        - bearerJwt: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [teamId, name, platform]
+              properties:
+                teamId: { type: string, minLength: 1 }
+                name: { type: string, minLength: 1, maxLength: 80 }
+                platform: { type: string, minLength: 1, description: Catalog identifier, e.g. starter-web }
+            example: { teamId: team-1f7c2b, name: marketing, platform: starter-web }
+      responses:
+        '201':
+          description: Instance recorded.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Instance' }
+        '400':
+          description: The request did not match the schema -- names, never values.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+
+  /api/v1/instances/{instanceId}:
+    parameters:
+      - name: instanceId
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+    get:
+      operationId: getInstance
+      summary: One instance, as recorded
+      security:
+        - bearerJwt: []
+      responses:
+        '200':
+          description: The instance.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Instance' }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          description: No such instance for this principal.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/instances/{instanceId}/plan:
+    parameters:
+      - name: instanceId
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+    put:
+      operationId: putPlan
+      summary: Record the desired state and the digest a runner must satisfy
+      description: |
+        The plan is stored with the digest `buildPlan` computed for it. The API does not re-derive a hash: a
+        second implementation of a truth that has one home is the bug that made every honest attestation fail
+        with 400 once already.
+      security:
+        - bearerJwt: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [plan]
+              properties:
+                plan:
+                  type: object
+                  description: An InfraPlan, whose own `planHash` is the authority. Carries topology and digests; never a credential value (D4).
+      responses:
+        '200':
+          description: Stored, with the hash future dispatches will require.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [instanceId, planHash]
+                properties:
+                  instanceId: { type: string }
+                  planHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+              example: { instanceId: inst-1f7c2b, planHash: '5f976b5435bf434e00000000000000000000000000000000000000000000abcd' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          description: No such instance.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/instances/{instanceId}/dispatches:
+    parameters:
+      - name: instanceId
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+    post:
+      operationId: createDispatch
+      summary: Issue a single-use instruction for the managed workflow
+      description: |
+        Returns the dispatch intent the workflow passes to GitHub as inputs. The nonce is the freshness token
+        the runner must echo back; the plan hash is what it must still find on the way to the provider.
+      security:
+        - bearerJwt: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                action: { type: string, enum: [apply, destroy], default: apply }
+                environment: { type: string, minLength: 1, maxLength: 60, default: production }
+            example: { action: apply, environment: production }
+      responses:
+        '201':
+          description: Dispatch issued.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [intent]
+                properties:
+                  intent: { $ref: '#/components/schemas/DispatchIntent' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          description: No plan registered for this instance yet.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/instances/{instanceId}/dispatches/{dispatchId}:
+    parameters:
+      - name: instanceId
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+      - name: dispatchId
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+    get:
+      operationId: getDispatchPlan
+      summary: The plan a runner is authorised to apply -- exactly once
+      description: |
+        Consumes the dispatch. A second read is a replay, not a retry: it answers 409 so a duplicated or
+        retried GitHub job cannot apply the same plan twice. This is the property the store enforces
+        conditionally in SQL, which is why it holds across processes rather than within one.
+      security:
+        - bearerJwt: []
+      responses:
+        '200':
+          description: The plan and the hash it must match.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [plan, planHash, issuedAt, expiresAt]
+                properties:
+                  plan: { type: object }
+                  planHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+                  issuedAt: { type: string, format: date-time }
+                  expiresAt: { type: string, format: date-time }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          description: Unknown dispatch, or a dispatch belonging to another instance.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: Already consumed -- this dispatch has a runner, or had one that died mid-apply.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/attestations:
+    post:
+      operationId: postAttestation
+      summary: A runner reports what happened
+      description: |
+        Accepted once per dispatch, and only if it agrees with that dispatch on nonce, plan hash, action and
+        environment. Policy lives in `checkAttestationPolicy`, shared by every store implementation, because a
+        security decision must not be re-implemented per driver.
+
+        Today the caller is authenticated by a shared secret, so `actorKind` defaults to `shared-secret` rather
+        than implying a verified repository binding (#159). The read-back rule is what makes a false claim
+        harmless, and that is a thinner defence than it sounds like.
+      security:
+        - bearerJwt: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Attestation' }
+      responses:
+        '202':
+          description: Recorded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [accepted, dispatchId, result]
+                properties:
+                  accepted: { type: boolean, const: true }
+                  dispatchId: { type: string }
+                  result: { type: string, enum: [ok, partial, failed, noop] }
+        '400':
+          description: Refused by the acceptance policy, or malformed. The reason is machine-readable.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '409':
+          description: This dispatch has already been attested.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/instances/{instanceId}/latest-attestation:
+    parameters:
+      - name: instanceId
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+    get:
+      operationId: getLatestAttestation
+      summary: The most recent result for this instance, newest first
+      description: |
+        A claim that agrees with something is still only a claim: the control plane verifies against the
+        provider before presenting it as state. This endpoint returns the record; the reconciliation is
+        elsewhere on purpose.
+      security:
+        - bearerJwt: []
+      responses:
+        '200':
+          description: The latest attestation.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AttestationRecord' }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          description: Nothing has attested for this instance.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/audit:
+    get:
+      operationId: listAudit
+      summary: What the platform did, and who did it
+      description: |
+        Newest first, bounded by `limit`. Detail carries ids and reason codes, never payloads, and never a
+        credential: the store refuses an over-long detail value as a value rather than throwing, because an
+        audit write that aborts the loop it is recording makes the audit trail less trustworthy, not more.
+      security:
+        - bearerJwt: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        '200':
+          description: Audit entries.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/AuditEntry' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+
+
 components:
   securitySchemes:
     bearerJwt:
@@ -139,6 +463,13 @@ components:
         attacker's header claims (algorithm-confusion is the reason the allowed set is checked, not assumed).
 
   responses:
+    BadRequest:
+      description: 'The request was well-formed HTTP but did not satisfy the schema: names and reasons, never values.'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: invalid-request, message: 'plan must carry the bare 64-hex planHash computed by buildPlan' }
+
     Unauthenticated:
       description: No token, a token that failed verification, or one that is expired or not yet valid.
       content:
@@ -152,6 +483,129 @@ components:
           example: 'Bearer realm="platfolio", error="invalid_token"'
 
   schemas:
+    Instance:
+      type: object
+      additionalProperties: false
+      required: [id, teamId, name, platform, state, provider, createdAt, updatedAt]
+      properties:
+        id: { type: string, minLength: 1 }
+        teamId: { type: string, minLength: 1 }
+        name: { type: string, minLength: 1, maxLength: 80 }
+        platform: { type: string, minLength: 1 }
+        state: { type: string, enum: [pending, provisioning, live, degraded, paused, failed, deprovisioning, removed] }
+        provider: { type: string, enum: [railway, fake] }
+        desiredPlanHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        lastAppliedPlanHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    DispatchIntent:
+      type: object
+      additionalProperties: false
+      required: [instanceId, teamId, dispatchId, nonce, planHash, action, environment, issuedAt, expiresAt]
+      properties:
+        instanceId: { type: string }
+        teamId: { type: string }
+        dispatchId: { type: string }
+        nonce: { type: string, minLength: 16, maxLength: 64 }
+        planHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        action: { type: string, enum: [apply, destroy] }
+        environment: { type: string, minLength: 1 }
+        issuedAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+
+    Attestation:
+      type: object
+      additionalProperties: false
+      required: [dispatchId, instanceId, nonce, planHash, action, environment, result, resources, release, durationMs, finishedAt]
+      properties:
+        dispatchId: { type: string }
+        instanceId: { type: string }
+        nonce: { type: string, minLength: 16 }
+        planHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        action: { type: string, enum: [apply, destroy] }
+        environment: { type: string }
+        result: { type: string, enum: [ok, partial, failed, noop] }
+        resources:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [kind, name, status]
+            properties:
+              kind: { type: string }
+              name: { type: string }
+              externalId: { type: string }
+              status: { type: string }
+        errorCode: { type: string, maxLength: 200 }
+        release:
+          type: object
+          additionalProperties: false
+          required: [version, commitSha, imageDigest]
+          properties:
+            version: { type: string }
+            commitSha: { type: string, pattern: '^[0-9a-f]{7,40}$' }
+            imageDigest: { type: string, pattern: '^sha256:[0-9a-f]{64}$' }
+        durationMs: { type: integer, minimum: 0 }
+        finishedAt: { type: string, format: date-time }
+
+    AttestationRecord:
+      # Written out rather than composed with allOf: `additionalProperties: false` inside one allOf member
+      # rejects the fields declared only in the other member, so a correct response fails validation. The
+      # duplication is deliberate and the comment is the maintenance note -- a generated client would otherwise
+      # receive a type it cannot satisfy.
+      type: object
+      additionalProperties: false
+      required: [dispatchId, instanceId, nonce, planHash, action, environment, result, resources, release, durationMs, finishedAt, receivedAt, actorKind]
+      properties:
+        dispatchId: { type: string }
+        instanceId: { type: string }
+        nonce: { type: string, minLength: 16 }
+        planHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        action: { type: string, enum: [apply, destroy] }
+        environment: { type: string }
+        result: { type: string, enum: [ok, partial, failed, noop] }
+        resources:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [kind, name, status]
+            properties:
+              kind: { type: string }
+              name: { type: string }
+              externalId: { type: string }
+              status: { type: string }
+        errorCode: { type: string, maxLength: 200 }
+        release:
+          type: object
+          additionalProperties: false
+          required: [version, commitSha, imageDigest]
+          properties:
+            version: { type: string }
+            commitSha: { type: string, pattern: '^[0-9a-f]{7,40}$' }
+            imageDigest: { type: string, pattern: '^sha256:[0-9a-f]{64}$' }
+        durationMs: { type: integer, minimum: 0 }
+        finishedAt: { type: string, format: date-time }
+        receivedAt: { type: string, format: date-time }
+        actorKind: { type: string, enum: [runner, operator, shared-secret] }
+        actorRef: { type: string, maxLength: 200 }
+
+    AuditEntry:
+      type: object
+      additionalProperties: false
+      required: [id, at, actorKind, actorRef, action, target, detail]
+      properties:
+        id: { type: string }
+        at: { type: string, format: date-time }
+        actorKind: { type: string, enum: [user, runner, controller, system] }
+        actorRef: { type: string, maxLength: 200 }
+        action: { type: string, maxLength: 120 }
+        target: { type: string, maxLength: 200 }
+        detail:
+          type: object
+          additionalProperties: { type: [string, number, boolean] }
+
     Health:
       type: object
       additionalProperties: false

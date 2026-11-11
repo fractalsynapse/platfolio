@@ -42,3 +42,41 @@ jobs:
           pnpm run vendor:check \
             && echo "vendored ref is the newest upstream tag" \
             || echo "::notice::a newer upstream tag exists; run vendor-cordis plan/apply when convenient"
+
+  # The persistence seam is only a claim if the second implementation runs in CI too. A conformance suite that
+  # skips itself for want of a database is how a driver drifts from its interface without anyone noticing --
+  # which is the exact class of gap this project keeps finding and closing.
+  store-conformance:
+    name: Store conformance (Postgres)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17.11
+        env:
+          POSTGRES_PASSWORD: ci-only-not-a-secret
+          POSTGRES_DB: platfolio
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d platfolio"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      PLATFOLIO_DB_URL: postgresql://postgres:ci-only-not-a-secret@localhost:5432/platfolio
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Enable pnpm (version pinned by packageManager)
+        run: corepack enable
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Migrate the schema the way a deployment does
+        run: pnpm run db:migrate
+
+      - name: Run the suite with the database present (nothing may skip silently)
+        run: pnpm run test

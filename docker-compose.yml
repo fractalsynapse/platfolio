@@ -1,10 +1,14 @@
-# platfolio's own local stack (D40 Slice 1): the control plane runs the architecture it will sell.
+# platfolio's own local stack (D40): the control plane runs the architecture it will sell.
 #
-#   docker compose up          # postgres + keycloak + control-plane, seeded realm, nothing to click
+#   docker compose up -d postgres                                   # one database, two schemas
+#   pnpm run db:migrate && pnpm run db:seed-dev                     # platfolio schema, one team to smoke with
+#   docker compose up -d                                            # the rest
+#   pnpm run identity:seed && pnpm run identity:smoke               # Keycloak realm, verified tokens
+#   pnpm run lifecycle:smoke                                        # records, dispatch, attestation, controller
 #
-# Versions are pinned exactly, not ranged: Keycloak auto-migrates its schema on first boot of a new version
-# (docs/design/05), so "latest" is a data-loss risk in a stack that holds a realm, and a floating Postgres tag
-# changes the digest under a committed prod overlay. `pnpm run identity:smoke` asserts the stack is healthy.
+# Versions are pinned exactly, never ranged: Keycloak auto-migrates its own schema on the first boot of a new
+# version (docs/design/05), so "latest" is a data-loss risk in a stack that holds a realm, and a floating
+# Postgres tag changes the digest under a committed prod overlay.
 name: platfolio
 
 services:
@@ -13,28 +17,40 @@ services:
     environment:
       POSTGRES_PASSWORD: platfolio-dev-only
       POSTGRES_DB: platfolio
+    ports:
+      # Published for local tooling: `db:migrate`, the store conformance suite, the smoke scripts, psql.
+      # Dev-only credentials, and the reason this file is a development topology and not a template.
+      - '5432:5432'
+    volumes:
+      # Creates the `platfolio` and `keycloak` schemas on first init, so neither service owns the other's.
+      - ./db/postgres-init:/docker-entrypoint-initdb.d:ro
+      - platfolio-pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U postgres -d platfolio']
       interval: 5s
       timeout: 3s
       retries: 12
-    volumes:
-      - platfolio-pgdata:/var/lib/postgresql/data
 
   identity:
     image: keycloak/keycloak:26.8.2
-    # `start-dev` only. The realm is created by `pnpm run identity:seed` -- an idempotent Admin-API script --
-    # rather than --import-realm: Keycloak's import format rejects role assignments in every shape tried here
-    # (clientRoles on a client, federated on a user, realm-level clientMappings), and a JSON file that the
-    # product cannot boot is worse than a script that works. Recorded as a known limitation, not hidden.
+    # `start-dev`, on the SAME Postgres instance as the control plane and in its own schema: the consolidation
+    # asked for (one container, one backup) without two owners in one namespace.
+    #
+    # The realm is created by `pnpm run identity:seed` -- an idempotent Admin-API script -- rather than
+    # `--import-realm`. Keycloak 26.8.2's import format rejected role assignments in every shape tried here
+    # (clientRoles on a client, federated on a user, realm-level clientMappings), and a file the product cannot
+    # boot is worse than a script that works. Recorded as #168 rather than hidden.
     command: ['start-dev']
     environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/platfolio
+      KC_DB_USERNAME: postgres
+      KC_DB_PASSWORD: platfolio-dev-only
+      KC_DB_SCHEMA: keycloak
       KC_BOOTSTRAP_ADMIN_USERNAME: platfolio-admin
       KC_BOOTSTRAP_ADMIN_PASSWORD: platfolio-dev-only
       KC_HTTP_PORT: '8080'
-      # start-dev is the local mode; production uses `start` with a real host config and this same realm file.
       KC_HOSTNAME_STRICT: 'false'
-      PROXY_ADDRESS_FORWARDING: 'true'
     ports:
       - '8081:8080'
     depends_on:
@@ -48,20 +64,31 @@ services:
     environment:
       PORT: '8080'
       HOST: '0.0.0.0'
-      # The issuer string must match byte-for-byte what the token carries -- exact match is the cross-tenant
-      # rule (D4), so this is a config value an operator sees, not a default that can drift.
+      # The issuer must match byte-for-byte what the token carries -- exact match is D4's cross-tenant rule --
+      # so this is a value an operator reads, not a default that may drift.
       PLATFOLIO_IDENTITY_ISSUER: http://localhost:8081/realms/platfolio
       PLATFOLIO_IDENTITY_AUDIENCE: platfolio-api
       PLATFOLIO_IDENTITY_JWKS_URI: http://identity:8080/realms/platfolio/protocol/openid-connect/certs
+      PLATFOLIO_DB_URL: postgresql://postgres:platfolio-dev-only@postgres:5432/platfolio
+      # Migrate-on-boot is a local convenience. Production runs `pnpm run db:migrate` as a separate step,
+      # because replicas boot concurrently and two of them issuing the same DDL is an outage.
+      PLATFOLIO_DB_MIGRATE: 'true'
       PLATFOLIO_VERSION: 0.0.0-local
-      PLATFOLIO_COMMIT: "0000000000000000000000000000000000000000"  # quoted: YAML reads an all-digit scalar as a number, which failed the spec pattern
+      PLATFOLIO_COMMIT: "0000000000000000000000000000000000000000"
+      # Quoted on purpose: an unquoted all-digit scalar is read as a *number*, which then failed the OpenAPI
+      # pattern for a commit SHA -- the fourth YAML-scalar defect in this project, and the compose file is
+      # where it bit.
       PLATFOLIO_BUILD_TIME: '2026-11-11T00:00:00.000Z'
+      PLATFOLIO_RECONCILE_INTERVAL_MS: '5000'
     ports:
       - '8082:8080'
     volumes:
       - .:/workspace
     depends_on:
-      - identity
+      postgres:
+        condition: service_healthy
+      identity:
+        condition: service_started
 
 volumes:
   platfolio-pgdata:

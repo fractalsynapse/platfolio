@@ -65,6 +65,22 @@ in OIDC the client is the boundary, not a claim the caller names.
 
 ## Slice 2 — records and the controller
 
+**Delivered 2026-11-11 (#162).** What exists now, and what deliberately does not:
+
+- `Store` is a capability with **two implementations under one conformance suite** (Postgres in
+  `packages/contracts/src/postgres-store.ts`, the in-memory double beside it). CI runs the Postgres half as its
+  own job so the seam cannot be greened by a skip.
+- Acceptance policy for attestations is **one pure function** shared by both drivers. If each implemented
+  "is this admissible", swapping persistence would change a security decision.
+- The controller consumes attestations into stored state (`ok`/`noop` → live, `partial` → degraded, `failed`
+  → failed) and signs its own rows in the audit trail as `controller`/`sweep-N`.
+- Migrations are forward-only, recorded in-schema, and applied by `db:migrate` -- not as a side effect of boot,
+  except in the local compose file where that is explicitly labelled a convenience.
+- **Not here yet:** commit statuses back to GitHub (item 5) and the connect pairing, because they need a
+  repository connection written by something other than a smoke script. Dispatch issuance is still an operator
+  action over the API rather than a reaction to a push.
+
+
 Postgres entities (team, member, instance, platform connection, dispatch, attestation, audit log) replacing
 the in-memory maps; the durable **controller** — idempotency, backoff, reconcile sweep, `runState` finally
 getting its caller; commit statuses/checks back to GitHub (#123's other half). Self-host dispatch moves from

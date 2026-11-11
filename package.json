@@ -30,7 +30,10 @@
     "action:check": "tsx scripts/bundle-action.ts --check",
     "api:check": "tsx scripts/check-api.ts",
     "identity:seed": "tsx scripts/seed-identity.ts",
-    "identity:smoke": "tsx scripts/smoke-identity.ts"
+    "identity:smoke": "tsx scripts/smoke-identity.ts",
+    "db:migrate": "tsx scripts/migrate-db.ts",
+    "db:seed-dev": "tsx scripts/seed-dev-data.ts",
+    "lifecycle:smoke": "tsx scripts/smoke-lifecycle.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
