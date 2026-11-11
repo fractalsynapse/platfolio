@@ -7,6 +7,21 @@ change; entries describe merged intent, not aspirations.
 
 ### Added
 
+- **The dispatch and attestation surface the managed action calls (#123).** Served beside the existing
+  liveness routes in `apps/status-api`: `POST /api/v1/instances/{id}/plans`,
+  `POST /api/v1/instances/{id}/dispatches`, `GET .../dispatches/{dispatchId}` (single use — a second fetch is
+  a 409, because a re-run must not re-apply), `POST /api/v1/attestations`, and
+  `GET /api/v1/instances/{id}/latest-attestation`. Attestations are checked for schema, known dispatch,
+  nonce match, plan-hash agreement and replay, and are accepted exactly once per dispatch.
+  `/api/v1/attestations/capabilities` states what is **not** implemented — OIDC audience, issuer, repository
+  binding and signature verification — so the gap is a sentence in the API rather than an absence.
+- Fail-closed configuration: with no `PLATFOLIO_DISPATCH_TOKEN` the routes answer 503, so a half-configured
+  deployment cannot quietly become an unauthenticated one. Liveness stays GET-only; a test asserts `POST
+  /healthz` is still 405, because widening the method guard to the whole server is how that would happen.
+
+
+### Added
+
 - **The managed action (#123).** A composite action at `.github/actions/platfolio-managed`, referenced by
   path at a pinned commit, with its decisions in `apps/managed-action/src/runner.ts` behind injected
   dependencies: read dispatch inputs → OIDC job identity → fetch the plan → **refuse on a stale hash**
