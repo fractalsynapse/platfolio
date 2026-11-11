@@ -1,0 +1,11 @@
+{
+  "name": "@platfolio/api-contract",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The OpenAPI specification as an executable check: load it, validate bodies against it, and fail on drift in either direction.",
+  "license": "Apache-2.0",
+  "main": "./src/index.ts",
+  "exports": { ".": "./src/index.ts" },
+  "dependencies": { "ajv": "^8.17.1", "ajv-formats": "^3.0.1", "yaml": "^2.7.0" }
+}

@@ -22,3 +22,33 @@ export {
   redactCredentialShaped,
   assertAttestationClean,
 } from './managed-action.ts';
+export {
+  IDENTITY_CONTRACT,
+  IDENTITY_CONTRACT_VERSION,
+  IdentityConfigSchema,
+  JwkSchema,
+  VerifiedClaimsSchema,
+  JwksIdentityProvider,
+  EndpointKeySource,
+  StaticKeySource,
+  identityProviderFromKeys,
+  type IdentityConfig,
+  type IdentityProvider,
+  type Jwk,
+  type KeySource,
+  type VerificationFailure,
+  type VerificationFailureCode,
+  type VerificationResult,
+  type VerificationSuccess,
+} from './identity.ts';
+export {
+  createIdentityFixture,
+  defaultIdentityConfig,
+  runIdentityConformance,
+  signToken,
+  conformanceProvider,
+  type IdentityCaseResult,
+  type IdentityFixture,
+  type IdentityReport,
+  type TokenOptions,
+} from './identity-conformance.ts';

@@ -21371,6 +21371,37 @@ function redactCredentialShaped(text) {
   return text.replace(/(?:gh[pousr]_|github_pat_)[A-Za-z0-9]{8,}/g, "[redacted-token]").replace(/Bearer\s+[A-Za-z0-9._-]{8,}/g, "Bearer [redacted]").replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\\s\\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, "[redacted-key]").replace(/([?&](?:access_token|token|password)=)[^&\\s]+/gi, "$1[redacted]");
 }
 
+// packages/contracts/src/identity.ts
+var JwkSchema = external_exports.object({
+  kty: external_exports.string().min(1),
+  use: external_exports.enum(["sig", "enc"]).optional(),
+  alg: external_exports.string().optional(),
+  kid: external_exports.string().min(1),
+  n: external_exports.string().min(1),
+  e: external_exports.string().min(1)
+}).strip();
+var VerifiedClaimsSchema = external_exports.object({
+  subject: external_exports.string().min(1),
+  issuer: external_exports.string().min(1),
+  audience: external_exports.array(external_exports.string()).min(1),
+  clientId: external_exports.string().min(1),
+  scope: external_exports.array(external_exports.string()),
+  expiresAt: external_exports.string().min(1),
+  /** GitHub-environment claim, carried only when present; the production gate in the attestation contract needs it. */
+  environment: external_exports.string().optional()
+});
+var IdentityConfigSchema = external_exports.object({
+  /** Exact string match against `iss`. No prefix tricks, no tenant wildcard: D4's cross-tenant rule. */
+  issuer: external_exports.string().min(1),
+  /** The audience a token must carry. Keycloak puts the client id here unless an audience mapper adds one. */
+  audience: external_exports.string().min(1),
+  /** Where keys come from. Explicit wins over discovery so a misconfigured issuer cannot fall open. */
+  jwksUri: external_exports.string().min(1).optional(),
+  allowedAlgorithms: external_exports.array(external_exports.enum(["RS256"])).min(1).default(["RS256"]),
+  clockSkewSeconds: external_exports.number().int().min(0).max(120).default(30),
+  cacheTtlSeconds: external_exports.number().int().min(1).default(300)
+}).strict();
+
 // apps/managed-action/src/runner.ts
 var RELEASE = { version: process.env.PLATFOLIO_ACTION_VERSION ?? "0.0.0-dev", commitSha: process.env.PLATFOLIO_ACTION_SHA ?? "0".repeat(40), imageDigest: `sha256:${"0".repeat(64)}` };
 function readIntent(env) {

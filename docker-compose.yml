@@ -1,0 +1,67 @@
+# platfolio's own local stack (D40 Slice 1): the control plane runs the architecture it will sell.
+#
+#   docker compose up          # postgres + keycloak + control-plane, seeded realm, nothing to click
+#
+# Versions are pinned exactly, not ranged: Keycloak auto-migrates its schema on first boot of a new version
+# (docs/design/05), so "latest" is a data-loss risk in a stack that holds a realm, and a floating Postgres tag
+# changes the digest under a committed prod overlay. `pnpm run identity:smoke` asserts the stack is healthy.
+name: platfolio
+
+services:
+  postgres:
+    image: postgres:17.11
+    environment:
+      POSTGRES_PASSWORD: platfolio-dev-only
+      POSTGRES_DB: platfolio
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d platfolio']
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    volumes:
+      - platfolio-pgdata:/var/lib/postgresql/data
+
+  identity:
+    image: keycloak/keycloak:26.8.2
+    # `start-dev` only. The realm is created by `pnpm run identity:seed` -- an idempotent Admin-API script --
+    # rather than --import-realm: Keycloak's import format rejects role assignments in every shape tried here
+    # (clientRoles on a client, federated on a user, realm-level clientMappings), and a JSON file that the
+    # product cannot boot is worse than a script that works. Recorded as a known limitation, not hidden.
+    command: ['start-dev']
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: platfolio-admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: platfolio-dev-only
+      KC_HTTP_PORT: '8080'
+      # start-dev is the local mode; production uses `start` with a real host config and this same realm file.
+      KC_HOSTNAME_STRICT: 'false'
+      PROXY_ADDRESS_FORWARDING: 'true'
+    ports:
+      - '8081:8080'
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  control-plane:
+    image: node:22.22.1-slim
+    working_dir: /workspace
+    command: ['node', '--import', 'tsx', 'apps/control-plane/src/index.ts']
+    environment:
+      PORT: '8080'
+      HOST: '0.0.0.0'
+      # The issuer string must match byte-for-byte what the token carries -- exact match is the cross-tenant
+      # rule (D4), so this is a config value an operator sees, not a default that can drift.
+      PLATFOLIO_IDENTITY_ISSUER: http://localhost:8081/realms/platfolio
+      PLATFOLIO_IDENTITY_AUDIENCE: platfolio-api
+      PLATFOLIO_IDENTITY_JWKS_URI: http://identity:8080/realms/platfolio/protocol/openid-connect/certs
+      PLATFOLIO_VERSION: 0.0.0-local
+      PLATFOLIO_COMMIT: "0000000000000000000000000000000000000000"  # quoted: YAML reads an all-digit scalar as a number, which failed the spec pattern
+      PLATFOLIO_BUILD_TIME: '2026-11-11T00:00:00.000Z'
+    ports:
+      - '8082:8080'
+    volumes:
+      - .:/workspace
+    depends_on:
+      - identity
+
+volumes:
+  platfolio-pgdata:
