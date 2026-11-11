@@ -45,7 +45,7 @@ jobs:
           dispatch_id: ${{ inputs.dispatch_id }}
           nonce: ${{ inputs.nonce }}
           plan_hash: ${{ inputs.plan_hash }}
-          platfolio_url: https://status-production.up.railway.app
+          platfolio_url: https://status-production-54d3.up.railway.app
 
       - name: Report the outcome for platfolio to verify by read-back
         if: always()

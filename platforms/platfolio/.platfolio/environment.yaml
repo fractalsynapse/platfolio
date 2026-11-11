@@ -15,6 +15,6 @@
 - name: PUBLIC_ORIGIN
   kind: value
   # Matches the generated host for now; becomes the custom origin once DNS is delegated.
-  default: https://status-production.up.railway.app
+  default: https://status-production-54d3.up.railway.app
   service: status
   description: Canonical origin used for OIDC redirects and deep links.

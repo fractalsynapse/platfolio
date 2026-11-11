@@ -59,7 +59,7 @@ const actionSha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' 
 const installed = renderInstallPullRequest(manifest, {
   actionRepo: 'fractalsynapse/platfolio',
   actionSha,
-  platfolioUrl: flag('url', 'https://status-production.up.railway.app')!,
+  platfolioUrl: flag('url', 'https://status-production-54d3.up.railway.app')!,
 });
 
 const environments = ['production', ...(manifest.spec.environments.staging.enabled ? ['staging'] : [])];
