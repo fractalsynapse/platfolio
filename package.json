@@ -28,7 +28,9 @@
     "templates:publish": "tsx scripts/publish-platform-templates.ts",
     "action:bundle": "tsx scripts/bundle-action.ts",
     "action:check": "tsx scripts/bundle-action.ts --check",
-    "api:check": "tsx scripts/check-api.ts"
+    "api:check": "tsx scripts/check-api.ts",
+    "identity:seed": "tsx scripts/seed-identity.ts",
+    "identity:smoke": "tsx scripts/smoke-identity.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

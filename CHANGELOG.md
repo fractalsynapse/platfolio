@@ -7,6 +7,40 @@ change; entries describe merged intent, not aspirations.
 
 ### Added
 
+- **Slice 1 (#161, #168): platfolio has a service with real verified identity.** `apps/control-plane` boots on
+  the vendored Cordis runtime through `createKernel` — `ctx.identity`, `ctx.server`, `ctx.infra`,
+  `ctx.custody` — with `@platfolio/kernel` as the only place that imports the framework. `docker-compose.yml`
+  brings up Postgres + Keycloak 26.8.2 + the control plane; `pnpm run identity:seed` creates the realm through
+  the Admin API; `pnpm run identity:smoke` asserts the chain live (12/12).
+- **`identity.provider` as a Cordis capability**, `requireServices` as a startup assertion, and
+  `@platfolio/api-contract` — the OpenAPI document compiled into validators, with `api:check` wired into
+  `verify`. Responses are validated in the request path, not only in CI.
+
+### Fixed
+
+- **The API gate could not explain its own rejections.** Ajv's `errors` were captured by destructuring before
+  `validate()` ran, so every rejection came back with an empty list; `/version` answered
+  `500 {"error":"response-violates-spec","message":"getVersion 200: "}` — a gate that cannot state a reason is
+  a gate the next engineer turns off. Errors are read after the call, and a test now demands three reasons
+  from a body that is wrong three ways.
+- **403 was unreachable because authorization lived inside authentication.** Passing `requiredScope` into the
+  verifier made a genuine-but-unscoped token fail as *unauthenticated*, so the spec carried a decorative status
+  code. Verify who, then decide whether they may.
+- **`PLATFOLIO_COMMIT` in compose was read as a number** — an unquoted all-zero scalar — which failed the
+  spec's hex pattern. The fourth YAML-scalar defect in this project; the compose file now quotes it and says
+  why.
+
+### Learned about the framework (and corrected)
+
+A missing dependency does **not** produce the silent `PENDING` hang described in the reference-tree research:
+the property is absent and `ctx.inject` resolves regardless. `requireServices` therefore asserts *presence*
+and states that presence is not ACTIVE. Keycloak's `--import-realm` rejected role mappings in every shape
+tried (`clientRoles` on a client, `federated` on a user, realm-level `clientMappings`), and its admin API
+`?export=true` returns realm settings without clients or users, so the realm is seeded by script (#168).
+
+
+### Added
+
 - **The `identity.provider` seam (#161, Slice 1).** `packages/contracts/src/identity.ts` defines a verifier
   whose only job is to turn an untrusted string into verified claims or refuse: exact-issuer match, required
   audience, `exp`/`nbf` with a bounded clock-skew window, non-empty subject, optional scope enforcement, and

@@ -84,3 +84,15 @@ test('loadSpec refuses documents that are not specs', () => {
   assert.throws(() => loadSpec('paths: {}\n'), /missing an `openapi:` version/);
   assert.throws(() => loadSpec('- just\n- a\n- list\n'), /did not parse to an object/);
 });
+
+test('a rejection names WHY, not just that -- the bug this test exists to prevent', () => {
+  // Destructuring ajv's `errors` alongside `validate` captured an empty array before the call, so every
+  // rejection arrived with zero reasons and a 500 whose message ended in a colon. Validating a body that is
+  // wrong in three separate ways must report all three.
+  const bad = { subject: '', issuer: 42, audience: [], clientId: '', scope: 'not-an-array', expiresAt: 'nope', tenantAuthority: true, extra: 'x' };
+  const result = validateResponse(spec, 'getWhoami', 200, bad);
+  assert.equal(result.ok, false);
+  assert.ok(result.errors.length >= 3, `expected several reasons, got ${String(result.errors.length)}: ${JSON.stringify(result.errors)}`);
+  assert.ok(result.errors.every((e) => e.length > 5), `every error must carry text: ${JSON.stringify(result.errors)}`);
+  assert.match(result.errors.join(' '), /subject|audience|scope/, 'the messages should name the offending paths');
+});

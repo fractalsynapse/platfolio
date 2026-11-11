@@ -39,8 +39,29 @@ token from Keycloak returns something true.
 - Config by env with no secrets committed; local dev values in `.env.example`, everything else from
   Keycloak client credentials.
 
-Done means: cold clone → `pnpm i && docker compose up` → obtain a token → authenticated request succeeds,
-a forged one returns 401, and the check is in CI.
+Done means: cold clone → `pnpm i && docker compose up -d && pnpm run identity:seed` → `pnpm run identity:smoke`
+→ authenticated request succeeds, a forged one returns 401, and the check is in CI.
+
+**Slice 1 is done (2026-11-11), with three deviations recorded rather than smoothed over:**
+
+- `apps/control-plane` boots on the vendored Cordis runtime (`createKernel` → `ctx.identity`, `ctx.server`,
+  `ctx.infra`, `ctx.custody`), and the OpenAPI document is an executable gate: `api:check` runs inside `verify`,
+  checks drift in both directions, and every response body is validated **in the request path** -- a handler
+  that would emit an undocumented shape returns 500 with the reason instead of shipping it.
+- The realm is seeded by an idempotent Admin-API script, **not** by `--import-realm`. Keycloak 26.8.2 rejected
+  role assignments in all three shapes I tried; #168 has the error text and the trade-off (two commands for a
+  cold clone, dev credentials in code, guarded to loopback).
+- The framework research that guided this build was partly wrong, and measurement caught it: a missing
+  dependency does not produce the reported silent `PENDING` hang -- the property is simply absent, and
+  `ctx.inject` resolves anyway. `requireServices` asserts presence, and says plainly that *present is not the
+  same as ACTIVE*, because a provider stuck mid-init is a health-check problem this guard does not claim to
+  solve.
+
+Live evidence (`pnpm run identity:smoke`, 12/12 against Keycloak 26.8.2 in Compose): a real token → 200 with
+the verified subject and `tenantAuthority: false`; flipped signature → `401 unauthenticated:signature` naming
+the `kid`; no credentials → 401; a verified but unscoped user → 403; a master-realm admin token → refused as
+`unknown-key`. Plus one finding worth keeping: requesting a *foreign* audience does not strip the mapped one --
+in OIDC the client is the boundary, not a claim the caller names.
 
 ## Slice 2 — records and the controller
 

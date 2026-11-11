@@ -154,9 +154,13 @@ export function validateResponse(doc: SpecDocument, operationId: string, status:
     return { ok: false, errors: [`${operationId} ${status}: resolved to a response with no application/json schema -- refusing to call that valid`] };
   }
   if (schema === undefined) return { ok: true, errors: [] };
-  const { validate, errors } = validatorFor(doc, schema);
+  const { validate } = validatorFor(doc, schema);
   const ok = validate(body);
-  return { ok, errors: ok ? [] : describeErrors(errors) };
+  // Read the errors AFTER the call, through the function's own property. Destructuring `errors` alongside
+  // `validate` grabbed the getter before anything had failed, so every rejection came back with an empty list:
+  // `/version` in the container answered 500 with `getVersion 200: ` and no reason. A gate that cannot explain
+  // itself is worse than no gate, because the next engineer turns it off.
+  return { ok, errors: ok ? [] : describeErrors(validate.errors ?? []) };
 }
 
 function jsonSchemaFor(response: SpecDocument): unknown {
@@ -260,9 +264,9 @@ export function checkSpec(doc: SpecDocument): string[] {
 }
 
 function validateAgainst(doc: SpecDocument, schema: unknown, value: unknown): BodyCheck {
-  const { validate, errors } = validatorFor(doc, schema);
+  const { validate } = validatorFor(doc, schema);
   const ok = validate(value);
-  return { ok, errors: ok ? [] : describeErrors(errors) };
+  return { ok, errors: ok ? [] : describeErrors(validate.errors ?? []) };
 }
 
 /** Every schema node in the document, with a human-readable location for messages. */
