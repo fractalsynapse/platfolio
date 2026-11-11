@@ -73,7 +73,16 @@ fails if it drifts from source, which is the same rule that governs a generated 
 
 What is proven: the committed bundle boots, refuses legibly without OIDC (`no OIDC id token available; the
 workflow needs id-token: write`), reads a plan, refuses to act when the hash moved, redacts a provider error
-that echoes a token, and sets `outcome` for the workflow. What is **not** proven: a real dispatch against a live provider. The endpoints now exist and are tested
+that echoes a token, and sets `outcome` for the workflow. The chain has now been run against the live control plane, end to end: register a plan, issue a
+single-use dispatch, execute the committed bundle (`outcome=ok`, one resource live, 1080ms), and have the
+attestation accepted and stored with the hash it should carry. Replaying the consumed dispatch returns 409.
+What is still **not** proven: a dispatch launched by GitHub Actions itself — the runner has been started
+from a shell with a locally-minted OIDC stand-in, so the workflow trigger, the environment-secret resolution,
+and real JWKS verification are untested. Notably, a duplicate attestation was refused with 400 (schema)
+rather than 409 (already-attested) because the probe sent an empty body; the 409 path is covered by tests,
+not yet by this run.
+
+What was NOT proven, before that run: The endpoints now exist and are tested
 (`apps/status-api/src/dispatch-api.ts`) — plan registration, single-use dispatch, attestation with
 nonce/hash/replay checks — and they state their own gap: OIDC audience, issuer, repository and signature
 verification are **not** implemented, which is `/api/v1/attestations/capabilities` saying so rather than an
