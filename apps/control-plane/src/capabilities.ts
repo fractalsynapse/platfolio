@@ -48,7 +48,7 @@ const bodyOf = <T>(request: Request): Body<T> => {
   return { ok: true, value: request.body === undefined ? undefined : (request.body as T) };
 };
 
-type Scope = { context: KernelContext; claims: VerifiedClaims; teamId: string };
+type Scope = { context: KernelContext; claims: VerifiedClaims; personId: string; teamId: string };
 type ScopedHandler = (scope: Scope, request: Request, params: Record<string, string>) => Promise<Response_>;
 
 /**
@@ -64,8 +64,13 @@ type ScopedHandler = (scope: Scope, request: Request, params: Record<string, str
 async function resolveScope(context: KernelContext, request: Request, params: Record<string, string>, viaTeamId?: string): Promise<{ ok: true; scope: Scope } | { ok: false; response: Response_ }> {
   const auth = await authorize(context, request);
   if (auth.ok === false) return { ok: false, response: auth.response };
-  const subject = auth.claims.subject;
-  const teams = await context.store.teamsForSubject(subject);
+  // #177: the verified claims resolve to a **person**, and membership is read from the person. Keying teams
+  // off a bare `sub` made two realms that mint the same subject string the same person, and left no way to
+  // attach a machine client. The issuer here comes from the verified claims, so a caller cannot name one.
+  const resolved = await context.store.resolvePerson({ issuer: auth.claims.issuer, subject: auth.claims.subject });
+  if (resolved.ok === false) return { ok: false, response: { status: 503, body: { error: 'principal-unresolved', message: reasonOf(resolved) } } };
+  const person = resolved.value.person;
+  const teams = await context.store.teamsForPerson(person.id);
   if (teams.length === 0) {
     // Authenticated, and member of nothing. Not an error to explain -- a 404 on a specific resource and an
     // empty list on a collection, which is what an outsider is entitled to know.
@@ -82,7 +87,7 @@ async function resolveScope(context: KernelContext, request: Request, params: Re
     // Same 404 whether the resource exists or not, so the answer cannot be probed for membership.
     return { ok: false, response: { status: 404, body: { error: 'not-found', message: 'no such resource for this principal' } } };
   }
-  return { ok: true, scope: { context, claims: auth.claims, teamId } };
+  return { ok: true, scope: { context, claims: auth.claims, personId: person.id, teamId } };
 }
 
 /** Wraps a handler so the scope is resolved before it runs. Team-scoped routes are built with this only. */
@@ -173,7 +178,9 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
         handle: async (request, _params, context) => {
           const auth = await authorize(context, request);
           if (auth.ok === false) return auth.response;
-          const teams = await context.store.teamsForSubject(auth.claims.subject);
+          const resolved = await context.store.resolvePerson({ issuer: auth.claims.issuer, subject: auth.claims.subject });
+          if (resolved.ok === false) return { status: 503, body: { error: 'principal-unresolved', message: reasonOf(resolved) } };
+          const teams = await context.store.teamsForPerson(resolved.value.person.id);
           // Filtered by membership, not by "there is only one team in the demo". An outsider sees an empty
           // list, which is the same answer as a member of an empty team -- no signal about what exists.
           const visible = await Promise.all(teams.map((teamId) => context.store.listInstances(teamId)));
@@ -200,6 +207,31 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
           return send('createInstance', 201, created.value);
         },
       },
+      {
+        method: 'GET', path: '/api/v1/me', operationId: 'getCurrentPerson',
+        handle: async (request, _params, context) => {
+          const auth = await authorize(context, request);
+          if (auth.ok === false) return auth.response;
+          const resolved = await context.store.resolvePerson({ issuer: auth.claims.issuer, subject: auth.claims.subject });
+          if (resolved.ok === false) return { status: 503, body: { error: 'principal-unresolved', message: reasonOf(resolved) } };
+          const { person } = resolved.value;
+          const identities = await context.store.listIdentities(person.id);
+          const memberships = await context.store.teamsForPerson(person.id);
+          const teams: Array<{ teamId: string; name: string; role: 'owner' | 'member' }> = [];
+          for (const teamId of memberships) {
+            const team = await context.store.getTeam(teamId);
+            const member = await context.store.getTeamMember(teamId, person.id);
+            if (team.ok && member.ok) teams.push({ teamId, name: team.value.name, role: member.value.role });
+          }
+          // Proofs are listed as issuer+subject only. A token, a session id, or an email taken from the
+          // request would all be different answers -- the caller is told who they are, not allowed to say.
+          return send('getCurrentPerson', 200, {
+            personId: person.id, kind: person.kind,
+            identities: identities.map((i) => ({ issuer: i.issuer, subject: i.subject })),
+            teams,
+          });
+        },
+      },
       scoped('GET', '/api/v1/instances/{instanceId}', 'getInstance', async (scope, _request, params) => {
         const found = await scope.context.store.getInstance(params.instanceId ?? '');
         // resolveScope already proved the instance exists and is the caller's team's; a mismatch here means the
@@ -220,7 +252,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
         const stored = await scope.context.store.putPlan(params.instanceId ?? '', plan, hash);
         if (stored.ok === false) return { status: 400, body: { error: stored.code, message: reasonOf(stored) } };
         await scope.context.store.updateInstanceState(params.instanceId ?? '', 'pending', { desiredPlanHash: hash });
-        await scope.context.store.appendAudit({ actorKind: 'user', actorRef: scope.claims.subject, action: 'plan.register', target: params.instanceId ?? '', detail: { planHash: hash.slice(0, 12) } });
+        await scope.context.store.appendAudit({ actorKind: 'user', actorRef: scope.personId, action: 'plan.register', target: params.instanceId ?? '', detail: { planHash: hash.slice(0, 12) } });
         return send('putPlan', 200, { instanceId: params.instanceId ?? '', planHash: hash });
       }),
     ],
@@ -262,7 +294,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
         // Target is the team-owned instance, not the dispatch id. The audit list is filtered by what the
         // caller's teams own, so a row addressed to a dispatch would be invisible to the very people whose
         // action it records -- which the authorization filter caught the first time it ran.
-        await scope.context.store.appendAudit({ actorKind: 'user', actorRef: scope.claims.subject, action: 'dispatch.create', target: instanceId, detail: { dispatchId: created.value.id, action, environment } });
+        await scope.context.store.appendAudit({ actorKind: 'user', actorRef: scope.personId, action: 'dispatch.create', target: instanceId, detail: { dispatchId: created.value.id, action, environment } });
         return send('createDispatch', 201, { intent });
       }),
       {
@@ -320,7 +352,9 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
         if (auth.ok === false) return auth.response;
         const limit = Number(request.query.get('limit') ?? 50);
         if (!Number.isFinite(limit) || limit < 1 || limit > 200) return badRequest('limit must be between 1 and 200');
-        const teams = await context.store.teamsForSubject(auth.claims.subject);
+        const resolved = await context.store.resolvePerson({ issuer: auth.claims.issuer, subject: auth.claims.subject });
+          if (resolved.ok === false) return { status: 503, body: { error: 'principal-unresolved', message: reasonOf(resolved) } };
+          const teams = await context.store.teamsForPerson(resolved.value.person.id);
         const owned = new Set((await Promise.all(teams.map((teamId) => context.store.listInstances(teamId)))).flat().map((i) => i.id));
         const rows = await context.store.recentAudit(200);
         // Audit rows are addressed by instance id, or by the instance itself for dispatches. Anything not
@@ -394,7 +428,9 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
         handle: async (request, _params, context) => {
           const auth = await authorize(context, request);
           if (auth.ok === false) return auth.response;
-          const teams = await context.store.teamsForSubject(auth.claims.subject);
+          const resolved = await context.store.resolvePerson({ issuer: auth.claims.issuer, subject: auth.claims.subject });
+          if (resolved.ok === false) return { status: 503, body: { error: 'principal-unresolved', message: reasonOf(resolved) } };
+          const teams = await context.store.teamsForPerson(resolved.value.person.id);
           const wanted = request.query.get('capability') ?? undefined;
           const perTeam = await Promise.all(teams.map((teamId) => context.store.availableOffersForTeam(teamId, wanted)));
           const seen = new Map<string, CapabilityOffer>();
@@ -410,7 +446,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
         const outputs = Array.isArray(parsed.value?.outputs) ? parsed.value.outputs : [];
         const published = await scope.context.store.publishCapability({ instanceId: params.instanceId ?? '', teamId: scope.teamId, capability, outputs: outputs as CapabilityOffer['outputs'] });
         if (published.ok === false) return { status: published.code === 'not-found' ? 404 : 400, body: { error: published.code, message: reasonOf(published) } };
-        await scope.context.store.appendAudit({ actorKind: 'user', actorRef: scope.claims.subject, action: 'capability.publish', target: params.instanceId ?? '', detail: { capability } });
+        await scope.context.store.appendAudit({ actorKind: 'user', actorRef: scope.personId, action: 'capability.publish', target: params.instanceId ?? '', detail: { capability } });
         return send('publishCapability', 200, published.value);
       }),
       scoped('PUT', '/api/v1/instances/{instanceId}/capability/{capability}/shares', 'shareCapability', async (scope, request, params) => {
@@ -420,7 +456,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
         if (typeof toTeamId !== 'string' || toTeamId.length === 0) return badRequest('toTeamId is required (a team id, or * for every team)');
         const shared = await scope.context.store.shareCapability({ instanceId: params.instanceId ?? '', capability: params.capability ?? '', toTeamId, sharedBy: scope.claims.subject });
         if (shared.ok === false) return { status: shared.code === 'not-found' ? 404 : 400, body: { error: shared.code, message: reasonOf(shared) } };
-        await scope.context.store.appendAudit({ actorKind: 'user', actorRef: scope.claims.subject, action: 'capability.share', target: params.instanceId ?? '', detail: { capability: params.capability ?? '', toTeamId } });
+        await scope.context.store.appendAudit({ actorKind: 'user', actorRef: scope.personId, action: 'capability.share', target: params.instanceId ?? '', detail: { capability: params.capability ?? '', toTeamId } });
         return send('shareCapability', 200, shared.value);
       }),
       scoped('DELETE', '/api/v1/instances/{instanceId}/capability/{capability}/shares/{toTeamId}', 'revokeCapabilityShare', async (scope, _request, params) => {
@@ -430,7 +466,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
         if (typeof toTeamId !== 'string' || toTeamId.length === 0) return badRequest('toTeamId is required to revoke one specific share');
         const revoked = await scope.context.store.revokeCapabilityShare(params.instanceId ?? '', params.capability ?? '', toTeamId);
         if (revoked.ok === false) return { status: revoked.code === 'not-found' ? 404 : 400, body: { error: revoked.code, message: reasonOf(revoked) } };
-        await scope.context.store.appendAudit({ actorKind: 'user', actorRef: scope.claims.subject, action: 'capability.revoke', target: params.instanceId ?? '', detail: { capability: params.capability ?? '', toTeamId } });
+        await scope.context.store.appendAudit({ actorKind: 'user', actorRef: scope.personId, action: 'capability.revoke', target: params.instanceId ?? '', detail: { capability: params.capability ?? '', toTeamId } });
         return send('revokeCapabilityShare', 200, { revoked: true });
       }),
       scoped('GET', '/api/v1/instances/{instanceId}/bindings', 'listBindings', async (scope, _request, params) => {
@@ -458,13 +494,13 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
         if (verdict.ok === false) return { status: verdict.error.code === 'not-found' ? 404 : 400, body: { error: verdict.error.code, message: reasonOf(verdict.error) } };
         const bound = await scope.context.store.bindCapability({ consumerInstanceId: consumer.value.id, capability, providerInstanceId, destinations, boundBy: scope.claims.subject });
         if (bound.ok === false) return { status: 400, body: { error: bound.code, message: reasonOf(bound) } };
-        await scope.context.store.appendAudit({ actorKind: 'user', actorRef: scope.claims.subject, action: 'capability.bind', target: consumer.value.id, detail: { capability, providerInstanceId } });
+        await scope.context.store.appendAudit({ actorKind: 'user', actorRef: scope.personId, action: 'capability.bind', target: consumer.value.id, detail: { capability, providerInstanceId } });
         return send('bindCapability', 200, bound.value);
       }),
       scoped('DELETE', '/api/v1/instances/{instanceId}/bindings/{capability}', 'unbindCapability', async (scope, _request, params) => {
         const removed = await scope.context.store.unbindCapability(params.instanceId ?? '', params.capability ?? '');
         if (removed.ok === false) return { status: removed.code === 'not-found' ? 404 : 400, body: { error: removed.code, message: reasonOf(removed) } };
-        await scope.context.store.appendAudit({ actorKind: 'user', actorRef: scope.claims.subject, action: 'capability.unbind', target: params.instanceId ?? '', detail: { capability: params.capability ?? '' } });
+        await scope.context.store.appendAudit({ actorKind: 'user', actorRef: scope.personId, action: 'capability.unbind', target: params.instanceId ?? '', detail: { capability: params.capability ?? '' } });
         return { status: 204, body: undefined };
       }),
       scoped('GET', '/api/v1/instances/{instanceId}/consumers', 'listConsumers', async (scope, _request, params) => {

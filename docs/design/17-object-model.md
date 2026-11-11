@@ -18,9 +18,10 @@ instances, and a person is never a billing unit.
 
 | Entity | Key | Holds | State |
 | --- | --- | --- | --- |
-| Person | `sub` (IdP subject) | nothing yet -- platfolio has no user row | **contract-only** |
+| Person | `id` | kind (`human` \| `service`), label hint | implemented (#177) |
+| Identity (a proof) | `(issuer, subject)` | personId, verifiedAt | implemented (#177) |
 | Team | `id` | name | implemented |
-| Membership | `(teamId, subject)` | role: `owner` \| `member`, addedAt | implemented (#173) |
+| Membership | `(teamId, personId)` | role: `owner` \| `member`, addedAt | implemented (#173, rekeyed #177) |
 | Instance | `id` | teamId, name, `platform` (a template id), state, provider, desired/applied plan hashes | implemented |
 | Repository connection | `instanceId` | repo, default branch, pinned action SHA, installedAt | implemented |
 | Provider connection | `instanceId` | tier (`managed`/`self-custody`), workspace/project hints, secret **names** | implemented |
@@ -77,12 +78,15 @@ Ordered by how much damage they do if we build the CLI and API on top of them as
 `templateRef` (repository + commit SHA) so the origin is recorded the way the action's pin is -- by commit, not
 by a movable tag (D30 law 3). Cheap now, expensive after the CLI exposes the field name.
 
-**3. Membership is keyed on a bare `sub` from a single issuer.** True while one Keycloak is the only identity
-source. The moment a tenant brings their own IdP (docs/design/05 plane P2), two realms can issue the same
-`sub` string and mean different people. Fix before it matters: a `persons` table with an internal id, and
-`identities` mapping `(issuer, subject)` → person; team_members then reference the person. One person, several
-proofs; a team, several people. Also gives machines (a future platfolio API client) the same membership path as
-humans instead of a second authorization scheme.
+**3. Membership is keyed on a bare `sub` from a single issuer.** → **Done (#177).** `persons` and
+  `identities (issuer, subject) → person_id` exist (migration `007`), membership references the person, and the
+  request guard resolves a person from the **verified** claims before any handler runs. Two realms that mint the
+  same `sub` are now provably two people -- asserted in the conformance suite, not argued. A person may hold
+  several proofs; removing one does not touch their teams. `kind: 'service'` exists so a machine client can be
+  a member through the same path as a human, because a parallel authorization scheme for tokens is how
+  platforms grow a back door with different rules. `GET /api/v1/me` answers the question the CLI asks first:
+  who does the platform think I am, and which teams does that person belong to.
+
 
 **4. Roles are an enum with no policy in front of them.** Today every handler asks `teams.includes(teamId)`,
 which is membership, not role -- an `owner` and a `member` can currently do the same things, and `destroy` will

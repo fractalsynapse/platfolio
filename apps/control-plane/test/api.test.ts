@@ -27,7 +27,10 @@ function must<T>(result: StoreResult<T>, label: string): T {
 /** A team the given token subject can act for. Membership is granted, never assumed. */
 async function createTeamWith(ctx: KernelContext, subject = 'user-conformance'): Promise<string> {
   const team = must(await ctx.store.createTeam({ name: `t-${Math.random().toString(36).slice(2, 8)}` }), 'createTeam');
-  must(await ctx.store.putTeamMember({ teamId: team.id, subject, role: 'owner' }), 'putTeamMember');
+  // Membership is granted to a *person* resolved from the same (issuer, subject) the request guard will use,
+  // so a test cannot pass by writing a key the API never looks up.
+  const person = must(await ctx.store.resolvePerson({ issuer: fixture.issuer, subject }), 'resolvePerson');
+  must(await ctx.store.putTeamMember({ teamId: team.id, personId: person.person.id, role: 'owner' }), 'putTeamMember');
   return team.id;
 }
 

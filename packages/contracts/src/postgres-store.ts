@@ -1,8 +1,9 @@
 import { Pool, type PoolClient } from 'pg';
 import {
-  AttestationRecordSchema, AuditEntrySchema, BindingRecordSchema, CapabilityOfferSchema, CapabilityShareSchema, DispatchRecordSchema, TeamMemberSchema, InstanceSchema, ProviderConnectionSchema, RepoConnectionSchema, TeamSchema, newId,
-  type AttestationRecord, type AuditEntry, type BindingRecord, type CapabilityOffer, type CapabilityShare, type NewBinding, type NewCapabilityOffer, type NewCapabilityShare, type DispatchRecord, type Instance, type ProviderConnection, type RepoConnection, type Store, type StoreError, type StoreResult, type Team, type TeamMember,
+  AttestationRecordSchema, AuditEntrySchema, BindingRecordSchema, CapabilityOfferSchema, CapabilityShareSchema, DispatchRecordSchema, IdentitySchema, PersonSchema, TeamMemberSchema, InstanceSchema, ProviderConnectionSchema, RepoConnectionSchema, TeamSchema, newId,
+  type AttestationRecord, type AuditEntry, type BindingRecord, type CapabilityOffer, type CapabilityShare, type NewBinding, type NewCapabilityOffer, type NewCapabilityShare, type DispatchRecord, type Instance, type ProviderConnection, type RepoConnection, type Store, type StoreError, type StoreResult, type Team, type Identity, type Person, type TeamMember,
 } from './persistence.ts';
+import { reasonOf } from './persistence.ts';
 import { checkAttestationPolicy } from './dispatch-policy.ts';
 import type { Attestation } from './attestation.ts';
 
@@ -405,40 +406,126 @@ export class PostgresStore implements Store {
     return ok({ removed: true });
   }
 
+  async resolvePerson(input: { issuer: string; subject: string; kind?: Person['kind']; label?: string }) {
+    const existing = await this.pool.query(`SELECT person_id FROM ${this.q('identities')} WHERE issuer = $1 AND subject = $2`, [input.issuer, input.subject]);
+    const found = (existing.rows as Row[])[0];
+    if (found) {
+      const person = await this.getPerson(String(found.person_id));
+      if (person.ok) return ok({ person: person.value, created: false });
+    }
+    const id = newId('person');
+    try {
+      await this.pool.query(`INSERT INTO ${this.q('persons')} (id, kind, label) VALUES ($1,$2,$3)`, [id, input.kind ?? 'human', input.label ?? null]);
+    } catch (error) {
+      // A concurrent first request can win the insert. Re-read instead of failing someone's login, because the
+      // losing request knows the person exists by definition of having looked.
+      if ((error as { code?: string }).code === '23505') {
+        const again = await this.pool.query(`SELECT person_id FROM ${this.q('identities')} WHERE issuer = $1 AND subject = $2`, [input.issuer, input.subject]);
+        const row = (again.rows as Row[])[0];
+        if (row) {
+          const person = await this.getPerson(String(row.person_id));
+          if (person.ok) return ok({ person: person.value, created: false });
+        }
+      }
+      throw error;
+    }
+    const linked = await this.linkIdentity({ personId: id, issuer: input.issuer, subject: input.subject });
+    if (!linked.ok) return err({ code: 'conflict', reason: `identity link refused: ${reasonOf(linked)}` });
+    const created = await this.getPerson(id);
+    return created.ok ? ok({ person: created.value, created: true }) : err({ code: 'conflict', reason: reasonOf(created) });
+  }
+
+  async getPerson(id: string) {
+    const rows = (await this.pool.query(`SELECT * FROM ${this.q('persons')} WHERE id = $1`, [id])).rows as Row[];
+    const row = rows[0];
+    if (!row) return err({ code: 'not-found', what: 'person', id });
+    const admitted = admit(PersonSchema, { id: row.id, kind: row.kind, ...(row.label === null ? {} : { label: String(row.label) }), createdAt: iso(row.created_at) }, 'person row');
+    return admitted.accepted ? ok(admitted.value) : err({ code: 'conflict', reason: admitted.reason });
+  }
+
+  async listPersons() {
+    const rows = (await this.pool.query(`SELECT * FROM ${this.q('persons')} ORDER BY created_at ASC`)).rows as Row[];
+    return values(rows.map((r) => {
+      const admitted = admit(PersonSchema, { id: r.id, kind: r.kind, ...(r.label === null ? {} : { label: String(r.label) }), createdAt: iso(r.created_at) }, 'person row');
+      return admitted.accepted ? ok(admitted.value) : err({ code: 'conflict', reason: admitted.reason });
+    }));
+  }
+
+  async linkIdentity(input: { personId: string; issuer: string; subject: string }) {
+    const admitted = admit(IdentitySchema, { ...input, verifiedAt: new Date().toISOString() }, 'identity');
+    if (!admitted.accepted) return err({ code: 'conflict', reason: admitted.reason });
+    const i = admitted.value;
+    try {
+      await this.pool.query(
+        `INSERT INTO ${this.q('identities')} (issuer, subject, person_id, verified_at) VALUES ($1,$2,$3,$4)
+         ON CONFLICT (issuer, subject) DO UPDATE SET person_id = EXCLUDED.person_id, verified_at = now()`,
+        [i.issuer, i.subject, i.personId, i.verifiedAt]);
+    } catch (error) {
+      if ((error as { code?: string }).code === '23503') return err({ code: 'not-found', what: 'person', id: i.personId });
+      throw error;
+    }
+    return ok(i);
+  }
+
+  async unlinkIdentity(issuer: string, subject: string) {
+    const removed = await this.pool.query(`DELETE FROM ${this.q('identities')} WHERE issuer = $1 AND subject = $2`, [issuer, subject]);
+    if ((removed.rowCount ?? 0) === 0) return err({ code: 'not-found', what: 'identity', id: `${issuer}/${subject}` });
+    return ok({ removed: true });
+  }
+
+  async listIdentities(personId: string) {
+    const rows = (await this.pool.query(`SELECT * FROM ${this.q('identities')} WHERE person_id = $1 ORDER BY verified_at ASC`, [personId])).rows as Row[];
+    return values(rows.map((r) => {
+      const admitted = admit(IdentitySchema, { issuer: r.issuer, subject: r.subject, personId: r.person_id, verifiedAt: iso(r.verified_at) }, 'identity row');
+      return admitted.accepted ? ok(admitted.value) : err({ code: 'conflict', reason: admitted.reason });
+    }));
+  }
+
+  async getPersonByIdentity(issuer: string, subject: string) {
+    const rows = (await this.pool.query(`SELECT person_id FROM ${this.q('identities')} WHERE issuer = $1 AND subject = $2`, [issuer, subject])).rows as Row[];
+    const row = rows[0];
+    if (!row) return err({ code: 'not-found', what: 'person', id: `${issuer}/${subject}` });
+    return this.getPerson(String(row.person_id));
+  }
+
   async putTeamMember(member: Omit<TeamMember, 'addedAt'> & { addedAt?: string }) {
     const admitted = admit(TeamMemberSchema, { ...member, addedAt: member.addedAt ?? new Date().toISOString() }, 'team member');
     if (!admitted.accepted) return err({ code: 'conflict', reason: admitted.reason });
     const m = admitted.value;
     try {
       await this.pool.query(
-        `INSERT INTO ${this.q('team_members')} (team_id, subject, role, added_at) VALUES ($1,$2,$3,$4)
-         ON CONFLICT (team_id, subject) DO UPDATE SET role = EXCLUDED.role`,
-        [m.teamId, m.subject, m.role, m.addedAt]);
+        `INSERT INTO ${this.q('team_members')} (team_id, person_id, role, added_at) VALUES ($1,$2,$3,$4)
+         ON CONFLICT (team_id, person_id) DO UPDATE SET role = EXCLUDED.role`,
+        [m.teamId, m.personId, m.role, m.addedAt]);
     } catch (error) {
-      if ((error as { code?: string }).code === '23503') return err({ code: 'not-found', what: 'team', id: m.teamId });
+      if ((error as { code?: string }).code === '23503') {
+        const teamExists = await this.pool.query(`SELECT 1 FROM ${this.q('teams')} WHERE id = $1`, [m.teamId]);
+        if ((teamExists.rowCount ?? 0) === 0) return err({ code: 'not-found', what: 'team', id: m.teamId });
+        return err({ code: 'not-found', what: 'person', id: m.personId });
+      }
       throw error;
     }
     return ok(m);
   }
 
-  async getTeamMember(teamId: string, subject: string) {
-    const rows = (await this.pool.query(`SELECT * FROM ${this.q('team_members')} WHERE team_id = $1 AND subject = $2`, [teamId, subject])).rows as Row[];
+  async getTeamMember(teamId: string, personId: string) {
+    const rows = (await this.pool.query(`SELECT * FROM ${this.q('team_members')} WHERE team_id = $1 AND person_id = $2`, [teamId, personId])).rows as Row[];
     const row = rows[0];
-    return row ? this.asMember(row) : err({ code: 'not-found', what: 'team membership', id: `${teamId}/${subject}` });
-  }
-
-  private asMember(row: Row): StoreResult<TeamMember> {
-    const admitted = admit(TeamMemberSchema, { teamId: row.team_id, subject: row.subject, role: row.role, addedAt: iso(row.added_at) }, 'team member row');
+    if (!row) return err({ code: 'not-found', what: 'team membership', id: `${teamId}/${personId}` });
+    const admitted = admit(TeamMemberSchema, { teamId: row.team_id, personId: row.person_id, role: row.role, addedAt: iso(row.added_at) }, 'team member row');
     return admitted.accepted ? ok(admitted.value) : err({ code: 'conflict', reason: admitted.reason });
   }
 
   async listTeamMembers(teamId: string) {
     const rows = (await this.pool.query(`SELECT * FROM ${this.q('team_members')} WHERE team_id = $1 ORDER BY added_at ASC`, [teamId])).rows as Row[];
-    return rows.map((r) => this.asMember(r)).filter((r): r is { ok: true; value: TeamMember } => r.ok).map((r) => r.value);
+    return values(rows.map((r) => {
+      const admitted = admit(TeamMemberSchema, { teamId: r.team_id, personId: r.person_id, role: r.role, addedAt: iso(r.added_at) }, 'team member row');
+      return admitted.accepted ? ok(admitted.value) : err({ code: 'conflict', reason: admitted.reason });
+    }));
   }
 
-  async teamsForSubject(subject: string) {
-    const rows = (await this.pool.query(`SELECT team_id FROM ${this.q('team_members')} WHERE subject = $1 ORDER BY added_at ASC`, [subject])).rows as Row[];
+  async teamsForPerson(personId: string) {
+    const rows = (await this.pool.query(`SELECT team_id FROM ${this.q('team_members')} WHERE person_id = $1 ORDER BY added_at ASC`, [personId])).rows as Row[];
     return rows.map((r) => String(r.team_id));
   }
 

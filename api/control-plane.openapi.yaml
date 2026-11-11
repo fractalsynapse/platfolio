@@ -127,6 +127,30 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
               example: { error: insufficient-scope, message: 'token lacks the platfolio.user scope' }
 
+  /api/v1/me:
+    get:
+      operationId: getCurrentPerson
+      summary: The person behind this token, their proofs, and their teams
+      description: |
+        The CLI needs this before anything else: `platfolio login` ends by asking who the platform thinks I
+        am (#177, D44). A person may hold several proofs -- this realm, a tenant IdP later -- and the answer
+        lists them without ever exposing a token, plus the teams each membership grants.
+
+        Note what is absent: no email taken from the request, no team chosen by the caller. The issuer and
+        subject come from the verified claims, and teams are read from membership. A client that could name
+        its own team would be asserting its own authorization.
+      security:
+        - bearerJwt: []
+      responses:
+        '200':
+          description: The authenticated person.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CurrentPerson' }
+              example: { personId: person-1f7c, kind: human, identities: [{ issuer: 'http://localhost:8081/realms/platfolio', subject: '47c7105c' }], teams: [{ teamId: team-f4e9, name: dev-workspace, role: owner }] }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+
   /api/v1/instances:
     get:
       operationId: listInstances
@@ -763,6 +787,33 @@ components:
           example: 'Bearer realm="platfolio", error="invalid_token"'
 
   schemas:
+    CurrentPerson:
+      type: object
+      additionalProperties: false
+      required: [personId, kind, identities, teams]
+      properties:
+        personId: { type: string, minLength: 1 }
+        kind: { type: string, enum: [human, service] }
+        identities:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [issuer, subject]
+            properties:
+              issuer: { type: string }
+              subject: { type: string }
+        teams:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [teamId, name, role]
+            properties:
+              teamId: { type: string }
+              name: { type: string }
+              role: { type: string, enum: [owner, member] }
+
     CapabilityOffer:
       type: object
       additionalProperties: false

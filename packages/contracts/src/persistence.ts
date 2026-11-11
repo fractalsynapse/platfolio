@@ -131,7 +131,11 @@ export type TeamRole = z.infer<typeof TeamRoleSchema>;
 
 export const TeamMemberSchema = z.object({
   teamId: z.string().min(1),
-  subject: z.string().min(1).max(200),
+  /**
+   * The person, not the proof. A member with two IdPs is one member; removing a proof (someone leaves SSO)
+   * must not silently revoke their team access while another proof still stands.
+   */
+  personId: z.string().min(1),
   role: TeamRoleSchema,
   addedAt: z.string().min(1),
 }).strict();
@@ -214,6 +218,37 @@ export interface NewBinding {
   boundBy: string;
   boundAt?: string;
 }
+
+/**
+ * A person, independent of how they proved it (D44, #177).
+ *
+ * Membership used to hang off a bare `sub` string from the one issuer platfolio verified. That is correct
+ * while there is exactly one Keycloak and wrong the moment a tenant brings an IdP: two realms can mint the
+ * same `sub` for different people, and a global key cannot be both. So identity moved from "a string we
+ * trust" to "a set of proofs attached to a person", and teams reference the person.
+ *
+ * `kind` exists because a machine client (a future `platfolio` API token) needs membership too. A second,
+ * parallel authorization scheme for non-humans is how platforms end up with a back door that has different
+ * rules.
+ */
+export const PersonSchema = z.object({
+  id: z.string().min(1),
+  kind: z.enum(['human', 'service']).default('human'),
+  /** Display hint only -- never an authorization input, and never trusted from a client. */
+  label: z.string().max(120).optional(),
+  createdAt: z.string().min(1),
+}).strict();
+export type Person = z.infer<typeof PersonSchema>;
+
+/** One proof: `(issuer, subject)` from a verified token, bound to a person. Unique as a pair. */
+export const IdentitySchema = z.object({
+  issuer: z.string().min(1),
+  subject: z.string().min(1),
+  personId: z.string().min(1),
+  verifiedAt: z.string().min(1),
+}).strict();
+export type Identity = z.infer<typeof IdentitySchema>;
+
 
 export type StoreError =
   | { code: 'not-found'; what: string; id: string }
@@ -301,15 +336,31 @@ export interface Store {
    * Membership. `put` is idempotent by (teamId, subject): re-adding a member updates the role rather than
    * accumulating rows, because an audit of "who could see this" must have one answer.
    */
+  // ---------- persons and identities (#177, D44) ----------
+  /**
+   * Find or create the person behind a verified claim pair. Idempotent on `(issuer, subject)`, and called on
+   * the request path by the scope guard -- which is why it takes the *verified* issuer from the claims rather
+   * than trusting a caller to name one.
+   */
+  resolvePerson(input: { issuer: string; subject: string; kind?: Person['kind']; label?: string }): Promise<StoreResult<{ person: Person; created: boolean }>>;
+  getPerson(id: string): Promise<StoreResult<Person>>;
+  listPersons(): Promise<Person[]>;
+  /** A person may hold several proofs; dropping one must not orphan the teams the person belongs to. */
+  linkIdentity(input: { personId: string; issuer: string; subject: string }): Promise<StoreResult<Identity>>;
+  unlinkIdentity(issuer: string, subject: string): Promise<StoreResult<{ removed: boolean }>>;
+  listIdentities(personId: string): Promise<Identity[]>;
+  getPersonByIdentity(issuer: string, subject: string): Promise<StoreResult<Person>>;
+
+  // ---------- membership ----------
   putTeamMember(member: Omit<TeamMember, 'addedAt'> & { addedAt?: string }): Promise<StoreResult<TeamMember>>;
-  getTeamMember(teamId: string, subject: string): Promise<StoreResult<TeamMember>>;
+  getTeamMember(teamId: string, personId: string): Promise<StoreResult<TeamMember>>;
   listTeamMembers(teamId: string): Promise<TeamMember[]>;
   /**
-   * The authorization question, asked once: which teams may this subject act for? An empty array means the
-   * caller is authenticated and belongs to nothing -- which is a valid state, not an error, and the reason
-   * this returns a list instead of throwing.
+   * The authorization question, asked once: which teams may this person act for? An empty array means
+   * authenticated and belonging to nothing -- a valid state, not an error, and the reason this returns a list
+   * instead of throwing.
    */
-  teamsForSubject(subject: string): Promise<string[]>;
+  teamsForPerson(personId: string): Promise<string[]>;
 
   createDispatch(input: Omit<DispatchRecord, 'id' | 'consumedAt'> & { id?: string }): Promise<StoreResult<DispatchRecord>>;
   getDispatch(id: string): Promise<StoreResult<DispatchRecord>>;
