@@ -42,10 +42,10 @@ test('the server dispatches by method and path, and 404s without hanging', async
   await ctx.plugin(ServerService, ServerConfigSchema.parse({ host: '127.0.0.1', port: 0 }));
   ctx.server.addRoute({ method: 'GET', path: '/ping', operationId: 'ping', handle: async () => ({ status: 200, body: { pong: true } }) });
   ctx.server.addRoute({ method: 'GET', path: '/api/v1/instances/{instanceId}', operationId: 'getInstance', handle: async (_req, params) => ({ status: 200, body: params }) });
-  assert.deepEqual(await ctx.server.dispatch({ method: 'GET', path: '/ping', url: '/ping', headers: {}, raw: null as never }), { status: 200, body: { pong: true } });
-  const routed = await ctx.server.dispatch({ method: 'get', path: '/api/v1/instances/inst-9', url: '/x', headers: {}, raw: null as never });
+  assert.deepEqual(await ctx.server.dispatch({ method: 'GET', path: '/ping', url: '/ping', query: new URLSearchParams(), headers: {}, body: undefined, raw: null as never }), { status: 200, body: { pong: true } });
+  const routed = await ctx.server.dispatch({ method: 'get', path: '/api/v1/instances/inst-9', url: '/x', query: new URLSearchParams(), headers: {}, body: undefined, raw: null as never });
   assert.deepEqual(routed.body, { instanceId: 'inst-9' }, 'path parameters must bind, and method match must be case-insensitive');
-  const missing = await ctx.server.dispatch({ method: 'DELETE', path: '/ping', url: '/ping', headers: {}, raw: null as never });
+  const missing = await ctx.server.dispatch({ method: 'DELETE', path: '/ping', url: '/ping', query: new URLSearchParams(), headers: {}, body: undefined, raw: null as never });
   assert.equal(missing.status, 404, 'a method mismatch is a 404, not a hang and not a 405-by-accident');
   assert.equal(ctx.server.listening, true);
   await ctx.fiber.dispose();

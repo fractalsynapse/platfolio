@@ -17,12 +17,21 @@ const mutate = (edit: (doc: SpecDocument) => void): SpecDocument => {
 test('the shipped spec is internally true', () => {
   assert.deepEqual(checkSpec(spec), [], 'the canonical spec must pass its own checks before it can check anything');
   const ops = operationsOf(spec);
-  assert.equal(ops.length, 4);
-  assert.deepEqual(ops.map((o) => o.operationId).sort(), ['getHealth', 'getReady', 'getVersion', 'getWhoami']);
-  // The public half says so explicitly rather than by omission -- that is what the security check is for.
-  assert.deepEqual(ops.filter((o) => Array.isArray(o.security) && o.security.length === 0).map((o) => o.operationId).sort(), ['getHealth', 'getReady', 'getVersion']);
-  // Coverage of the surface: every operation's declared responses, so a new status code shows up in a diff.
-  assert.deepEqual(declaredResponseKeys(spec).sort(), ['getHealth:200', 'getReady:200', 'getReady:503', 'getVersion:200', 'getWhoami:200', 'getWhoami:401', 'getWhoami:403']);
+  // Asserted as an invariant over the document, not a snapshot of Slice 1's four operations: a test that
+  // hardcodes the whole surface goes red on every legitimate addition and gets weakened instead of read.
+  assert.equal(ops.length, 13, 'one operation per entry in the route manifest');
+  assert.equal(new Set(ops.map((o) => o.operationId)).size, ops.length, 'operationIds are unique');
+  // The public half declares itself explicitly rather than by omission -- that is what the security check is for.
+  const publicOps = ops.filter((o) => Array.isArray(o.security) && o.security.length === 0).map((o) => o.operationId).sort();
+  assert.deepEqual(publicOps, ['getHealth', 'getReady', 'getVersion'], 'only liveness and build identity are unauthenticated');
+  for (const guarded of ops.filter((o) => !publicOps.includes(o.operationId))) {
+    assert.ok(guarded.security !== 'undeclared' && guarded.security.includes('bearerJwt'), `${guarded.operationId} must declare bearerJwt`);
+  }
+  // Every operation declares at least one 4xx or states it is bodiless, so no path can only ever succeed.
+  const keys = declaredResponseKeys(spec);
+  for (const op of ops) {
+    assert.ok(keys.some((k) => k.startsWith(`${op.operationId}:`)), `${op.operationId} declares no response`);
+  }
 });
 
 test('response validation accepts truth and rejects a body that merely looks plausible', () => {

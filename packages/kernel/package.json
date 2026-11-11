@@ -6,7 +6,10 @@
   "description": "Cordis-rooted control-plane runtime. The only package permitted to import the vendored framework.",
   "license": "Apache-2.0",
   "main": "./src/index.ts",
-  "exports": { ".": "./src/index.ts", "./cli": "./src/cli.ts" },
+  "exports": {
+    ".": "./src/index.ts",
+    "./cli": "./src/cli.ts"
+  },
   "dependencies": {
     "@platfolio/contracts": "workspace:*",
     "@platfolio/manifest": "workspace:*",

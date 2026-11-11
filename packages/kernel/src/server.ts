@@ -25,17 +25,31 @@ export const ServerConfigSchema = z.object({
 
 export interface RouteDefinition {
   method: string;
-  /**Colon parameters in the spec's own notation: `/api/v1/instances/{instanceId}`. */
+  /** Colon parameters in the spec's own notation: `/api/v1/instances/{instanceId}`. */
   path: string;
   operationId: string;
-  handle: (request: Request, params: Record<string, string>) => Promise<Response_>;
+  /**
+   * The context arrives per request rather than being captured at registration. That is not ceremony: a route
+   * table built before the other capabilities are live either holds a half-initialised object or a mutable
+   * holder someone must remember to fill, and both fail later and quieter than this does.
+   */
+  handle: (request: Request, params: Record<string, string>, context: import('./extension.ts').KernelContext) => Promise<Response_>;
 }
 
 export interface Request {
   method: string;
   path: string;
   url: string;
+  query: URLSearchParams;
   headers: IncomingMessage['headers'];
+  /**
+   * Parsed JSON body, or undefined. Reading and size-limiting happens in the transport because a capability
+   * that reads the stream itself gets no bound, and an unbounded read on a public endpoint is an outage
+   * waiting for one curious caller. `raw` stays available for the rare handler that needs the stream.
+   */
+  body: unknown;
+  /** Why a body was rejected, so a handler can answer 400 with the reason instead of guessing. */
+  bodyError?: string;
   raw: IncomingMessage;
 }
 
@@ -76,6 +90,11 @@ export class ServerService extends Service<z.infer<typeof ServerConfigSchema>> {
     this.fallback = handler;
   }
 
+  /** How many routes have been registered. Read by the composition root after every capability is installed. */
+  get routeCount(): number {
+    return this.routes.length;
+  }
+
   get listening(): boolean {
     return this.server?.listening === true;
   }
@@ -92,7 +111,7 @@ export class ServerService extends Service<z.infer<typeof ServerConfigSchema>> {
       if (route.method !== request.method.toUpperCase()) continue;
       const params = matchPath(route.path, request.path);
       if (params === null) continue;
-      return route.handle(request, params);
+      return route.handle(request, params, this.ctx);
     }
     const through = await this.fallback?.(request);
     if (through) return through;
@@ -103,7 +122,31 @@ export class ServerService extends Service<z.infer<typeof ServerConfigSchema>> {
     const listener: RequestListener = (req, res) => {
       void (async () => {
         const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
-        const response = await this.dispatch({ method: req.method ?? 'GET', path: url.pathname, url: req.url ?? '/', headers: req.headers, raw: req });
+        const readBody = async (): Promise<{ body: unknown; bodyError?: string }> => {
+          if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'DELETE') return { body: undefined };
+          const chunks: Buffer[] = [];
+          let size = 0;
+          for await (const chunk of req) {
+            size += (chunk as Buffer).length;
+            if (size > this.config.bodyLimitBytes) {
+              req.destroy();
+              return { body: undefined, bodyError: `request body exceeds ${String(this.config.bodyLimitBytes)} bytes` };
+            }
+            chunks.push(chunk as Buffer);
+          }
+          if (chunks.length === 0) return { body: undefined };
+          const text = Buffer.concat(chunks).toString('utf8');
+          try {
+            return { body: JSON.parse(text) as unknown };
+          } catch {
+            return { body: undefined, bodyError: 'request body is not valid JSON' };
+          }
+        };
+        const { body, bodyError } = await readBody();
+        const response = await this.dispatch({
+          method: req.method ?? 'GET', path: url.pathname, url: req.url ?? '/', query: url.searchParams,
+          headers: req.headers, body, ...(bodyError === undefined ? {} : { bodyError }), raw: req,
+        });
         const payload = JSON.stringify(response.body ?? null);
         res.writeHead(response.status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...(response.headers ?? {}) });
         res.end(payload);
@@ -112,7 +155,12 @@ export class ServerService extends Service<z.infer<typeof ServerConfigSchema>> {
         // no shutdown story at this tag, so the transport is the place that decides.
         this.ctx.logger.error(`server: handler threw for ${req.method} ${req.url}: ${(error as Error).message ?? String(error)}`);
         if (!res.headersSent) res.writeHead(500, { 'content-type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ error: 'internal', message: 'the request handler threw; the server stayed up' }));
+        // The reason is included, redacted and bounded. An opaque 500 sent me reading framework source to find
+        // one missing field; the same dead end is waiting for the next operator. Credential-shaped text is
+        // stripped, so this cannot leak a token that appeared inside an error string.
+        const reason = (error instanceof Error ? error.message : String(error)).slice(0, 200)
+          .replace(/(gh[pousr]_|github_pat_|Bearer |access_token=)[A-Za-z0-9._~+/=-]{6,}/g, '$1' + '[redacted]');
+        res.end(JSON.stringify({ error: 'internal', message: reason }));
       });
     };
     const server = createServer(listener);

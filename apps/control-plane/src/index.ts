@@ -1,7 +1,7 @@
 import { createKernel, disposeKernel } from '@platfolio/kernel';
-import { IdentityConfigSchema } from '@platfolio/contracts';
-import { EndpointKeySource } from '@platfolio/contracts';
-import { registerRoutes, ROUTE_MANIFEST } from './routes.ts';
+import { EndpointKeySource, IdentityConfigSchema } from '@platfolio/contracts';
+import { ROUTE_MANIFEST } from './routes.ts';
+import { buildCapabilities } from './capabilities.ts';
 
 export { ROUTE_MANIFEST };
 
@@ -42,15 +42,17 @@ export async function boot(config: BootConfig, fetchImpl: typeof fetch = fetch) 
     ...(config.jwksUri ? { jwksUri: config.jwksUri } : {}),
     allowedAlgorithms: ['RS256'],
   });
+  const storeUrl = process.env.PLATFOLIO_DB_URL;
   const ctx = await createKernel({
     provider: 'fake',
     custody: 'strict',
     identity,
+    ...(storeUrl ? { store: { driver: 'postgres' as const, connectionString: storeUrl, ...(process.env.PLATFOLIO_DB_MIGRATE === 'true' ? { migrate: true } : {}) } } : {}),
     server: { host: config.host, port: config.port },
-    requiredServices: ['identity', 'server'],
+    extensions: buildCapabilities({ build: config.build }),
+    requiredServices: ['identity', 'server', 'store', 'extensions'],
   });
   ctx.identity.attachKeySource(new EndpointKeySource(identity, fetchImpl, config.jwksUri));
-  registerRoutes(ctx.server, { identity: ctx.identity, build: config.build });
   return {
     ctx,
     address: ctx.server.address,
@@ -62,7 +64,7 @@ export async function boot(config: BootConfig, fetchImpl: typeof fetch = fetch) 
 
 // Cordis has no shutdown seam at this tag (verified: `Loader.exit()` is an empty stub in the reference tree),
 // so the process owns that decision. SIGTERM must close the listener and settle in-flight work, or a rolling
-// deploy in Railway just kills requests mid-flight.
+// deploy just kills requests mid-flight.
 if (import.meta.url === `file://${process.argv[1]}`) {
   let stopping = false;
   boot(configFromEnv(process.env))
@@ -79,8 +81,6 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       process.on('SIGTERM', () => shutdown('SIGTERM'));
       process.on('SIGINT', () => shutdown('SIGINT'));
       process.on('unhandledRejection', (reason) => {
-        // Logged, not fatal: one stray rejection should not kill a control plane that is serving tenants -- but
-        // silence is worse, which is why this exists at all.
         process.stderr.write(`control-plane: unhandled rejection: ${String(reason).slice(0, 300)}\n`);
       });
       process.stdout.write(`control-plane listening on ${app.address.host}:${String(app.address.port)}\n`);

@@ -36,6 +36,7 @@ export {
   type IdentityProvider,
   type Jwk,
   type KeySource,
+  type VerifiedClaims,
   type VerificationFailure,
   type VerificationFailureCode,
   type VerificationResult,
@@ -52,3 +53,37 @@ export {
   type IdentityReport,
   type TokenOptions,
 } from './identity-conformance.ts';
+export {
+  STORE_CONTRACT,
+  STORE_CONTRACT_VERSION,
+  AttestationRecordSchema,
+  AuditEntrySchema,
+  DispatchRecordSchema,
+  InstanceSchema,
+  InstanceStateSchema,
+  ProviderConnectionSchema,
+  RepoConnectionSchema,
+  SecretNameSchema,
+  TeamSchema,
+  newId,
+  reasonOf,
+  type AttestationRecord,
+  type AuditEntry,
+  type DispatchRecord,
+  type Instance,
+  type InstanceState,
+  type NewInstance,
+  type NewTeam,
+  type ProviderConnection,
+  type RepoConnection,
+  type SecretName,
+  type Store,
+  type StoreError,
+  type StoreResult,
+  type Team,
+} from './persistence.ts';
+export { checkAttestationPolicy, type PolicyVerdict } from './dispatch-policy.ts';
+export { MemoryStore, type MemoryStoreOptions } from './memory-store.ts';
+export { PostgresStore, type PostgresStoreOptions } from './postgres-store.ts';
+export { applyMigrations, dropSchema, safeSchema, type MigrateOptions, type MigrateResult } from './migrations.ts';
+export { runStoreConformance, type StoreCaseResult, type StoreReport } from './store-conformance.ts';

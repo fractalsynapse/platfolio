@@ -7,6 +7,58 @@ change; entries describe merged intent, not aspirations.
 
 ### Added
 
+- **Slice 2 (#162): the control plane has records, and they are a capability.** `packages/contracts` gains
+  `Store` (teams, instances, repo/provider connections, plans, dispatches, attestations, audit), a Postgres
+  implementation with migrations under `db/migrations/`, and an in-memory double -- both running the same
+  conformance suite, which is what makes "swappable" a tested claim rather than an interface with one driver
+  (D15, docs/design/10 OD8). Acceptance policy lives in one pure function, `checkAttestationPolicy`, shared by
+  both: a security decision must not be re-implemented per driver.
+- **`apps/control-plane` is composed from capability plugins** (`packages/kernel/src/extension.ts`): each
+  surface declares its routes and its `requires`, and the kernel turns that data into a fiber. The app never
+  imports the framework; D15 holds while "everything is a plugin" stays true rather than aspirational.
+- **A controller that consumes attestations.** An accepted `ok`/`noop` moves an instance to `live`, `partial`
+  to `degraded`, `failed` to `failed`, and the transition is written to the audit trail with the controller as
+  actor. This is the missing caller #123 reported for `runState`.
+- **`/readyz` reports `degraded` for an in-memory store even when it answers**, and `not-configured` for a
+  dependency that is absent. Neither is a silent green.
+- One Postgres instance, two schemas (`platfolio`, `keycloak`) in the local stack: the consolidation asked
+  for, without two owners in one namespace, since Keycloak auto-migrates its own tables (D40, docs/design/05).
+- `api:check` covers the 13-operation surface; CI runs the Postgres conformance as its own job, so the second
+  implementation cannot skip itself.
+
+### Found by the OpenAPI gate, in the request path
+
+- **Postgres timestamps were stringified `Date` objects** (`Wed Nov 11 2026…`), which is not RFC 3339, so
+  every instance and dispatch response was refused as `response-violates-spec` -- a bug no fake-store test
+  could see, because the double never returns a `Date`. Fixed with one normaliser at the driver boundary.
+- **The document was missing the 400 paths** the handlers can legitimately take, and one `allOf` + 
+  `additionalProperties: false` composition made a correct response unsatisfiable. Both fixed in the spec.
+
+### Fixed in my own work, worth the listing
+
+- A `createKernel` rewrite **lost the `custody.attachPorts` line**; the kernel test caught it by counting
+  provider writes. Restructuring a working function is not free, and the assertion that fails is the one to keep.
+- **A failed boot leaked a listening socket and a running controller interval**, which presented as a hung test
+  suite rather than an error. `createKernel` now disposes on failure, bounded so teardown cannot mask the
+  startup error someone needs to read.
+- Capability descriptors under-declared `requires` and the framework refused the property at request time
+  (`cannot get property "identity" without inject`) -- correct behaviour, my bug, and the reason dependencies
+  are declared per capability rather than assumed globally.
+- Root scripts importing `pg` directly re-created the ambient-dependency trap already documented for `ajv`;
+  both scripts now go through the store capability, which also makes the persistence check cross-process.
+
+### Verified live
+
+- **Slice 2, 15/15 (`pnpm run lifecycle:smoke`)** against the running stack: real database, real Keycloak
+  token, instance created `pending`, plan registered by its own digest, dispatch issued and fetched once
+  (second read `409 nonce-consumed`), attestation accepted and unreadable-to-no-one (`202`), duplicate
+  refused, **the controller moved the stored row to `live`**, controller attributed in the audit trail, and
+  every record read back from a *second process* to prove it is a row and not memory.
+- Slice 1's `identity:smoke` still passes 12/12 on the same stack.
+
+
+### Added
+
 - **Slice 1 (#161, #168): platfolio has a service with real verified identity.** `apps/control-plane` boots on
   the vendored Cordis runtime through `createKernel` — `ctx.identity`, `ctx.server`, `ctx.infra`,
   `ctx.custody` — with `@platfolio/kernel` as the only place that imports the framework. `docker-compose.yml`
