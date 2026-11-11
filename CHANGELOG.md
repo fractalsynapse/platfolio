@@ -7,6 +7,31 @@ change; entries describe merged intent, not aspirations.
 
 ### Added
 
+- **Persons and identities (#177, D44).** `persons` and `identities (issuer, subject) → person_id`
+  (migration `007`), and membership rekeyed from a bare `sub` onto the person. Two realms that mint the same
+  subject string are now provably two people: the conformance suite asserts it against **both** drivers, which
+  is the only reason the claim means anything. A person may hold several proofs, and unlinking one leaves their
+  teams untouched -- removing an SSO connection must not silently revoke membership while another proof stands.
+  `kind: 'service'` lets a machine client be a member through the same path as a human, because a second
+  authorization scheme for tokens is how a platform grows a back door with different rules.
+- `GET /api/v1/me` -- the person behind a verified token, their proofs, and the teams membership grants. The
+  CLI's first question, and the issuer comes from the verified claims rather than the request.
+
+### Fixed
+
+- **A migration constraint that silently did not apply, caught by the second driver.** `007` guarded its
+  foreign key with an unqualified `pg_constraint` lookup, which matches a constraint of that name in **any**
+  schema. The conformance suite migrates into a fresh scratch schema while the application schema already
+  exists in the same database, so the guard saw the other schema's constraint, skipped, and Postgres began
+  accepting memberships for people who do not exist -- while the in-memory double refused. Both drivers pass one
+  suite, and that disagreement is the suite doing its job. The check is now scoped to `current_schema()`.
+- **Membership seeding is resolved, not inserted**: `db:seed-dev` derives the person from
+  `(issuer, subject)` the same way the request guard does. A membership written against any other key would
+  seed cleanly and be invisible at request time.
+
+
+### Added
+
 - **Capability bindings are records (#176, D42).** `capability_offers`, `capability_shares` and
   `capability_bindings` (migration `006`), `Store` methods for both drivers, and the shared
   `checkBindingPolicy` that gates them -- one function, so no driver can drift on a security decision. Eight

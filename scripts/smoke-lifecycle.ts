@@ -125,6 +125,15 @@ check('the attestation is a row, not a memory', persisted.ok && persisted.value.
 const listAfterRestart = await call('/api/v1/instances', {}, accessToken);
 check('authenticated list reflects the record', listAfterRestart.status === 200 && JSON.stringify(listAfterRestart.json ?? []).includes(instanceId), `${String(listAfterRestart.status)}`);
 
+// Who am I, according to the platform (#177): the person resolved from the verified token, their proofs,
+// and the teams membership grants. Printed rather than asserted-once, because "who does the platform think
+// I am" is the first question a CLI has to answer and it must be visible when it is wrong.
+const me = await call('/api/v1/me', {}, accessToken);
+const who = me.json as { personId?: string; kind?: string; identities?: Array<{ issuer: string }>; teams?: Array<{ role: string }> } | undefined;
+check('the platform resolves this token to a person', me.status === 200 && typeof who?.personId === 'string' && who.personId.length > 0, `${String(me.status)} person=${String(who?.personId)} kind=${String(who?.kind)}`);
+check('the person holds the proof this token presented', (who?.identities ?? []).some((i) => i.issuer.includes('/realms/platfolio')), JSON.stringify(who?.identities ?? []));
+check('membership resolves through the person, not the subject string', (who?.teams ?? []).some((x) => x.role === 'owner'), JSON.stringify(who?.teams ?? []));
+
 // Cross-team authorization, against a team this caller is NOT a member of. The foreign instance is written
 // through the database from this process, because the whole point is that the API cannot create it.
 const otherTeams = (await reader.listTeams()).filter((x) => x.name === 'other-workspace');

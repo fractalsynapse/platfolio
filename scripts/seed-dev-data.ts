@@ -39,14 +39,18 @@ try {
   const otherId = await ensureTeam('other-workspace');
 
   const adrian = await subjectOf('adrian');
-  const member = await store.putTeamMember({ teamId: ownedId, subject: adrian, role: 'owner' });
+  // Resolve the person from (issuer, subject) exactly as the request guard does. A membership written
+  // against any other key would seed successfully and then be invisible at request time -- the worst kind
+  // of green, and the reason this script resolves rather than inserts.
+  const person = await store.resolvePerson({ issuer: `${idp}/realms/platfolio`, subject: adrian, label: 'adrian' });
+  if (!person.ok) throw new Error(`person resolve refused: ${reasonOf(person)}`);
+  const member = await store.putTeamMember({ teamId: ownedId, personId: person.value.person.id, role: 'owner' });
   if (!member.ok) throw new Error(`membership refused: ${reasonOf(member)}`);
-  const readBack = await store.teamsForSubject(adrian);
+  const readBack = await store.teamsForPerson(person.value.person.id);
   if (!readBack.includes(ownedId)) throw new Error(`membership written but not readable: ${JSON.stringify(readBack)}`);
-  const other = await store.teamsForSubject('subject-with-no-membership');
-  if (other.length > 0) throw new Error('a subject with no membership resolved to teams');
+  if ((await store.teamsForPerson('person-with-no-membership')).length > 0) throw new Error('a person with no membership resolved to teams');
 
-  process.stdout.write(`D team ${ownedId} (dev-workspace) owned by sub=${adrian}\n`);
+  process.stdout.write(`D team ${ownedId} (dev-workspace) owned by person ${person.value.person.id}\n`);
   process.stdout.write(`D team ${otherId} (other-workspace) has no members -- the cross-team probe target\n`);
 } finally {
   await store.close();

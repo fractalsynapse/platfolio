@@ -75,7 +75,14 @@ export class StoreService extends Service<z.infer<typeof StoreConfigSchema>> {
   putTeamMember(...args: Parameters<Store['putTeamMember']>) { return this.inner.putTeamMember(...args); }
   getTeamMember(...args: Parameters<Store['getTeamMember']>) { return this.inner.getTeamMember(...args); }
   listTeamMembers(...args: Parameters<Store['listTeamMembers']>) { return this.inner.listTeamMembers(...args); }
-  teamsForSubject(...args: Parameters<Store['teamsForSubject']>) { return this.inner.teamsForSubject(...args); }
+  teamsForPerson(...args: Parameters<Store['teamsForPerson']>) { return this.inner.teamsForPerson(...args); }
+  resolvePerson(...args: Parameters<Store['resolvePerson']>) { return this.inner.resolvePerson(...args); }
+  getPerson(...args: Parameters<Store['getPerson']>) { return this.inner.getPerson(...args); }
+  listPersons() { return this.inner.listPersons(); }
+  linkIdentity(...args: Parameters<Store['linkIdentity']>) { return this.inner.linkIdentity(...args); }
+  unlinkIdentity(...args: Parameters<Store['unlinkIdentity']>) { return this.inner.unlinkIdentity(...args); }
+  listIdentities(...args: Parameters<Store['listIdentities']>) { return this.inner.listIdentities(...args); }
+  getPersonByIdentity(...args: Parameters<Store['getPersonByIdentity']>) { return this.inner.getPersonByIdentity(...args); }
   publishCapability(...args: Parameters<Store['publishCapability']>) { return this.inner.publishCapability(...args); }
   getCapabilityOffer(...args: Parameters<Store['getCapabilityOffer']>) { return this.inner.getCapabilityOffer(...args); }
   listCapabilityOffers(...args: Parameters<Store['listCapabilityOffers']>) { return this.inner.listCapabilityOffers(...args); }

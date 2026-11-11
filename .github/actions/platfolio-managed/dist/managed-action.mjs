@@ -26819,7 +26819,11 @@ var AuditEntrySchema = external_exports.object({
 var TeamRoleSchema = external_exports.enum(["owner", "member"]);
 var TeamMemberSchema = external_exports.object({
   teamId: external_exports.string().min(1),
-  subject: external_exports.string().min(1).max(200),
+  /**
+   * The person, not the proof. A member with two IdPs is one member; removing a proof (someone leaves SSO)
+   * must not silently revoke their team access while another proof still stands.
+   */
+  personId: external_exports.string().min(1),
   role: TeamRoleSchema,
   addedAt: external_exports.string().min(1)
 }).strict();
@@ -26855,6 +26859,19 @@ var BindingRecordSchema = external_exports.object({
   state: external_exports.enum(["bound", "stale"]).default("bound"),
   boundAt: external_exports.string().min(1),
   boundBy: external_exports.string().min(1).max(200)
+}).strict();
+var PersonSchema = external_exports.object({
+  id: external_exports.string().min(1),
+  kind: external_exports.enum(["human", "service"]).default("human"),
+  /** Display hint only -- never an authorization input, and never trusted from a client. */
+  label: external_exports.string().max(120).optional(),
+  createdAt: external_exports.string().min(1)
+}).strict();
+var IdentitySchema = external_exports.object({
+  issuer: external_exports.string().min(1),
+  subject: external_exports.string().min(1),
+  personId: external_exports.string().min(1),
+  verifiedAt: external_exports.string().min(1)
 }).strict();
 
 // node_modules/.pnpm/pg@8.23.1/node_modules/pg/esm/index.mjs

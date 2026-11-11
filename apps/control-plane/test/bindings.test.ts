@@ -58,7 +58,8 @@ test('in-team sharing works, and both sides can see the dependency', async () =>
     const provider = must(await app.ctx.store.createTeam({ name: 'platforms' }), 'team');
     const idp = must(await app.ctx.store.createInstance({ teamId: provider.id, name: 'idp', platform: 'shared-identity' }), 'idp');
     const web = must(await app.ctx.store.createInstance({ teamId: provider.id, name: 'shop', platform: 'starter-web' }), 'web');
-    must(await app.ctx.store.putTeamMember({ teamId: provider.id, subject: 'user-conformance', role: 'owner' }), 'member');
+    const owner = must(await app.ctx.store.resolvePerson({ issuer: fixture.issuer, subject: 'user-conformance' }), 'resolvePerson');
+    must(await app.ctx.store.putTeamMember({ teamId: provider.id, personId: owner.person.id, role: 'owner' }), 'member');
 
     const published = await app.call(`/api/v1/instances/${idp.id}/capability`, { method: 'POST', body: JSON.stringify({ capability: 'identity', outputs: [{ output: 'issuer', kind: 'url', state: 'issued-and-placed' }, { output: 'client_secret', kind: 'secret' }] }) });
     assert.equal(published.status, 200, JSON.stringify(published.body));
@@ -100,8 +101,10 @@ test('a cross-team bind needs a live share, and the refusal names the gate rathe
     // correct behaviour seen from a team the caller also belongs to.
     const providerTeam = await app.teamWithInstance(app.ctx, 'identity-owners', 'shared-identity');
     const consumerTeam = await app.teamWithInstance(app.ctx, 'consumers', 'starter-web');
-    must(await app.ctx.store.putTeamMember({ teamId: providerTeam.teamId, subject: 'team-a-owner', role: 'owner' }), 'member A');
-    must(await app.ctx.store.putTeamMember({ teamId: consumerTeam.teamId, subject: 'user-conformance', role: 'owner' }), 'member B');
+    const ownerA = must(await app.ctx.store.resolvePerson({ issuer: fixture.issuer, subject: 'team-a-owner' }), 'person A');
+    const ownerB = must(await app.ctx.store.resolvePerson({ issuer: fixture.issuer, subject: 'user-conformance' }), 'person B');
+    must(await app.ctx.store.putTeamMember({ teamId: providerTeam.teamId, personId: ownerA.person.id, role: 'owner' }), 'member A');
+    must(await app.ctx.store.putTeamMember({ teamId: consumerTeam.teamId, personId: ownerB.person.id, role: 'owner' }), 'member B');
     must(await app.ctx.store.publishCapability({ instanceId: providerTeam.instance.id, teamId: providerTeam.teamId, capability: 'identity', outputs: [{ output: 'issuer', kind: 'url', state: 'issued-and-placed' }] }), 'publish');
 
     const refused = await app.call(`/api/v1/instances/${consumerTeam.instance.id}/bindings/identity`, { method: 'PUT', body: JSON.stringify({ providerInstanceId: providerTeam.instance.id, destinations: [{ output: 'issuer', into: ['OIDC_ISSUER'] }] }) });
@@ -138,7 +141,8 @@ test('binding is refused when the destinations cannot be filled, and self-bindin
   const app = await start();
   try {
     const team = await app.teamWithInstance(app.ctx, 'solo', 'shared-identity');
-    must(await app.ctx.store.putTeamMember({ teamId: team.teamId, subject: 'user-conformance', role: 'owner' }), 'member');
+    const owner = must(await app.ctx.store.resolvePerson({ issuer: fixture.issuer, subject: 'user-conformance' }), 'resolvePerson');
+    must(await app.ctx.store.putTeamMember({ teamId: team.teamId, personId: owner.person.id, role: 'owner' }), 'member');
     must(await app.ctx.store.publishCapability({ instanceId: team.instance.id, teamId: team.teamId, capability: 'identity', outputs: [{ output: 'issuer', kind: 'url', state: 'issued-and-placed' }] }), 'publish');
 
     const self = await app.call(`/api/v1/instances/${team.instance.id}/bindings/identity`, { method: 'PUT', body: JSON.stringify({ providerInstanceId: team.instance.id, destinations: [{ output: 'issuer', into: ['OIDC_ISSUER'] }] }) });
@@ -160,7 +164,8 @@ test('binding routes honour team scope: an outsider gets 404 and learns nothing'
   const app = await start();
   try {
     const insider = await app.teamWithInstance(app.ctx, 'insiders', 'shared-identity');
-    must(await app.ctx.store.putTeamMember({ teamId: insider.teamId, subject: 'user-conformance', role: 'owner' }), 'member');
+    const insiderOwner = must(await app.ctx.store.resolvePerson({ issuer: fixture.issuer, subject: 'user-conformance' }), 'resolvePerson');
+    must(await app.ctx.store.putTeamMember({ teamId: insider.teamId, personId: insiderOwner.person.id, role: 'owner' }), 'member');
     // A second user in no team at all.
     const outsider = 'user-alone';
     const paths: Array<[string, string, RequestInit]> = [

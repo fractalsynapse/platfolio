@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import type { Attestation } from './attestation.ts';
-import { AttestationRecordSchema, AuditEntrySchema, BindingRecordSchema, CapabilityOfferSchema, CapabilityShareSchema, TeamMemberSchema, DispatchRecordSchema, InstanceSchema, ProviderConnectionSchema, RepoConnectionSchema, TeamSchema, newId,
-  type AttestationRecord, type AuditEntry, type BindingRecord, type CapabilityOffer, type CapabilityShare, type NewBinding, type NewCapabilityOffer, type NewCapabilityShare, type DispatchRecord, type Instance, type ProviderConnection, type RepoConnection, type Store, type StoreError, type StoreResult, type Team, type TeamMember } from './persistence.ts';
+import { AttestationRecordSchema, AuditEntrySchema, BindingRecordSchema, CapabilityOfferSchema, CapabilityShareSchema, IdentitySchema, PersonSchema, TeamMemberSchema, DispatchRecordSchema, InstanceSchema, ProviderConnectionSchema, RepoConnectionSchema, TeamSchema, newId,
+  type AttestationRecord, type AuditEntry, type BindingRecord, type CapabilityOffer, type CapabilityShare, type NewBinding, type NewCapabilityOffer, type NewCapabilityShare, type DispatchRecord, type Instance, type ProviderConnection, type RepoConnection, type Store, type StoreError, type StoreResult, type Team, type TeamMember, type Identity, type Person } from './persistence.ts';
+import { reasonOf } from './persistence.ts';
 import { checkAttestationPolicy } from './dispatch-policy.ts';
 
 /**
@@ -36,6 +37,8 @@ export class MemoryStore implements Store {
   private readonly providers = new Map<string, ProviderConnection>();
   private readonly dispatches = new Map<string, DispatchRecord>();
   private readonly plans = new Map<string, { instanceId: string; planHash: string; plan: unknown }>();
+  private readonly persons = new Map<string, Person>();
+  private readonly identities = new Map<string, Identity>();
   private readonly members = new Map<string, TeamMember>();
   private readonly offers = new Map<string, CapabilityOffer>();
   private readonly shares = new Map<string, CapabilityShare>();
@@ -140,23 +143,67 @@ export class MemoryStore implements Store {
     return found ? ok(copy(found)) : err({ code: 'not-found', what: 'provider connection', id: instanceId });
   }
 
+  async resolvePerson(input: { issuer: string; subject: string; kind?: Person['kind']; label?: string }) {
+    if (this.closed) return this.refuse('resolvePerson');
+    const existing = this.identities.get(`${input.issuer}\u0000${input.subject}`);
+    if (existing) {
+      const person = this.persons.get(existing.personId);
+      if (person) return ok({ person: copy(person), created: false });
+    }
+    const person = admit(PersonSchema, { id: newId('person'), kind: input.kind ?? 'human', ...(input.label === undefined ? {} : { label: input.label }), createdAt: this.clock() }, 'person');
+    if (!person.accepted) return err({ code: 'conflict', reason: person.reason });
+    this.persons.set(person.value.id, person.value);
+    const linked = await this.linkIdentity({ personId: person.value.id, issuer: input.issuer, subject: input.subject });
+    if (!linked.ok) return err({ code: 'conflict', reason: `identity link refused: ${reasonOf(linked)}` });
+    return ok({ person: copy(person.value), created: true });
+  }
+  async getPerson(id: string) {
+    const found = this.persons.get(id);
+    return found ? ok(copy(found)) : err({ code: 'not-found', what: 'person', id });
+  }
+  async listPersons() {
+    return [...this.persons.values()].map(copy);
+  }
+  async linkIdentity(input: { personId: string; issuer: string; subject: string }) {
+    if (this.closed) return this.refuse('linkIdentity');
+    if (!this.persons.has(input.personId)) return err({ code: 'not-found', what: 'person', id: input.personId });
+    const admitted = admit(IdentitySchema, { ...input, verifiedAt: this.clock() }, 'identity');
+    if (!admitted.accepted) return err({ code: 'conflict', reason: admitted.reason });
+    this.identities.set(`${admitted.value.issuer}\u0000${admitted.value.subject}`, admitted.value);
+    return ok(admitted.value);
+  }
+  async unlinkIdentity(issuer: string, subject: string) {
+    const existed = this.identities.delete(`${issuer}\u0000${subject}`);
+    if (!existed) return err({ code: 'not-found', what: 'identity', id: `${issuer}/${subject}` });
+    return ok({ removed: true });
+  }
+  async listIdentities(personId: string) {
+    return [...this.identities.values()].filter((i) => i.personId === personId).map(copy);
+  }
+  async getPersonByIdentity(issuer: string, subject: string) {
+    const identity = this.identities.get(`${issuer}\u0000${subject}`);
+    const person = identity ? this.persons.get(identity.personId) : undefined;
+    return person ? ok(copy(person)) : err({ code: 'not-found', what: 'person', id: `${issuer}/${subject}` });
+  }
+
   async putTeamMember(member: Omit<TeamMember, 'addedAt'> & { addedAt?: string }) {
     if (this.closed) return this.refuse('putTeamMember');
     if (!this.teams.has(member.teamId)) return err({ code: 'not-found', what: 'team', id: member.teamId });
+    if (!this.persons.has(member.personId)) return err({ code: 'not-found', what: 'person', id: member.personId });
     const admitted = admit(TeamMemberSchema, { ...member, addedAt: member.addedAt ?? this.clock() }, 'team member');
     if (!admitted.accepted) return err({ code: 'conflict', reason: admitted.reason });
-    this.members.set(`${admitted.value.teamId}\u0000${admitted.value.subject}`, admitted.value);
+    this.members.set(`${admitted.value.teamId}\u0000${admitted.value.personId}`, admitted.value);
     return ok(admitted.value);
   }
-  async getTeamMember(teamId: string, subject: string) {
-    const found = this.members.get(`${teamId}\u0000${subject}`);
-    return found ? ok(copy(found)) : err({ code: 'not-found', what: 'team membership', id: `${teamId}/${subject}` });
+  async getTeamMember(teamId: string, personId: string) {
+    const found = this.members.get(`${teamId}\u0000${personId}`);
+    return found ? ok(copy(found)) : err({ code: 'not-found', what: 'team membership', id: `${teamId}/${personId}` });
   }
   async listTeamMembers(teamId: string) {
     return [...this.members.values()].filter((m) => m.teamId === teamId).map(copy);
   }
-  async teamsForSubject(subject: string) {
-    return [...this.members.values()].filter((m) => m.subject === subject).map((m) => m.teamId);
+  async teamsForPerson(personId: string) {
+    return [...this.members.values()].filter((m) => m.personId === personId).map((m) => m.teamId);
   }
 
   async publishCapability(offer: NewCapabilityOffer) {
@@ -329,6 +376,8 @@ export class MemoryStore implements Store {
     this.teams.clear();
     this.plans.clear();
     this.members.clear();
+    this.persons.clear();
+    this.identities.clear();
     this.offers.clear();
     this.shares.clear();
     this.bindings.clear();

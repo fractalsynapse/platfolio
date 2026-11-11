@@ -109,36 +109,66 @@ const expectErr = (result: { ok: boolean; value?: unknown } & Partial<StoreError
     return expectErr(conn, 'not-found', 'repo connection for unknown instance');
   });
 
-  await add('membership answers the authorization question, and unknown subjects get nothing', async () => {
+  await add('persons and identities: the same subject in two realms is two people (#177)', async () => {
+    const store = await fresh();
+    const first = mustOk(await store.resolvePerson({ issuer: 'https://idp-a.test/realms/t', subject: 'shared-subject' }), 'resolve A');
+    const again = mustOk(await store.resolvePerson({ issuer: 'https://idp-a.test/realms/t', subject: 'shared-subject' }), 'resolve A again');
+    if (again.created || again.person.id !== first.person.id) {
+      return { status: 'fail', detail: `re-resolving the same identity made a new person (created=${String(again.created)})` };
+    }
+    const twin = mustOk(await store.resolvePerson({ issuer: 'https://idp-b.test/realms/t', subject: 'shared-subject' }), 'resolve B');
+    if (twin.person.id === first.person.id) {
+      return { status: 'fail', detail: 'two issuers that mint the same sub were collapsed into one person -- the exact defect this change removes' };
+    }
+    const identitiesA = await store.listIdentities(first.person.id);
+    if (identitiesA.length !== 1) return { status: 'fail', detail: `person A lists ${String(identitiesA.length)} identities` };
+
+    const team = mustOk(await store.createTeam({ name: 'identity-team' }), 'createTeam');
+    mustOk(await store.putTeamMember({ teamId: team.id, personId: first.person.id, role: 'owner' }), 'putTeamMember');
+    const byA = await store.teamsForPerson(first.person.id);
+    const byB = await store.teamsForPerson(twin.person.id);
+    if (byA.length !== 1 || byB.length !== 0) {
+      return { status: 'fail', detail: `membership leaked across people who share a subject string: A=${JSON.stringify(byA)} B=${JSON.stringify(byB)}` };
+    }
+    return { status: 'pass', detail: 'idempotent per (issuer, subject); two realms, two people, two memberships' };
+  });
+
+  await add('persons may hold several proofs, and dropping one does not revoke access', async () => {
+    const store = await fresh();
+    const team = mustOk(await store.createTeam({ name: 'multi-proof' }), 'createTeam');
+    const person = mustOk(await store.resolvePerson({ issuer: 'https://first.test', subject: 'p1' }), 'first proof');
+    mustOk(await store.putTeamMember({ teamId: team.id, personId: person.person.id, role: 'member' }), 'member');
+    mustOk(await store.linkIdentity({ personId: person.person.id, issuer: 'https://second.test', subject: 'p1' }), 'second proof');
+
+    const viaSecond = mustOk(await store.getPersonByIdentity('https://second.test', 'p1'), 'resolve by second proof');
+    if (viaSecond.id !== person.person.id) return { status: 'fail', detail: 'the second proof resolved to a different person' };
+    mustOk(await store.unlinkIdentity('https://first.test', 'p1'), 'unlink first proof');
+    const teams = await store.teamsForPerson(person.person.id);
+    if (teams.length !== 1) {
+      return { status: 'fail', detail: `removing one proof changed membership to ${JSON.stringify(teams)} -- the person still has a valid proof` };
+    }
+    const afterUnlink = await store.getPersonByIdentity('https://first.test', 'p1');
+    if (afterUnlink.ok) return { status: 'fail', detail: 'the unlinked proof still resolves' };
+    return { status: 'pass', detail: 'several proofs, one membership; a dropped proof costs nothing' };
+  });
+
+  await add('membership requires a real person and answers with typed not-found otherwise', async () => {
     const { store, team } = await seed();
-    const orphan = await store.putTeamMember({ teamId: 'team-never-created', subject: 'sub-x', role: 'member' });
-    const guardVerdict = expectErr(orphan, 'not-found', 'membership for an unknown team');
-    if (guardVerdict.status === 'fail') return guardVerdict;
-
-    const added = await store.putTeamMember({ teamId: team.id, subject: 'sub-adrian', role: 'owner' });
-    if (!added.ok) return { status: 'fail', detail: `add refused: ${reasonOf(added)}` };
-    // Idempotent by (team, subject): a re-add updates the role rather than accumulating rows, because an audit
-    // of who could see a team's data must have exactly one answer per person.
-    const again = await store.putTeamMember({ teamId: team.id, subject: 'sub-adrian', role: 'member' });
-    if (!again.ok) return { status: 'fail', detail: `re-add refused: ${reasonOf(again)}` };
-    const members = await store.listTeamMembers(team.id);
-    if (members.length !== 1) return { status: 'fail', detail: `expected one row after re-add, got ${String(members.length)}` };
-    if (members[0]?.role !== 'member') return { status: 'fail', detail: `role was not updated on re-add: ${String(members[0]?.role)}` };
-
-    const teams = await store.teamsForSubject('sub-adrian');
-    if (teams.length !== 1 || teams[0] !== team.id) return { status: 'fail', detail: `teamsForSubject returned ${JSON.stringify(teams)}` };
-    const nobody = await store.teamsForSubject('sub-stranger');
-    if (nobody.length !== 0) return { status: 'fail', detail: `an unknown subject was granted ${JSON.stringify(nobody)}` };
-    return { status: 'pass', detail: 'one row, role updated, membership resolved, stranger gets nothing' };
+    const ghost = await store.putTeamMember({ teamId: team.id, personId: 'person-never-created', role: 'member' });
+    const verdict = expectErr(ghost, 'not-found', 'membership for an unknown person');
+    if (verdict.status === 'fail') return verdict;
+    const teamless = await store.putTeamMember({ teamId: 'team-does-not-exist', personId: mustOk(await store.resolvePerson({ issuer: 'https://x.test', subject: 's' }), 'resolve').person.id, role: 'member' });
+    return expectErr(teamless, 'not-found', 'membership in an unknown team');
   });
 
   await add('a refused write leaves no row readable afterwards', async () => {
     // The two drivers differ here on purpose: Postgres enforces the foreign key, the double checks by hand.
     // Both must refuse, because an orphaned membership would grant access to a team that does not exist.
     const { store } = await seed();
-    const rejected = await store.putTeamMember({ teamId: 'team-does-not-exist', subject: 'sub-y', role: 'owner' });
+    const ghost = mustOk(await store.resolvePerson({ issuer: 'https://ghost.test', subject: 'sub-y' }), 'resolve ghost person');
+    const rejected = await store.putTeamMember({ teamId: 'team-does-not-exist', personId: ghost.person.id, role: 'owner' });
     if (rejected.ok) return { status: 'fail', detail: 'the write was accepted' };
-    const listed = await store.teamsForSubject('sub-y');
+    const listed = await store.teamsForPerson(ghost.person.id);
     return listed.length === 0
       ? { status: 'pass', detail: `refused as ${rejected.code} and nothing readable` }
       : { status: 'fail', detail: `refused but granted: ${JSON.stringify(listed)}` };
@@ -155,7 +185,7 @@ const expectErr = (result: { ok: boolean; value?: unknown } & Partial<StoreError
     mustOk(await store.bindCapability({
       consumerInstanceId: consumerInst.id, capability: 'identity', providerInstanceId: offer.instanceId,
       destinations: [{ output: 'issuer', into: ['OIDC_ISSUER'] }, { output: 'client_secret', into: ['OIDC_CLIENT_SECRET'] }],
-      boundBy: 'sub-test',
+      boundBy: 'person-test',
     }), 'bindCapability');
     const consumers = await store.listConsumers(providerInst.id);
     if (consumers.length !== 1 || consumers[0]?.consumerInstanceId !== consumerInst.id) {
@@ -202,7 +232,7 @@ const expectErr = (result: { ok: boolean; value?: unknown } & Partial<StoreError
     const discoverable = await store.availableOffersForTeam(teamB.id, 'identity');
     if (discoverable.length !== 1) return { status: 'fail', detail: `shared offer not discoverable by team B (${String(discoverable.length)})` };
 
-    mustOk(await store.bindCapability({ consumerInstanceId: consumerInst.id, capability: 'identity', providerInstanceId: providerInst.id, destinations: [{ output: 'issuer', into: ['OIDC_ISSUER'] }], boundBy: 'sub-b' }), 'bind');
+    mustOk(await store.bindCapability({ consumerInstanceId: consumerInst.id, capability: 'identity', providerInstanceId: providerInst.id, destinations: [{ output: 'issuer', into: ['OIDC_ISSUER'] }], boundBy: 'person-b' }), 'bind');
     mustOk(await store.revokeCapabilityShare(providerInst.id, 'identity', teamB.id), 'revoke');
     const after = await store.getBinding(consumerInst.id, 'identity');
     if (!after.ok) return { status: 'fail', detail: 'revoking the share DELETED the binding -- the app loses its record of what it points at' };
