@@ -5,6 +5,16 @@ change; entries describe merged intent, not aspirations.
 
 "## [Unreleased]
 
+### Verified live
+
+- **The dispatch chain runs end to end against the deployed control plane** (#123): plan registered,
+  single-use dispatch issued, the committed action bundle fetched it, applied it through the real provider,
+  and its attestation was accepted and stored (`result: ok`, 1 live resource, 1080ms, matching plan hash);
+  replaying the consumed dispatch returned 409. The control plane now serves the build at `staging`'s head.
+  Still unproven: a dispatch actually launched by GitHub Actions, and real OIDC/JWKS verification — the
+  runner was executed from a shell with a locally minted stand-in token.
+
+
 ### Fixed
 
 - **The dispatch API had a second, competing plan-hash implementation.** `buildPlan` computes a plan's digest
