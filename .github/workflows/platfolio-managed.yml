@@ -38,7 +38,7 @@ jobs:
 
       - name: Apply desired state with this repository's own credentials
         id: apply
-        uses: fractalsynapse/platfolio/.github/actions/platfolio-managed@2044c48e5642eba4870da962b37feeadeed5db68
+        uses: fractalsynapse/platfolio/.github/actions/platfolio-managed@d40412fd727f4af1405afdc7898ffcf753ae37b7
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
           PLATFOLIO_DISPATCH_TOKEN: ${{ secrets.PLATFOLIO_DISPATCH_TOKEN }}
