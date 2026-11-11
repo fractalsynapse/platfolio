@@ -21486,8 +21486,16 @@ async function idToken() {
   const { value } = await response.json();
   return value;
 }
-var bearer = await idToken();
-var headers = { authorization: `Bearer ${bearer}`, accept: "application/json", "content-type": "application/json", "user-agent": "platfolio-managed-action" };
+var idTokenValue = await idToken();
+var dispatchToken = process.env.PLATFOLIO_DISPATCH_TOKEN;
+if (!dispatchToken) throw new Error("PLATFOLIO_DISPATCH_TOKEN is not available to this job; set it as an environment secret");
+var headers = {
+  authorization: `Bearer ${dispatchToken}`,
+  "x-platfolio-runner-token": idTokenValue,
+  accept: "application/json",
+  "content-type": "application/json",
+  "user-agent": "platfolio-managed-action"
+};
 await runManagedAction({
   env: process.env,
   async fetchDispatch(intent) {

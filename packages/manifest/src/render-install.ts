@@ -113,6 +113,7 @@ export function renderInstallPullRequest(m: Manifest, opts: InstallOptions): Ins
     // into the step process and platfolio never sees it.
     '        env:',
     '          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}',
+    '          PLATFOLIO_DISPATCH_TOKEN: ${{ secrets.PLATFOLIO_DISPATCH_TOKEN }}',
     '        with:',
     `          action: ${EXPR.action}`,
     `          environment: ${EXPR.environment}`,
@@ -152,6 +153,9 @@ export function renderInstallPullRequest(m: Manifest, opts: InstallOptions): Ins
       // platform's own secrets while omitting the one credential the apply step runs on are how an
       // install looks complete and then fails on the first dispatch.
       '- `RAILWAY_TOKEN` — workflow-level, resolved from your environment secret by the managed step',
+      '- `PLATFOLIO_DISPATCH_TOKEN` — how the runner proves it is talking to *its* control plane. The OIDC job',
+      '  token travels alongside it as identity evidence and is **not yet verified**, so today this secret is',
+      '  what authenticates; `/api/v1/attestations/capabilities` states the gap in those words.',
       ...(secretLines.length ? secretLines : ['_No additional platform secrets declared._']),
     '',
     'No secret value crosses platfolio. Set these in your own provider project or as environment',

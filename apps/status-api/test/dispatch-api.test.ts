@@ -26,6 +26,8 @@ const call = async (path: string, method: string, body?: unknown, token = 'test-
 const plan = (() => {
   const p = samplePlan();
   for (const e of p.environments) { e.cloneFrom = undefined; e.buckets = []; e.databases = []; e.volumes = []; for (const s of e.services) { s.image = 'ghcr.io/acme/api:1'; s.digest = `sha256:${'d'.repeat(64)}`; } }
+  // A plan arrives with the digest buildPlan computed for it; the API stores that and never re-derives one.
+  p.planHash = 'e'.repeat(64);
   return p;
 })();
 
@@ -48,7 +50,9 @@ test('liveness stays a GET-only surface while /api/v1 accepts POST', async () =>
 test('a plan is stored by hash and the instance must match the path', async () => {
   const ok = await call(`/api/v1/instances/${plan.instanceId}/plans`, 'POST', { plan });
   assert.equal(ok.status, 201);
-  assert.equal(planHashOf(plan), (JSON.parse(ok.body) as { planHash: string }).planHash, 'the hash the runner compares against is the one the caller just agreed to');
+  assert.equal(planHashOf(plan), (JSON.parse(ok.body) as { planHash: string }).planHash, 'the stored hash is the plan own digest, not a re-derivation');
+  const noHash = { ...structuredClone(plan), planHash: undefined } as unknown as InfraPlan;
+  assert.equal((await call(`/api/v1/instances/${plan.instanceId}/plans`, 'POST', { plan: noHash })).status, 400, 'a plan without a digest cannot be registered');
   const mismatch = await call('/api/v1/instances/other/plans', 'POST', { plan });
   assert.equal(mismatch.status, 400);
   assert.match(mismatch.body, /instance-mismatch/);
@@ -89,9 +93,13 @@ test('an attestation is accepted once and its binding is enforced', async () => 
 });
 
 test('the capabilities route says what is not implemented, in its own words', async () => {
-  const body = JSON.parse((await call('/api/v1/attestations/capabilities', 'GET')).body) as { checks: string[]; notImplemented: string[] };
+  const body = JSON.parse((await call('/api/v1/attestations/capabilities', 'GET')).body) as { checks: string[]; notImplemented: string[]; headers: { authenticate: string; identityEvidence: string } };
   assert.deepEqual(body.notImplemented.sort(), ['oidc-audience', 'oidc-issuer', 'repository-binding', 'signature']);
   assert.ok(body.checks.includes('nonce-replay'), 'what it does check is named too, so nobody reads the gap as silence');
+  // The header split is stated because it is the difference between "authenticated" and "identified": the
+  // shared secret authenticates today, the OIDC token is evidence waiting for JWKS verification.
+  assert.equal(body.headers.authenticate, 'authorization: Bearer <shared>');
+  assert.match(body.headers.identityEvidence, /unverified/);
 });
 
 test('a malformed attestation is refused by the shared schema, not accepted and stored', async () => {

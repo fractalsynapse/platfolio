@@ -154,20 +154,42 @@ test('the outcome reaches platfolio through a step output, not a log line', () =
 });
 
 test('the apply step is given the provider credential, by name', () => {
-  // Without this the action could not have applied anything: the plan, identity and trigger were all wired,
-  // and the credential the step runs on was absent from the manifest entirely.
+  // Without this the action could not have applied anything: plan, identity and trigger were wired, and the
+  // credential the step runs on was absent from the manifest entirely.
   const m = manifest('templates/example-web-app/manifest.yaml');
   const workflow = renderInstallPullRequest(m, OPTS).files[WORKFLOW_PATH]!;
-  const doc = yamlParse(workflow) as { jobs: Record<string, { steps?: { id?: string; env?: Record<string, string>; with?: Record<string, string> }[] }> };
-  const apply = doc.jobs.managed!.steps!.find((s) => s.id === 'apply');
+  const doc = yamlParse(workflow) as { jobs: Record<string, { steps?: { id?: string; env?: Record<string, string> }[] }> };
+  const apply = doc.jobs.managed!.steps!.find((x) => x.id === 'apply');
   assert.ok(apply, 'the apply step exists');
-  assert.deepEqual(apply!.env, { RAILWAY_TOKEN: '${{ secrets.RAILWAY_TOKEN }}' }, 'resolved by GitHub into the step process, never stored by platfolio');
+  assert.deepEqual(Object.keys(apply!.env ?? {}).sort(), ['PLATFOLIO_DISPATCH_TOKEN', 'RAILWAY_TOKEN'], 'both credentials, both by name');
+  assert.equal(apply!.env?.RAILWAY_TOKEN, '${{ secrets.RAILWAY_TOKEN }}', 'resolved by GitHub into the step process, never stored by platfolio');
   assert.ok(!Object.values(apply!.env ?? {}).some((v) => !v.includes('${{')), 'names in the manifest, never values');
   assert.ok(workflow.includes('instance_id'), 'and the identity inputs are still passed');
 });
+
 
 test('the tenant document tells them which environment secret to set', () => {
   const m = manifest('templates/example-web-app/manifest.yaml');
   const doc = renderInstallPullRequest(m, OPTS).files['PLATFOLIO.md']!;
   assert.match(doc, /RAILWAY_TOKEN/, 'the name the workflow resolves must appear where the tenant reads instructions');
 });
+
+test('the apply step receives both credentials it needs, by name', () => {
+  // The runner authenticates with the shared dispatch token and carries its OIDC token as identity evidence;
+  // a workflow without the first cannot reach its own control plane (measured: 401), so the install PR must
+  // supply it. Values are GitHub's to resolve -- asserted by shape, because a literal here would be the bug.
+  const m = manifest('templates/example-web-app/manifest.yaml');
+  const workflow = renderInstallPullRequest(m, OPTS).files[WORKFLOW_PATH]!;
+  const doc = yamlParse(workflow) as { jobs: Record<string, { steps?: { id?: string; env?: Record<string, string> }[] }> };
+  const apply = doc.jobs.managed!.steps!.find((x) => x.id === 'apply');
+  assert.deepEqual(Object.keys(apply!.env ?? {}).sort(), ['PLATFOLIO_DISPATCH_TOKEN', 'RAILWAY_TOKEN']);
+  for (const [name, value] of Object.entries(apply!.env ?? {})) {
+    // Built from concatenation so no template literal tries to interpolate the expression, and every check
+    // is capable of failing: the first draft of this used a ternary that could only ever produce '' and so
+    // asserted nothing at all -- the vacuous-assertion mistake this repo has now caught four times.
+    assert.ok(value.startsWith('${' + '{ secrets.'), `${name} must come from a secret, got ${value}`);
+    assert.ok(value.endsWith(' }' + '}'), `${name} must close the expression, got ${value}`);
+    assert.match(value, new RegExp('\\{\\{ secrets\\.[A-Z_]+ \\}\\}'), `${name} has an unexpected shape: ${value}`);
+  }
+});
+

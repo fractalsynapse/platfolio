@@ -2,5 +2,5 @@
 # Regenerate and compare: a hand edit here is a pinned image the release job did not build.
 services:
   status:
-    image: ghcr.io/fractalsynapse/platfolio-status-api:staging@sha256:704e2d24f888e2502e27271723cdd8d7493b1a7fd8530a93f25ab916c2e7df95
+    image: ghcr.io/fractalsynapse/platfolio-status-api:staging@sha256:3c7cf847b440be315a4d128dfc46578b9239d04133ac2ee0cb690f3c5e30d6b7
     build: !reset null
