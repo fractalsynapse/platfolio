@@ -99,6 +99,31 @@ An authorized experiment answers a bounded question in isolated state — `spike
 result is reproducible or falsifiable. Retaining experimental work as product requires the applicable
 acceptance and review above; a green spike does not establish delivery.
 
+## If `pnpm run <script>` fails before running anything
+
+A sandboxed or shared home can make pnpm's own version manager unwritable, and every wrapped command then
+dies with the same message regardless of which script you asked for:
+
+> `ERR_PNPM_STORE_DIR_OPEN_OPERATION_LOCK: lock the package-manager engine store … Read-only file system`
+
+That is not a failing gate. Each check is a plain `tsx` script and runs directly, which is what `verify`
+sequences:
+
+```
+npx -y tsx scripts/check-lockfile.ts          # lock:check
+npx -y tsx scripts/check-project.ts           # check
+npx -y tsx scripts/vendor-cordis.ts verify    # vendor:verify   (note: vendor-cordis, not check-vendor)
+npx -y tsx scripts/check-graphql-schema.ts    # graphql:check
+npx -y tsx scripts/check-api.ts               # api:check
+npx -y tsx scripts/bundle-action.ts --check   # action:check
+npx -y tsc --noEmit -p tsconfig.json          # typecheck
+npx -y tsx --test packages/*/test/*.test.ts apps/*/test/*.test.ts
+npx -y tsx scripts/check-contracts.ts         # contracts:check
+```
+
+CI installs its own pnpm and is unaffected, so a locally unverifiable wrapper never excuses a merge: run the
+scripts directly, or don't merge. Record which you did.
+
 ## Release policy
 
 Integration into `staging` does not close an implementation issue. When a release is requested:

@@ -28,9 +28,9 @@ Three similar-looking paths, three different jobs — worth stating because they
 
 | Path | Is | Changes when |
 | --- | --- | --- |
-| `platform-templates/` | **source code a team forks**, published into repositories by `pnpm run templates:publish` | the scaffold stops being a good starting point |
+| `templates/` | **source code a team forks**, published into repositories by `pnpm run templates:publish` | the scaffold stops being a good starting point |
 | `templates/` | **reference platform manifests** shipped with platfolio's catalog (D28), used as test fixtures | the manifest format changes |
-| `platforms/platfolio/` | **platfolio hosting itself** — a deployment description, not something a tenant forks | the control plane's own topology changes |
+| `selfhost/` | **platfolio hosting itself** — a deployment description, not something a tenant forks | the control plane's own topology changes |
 
 Only the first leaves this repository as source. The catalog (second) is generic on purpose and contains no
 platform identities; the third is deliberately excluded from it.

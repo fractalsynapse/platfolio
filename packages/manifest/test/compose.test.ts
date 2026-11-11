@@ -121,9 +121,9 @@ test('a Compose document reaches the same plan the manifest format does', () => 
 
 test('platfolio\'s own service is describable in this format (step 7)', () => {
   const root = path.resolve('.');
-  const dir = path.join(root, 'apps', 'status-api');
+  const dir = path.join(root, 'selfhost');
   if (!fs.existsSync(path.join(dir, 'compose.yaml'))) {
-    assert.fail('apps/status-api/compose.yaml is the reference case for D29; it must stay in the tree');
+    assert.fail('selfhost/compose.yaml is the reference case for D29; it must stay in the tree');
   }
   const docs = [fs.readFileSync(path.join(dir, 'compose.yaml'), 'utf8'), fs.readFileSync(path.join(dir, 'compose.prod.yaml'), 'utf8')];
   const parsed = parseCompose(docs);

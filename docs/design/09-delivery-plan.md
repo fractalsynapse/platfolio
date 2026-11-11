@@ -292,7 +292,7 @@ A reference platform manifest went `buildPlan` → `applyPlan` against Railway a
 
 ## M2 entry point
 
-The first tenant will be platfolio hosting platfolio: `platforms/platfolio/` is authored in the Compose format with its own inventory and a generated prod overlay, and round-trips through `parseCompose → applyInventory → buildPlan → validatePlan` with no issues (#113 offline half). The live half is the ordered runbook with its two browser-only steps marked: [14-first-connect-runbook.md](14-first-connect-runbook.md).
+The first tenant will be platfolio hosting platfolio: `selfhost/` is authored in the Compose format with its own inventory and a generated prod overlay, and round-trips through `parseCompose → applyInventory → buildPlan → validatePlan` with no issues (#113 offline half). The live half is the ordered runbook with its two browser-only steps marked: [14-first-connect-runbook.md](14-first-connect-runbook.md).
 
 ## Follow-on work accepted with D29–D31 (2026-11-09)
 

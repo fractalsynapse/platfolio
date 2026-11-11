@@ -9,15 +9,15 @@ import { RailwayMock } from '../../../packages/contracts/test/railway-mock.ts';
 import { buildPlan, parse } from '../src/index.ts';
 
 // Tests run from the repository root (pnpm test); templates live there, not beside the package.
-const dir = path.resolve('templates');
+const dir = path.resolve('samples');
 const raw = (f: string) => fs.readFileSync(path.join(dir, f, 'manifest.yaml'), 'utf8');
 function loaded(name: string) {
   const result = parse(raw(name));
   if (!result.manifest) throw new Error(`template "templates/${name}" did not parse: ${JSON.stringify(result.issues)}`);
   return result.manifest;
 }
-const webApp = loaded('example-web-app');
-const fullStack = loaded('example-full-stack');
+const webApp = loaded('web-app');
+const fullStack = loaded('full-stack');
 
 /** Real coordinates a release pipeline would have produced. */
 function realDigest(seed: string): string {

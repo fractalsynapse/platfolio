@@ -14,7 +14,7 @@ function manifest(p: string): Manifest {
   assert.equal(r.issues.length, 0, JSON.stringify(r.issues));
   return r.manifest!;
 }
-const fullStack = manifest('templates/example-full-stack/manifest.yaml');
+const fullStack = manifest('samples/full-stack/manifest.yaml');
 
 const BOTH_ENVS = { instanceId: 'inst-1', environments: ['production', 'staging'], satisfied: [] };
 const SEALED = { sealedVariables: true, custody: 'managed' as const };
