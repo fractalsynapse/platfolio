@@ -74,11 +74,20 @@ services:
     # is what the format calls a service we host but do not develop -- the same posture a tenant has toward
     # their dependencies, which is the point of dogfooding.
     image: keycloak/keycloak:26.8.2@sha256:c126f032d43b941ed7c5ccca7d6571596d8eab84d748afd7c86989e48ef07b8f
-    command: ['start']
+    # Full path, not `start`: Railway's start command replaces the image command rather than being appended to
+    # an entrypoint, so a bare `start` is "command not found" -- an instant exit with zero log lines, which is
+    # how this failure looked like a mysterious deployment error for a whole debugging pass. #198's own lesson:
+    # the message a platform gives is part of the platform.
+    command: ['/opt/keycloak/bin/kc.sh', 'start']
     expose: ["8080"]
     environment:
       KC_DB: postgres
-      KC_DB_SCHEMA: keycloak
+      # No KC_DB_SCHEMA. Keycloak's Liquibase refuses to create a schema it is told to use -- it failed with
+      # `ERROR: schema "keycloak" does not exist` -- and the manifest format has no way to ask the provider to
+      # create one, which is a real gap now recorded (a tenant's JVM app hitting the same wall would have no
+      # answer either). So identity shares `public`, while the control plane keeps its own schema through
+      # PLATFOLIO_DB_SCHEMA, which *is* created because our own migrator does it. The two cannot collide:
+      # Keycloak's tables and platfolio's migration ledger are different sets in different schemas.
       # The port is an ENVIRONMENT setting in Keycloak 26, not a start flag. My first version passed
       # `--http-port=8080` and the container printed its own usage text and exited -- which the provider
       # reported honestly as a failed deployment rather than as success with a dead service.
@@ -91,6 +100,14 @@ services:
       # is refused -- which is the correct failure, and one worth being explicit about in the file that sets it.
       KC_HOSTNAME: auth.platfolio.dev
       KC_HEALTH_ENABLED: 'true'
+    # Keycloak 26 builds its runtime configuration on first start when the config changed, and that build phase
+    # was OOM-killed at Railway's default memory ceiling (`kc.sh: line 170: 82 Killed 'java'`) before the
+    # server ever got to the schema error. 2 GB is what the JVM needs to survive its own start.
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2048M
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/realms/master').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
@@ -98,7 +115,17 @@ services:
       retries: 6
     x-platfolio:
       references:
-        - { variable: KC_DB_URL, database: main }
+        # #198: Keycloak wants a JDBC URL, and handing it `postgresql://…` is what kept it from booting.
+        # The mechanism was never the limit -- `output` names WHICH variable on the database service to point
+        # at, and Railway Postgres exposes the components below (read live from `environment.config`, which
+        # returns names with values redacted). What was missing is that nothing checked the name existed.
+        # No KC_DB_URL at all: Keycloak assembles the JDBC string from host/port/database, which also keeps
+        # the password out of a URL that something other than Keycloak might log.
+        - { variable: KC_DB_URL_HOST, database: main, output: PGHOST }
+        - { variable: KC_DB_URL_PORT, database: main, output: PGPORT }
+        - { variable: KC_DB_URL_DATABASE, database: main, output: POSTGRES_DB }
+        - { variable: KC_DB_USERNAME, database: main, output: POSTGRES_USER }
+        - { variable: KC_DB_PASSWORD, database: main, output: POSTGRES_PASSWORD }
       secrets:
         # Keycloak's initial admin, by name. The seed script reads the same variable from the environment it is
         # run with; platfolio stores no secret values (D4).

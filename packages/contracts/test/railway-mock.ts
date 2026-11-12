@@ -38,6 +38,21 @@ export interface MockOptions {
 }
 
 interface MockService { id: string; projectId: string; name: string }
+/**
+ * The variables a Railway Postgres template actually creates, read from `environment.config` on the live
+ * service provisioned for platfolio's own deployment (2026-11-12). Values are redacted by the API -- names are
+ * all that is available, and all that a name-existence check needs.
+ *
+ * The double carries them because #198 added that check: a mock with an empty variable set would either refuse
+ * every wiring or verify nothing, and the point is that a typo surfaces as `reference-output-missing` rather
+ * than as a service that cannot find its database.
+ */
+export const TEMPLATE_DATABASE_VARIABLES = [
+  'DATABASE_URL', 'DATABASE_PUBLIC_URL', 'PGDATA', 'PGDATABASE', 'PGHOST', 'PGPASSWORD', 'PGPORT', 'PGUSER',
+  'POSTGRES_DB', 'POSTGRES_PASSWORD', 'POSTGRES_USER', 'RAILWAY_DEPLOYMENT_DRAINING_SECONDS',
+  'RUNTIME_LOCK_WAIT_SECONDS', 'SSL_CA_CERT_DAYS', 'SSL_CERT_DAYS', 'SSL_REQUIRE',
+] as const;
+
 interface MockInstance { instanceId: string; limits?: { cpu: number; memoryMB: number }; settledDomains?: boolean | undefined; verifiedDomains?: boolean | undefined; status: string | null; image: string; numReplicas: number; domains: string[]; polls: number; variables: Set<string> }
 
 export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
@@ -369,7 +384,9 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
           numReplicas: 1,
           domains: [],
           polls: 0,
-          variables: new Set(Object.keys(spec.variables ?? {})),
+          // The measured template variables are merged in (#198): reference outputs are checked against
+          // what the provider can actually see, and an empty set here would make the check vacuous.
+          variables: new Set([...Object.keys(spec.variables ?? {}), ...TEMPLATE_DATABASE_VARIABLES]),
         });
         this.templateServiceIds.add(serviceId);
         this.hiddenServices.set(serviceId, this.options.templateNeverReveals ? Number.MAX_SAFE_INTEGER : (this.options.templateRevealAfter ?? 2));

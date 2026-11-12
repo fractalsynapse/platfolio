@@ -63,8 +63,9 @@ A person is now a `persons` row with proofs in `identities`, and membership atta
 second issuer or a machine client does not need a parallel authorization scheme.
 The control plane is **deployed and answering on a public HTTPS host**, built by this repository, with its
 database created and migrated by its own plan (#172's first run). It is not yet the live service for tenants:
-Keycloak does not boot (a `references` dialect gap, #198) and the `platfolio.dev` CNAMEs are not yet set at
-the registrar (#199). The published image digest is now looked up rather than typed (`selfhost:overlay:check`), so
+Keycloak now boots (its JDBC DSN is wired as verified `references[].output` components, #198), and
+`api.platfolio.dev` / `auth.platfolio.dev` are attached as unproxied CNAMEs (#199) with certificate issuance
+still pending — so seeded-realm and token flows are the next step, not the current claim. The published image digest is now looked up rather than typed (`selfhost:overlay:check`), so
 `selfhost/compose.prod.yaml` carries a real pin -- having previously carried a *real digest of the deleted
 service's bytes*, which every check passed. The renderer still refuses an unpinned first-party service rather
 than accepting a placeholder (#84), and `selfhost-deploy.ts --dry-run` is how you find out before a provider
