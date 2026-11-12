@@ -95,6 +95,14 @@ export class StoreService extends Service<z.infer<typeof StoreConfigSchema>> {
   listBindings(...args: Parameters<Store['listBindings']>) { return this.inner.listBindings(...args); }
   listConsumers(...args: Parameters<Store['listConsumers']>) { return this.inner.listConsumers(...args); }
   unbindCapability(...args: Parameters<Store['unbindCapability']>) { return this.inner.unbindCapability(...args); }
+  createInvitation(...args: Parameters<Store['createInvitation']>) { return this.inner.createInvitation(...args); }
+  getInvitation(...args: Parameters<Store['getInvitation']>) { return this.inner.getInvitation(...args); }
+  listInvitations(...args: Parameters<Store['listInvitations']>) { return this.inner.listInvitations(...args); }
+  findInvitationsForEmail(...args: Parameters<Store['findInvitationsForEmail']>) { return this.inner.findInvitationsForEmail(...args); }
+  acceptInvitation(...args: Parameters<Store['acceptInvitation']>) { return this.inner.acceptInvitation(...args); }
+  revokeInvitation(...args: Parameters<Store['revokeInvitation']>) { return this.inner.revokeInvitation(...args); }
+  setInvitationEmailResult(...args: Parameters<Store['setInvitationEmailResult']>) { return this.inner.setInvitationEmailResult(...args); }
+
   setInstanceEnvironment(...args: Parameters<Store['setInstanceEnvironment']>) { return this.inner.setInstanceEnvironment(...args); }
   getInstanceEnvironment(...args: Parameters<Store['getInstanceEnvironment']>) { return this.inner.getInstanceEnvironment(...args); }
   listInstanceEnvironments(...args: Parameters<Store['listInstanceEnvironments']>) { return this.inner.listInstanceEnvironments(...args); }

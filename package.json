@@ -34,7 +34,8 @@
     "db:migrate": "tsx scripts/migrate-db.ts",
     "db:seed-dev": "tsx scripts/seed-dev-data.ts",
     "lifecycle:smoke": "tsx scripts/smoke-lifecycle.ts",
-    "email:smoke": "tsx scripts/email-smoke.ts"
+    "email:smoke": "tsx scripts/email-smoke.ts",
+    "invitations:smoke": "tsx scripts/smoke-invitations.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

@@ -7,6 +7,41 @@ change; entries describe merged intent, not aspirations.
 
 ### Added
 
+- **Invitations (#186, D44), five operations designed in the document before any handler existed** (27
+  operations, `api:check` green both directions): an owner invites by address, the invited person discovers
+  what is addressed to them by signing in, and acceptance grants the invited role. `invitations` (migration
+  `010`) is a record **apart from membership** -- inviting someone creates no person, no identity and no role,
+  because "invited" must not be indistinguishable from "allowed".
+- **No token in the link.** Acceptance matches the invitation against the address the *identity provider
+  asserts* on the caller's token (`email` / `email_verified`, added to `VerifiedClaims` and read from the JWT
+  and never from a body field). A forwarded invitation email therefore grants its reader nothing -- and D46's
+  root-of-trust problem, "someone received mail at this address", is not reintroduced by the claim flow. An
+  identity that asserts no verified address is answered **409 with that reason**, not an empty list: "nobody
+  invited you" and "nothing can match you" are different answers and only one is actionable.
+- Delivery is a fact on the row, not a log line: `emailReceipt` / `emailError` record what the transport said,
+  and `createInvitation` reports creation and delivery separately -- a created invitation whose mail failed is
+  still an invitation, and returning 500 for it would destroy the record that makes "we never got it"
+  answerable.
+- `pnpm run invitations:smoke`: Keycloak issues both tokens, Postgres holds the rows, the control plane
+  container speaks SMTP to Mailpit, and the message is read back out of Mailpit to prove the correlation header
+  travelled and no capability secret was in the body. **17/17 live.**
+
+### Changed
+
+- **The email capability is now always installed, defaulting to a `none` driver.** The first version installed
+  it only when configured, and an extension that declared `email` in `requires` then lost its **routes** -- an
+  operator who forgot SMTP got 404 on an endpoint that exists, with nothing in the log. A capability that may
+  be absent is a value, never a hole in the route table.
+- `normaliseEmail` (trim + case-fold) lives in contracts and is used by both drivers and the acceptance policy.
+  The two drivers had each been lower-casing without trimming, and Postgres did not age expired rows on read
+  while the double did: the shared suite caught both, and `ageRow` makes the answer identical.
+- `invitation.list` and `invitation.revoke` join the owner-only set in `POLICY`, because a pending invitation
+  carries an email address and a member-visible list is a people directory nobody asked for. The policy
+  tripwire test failed when this was added, which is the intended behaviour of a test that names the decision.
+
+
+### Added
+
 - **Platform email is a capability seam (#187, D46)**: one `EmailTransport` interface in contracts, three
   drivers chosen by configuration -- `smtp` (a hand-written client over sockets, no new dependency), `mailpit`
   (HTTP), `memory` (the double) -- plus a single conformance suite that both readable drivers run. Nothing in

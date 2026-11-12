@@ -97,11 +97,11 @@ async function install(ctx: Context, options: KernelOptions): Promise<Context> {
     await ctx.plugin(StoreService, StoreConfigSchema.parse(options.store));
   }
 
-  if (options.email) {
-    // Installed before the server so a capability can reach email at boot, and only when configured -- an
-    // unconfigured control plane does not silently gain a sender it never asked for.
-    await ctx.plugin(EmailService, EmailConfigSchema.parse(options.email));
-  }
+  // Always installed, defaulting to the null transport. The first version installed email only when
+  // configured -- and an extension that *declared* email as a requirement then lost its routes entirely, so a
+  // missing relay became a 404 on a real endpoint. A capability that may be absent is a value ('none'), never
+  // a hole in the route table.
+  await ctx.plugin(EmailService, EmailConfigSchema.parse(options.email ?? { driver: 'none' }));
 
   if (options.server) {
     await ctx.plugin(ServerService, ServerConfigSchema.parse({ ...options.server }));

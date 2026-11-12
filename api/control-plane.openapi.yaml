@@ -151,6 +151,185 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthenticated'
 
+  /api/v1/teams/{teamId}/invitations:
+    parameters:
+      - { name: teamId, in: path, required: true, schema: { type: string, minLength: 1 } }
+    get:
+      operationId: listInvitations
+      summary: Pending and historic invitations for a team
+      description: |
+        Owner-only, and deliberately so: a pending invitation carries an email address, and showing that to
+        every member turns a workspace into a people directory nobody asked for.
+      security:
+        - bearerJwt: []
+      responses:
+        '200':
+          description: The team's invitations, newest first.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Invitation' } }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      operationId: createInvitation
+      summary: Invite a person by address, and send the mail that tells them
+      description: |
+        An invitation is an intent that someone should become a member (D44). It is NOT a membership: no
+        person row, no identity, and no role exists until that address is asserted by an identity provider
+        and the invitation is accepted.
+
+        The response separates two things that are easy to conflate -- whether the record was created, and
+        whether the transport took the message. A created invitation whose mail failed is still an invitation
+        (the row records the failure), and returning 500 for it would lose the fact that someone was invited.
+      security:
+        - bearerJwt: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [email]
+              properties:
+                email: { type: string, minLength: 3, maxLength: 320 }
+                role: { type: string, enum: [owner, member], default: member }
+                ttlDays: { type: integer, minimum: 1, maximum: 90, default: 14 }
+            example: { email: new-hire@example.com, role: member }
+      responses:
+        '201':
+          description: Invited. Delivery is reported, not assumed.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [invitation, delivery]
+                properties:
+                  invitation: { $ref: '#/components/schemas/Invitation' }
+                  delivery:
+                    type: object
+                    additionalProperties: false
+                    required: [sent]
+                    properties:
+                      sent: { type: boolean }
+                      reason: { type: string, maxLength: 300 }
+              example: { invitation: { id: inv-1, teamId: team-1, email: new-hire@example.com, role: member, state: pending, invitedBy: person-1, createdAt: '2026-11-12T00:00:00.000Z', expiresAt: '2026-11-26T00:00:00.000Z' }, delivery: { sent: true } }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: A pending invitation for that address already exists in this team.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/teams/{teamId}/invitations/{invitationId}:
+    parameters:
+      - { name: teamId, in: path, required: true, schema: { type: string, minLength: 1 } }
+      - { name: invitationId, in: path, required: true, schema: { type: string, minLength: 1 } }
+    delete:
+      operationId: revokeInvitation
+      summary: Withdraw a pending invitation
+      description: |
+        An accepted invitation cannot be revoked, because at that point it is a membership: remove the member
+        instead. Two different verbs for two different states, so a caller cannot accidentally do the other
+        thing.
+      security:
+        - bearerJwt: []
+      responses:
+        '204':
+          description: Withdrawn, with no body.
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The invitation is already accepted, revoked or expired.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/me/invitations:
+    get:
+      operationId: listMyInvitations
+      summary: Invitations addressed to the email my identity provider asserts
+      description: |
+        The claim path, and the reason there is no token in an invitation. The address is read from verified
+        claims -- never from the request -- so a forwarded invitation email grants its reader nothing. What
+        they can do is sign in with an identity that asserts the same address.
+      security:
+        - bearerJwt: []
+      responses:
+        '200':
+          description: Pending invitations for this verified address, across every team.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Invitation' } }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '409':
+          description: |
+            The identity behind this token asserts no verified address, so there is nothing to match against.
+            Stated rather than returning an empty list, because "no invitations" and "you cannot be matched"
+            are different answers and the user can act on only one of them.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/me/invitations/{invitationId}/accept:
+    parameters:
+      - { name: invitationId, in: path, required: true, schema: { type: string, minLength: 1 } }
+    post:
+      operationId: acceptInvitation
+      summary: Accept an invitation addressed to my verified address
+      description: |
+        The body is empty on purpose. Everything that decides this -- who I am, which address the IdP asserts,
+        which invitation I mean -- comes from the token and the path.
+      security:
+        - bearerJwt: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+      responses:
+        '200':
+          description: A member now.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [teamId, role, personId]
+                properties:
+                  teamId: { type: string }
+                  role: { type: string, enum: [owner, member] }
+                  personId: { type: string }
+              example: { teamId: team-1, role: member, personId: person-9 }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Already accepted, withdrawn, expired, or addressed to a different verified address.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
   /api/v1/instances:
     get:
       operationId: listInstances
@@ -808,6 +987,25 @@ components:
           example: 'Bearer realm="platfolio", error="invalid_token"'
 
   schemas:
+    Invitation:
+      type: object
+      additionalProperties: false
+      required: [id, teamId, email, role, state, invitedBy, createdAt, expiresAt]
+      properties:
+        id: { type: string, minLength: 1 }
+        teamId: { type: string, minLength: 1 }
+        email: { type: string, minLength: 3, maxLength: 320, description: Normalised (trimmed and case-folded) on write. }
+        role: { type: string, enum: [owner, member] }
+        state: { type: string, enum: [pending, accepted, revoked, expired] }
+        invitedBy: { type: string, minLength: 1 }
+        createdAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+        acceptedBy: { type: string }
+        acceptedAt: { type: string, format: date-time }
+        revokedAt: { type: string, format: date-time }
+        emailReceipt: { type: string, maxLength: 200, description: The transport's receipt, so delivery is a fact about the row (D46). }
+        emailError: { type: string, maxLength: 300 }
+
     CurrentPerson:
       type: object
       additionalProperties: false

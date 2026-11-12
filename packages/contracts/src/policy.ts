@@ -31,6 +31,8 @@ export const PolicyActionSchema = z.enum([
   'audit.read',
   'team.member.manage',
   'team.invite',
+  'invitation.list',
+  'invitation.revoke',
 ]);
 export type PolicyAction = z.infer<typeof PolicyActionSchema>;
 
@@ -55,8 +57,12 @@ export const POLICY: Record<PolicyAction, TeamRole> = {
   'capability.bind': 'member',
   'audit.read': 'member',
   'team.member.manage': 'owner',
-  // D44: an invitation is a membership in waiting, so it is the same authority as granting one.
+  // D44: an invitation is a membership in waiting, so it is the same authority as granting one. Listing and
+  // revoking are here too because a pending invitation carries an email address -- handing that to every member
+  // would be a people-directory nobody asked for.
   'team.invite': 'owner',
+  'invitation.list': 'owner',
+  'invitation.revoke': 'owner',
 };
 
 export interface PolicyInput {

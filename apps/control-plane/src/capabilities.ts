@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import {
   AttestationSchema, checkBindingPolicy, CONTRACT_NAME, CONTRACT_VERSION, DispatchIntentSchema, InstanceSchema,
-  reasonOf, decide, rollupState, type BindingRecord, type CapabilityOffer, type PolicyAction, type VerifiedClaims,
+  reasonOf, decide, checkInvitationAcceptance, rollupState, type BindingRecord, type CapabilityOffer, type PolicyAction, type VerifiedClaims,
 } from '@platfolio/contracts';
 import type { ExtensionDescriptor, KernelContext, Request, Response_, RouteDefinition } from '@platfolio/kernel';
 import { badRequest, bearerToken, notFound, send, unauthorized } from './respond.ts';
@@ -567,7 +567,122 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
     ],
   };
 
-  return [core, instances, dispatches, audit, bindings, controller];
+  // Invitations (#186, D44/D46). Two clusters of routes on purpose: the team-scoped ones are what an owner
+  // manages, and the `/me` ones are what an outsider can reach before they are a member of anything. They are
+  // not the same authorization question and do not share a guard.
+  const invitations: ExtensionDescriptor = {
+    id: 'invitations',
+    requires: ['store', 'identity', 'email'],
+    routes: [
+      scoped('GET', '/api/v1/teams/{teamId}/invitations', 'listInvitations', 'invitation.list', async (scope, _request, params) => {
+        return send('listInvitations', 200, await scope.context.store.listInvitations(params.teamId ?? ''));
+      }),
+      scoped('POST', '/api/v1/teams/{teamId}/invitations', 'createInvitation', 'team.invite', async (scope, request, params) => {
+        const parsed = bodyOf<{ email?: unknown; role?: unknown; ttlDays?: unknown }>(request);
+        if (parsed.ok === false) return badRequest(parsed.error);
+        const email = parsed.value?.email;
+        if (typeof email !== 'string' || email.trim().length === 0) return badRequest('email is required');
+        const role = parsed.value?.role === 'owner' ? 'owner' : 'member';
+        const ttlDays = typeof parsed.value?.ttlDays === 'number' ? parsed.value.ttlDays : undefined;
+        const created = await scope.context.store.createInvitation({ teamId: params.teamId ?? '', email, role, invitedBy: scope.personId, ...(ttlDays === undefined ? {} : { ttlDays }) });
+        if (created.ok === false) {
+          const status = created.code === 'not-found' ? 404 : created.code === 'conflict' ? 409 : 400;
+          return { status, body: { error: created.code, message: reasonOf(created) } };
+        }
+        const invitation = created.value;
+        // Send, then record what the transport said. An unconfigured sender is reported, not hidden: the
+        // invitation exists, and the operator needs to know the mail did not go out.
+        let delivery: { sent: boolean; reason?: string };
+        if (scope.context.email.driver === 'none') {
+          // Not an error and not a success: the record exists, the mail did not leave, and both facts are on
+          // the row. Refusing the whole request here would make "we never got it" unanswerable.
+          const reason = 'no email transport is configured on this control plane';
+          delivery = { sent: false, reason };
+          await scope.context.store.setInvitationEmailResult(invitation.id, { error: reason });
+        } else {
+          const link = 'the address your inviter gave you, then open the team page';
+          const result = await scope.context.email.send({
+            to: [invitation.email],
+            subject: `You have been invited to a platfolio team`,
+            text: `You have been invited to join a platfolio team as ${invitation.role}.\n\nTo accept: sign in at ${link}.\nThis invitation expires on ${invitation.expiresAt}.\nThe invitation is tied to this address as your identity provider asserts it, so forwarding this email grants nothing to whoever receives it.`,
+            correlationId: invitation.id,
+          });
+          if (result.accepted) {
+            delivery = { sent: true };
+            await scope.context.store.setInvitationEmailResult(invitation.id, { receipt: result.providerId ?? result.messageId });
+          } else {
+            delivery = { sent: false, reason: result.reason };
+            await scope.context.store.setInvitationEmailResult(invitation.id, { error: result.reason });
+          }
+        }
+        await scope.context.store.appendAudit({ actorKind: 'user', actorRef: scope.personId, action: 'invitation.create', target: invitation.id, detail: { teamId: invitation.teamId, email: invitation.email, role: invitation.role, sent: delivery.sent } });
+        // Re-read rather than echo the row we built before the delivery result was recorded: the response and
+        // the record must be the same fact, or a client showing `emailError` from the list would disagree with
+        // what it got from the create.
+        const stored = await scope.context.store.getInvitation(invitation.id);
+        return send('createInvitation', 201, { invitation: stored.ok ? stored.value : invitation, delivery });
+      }),
+      scoped('DELETE', '/api/v1/teams/{teamId}/invitations/{invitationId}', 'revokeInvitation', 'invitation.revoke', async (scope, _request, params) => {
+        const existing = await scope.context.store.getInvitation(params.invitationId ?? '');
+        if (existing.ok === false) return notFound('invitation', params.invitationId ?? '');
+        // Reading it is one question (is it this team's?), withdrawing it another. A pending invitation from
+        // another team must be indistinguishable from one that does not exist.
+        if (existing.value.teamId !== (params.teamId ?? '')) return notFound('invitation', params.invitationId ?? '');
+        const revoked = await scope.context.store.revokeInvitation(params.invitationId ?? '');
+        if (revoked.ok === false) return { status: revoked.code === 'conflict' ? 409 : 400, body: { error: revoked.code, message: reasonOf(revoked) } };
+        await scope.context.store.appendAudit({ actorKind: 'user', actorRef: scope.personId, action: 'invitation.revoke', target: revoked.value.id, detail: { teamId: revoked.value.teamId } });
+        return { status: 204, body: undefined };
+      }),
+      {
+        method: 'GET', path: '/api/v1/me/invitations', operationId: 'listMyInvitations',
+        handle: async (request, _params, context) => {
+          const auth = await authorize(context, request);
+          if (auth.ok === false) return auth.response;
+          const email = auth.claims.email;
+          const verified = auth.claims.emailVerified;
+          if (email === undefined || verified !== true) {
+            // Not an empty list: "nobody invited you" and "your identity asserts no address, so nothing can
+            // match you" are different answers, and only one of them is actionable.
+            return { status: 409, body: { error: 'conflict', message: 'your identity does not assert a verified email address, so there is nothing here to match an invitation against' } };
+          }
+          const mine = await context.store.findInvitationsForEmail(email);
+          return send('listMyInvitations', 200, mine.filter((i) => i.state === 'pending'));
+        },
+      },
+      {
+        method: 'POST', path: '/api/v1/me/invitations/{invitationId}/accept', operationId: 'acceptInvitation',
+        handle: async (request, params, context) => {
+          const auth = await authorize(context, request);
+          if (auth.ok === false) return auth.response;
+          const found = await context.store.findInvitationsForEmail(auth.claims.email ?? '');
+          const invitation = found.find((i) => i.id === params.invitationId) ?? null;
+          const verdict = checkInvitationAcceptance({
+            invitation,
+            // The address is the IdP's assertion, never a body field. A caller that could name its own address
+            // could claim any invitation it had merely learned the id of.
+            callerEmail: auth.claims.email,
+            callerEmailVerified: auth.claims.emailVerified,
+            now: new Date().toISOString(),
+          });
+          if (verdict.ok === false || invitation === null) {
+            // `invitation === null` is unreachable when the verdict is ok -- the policy refuses a null
+            // invitation -- but the type cannot see that, and a non-null assertion here would be me telling the
+            // compiler to trust me rather than showing it.
+            if (verdict.ok === false) return { status: verdict.error.code === 'not-found' ? 404 : 409, body: { error: verdict.error.code, message: reasonOf(verdict.error) } };
+            return notFound('invitation', params.invitationId ?? '');
+          }
+          const resolved = await context.store.resolvePerson({ issuer: auth.claims.issuer, subject: auth.claims.subject });
+          if (resolved.ok === false) return { status: 503, body: { error: 'principal-unresolved', message: reasonOf(resolved) } };
+          const accepted = await context.store.acceptInvitation(invitation.id, resolved.value.person.id);
+          if (accepted.ok === false) return { status: accepted.code === 'not-found' ? 404 : 409, body: { error: accepted.code, message: reasonOf(accepted) } };
+          await context.store.appendAudit({ actorKind: 'user', actorRef: resolved.value.person.id, action: 'invitation.accept', target: accepted.value.invitation.id, detail: { teamId: accepted.value.member.teamId, role: accepted.value.member.role } });
+          return send('acceptInvitation', 200, { teamId: accepted.value.member.teamId, role: accepted.value.member.role, personId: accepted.value.member.personId });
+        },
+      },
+    ],
+  };
+
+  return [core, instances, dispatches, audit, bindings, invitations, controller];
 }
 
 export type { VerifiedClaims };

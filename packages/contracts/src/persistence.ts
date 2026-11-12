@@ -303,6 +303,81 @@ export function rollupState(rows: readonly InstanceEnvironmentState[], productio
   return rows.reduce((worst, r) => (SEVERITY.indexOf(r.state) > SEVERITY.indexOf(worst) ? r.state : worst), 'live' as InstanceState);
 }
 
+/**
+ * An invitation: an intent that some person should become a member (D44).
+ *
+ * It is NOT a membership. Representing an invited person with a `team_members` row would make "invited"
+ * indistinguishable from "allowed", which is the confusion the role split exists to avoid -- and it would give
+ * a not-yet-existing person a role in the authorization table.
+ *
+ * There is deliberately no token or secret in this record. The claim path is "sign in, then ask what is
+ * addressed to the email your IdP asserts", so a forwarded invitation email grants nothing to whoever forwards
+ * it. The alternative -- a capability link -- makes the mailbox the root of trust, which is the thing D46
+ * declines to build.
+ */
+export const InvitationSchema = z.object({
+  id: z.string().min(1),
+  teamId: z.string().min(1),
+  /** The address as the inviter typed it, matched only against an IdP assertion later. Lower-cased on write. */
+  email: z.string().min(3).max(320),
+  role: TeamRoleSchema,
+  state: z.enum(['pending', 'accepted', 'revoked', 'expired']).default('pending'),
+  /** The person who sent it, so an audit question has a subject to name. */
+  invitedBy: z.string().min(1),
+  createdAt: z.string().min(1),
+  expiresAt: z.string().min(1),
+  acceptedBy: z.string().optional(),
+  acceptedAt: z.string().optional(),
+  revokedAt: z.string().optional(),
+  /** The transport's receipt, so "we never got it" is a lookup rather than a log grep (D46). */
+  emailReceipt: z.string().max(200).optional(),
+  emailError: z.string().max(300).optional(),
+}).strict();
+export type Invitation = z.infer<typeof InvitationSchema>;
+
+/**
+ * The ONE address normalisation rule (trim + case-fold), shared by both drivers and the acceptance policy.
+ * Written here rather than inline in each implementation because two copies of a security-relevant comparison
+ * is how "the double accepted it and production did not" happens -- and the shared suite is what proved both
+ * drivers had been lower-casing without trimming.
+ */
+export function normaliseEmail(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+export interface NewInvitation { teamId: string; email: string; role: TeamRole; invitedBy: string; ttlDays?: number }
+
+/**
+ * Whether an invitation may be accepted by a given verified address, as one pure function (the rule of two
+ * again: a security decision re-implemented per driver is a decision that drifts).
+ */
+export type AcceptVerdict = { ok: true } | { ok: false; error: StoreError };
+export function checkInvitationAcceptance(input: {
+  invitation: Invitation | null;
+  /** The address the identity provider asserted for the caller -- never a value from the request body. */
+  callerEmail: string | undefined;
+  /** Whether the provider asserted it is verified. Not asserted is not verified (D46). */
+  callerEmailVerified: boolean | undefined;
+  now: string;
+}): AcceptVerdict {
+  if (input.callerEmail === undefined || input.callerEmailVerified !== true) {
+    return { ok: false, error: { code: 'conflict', reason: 'your identity does not assert a verified email address, so there is nothing here to match an invitation against' } };
+  }
+  if (input.invitation === null) return { ok: false, error: { code: 'not-found', what: 'invitation', id: 'none-visible-to-this-address' } };
+  const inv = input.invitation;
+  if (inv.state === 'accepted') return { ok: false, error: { code: 'conflict', reason: 'this invitation has already been accepted' } };
+  if (inv.state === 'revoked') return { ok: false, error: { code: 'conflict', reason: 'this invitation was withdrawn' } };
+  if (inv.state === 'expired' || Date.parse(inv.expiresAt) <= Date.parse(input.now)) {
+    return { ok: false, error: { code: 'conflict', reason: 'this invitation has expired; ask the inviter to send another' } };
+  }
+  // The match is on the asserted address and nothing else. It is case-folded because addresses are, and
+  // because an invitation typed with capitals must still be claimable by the person who owns it.
+  if (inv.email !== normaliseEmail(input.callerEmail)) {
+    return { ok: false, error: { code: 'not-found', what: 'invitation', id: 'not-addressed-to-your-verified-email' } };
+  }
+  return { ok: true };
+}
+
 export type StoreError =
   | { code: 'not-found'; what: string; id: string }
   | { code: 'conflict'; reason: string }
@@ -363,6 +438,26 @@ export interface Store {
    */
   putPlan(instanceId: string, plan: unknown, planHash: string): Promise<StoreResult<{ instanceId: string; planHash: string }>>;
   getPlan(instanceId: string): Promise<StoreResult<{ instanceId: string; planHash: string; plan: unknown }>>;
+
+  // ---------- invitations (D44) ----------
+  /** Create a pending invitation. The team must exist; the address need not belong to anyone yet. */
+  createInvitation(input: NewInvitation): Promise<StoreResult<Invitation>>;
+  getInvitation(id: string): Promise<StoreResult<Invitation>>;
+  listInvitations(teamId: string): Promise<Invitation[]>;
+  /**
+   * Pending invitations addressed to a specific (already verified) address. This is the only way an outside
+   * person discovers an invitation, which is why the address is matched exactly and case-folded.
+   */
+  findInvitationsForEmail(email: string): Promise<Invitation[]>;
+  /**
+   * Accept an invitation as a person. Atomic by contract: the membership and the accepted state either both
+   * happen or neither does -- a half-accepted invitation is a person with a role nobody recorded, or a
+   * recorded acceptance that grants nothing.
+   */
+  acceptInvitation(invitationId: string, personId: string): Promise<StoreResult<{ invitation: Invitation; member: TeamMember }>>;
+  revokeInvitation(id: string): Promise<StoreResult<Invitation>>;
+  /** Record what the transport said, so delivery is a fact about the row rather than about a log file (D46). */
+  setInvitationEmailResult(id: string, result: { receipt?: string; error?: string }): Promise<StoreResult<Invitation>>;
 
   // ---------- capability bindings (#176, D42) ----------
   /** Idempotent by instance+capability: republishing refreshes outputs rather than accumulating offers. */

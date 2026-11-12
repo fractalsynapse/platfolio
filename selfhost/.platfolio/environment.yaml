@@ -62,7 +62,8 @@
 - name: PLATFOLIO_EMAIL_DRIVER
   kind: value
   required: false
-  enum: [smtp, mailpit, memory]
+  default: none
+  enum: [none, smtp, mailpit, memory]
   service: api
   description: >-
     Which transport exists at all. Absent means the control plane has no sender: an unconfigured default would

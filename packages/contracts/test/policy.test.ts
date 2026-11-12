@@ -51,5 +51,8 @@ test('an under-roled member gets 403 with advice they can act on, not a mystery'
 
 test('the destructive and grant-giving verbs are exactly the owner-only set (D43, D42)', () => {
   const ownerOnly = actions.filter((a) => POLICY[a] === 'owner').sort();
-  assert.deepEqual(ownerOnly, ['capability.share', 'instance.destroy', 'team.invite', 'team.member.manage']);
+  assert.deepEqual(ownerOnly.sort(), ['capability.share', 'instance.destroy', 'invitation.list', 'invitation.revoke', 'team.invite', 'team.member.manage'].sort());
+  // The invitation verbs are owner-only for a reason recorded in #186: a pending row carries an email address,
+  // and a member-visible list is a people directory nobody asked for. This assertion is a tripwire -- it failed
+  // when the invitations capability was added, which is a test naming the decision rather than the code.
 });

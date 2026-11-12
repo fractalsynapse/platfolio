@@ -26729,7 +26729,16 @@ var VerifiedClaimsSchema = external_exports.object({
   scope: external_exports.array(external_exports.string()),
   expiresAt: external_exports.string().min(1),
   /** GitHub-environment claim, carried only when present; the production gate in the attestation contract needs it. */
-  environment: external_exports.string().optional()
+  environment: external_exports.string().optional(),
+  /**
+   * The identity provider's own assertion about this person's address (D46), read from the token and never
+   * supplied by the caller. An invitation is accepted by whoever the IdP says owns the address; a request body
+   * claiming "my email is..." would make the root of trust a typed string -- the authorization-by-mailbox
+   * problem D46 explicitly declines to create.
+   */
+  email: external_exports.string().min(3).max(320).optional(),
+  /** `email_verified` in the IdP's vocabulary. Absent means not asserted, which is NOT the same as true. */
+  emailVerified: external_exports.boolean().optional()
 });
 var IdentityConfigSchema = external_exports.object({
   /** Exact string match against `iss`. No prefix tricks, no tenant wildcard: D4's cross-tenant rule. */
@@ -26897,6 +26906,24 @@ var InstanceEnvironmentStateSchema = external_exports.object({
   attestationId: external_exports.string().optional(),
   updatedAt: external_exports.string().min(1)
 }).strict();
+var InvitationSchema = external_exports.object({
+  id: external_exports.string().min(1),
+  teamId: external_exports.string().min(1),
+  /** The address as the inviter typed it, matched only against an IdP assertion later. Lower-cased on write. */
+  email: external_exports.string().min(3).max(320),
+  role: TeamRoleSchema,
+  state: external_exports.enum(["pending", "accepted", "revoked", "expired"]).default("pending"),
+  /** The person who sent it, so an audit question has a subject to name. */
+  invitedBy: external_exports.string().min(1),
+  createdAt: external_exports.string().min(1),
+  expiresAt: external_exports.string().min(1),
+  acceptedBy: external_exports.string().optional(),
+  acceptedAt: external_exports.string().optional(),
+  revokedAt: external_exports.string().optional(),
+  /** The transport's receipt, so "we never got it" is a lookup rather than a log grep (D46). */
+  emailReceipt: external_exports.string().max(200).optional(),
+  emailError: external_exports.string().max(300).optional()
+}).strict();
 
 // node_modules/.pnpm/pg@8.23.1/node_modules/pg/esm/index.mjs
 var import_lib = __toESM(require_lib2(), 1);
@@ -26928,7 +26955,9 @@ var PolicyActionSchema = external_exports.enum([
   "capability.bind",
   "audit.read",
   "team.member.manage",
-  "team.invite"
+  "team.invite",
+  "invitation.list",
+  "invitation.revoke"
 ]);
 
 // packages/contracts/src/email.ts
