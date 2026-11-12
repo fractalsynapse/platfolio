@@ -26,13 +26,6 @@ const TONE: Record<BindingStatus, 'ok' | 'pending' | 'problem'> = {
   're-issue-required': 'problem',
 };
 
-const LABEL: Record<BindingStatus, string> = {
-  ok: 'Current',
-  'rebind-required': 'Supplier changed',
-  'provider-gone': 'Provider missing',
-  're-issue-required': 'Credential lost',
-};
-
 export interface BindingPanelInput {
   /** The instance whose consumers are shown, or `undefined` for the team-wide view. */
   instanceId?: string;

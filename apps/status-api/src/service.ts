@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { CONTRACT_NAME, CONTRACT_VERSION } from '@platfolio/contracts';
-import { createDispatchStore, handleDispatchApi, type DispatchStore } from './dispatch-api.ts';
+import { handleDispatchApi, type DispatchStore } from './dispatch-api.ts';
 import http from 'node:http';
 
 /**

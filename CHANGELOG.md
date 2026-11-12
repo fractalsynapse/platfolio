@@ -5,6 +5,35 @@ change; entries describe merged intent, not aspirations.
 
 "## [Unreleased]
 
+### Removed — legacy sweep
+
+- **The repository was carrying dead declarations, and 29 of them are gone.** `noUnusedLocals` and
+  `noUnusedParameters` are now **on in the root tsconfig**, so they cannot grow back: an intentionally unused
+  parameter is prefixed `_`, which is the convention the compiler honours rather than a comment asserting the
+  value is deliberate. Removed: an unused `PoolClient`-based `withClient` helper in the Postgres driver, the
+  `StoreFacade` alias (a second name for one thing), `StaticRailwayCredentials` and
+  `TEMPLATE_REPO_BODY_CONSTRAINTS` (both unreferenced anywhere, including the workflows and docs), a dead
+  `_LABEL` map in the binding panel, an unused `ROOT_FIELD` regex in the schema gate, and a `validateManifest`
+  line that stringified its input for a message format that no longer exists.
+- **`packages/kernel` declared a dependency on `@platfolio/manifest` and never imported it.** A D15 violation
+  sitting in the manifest of the package whose whole rule is that it may not know about manifests. Removed, and
+  the lockfile regenerated.
+- Four test values were being computed and then **never asserted on** -- worse than dead code, because each one
+  looked like coverage. Three are now real assertions (a rotated supplier value must surface on every consumer
+  of it; the current-state binding panel is walked as well as the stale one; the republished offer must be the
+  same offer). The fourth could not be asserted honestly: `validateManifest(withArchetype('shared-service'))`
+  on the *web* template never fires the rule, because that template has a reachable service -- the variable was
+  dead precisely because the fixture proved nothing. The real cases for that rule already existed below it, so
+  the vacuous fixture is gone with a note explaining why asserting on it would have been wrong rather than
+  merely unused.
+
+### Fixed
+
+- During the sweep I dropped a destructured `writes` from a harness call in `github-writes.test.ts` while
+  removing a genuinely unused one two lines away; typecheck caught it in the same pass. The lesson is that
+  "delete the dead thing" needs the call site read, not the line.
+
+
 ### Changed — **breaking**
 
 - **`Instance.platform` is now `Instance.template` (#180, D45), and instance names are `team/name` slugs.**

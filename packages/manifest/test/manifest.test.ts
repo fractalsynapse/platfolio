@@ -4,7 +4,6 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { fileURLToPath } from 'node:url';
 import { parse, renderAll, renderCompose, renderRailwayIaC, requiredSecrets, validateManifest } from '../src/index.ts';
 
 const here = path.dirname(fileToPathSafe(import.meta.url));
@@ -120,8 +119,10 @@ test('the new archetypes carry rules, not just names', () => {
   // a shared service with nothing reachable is unbindable, so the rule must say so.
   const quiet = structuredClone(base);
   for (const name of Object.keys(quiet.spec.services)) quiet.spec.services[name] = { ...quiet.spec.services[name]!, domains: [] };
-  const shared = validateManifest(withArchetype('shared-service'));
-  // Clear the hosts the same way the schema models them (strings on the service), or the assertion below
+  // (An earlier version computed `validateManifest(withArchetype('shared-service'))` and never
+  // asserted on it. Asserting on it would have been wrong, not merely unused: the web template HAS a
+  // reachable service, so the shared-service rule is supposed to stay quiet. The real cases for that
+  // rule are below, on fixtures whose hosts are cleared -- `quiet` feeds one of them.)
   // proves only that my fixture was wrong.
   const cleared = structuredClone(base);
   for (const name of Object.keys(cleared.spec.services)) cleared.spec.services[name] = { ...cleared.spec.services[name]!, domains: [] };

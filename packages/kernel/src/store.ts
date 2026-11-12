@@ -118,7 +118,6 @@ export class StoreService extends Service<z.infer<typeof StoreConfigSchema>> {
   }
 }
 
-export type StoreFacade = StoreService;
 export type { StoreResult };
 
 declare module 'cordis' {

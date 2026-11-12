@@ -98,6 +98,7 @@ test('every component the panel emits is one the renderers already know', () => 
     for (const c of node.children ?? []) walk(c);
   };
   walk(stalePage);
+  walk(page);
   for (const name of emitted) assert.ok((COMPONENT_NAMES as readonly string[]).includes(name), `unregistered component ${name}`);
   assert.ok(emitted.has('action-button'), 'the stale case must exercise the action path');
   assert.ok(projectToText(stalePage).includes('POST rebind'), 'and the text projection must reach it');

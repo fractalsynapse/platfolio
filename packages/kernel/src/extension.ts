@@ -1,5 +1,5 @@
 import { Context, Service } from 'cordis';
-import type { Request, Response_, RouteDefinition } from './server.ts';
+import type { Request, RouteDefinition } from './server.ts';
 
 /**
  * Capability plugins, written by the application without importing the framework.

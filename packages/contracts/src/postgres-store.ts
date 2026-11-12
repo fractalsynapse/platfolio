@@ -1,7 +1,7 @@
-import { Pool, type PoolClient } from 'pg';
+import { Pool } from 'pg';
 import {
   AttestationRecordSchema, AuditEntrySchema, BindingRecordSchema, CapabilityOfferSchema, CapabilityShareSchema, DispatchRecordSchema, IdentitySchema, PersonSchema, TeamMemberSchema, InstanceEnvironmentStateSchema, InstanceSchema, ProviderConnectionSchema, RepoConnectionSchema, TeamSchema, newId,
-  type AttestationRecord, type AuditEntry, type BindingRecord, type CapabilityOffer, type CapabilityShare, type NewBinding, type NewCapabilityOffer, type NewCapabilityShare, type DispatchRecord, type Instance, type InstanceEnvironmentState, type ProviderConnection, type RepoConnection, type Store, type StoreError, type NewInstance, type StoreResult, type Team, type Identity, type Person, type TeamMember,
+  type AttestationRecord, type AuditEntry, type BindingRecord, type CapabilityOffer, type NewBinding, type NewCapabilityOffer, type NewCapabilityShare, type DispatchRecord, type Instance, type InstanceEnvironmentState, type ProviderConnection, type RepoConnection, type Store, type StoreError, type NewInstance, type StoreResult, type Team, type Person, type TeamMember,
 } from './persistence.ts';
 import { reasonOf } from './persistence.ts';
 import { checkAttestationPolicy } from './dispatch-policy.ts';
@@ -78,15 +78,6 @@ export class PostgresStore implements Store {
 
   private q(table: string): string {
     return `${this.schema}.${table}`;
-  }
-
-  private async withClient<T>(run: (client: PoolClient) => Promise<T>): Promise<T> {
-    const client = await this.pool.connect();
-    try {
-      return await run(client);
-    } finally {
-      client.release();
-    }
   }
 
   describe() {

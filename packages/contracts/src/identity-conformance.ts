@@ -199,7 +199,7 @@ export async function runIdentityConformance(make: () => IdentityProvider, fixtu
 
   await add('alg "none" is refused before any key lookup', async () => {
     const unsigned = signToken(fixture, { alg: 'none' });
-    const [h, p] = unsigned.split('.');
+    const [_h, p] = unsigned.split('.');
     // Rebuild with an empty signature segment the way the attack sends it; signToken still signed it.
     const noneHeader = b64url(JSON.stringify({ alg: 'none', typ: 'JWT', kid: fixture.kid }));
     return expectVerify(make(), `${noneHeader}.${p ?? ''}.`, { ok: false, code: 'algorithm' });

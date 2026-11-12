@@ -26495,7 +26495,7 @@ var RailwayInfraProvider = class {
    * deleted inside the window. One retry with a short pause keeps the surface honest -- if both attempts
    * fail, the reason still lands in DeleteResult.failures rather than in an empty catch.
    */
-  async deleteServiceWithRetry(projectId, environment, service, credential) {
+  async deleteServiceWithRetry(_projectId, environment, service, credential) {
     let lastError;
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
@@ -26541,7 +26541,7 @@ var RailwayInfraProvider = class {
    * is the only stable identity a plan can match on. An unreadable answer is empty rather than an error: a
    * volume is created in that case, and the duplicate it might have caused is reported by the read-back below.
    */
-  async volumeInstances(projectId, environmentId, credential) {
+  async volumeInstances(_projectId, environmentId, credential) {
     const data = await this.transport.graphql({
       operation: "environment.volumeInstances",
       credential,

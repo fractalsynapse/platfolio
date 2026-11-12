@@ -4,7 +4,7 @@ import {
   reasonOf, decide, rollupState, type BindingRecord, type CapabilityOffer, type PolicyAction, type VerifiedClaims,
 } from '@platfolio/contracts';
 import type { ExtensionDescriptor, KernelContext, Request, Response_, RouteDefinition } from '@platfolio/kernel';
-import { badRequest, bearerToken, notFound, send, unauthorized, type Authorizer } from './respond.ts';
+import { badRequest, bearerToken, notFound, send, unauthorized } from './respond.ts';
 
 /**
  * The control plane's capabilities, expressed as plugins (D40: everything is a plugin).
@@ -144,7 +144,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
     routes: [
       {
         method: 'GET', path: '/healthz', operationId: 'getHealth',
-        handle: async (_request, _params, context) => {
+        handle: async (_request, _params, _context) => {
           const { createHash } = await import('node:crypto');
           const token = createHash('sha256').update(`${deps.build.commit}\u0000${deps.build.version}`).digest('hex').slice(0, 16);
           return send('getHealth', 200, { status: 'ok', livenessToken: token });

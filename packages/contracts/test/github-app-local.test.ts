@@ -116,7 +116,7 @@ test('an installation token is requested against the installation, scoped when a
 
 test('an unscoped request sends no body keys, so the installation selection governs', async () => {
   const calls: string[] = [];
-  const fetchImpl = (async (url: string, init?: { body?: string }) => {
+  const fetchImpl = (async (_url: string, init?: { body?: string }) => {
     calls.push(init?.body ?? '');
     return { ok: true, status: 201, async json() { return { token: 't', expires_at: '2026-01-01T00:00:00Z' }; } } as Response;
   }) as unknown as typeof globalThis.fetch;
