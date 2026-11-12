@@ -45,7 +45,8 @@ jobs:
           # Runtime files the app reads. Asserted here because their absence is invisible to `docker build`
           # and fatal on the first validated request: without api/ every spec-checked response 500s on ENOENT,
           # and without db/ PLATFOLIO_DB_MIGRATE=true cannot migrate.
-          grep -q "^COPY api ./api" apps/control-plane/Dockerfile || { echo "Dockerfile does not ship api/ -- spec-validated responses would 500"; exit 1; }
+          test -f apps/control-plane/openapi.yaml || { echo "the OpenAPI document is missing from the app it governs"; exit 1; }
+          grep -q "^COPY apps/control-plane ./apps/control-plane" apps/control-plane/Dockerfile || { echo "the Dockerfile does not copy the app, so it cannot ship the app's own openapi.yaml"; exit 1; }
           grep -q "^COPY db ./db" apps/control-plane/Dockerfile || { echo "Dockerfile does not ship db/ -- migrations cannot run"; exit 1; }
 
       - name: Build
