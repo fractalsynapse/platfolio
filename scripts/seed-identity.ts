@@ -17,17 +17,40 @@ const { values: flags } = parseArgs({
     base: { type: 'string', default: process.env.KC_BASE ?? 'http://localhost:8081' },
     'admin-user': { type: 'string', default: process.env.KC_ADMIN_USER ?? 'platfolio-admin' },
     'admin-password': { type: 'string', default: process.env.KC_ADMIN_PASSWORD ?? 'platfolio-dev-only' },
+    /**
+     * This script refused non-loopback hosts because it is a local-stack tool, not a production provisioner.
+     * Rather than delete that guard now that platfolio has a hosted realm, the refusal became a conditional
+     * permission: a remote run must also supply its OWN client secret and user password. The development
+     * credentials are therefore unusable against a public identity provider by construction -- which is the
+     * property the original refusal was actually reaching for.
+     */
+    'allow-remote': { type: 'boolean', default: false },
+    'client-secret': { type: 'string', default: process.env.KC_CLIENT_SECRET ?? '' },
+    'user-password': { type: 'string', default: process.env.KC_USER_PASSWORD ?? '' },
+    'api-origin': { type: 'string', default: process.env.PLATFOLIO_API_ORIGIN ?? '' },
   },
 });
 
 const base = flags.base as string;
-if (!/^(https?:\/\/)?(localhost|127\.0\.0\.1)(:\d+)?/.test(base)) {
-  console.error(`identity:seed refuses to run against ${base} -- it is a local-stack tool, not a production provisioner`);
+const loopback = /^(https?:\/\/)?(localhost|127\.0\.0\.1)(:\d+)?/.test(base);
+if (!loopback && flags['allow-remote'] !== true) {
+  console.error(`identity:seed refuses to run against ${base} without --allow-remote.`);
   process.exit(1);
 }
+if (loopback && flags['allow-remote'] === true) {
+  console.error('identity:seed: --allow-remote against loopback is a mistake, not a habit -- drop the flag');
+  process.exit(1);
+}
+const remote = flags['allow-remote'] === true;
+const apiSecret = remote ? (flags['client-secret'] as string) : 'platfolio-dev-only';
+const userPassword = remote ? (flags['user-password'] as string) : 'platfolio-dev-only';
+if (remote && (apiSecret.length < 32 || userPassword.length < 24)) {
+  console.error(`identity:seed refuses a remote run without strong credentials: --client-secret needs >=32 characters and --user-password >=24 (got ${String(apiSecret.length)} and ${String(userPassword.length)}). Values are never printed.`);
+  process.exit(1);
+}
+const origins = flags['api-origin'] ? [flags['api-origin'] as string] : ['http://localhost:8082', 'http://localhost:5173'];
 const realm = 'platfolio';
 const apiClientId = 'platfolio-api';
-const apiSecret = 'platfolio-dev-only';
 const audience = 'platfolio-api';
 const role = 'platfolio.user';
 const users: Array<{ username: string; email: string; scoped: boolean }> = [
@@ -90,8 +113,8 @@ const created = await req(`/admin/realms`, {
       serviceAccountsEnabled: true,
       standardFlowEnabled: true,
       directAccessGrantsEnabled: true,
-      redirectUris: ['http://localhost:8082/*', 'http://localhost:5173/*'],
-      webOrigins: ['http://localhost:8082', 'http://localhost:5173'],
+      redirectUris: origins.map((o) => `${o}/*`),
+      webOrigins: origins,
       secret: apiSecret,
       fullScopeAllowed: true,
       protocolMappers: [
@@ -116,9 +139,26 @@ log(`role -> ${String(roleCreate.status)} (201 created, 409 already present)`);
 for (const spec of users) {
   const status = (await req(`/admin/realms/${realm}/users`, {
     method: 'POST',
-    body: JSON.stringify({ username: spec.username, enabled: true, email: spec.email, emailVerified: true, firstName: spec.username, lastName: 'Operator', credentials: [{ type: 'password', value: apiSecret, temporary: false }] }),
+    body: JSON.stringify({ username: spec.username, enabled: true, email: spec.email, emailVerified: true, firstName: spec.username, lastName: 'Operator', credentials: [{ type: 'password', value: userPassword, temporary: false }] }),
   }, token)).status;
-  log(`user ${spec.username} -> ${String(status)} (201 or 409)`);
+  log(`user ${spec.username} -> ${String(status)} (201 created, 409 already present)`);
+
+  // Converge the password even when the user already existed. Two bugs live here and both should stay named:
+  // (1) this line used `apiSecret` as the USER password -- invisible on loopback because both were the same
+  // dev string, and it only surfaced the first time a hosted realm used distinct secrets, which is the actual
+  // argument for parameterizing them; (2) a 409 was treated as "nothing to do", so a re-seed could never fix
+  // a credential it had previously written wrong. reset-password is idempotent and makes the seed converge.
+  const uid = (await req<Array<{ id: string }>>(`/admin/realms/${realm}/users?username=${spec.username}`, {}, token)).body?.[0]?.id;
+  if (uid === undefined) throw new Error(`user ${spec.username} was accepted but cannot be found -- the realm is in a state this script cannot repair`);
+  // `reset-password` answered 404 on 26.8.2 through this grant, so the credential is written with the user
+  // update -- the documented convergence path, and the reason this step exists at all: a re-seed must be able
+  // to repair a password it previously got wrong.
+  const reset = await req(`/admin/realms/${realm}/users/${uid}`, {
+    method: 'PUT',
+    body: JSON.stringify({ id: uid, username: spec.username, enabled: true, email: spec.email, emailVerified: true, firstName: spec.username, lastName: 'Operator', credentials: [{ type: 'password', value: userPassword, temporary: false }] }),
+  }, token);
+  if (reset.status !== 204) throw new Error(`password set for ${spec.username} failed (${String(reset.status)}): ${reset.text.slice(0, 160)}`);
+  log(`  password for ${spec.username} converged (value never printed)`);
 }
 
 // 4. role assignment -- verified by reading it back, because a silent 404 here would leave a user who cannot
@@ -140,3 +180,5 @@ for (const spec of users) {
   log(`user ${spec.username} carries ${role} (read back)`);
 }
 log('identity seeded');
+
+if (remote) log('remote seed complete: the client secret and user password were supplied by the operator and are never printed here');

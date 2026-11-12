@@ -8,5 +8,5 @@
 # #146 is the job that rewrites this file on every release so it cannot drift again.
 services:
   api:
-    image: ghcr.io/fractalsynapse/platfolio-control-plane:staging@sha256:54ce1c59cb635470add23d98b2413c3628d5be7c648f484c6518e3beac251f56
+    image: ghcr.io/fractalsynapse/platfolio-control-plane:staging@sha256:b188ec823e1f51667eb7324f2e24306cbaf865e1be59f5148dc7d028b424cd57
     build: !reset null
