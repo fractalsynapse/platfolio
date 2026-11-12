@@ -5,6 +5,37 @@ change; entries describe merged intent, not aspirations.
 
 "## [Unreleased]
 
+### Added — **breaking** (team names)
+
+- **Self-service team creation (#195, D44).** `POST /api/v1/teams` and `GET /api/v1/teams`. Until now the only
+  way a team existed was a seed script, so D44's "adding a teammate cannot be an admin task" had an unstated
+ premise: *creating* the team was an admin task too. The caller becomes **owner** in the same operation, because a
+  team nobody owns cannot invite, share, or destroy anything and has no way out of that state. Creation is
+  deliberately **not** a row in `POLICY`: that table answers "may this person do this **in that team**", and
+  inventing an entry with no team to apply it to would stretch the table past what it means.
+- **The destroy route (#196, D43).** `DELETE /api/v1/instances/{instanceId}` — the caller #176's `consumers`
+  query and #178's owner-only `instance.destroy` policy were both built for. **409 naming the dependants**
+  while anything consumes the instance, not 202-with-a-warning: an API that says yes to a destructive operation
+  it knows is unsafe has made the tenant's outage its own. Scope is stated in the document — managed service
+  only, never a repository, branch or workflow (D36 extended by D43).
+- `30` operations, `api:check` green in both directions; `SLUG_PATTERN` / `normaliseName` live in contracts and
+  are used by the schema, both drivers and the OpenAPI document, rather than three hand-copied versions.
+- `lifecycle:smoke` grew nine checks: the destroy refusal, the refusal naming the dependant, the accepted 202,
+  its "recorded, not executed" wording, team creation, normalisation, collision, non-slug refusal and the
+  caller's own team list. **38/38 live.**
+
+### Changed
+
+- **Team names are slugs and platform-unique** (`teams_name_slug_check`, `teams_name_unique` in migration
+  `011`). D45 makes `team/name` the address of an instance, so the team half is a URL segment and a CLI
+  argument: two teams named `Acme` would make `acme/shop` ambiguous and undo the naming decision one layer
+  above the one it was made about. **BREAKING** for a name like `Acme Corp` — tightened on purpose, and
+  acknowledged through `check-contracts.ts --ack-breaking` rather than waved through as an additive line.
+- The Postgres conformance suite gives each case a unique team name. Its cases share one scratch schema, so a
+  literal name now collided with the previous case's row: the uniqueness rule and the fixture isolation had to
+  be reconciled deliberately, not by relaxing either.
+
+
 ### Added
 
 - **Invitations (#186, D44), five operations designed in the document before any handler existed** (27

@@ -330,6 +330,78 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
+  /api/v1/teams:
+    get:
+      operationId: listTeams
+      summary: The teams this person belongs to, with the role each membership carries
+      description: |
+        The CLI's first screen after login (`platfolio teams list`). Derived from membership rows joined to
+        teams -- never from a `teamId` a caller supplied, which would be the caller asserting its own scope.
+      security:
+        - bearerJwt: []
+      responses:
+        '200':
+          description: Teams and roles. Empty for an authenticated person who belongs to nothing yet.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: false
+                  required: [teamId, name, role]
+                  properties:
+                    teamId: { type: string }
+                    name: { $ref: '#/components/schemas/Slug' }
+                    role: { type: string, enum: [owner, member] }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+    post:
+      operationId: createTeam
+      summary: Create a team and become its owner
+      description: |
+        D44's other half: in an open SaaS, adding a teammate cannot be an admin task, and creating the team in
+        the first place cannot be one either. Until this existed the only way a team came into being was a seed
+        script.
+
+        The caller becomes the **owner** in the same operation, because a team nobody owns has no one who can
+        invite, share, or destroy anything in it -- and no way to get out of that state. Deliberately NOT a row
+        in `POLICY`: that table answers "may this person do this in that team", and here there is no team yet.
+        Guarding creation is authentication plus the verified person from #177; inventing a policy entry with no
+        team to apply it to would stretch the table past what it means.
+
+        The name is the first half of every instance address (`team/name`, D45), so it is a slug, unique across
+        the platform, normalised on write, and enforced in the schema, the database and the shared suite.
+      security:
+        - bearerJwt: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name]
+              properties:
+                name: { $ref: '#/components/schemas/Slug' }
+            example: { name: acme }
+      responses:
+        '201':
+          description: Created, and the caller owns it.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TeamWithRole' }
+              example: { teamId: team-1f7c2b, name: acme, role: owner }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '409':
+          description: That name belongs to another team. Names are platform-unique because they are addressable.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
   /api/v1/instances:
     get:
       operationId: listInstances
@@ -404,6 +476,52 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
 
   /api/v1/instances/{instanceId}:
+    delete:
+      operationId: destroyInstance
+      summary: Remove the managed service -- owner-only, and refused while anything depends on it
+      description: |
+        The reason #176 exists. `GET /api/v1/instances/{id}/consumers` answers "what breaks if I remove this",
+        and this is the verb that consults the answer before doing anything. A destroy that strands a running
+        application is refused with **409 naming the consumers** -- not accepted with a warning, because an API
+        that says yes to a destructive operation it knows is unsafe has made the tenant's outage its own.
+
+        Scope, stated because the parts this does NOT touch are what a future implementer will get wrong (D36,
+        extended by D43): platfolio manages the **hosted service on infrastructure the tenant owns**. It never
+        deletes a repository, a branch, a workflow, or anything else in the tenant's development path. Losing a
+        customer's source through a control-plane call would be unrecoverable in a way nothing here is.
+
+        202, not 200: this records the decision and moves the state to `deprovisioning`. **Actual provider
+        teardown is not wired** -- removing a Railway environment is a dispatch the action executes and attests,
+        and that is execution-plane work (#196 tracks it). An endpoint reporting completed destruction it has
+        not performed is the kind of lie this platform cannot tell, because a tenant reads it as licence to
+        reclaim their own compute.
+      security:
+        - bearerJwt: []
+      responses:
+        '202':
+          description: Removal recorded; execution follows through the dispatch path.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [instanceId, state, recorded]
+                properties:
+                  instanceId: { type: string }
+                  state: { type: string, enum: [deprovisioning] }
+                  recorded: { type: boolean, const: true }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Something still depends on this instance.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
     parameters:
       - name: instanceId
         in: path
@@ -987,6 +1105,22 @@ components:
           example: 'Bearer realm="platfolio", error="invalid_token"'
 
   schemas:
+    Slug:
+      type: string
+      minLength: 1
+      maxLength: 40
+      pattern: '^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$'
+      description: Repository-style slug. Lowercase alphanumerics with interior hyphens -- it is a URL segment and a CLI argument (D45).
+
+    TeamWithRole:
+      type: object
+      additionalProperties: false
+      required: [teamId, name, role]
+      properties:
+        teamId: { type: string, minLength: 1 }
+        name: { $ref: '#/components/schemas/Slug' }
+        role: { type: string, enum: [owner, member] }
+
     Invitation:
       type: object
       additionalProperties: false

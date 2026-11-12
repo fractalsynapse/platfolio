@@ -4,7 +4,7 @@ import {
   type AttestationRecord, type AuditEntry, type BindingRecord, type CapabilityOffer, type NewBinding, type NewCapabilityOffer, type NewCapabilityShare, type DispatchRecord, type Instance, type InstanceEnvironmentState, type Invitation, type NewInvitation, type ProviderConnection, type RepoConnection, type Store, type StoreError, type NewInstance, type StoreResult, type Team, type Person, type TeamMember,
 } from './persistence.ts';
 import { reasonOf } from './persistence.ts';
-import { normaliseEmail } from './persistence.ts';
+import { normaliseEmail, normaliseName } from './persistence.ts';
 import { checkAttestationPolicy } from './dispatch-policy.ts';
 import type { Attestation } from './attestation.ts';
 
@@ -114,11 +114,19 @@ export class PostgresStore implements Store {
   }
 
   async createTeam(input: { name: string }) {
-    const admitted = admit(TeamSchema, { id: newId('team'), name: input.name, createdAt: new Date().toISOString() }, 'team');
+    const name = normaliseName(input.name);
+    const admitted = admit(TeamSchema, { id: newId('team'), name, createdAt: new Date().toISOString() }, 'team');
     if (!admitted.accepted) return err({ code: 'conflict', reason: admitted.reason });
-    const t = admitted.value;
-    await this.pool.query(`INSERT INTO ${this.q('teams')} (id, name, created_at) VALUES ($1, $2, $3)`, [t.id, t.name, t.createdAt]);
-    return ok(t);
+    const team = admitted.value;
+    try {
+      await this.pool.query(`INSERT INTO ${this.q('teams')} (id, name, created_at) VALUES ($1,$2,$3)`, [team.id, team.name, team.createdAt]);
+    } catch (error) {
+      // The unique index is D45's rule; surface it as the same typed conflict the double raises so neither
+      // driver can be the only one that knows.
+      if ((error as { code?: string }).code === '23505') return err({ code: 'conflict', reason: `a team named "${name}" already exists` });
+      throw error;
+    }
+    return ok(team);
   }
 
   async getTeam(id: string) {
