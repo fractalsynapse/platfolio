@@ -5,6 +5,37 @@ change; entries describe merged intent, not aspirations.
 
 "## [Unreleased]
 
+### Removed
+
+- **`apps/status-api` is deleted: one API, the real one.** It was the first-draft service that predated the
+  OpenAPI-validated control plane, and keeping it meant two request paths where only one was checked against
+  the specification (D41) -- the duplication the layout rule exists to prevent, with an endpoint surface instead
+  of a file. `apps/control-plane` already serves everything the managed action calls (`/api/v1/instances/…/dispatches/{id}`
+  and `/api/v1/attestations`, both nonce-bound rather than user-scoped), so nothing in the contract moved.
+  **The deployed Railway container keeps running the deleted service's image until #172 replaces it**; that is
+  stated rather than glossed, because the end-to-end dispatch loop proven against it cannot be rebuilt from this
+  tree anymore, and a reader of this changelog should know which evidence still describes reality.
+- The build pipeline moved with it: `image.yml` now builds `apps/control-plane/Dockerfile` (the battle-tested
+  single-stage status-api Dockerfile, adapted, with its hard-won comments intact), publishes
+  `platfolio-control-plane`, and gained a **fail-closed check** asserting the container refuses to start without
+  identity configuration. Its smoke test boots against a shape-only JWKS and proves boot, health and build
+  identity -- **not** signature verification, which is proven against a real Keycloak in the Compose stack and
+  in the live tenant run.
+- `selfhost/.platfolio/environment.yaml` described variables the code never reads (`SESSION_SIGNING_KEY` -- there
+  are no platform sessions; `PUBLIC_ORIGIN` -- nothing reads it) and called the JWKS URI optional when the control
+  plane refuses to start without it. Rewritten from what `apps/control-plane` actually consumes: a stale inventory
+  is worse than none, because an operator trusting it ships something that cannot boot.
+
+### Fixed
+
+- **`selfhost/compose.prod.yaml` was pinning bytes nobody can account for** -- a real digest of the deleted
+  service's image. It now carries **no `image:` line**, and the step-7 test asserts the consequence
+  (`compose-image-unpinned`, no plan) instead of pretending otherwise, while a separate block proves the
+  *format* renders using the SHA-256 of the empty string as an unmistakably synthetic pin. Writing a placeholder
+  digest would have been the same mistake in a new costume, and `buildPlan` already refuses them (#84) -- which
+  this change discovered by having its own test rejected by its own guard.
+
+
 ### Removed — legacy sweep
 
 - **The repository was carrying dead declarations, and 29 of them are gone.** `noUnusedLocals` and

@@ -1,4 +1,6 @@
-# platfolio's own control-plane image (M1 step 6). Single stage on purpose: an earlier two-stage build
+"""platfolio's control-plane image -- the one API. apps/status-api, which this replaced, was deleted in the same
+change that moved this build over: two services where one was intended meant two request paths, one of them
+validated against the OpenAPI document and one not.""" Single stage on purpose: an earlier two-stage build
 # copied installed workspace links and then re-copied sources over them, and ran as `node` against
 # root-owned files -- both failures were invisible to `docker build` and only showed up when the
 # container started. A build is not a test; the container has to serve.
@@ -17,11 +19,15 @@ COPY packages/contracts/package.json packages/contracts/
 COPY packages/kernel/package.json packages/kernel/
 COPY packages/manifest/package.json packages/manifest/
 COPY packages/page-schema/package.json packages/page-schema/
-COPY apps/status-api/package.json apps/status-api/
+COPY packages/api-contract/package.json packages/api-contract/
+COPY apps/control-plane/package.json apps/control-plane/
 COPY pnpm-lock.yaml ./
-RUN pnpm install --frozen-lockfile --prod --filter @platfolio/status-api...
+RUN pnpm install --frozen-lockfile --prod --filter @platfolio/control-plane...
 COPY packages/contracts ./packages/contracts
-COPY apps/status-api ./apps/status-api
+COPY packages/kernel ./packages/kernel
+COPY packages/api-contract ./packages/api-contract
+COPY packages/manifest ./packages/manifest
+COPY apps/control-plane ./apps/control-plane
 # Build identity is injected by CI and reported by /version, never inferred from the filesystem.
 ARG PLATFOLIO_COMMIT=unknown
 ARG PLATFOLIO_VERSION=0.0.0-dev
@@ -35,4 +41,4 @@ USER node
 # node can reach its own health endpoint, so the image needs no curl/wget to be checkable.
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:8080/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
-CMD ["node", "apps/status-api/src/index.ts"]
+CMD ["node", "apps/control-plane/src/index.ts"]

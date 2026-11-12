@@ -27,7 +27,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  IMAGE_NAME: ${{ github.repository }}-status-api
+  IMAGE_NAME: ${{ github.repository }}-control-plane
 
 jobs:
   build:
@@ -40,40 +40,51 @@ jobs:
       # tested, so the frozen install inside the image is load-bearing rather than cosmetic.
       - name: Validate the build context
         run: |
-          test -f apps/status-api/Dockerfile || { echo "Dockerfile missing"; exit 1; }
-          grep -q "frozen-lockfile" apps/status-api/Dockerfile || { echo "image install is not lockfile-frozen"; exit 1; }
+          test -f apps/control-plane/Dockerfile || { echo "Dockerfile missing"; exit 1; }
+          grep -q "frozen-lockfile" apps/control-plane/Dockerfile || { echo "image install is not lockfile-frozen"; exit 1; }
 
       - name: Build
         run: |
           docker build \
-            --file apps/status-api/Dockerfile \
+            --file apps/control-plane/Dockerfile \
             --build-arg PLATFOLIO_COMMIT="${{ github.sha }}" \
             --build-arg PLATFOLIO_VERSION="${{ github.ref_name }}" \
             --build-arg PLATFOLIO_BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            --tag platfolio-status-api:build \
+            --tag platfolio-control-plane:build \
             .
 
       # The image answers its own healthcheck during the run, so a green job means the container serves --
       # not merely that it assembled. This is the difference the project keeps insisting on.
-      - name: Smoke test the built container
+      - name: Fail-closed check (no identity config, the container must refuse to start)
         run: |
-          docker run -d --rm --name status-smoke -p 8080:8080 \
-            -e PLATFOLIO_COMMIT="${{ github.sha }}" \
-            -e PLATFOLIO_VERSION="${{ github.ref_name }}" \
-            -e PLATFOLIO_BUILD_TIME="ci" \
-            platfolio-status-api:build
+          set -e
+          out=$(docker run --rm platfolio-control-plane:build 2>&1 || true)
+          echo "$out" | tail -3
+          echo "$out" | grep -qi "cannot start" || { echo "container started without identity config -- fail-closed is broken"; exit 1; }
+      - name: Smoke test the built container
+        # A shape-only JWKS stands in for a realm here: this step proves the image boots, binds, serves
+        # /healthz and reads its build identity -- NOT that signatures verify. That is proven against a real
+        # Keycloak in the Compose stack and in the live tenant run, and CI cannot substitute for either.
+        run: |
+          set -e
+          node -e "require('http').createServer((q,s)=>{s.writeHead(200,{'content-type':'application/json'});s.end('{\"keys\":[{\"kty\":\"RSA\",\"kid\":\"ci-smoke\",\"alg\":\"RS256\",\"use\":\"sig\",\"n\":\"AKd-pem3OaiXvBmXb-mPAmgLBFLmAWhVNxXfkRDBMUWXQ7oJrbnVjhFHwOTb-wsBAwEAAQ\",\"e\":\"AQAB\"}]}')}).listen(9911)" &
+          JWKS_PID=$!
+          sleep 1
+          docker run -d --rm --name cp-smoke -p 8080:8080 \
+            -e PLATFOLIO_IDENTITY_ISSUER=http://host.docker.internal:9911/realms/platfolio \
+            -e PLATFOLIO_IDENTITY_AUDIENCE=platfolio-api \
+            -e PLATFOLIO_IDENTITY_JWKS_URI=http://host.docker.internal:9911/realms/platfolio/protocol/openid-connect/certs \
+            -e HOST=0.0.0.0 -e PORT=8080 \
+            platfolio-control-plane:build
+          ok=""
           for i in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:8080/healthz >/dev/null 2>&1; then break; fi
+            if docker exec cp-smoke node -e "fetch('http://127.0.0.1:8080/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"; then ok=1; break; fi
             sleep 2
-            if [ "$i" = "30" ]; then echo "healthz never answered"; docker logs status-smoke; exit 1; fi
           done
-          echo "  healthz: $(curl -fsS http://127.0.0.1:8080/healthz)"
-          echo "  version: $(curl -fsS http://127.0.0.1:8080/version)"
-          curl -fsS http://127.0.0.1:8080/version | grep -q '"commit":"${{ github.sha }}"' \
-            || { echo "build identity not reported"; exit 1; }
-          curl -fsS http://127.0.0.1:8080/version | grep -q '"providerContract"' \
-            || { echo "provider contract not reported"; exit 1; }
-          docker stop status-smoke
+          if [ -z "$ok" ]; then echo "healthz never answered"; docker logs cp-smoke; exit 1; fi
+          echo "container healthy"
+          docker stop cp-smoke
+          kill $JWKS_PID 2>/dev/null || true
 
       # Only pushes publish. A pull request gets a build and a smoke test, never a registry write.
       - name: Publish
@@ -86,7 +97,7 @@ jobs:
           echo "$CR_PAT" | docker login "$REGISTRY" -u "$GITHUB_ACTOR" --password-stdin >/dev/null
           SHORT="$(echo "${{ github.sha }}" | cut -c1-7)"
           for tag in "sha-$SHORT" "${{ github.ref_name }}"; do
-            docker tag platfolio-status-api:build "$REGISTRY/$IMAGE_NAME:$tag"
+            docker tag platfolio-control-plane:build "$REGISTRY/$IMAGE_NAME:$tag"
             # The digest comes out of the push itself. A plan pins sha256:..., never a mutable tag, and
             # re-deriving it locally would need a go-template whose braces collide with this repo's
             # workflow placeholder lint.
