@@ -11,7 +11,10 @@
 const idp = process.env.KC_BASE ?? 'http://localhost:8081';
 const api = process.env.CONTROL_PLANE_BASE ?? 'http://localhost:8082';
 const realm = 'platfolio';
-const secret = 'platfolio-dev-only';
+// The dev client secret by default, overridable so this same suite can run against the hosted
+// realm (KC_CLIENT_SECRET) -- acceptance is one list of checks, not a local-only ritual.
+const secret = process.env.KC_CLIENT_SECRET ?? 'platfolio-dev-only';
+const userPassword = process.env.KC_USER_PASSWORD ?? 'platfolio-dev-only';
 
 const results: Array<{ name: string; ok: boolean; detail: string }> = [];
 const check = (name: string, ok: boolean, detail: string): void => {
@@ -20,7 +23,7 @@ const check = (name: string, ok: boolean, detail: string): void => {
 };
 
 const tokenFor = async (username: string): Promise<string | undefined> => {
-  const form = new URLSearchParams({ grant_type: 'password', client_id: 'platfolio-api', client_secret: secret, username, password: secret });
+  const form = new URLSearchParams({ grant_type: 'password', client_id: 'platfolio-api', client_secret: secret, username, password: userPassword });
   const response = await fetch(`${idp}/realms/${realm}/protocol/openid-connect/token`, { method: 'POST', body: form, headers: { 'content-type': 'application/x-www-form-urlencoded' } });
   if (!response.ok) return undefined;
   return ((await response.json()) as { access_token?: string }).access_token;
@@ -77,7 +80,7 @@ if (unscoped) {
 const foreign = await fetch(`${idp}/realms/master/protocol/openid-connect/token`, {
   method: 'POST',
   // The bootstrap admin from docker-compose.yml, not a secret this script invents.
-  body: new URLSearchParams({ grant_type: 'password', client_id: 'admin-cli', username: 'platfolio-admin', password: 'platfolio-dev-only' }),
+  body: new URLSearchParams({ grant_type: 'password', client_id: 'admin-cli', username: 'platfolio-admin', password: process.env.KC_ADMIN_PASSWORD ?? 'platfolio-dev-only' }),
   headers: { 'content-type': 'application/x-www-form-urlencoded' },
 });
 if (foreign.ok) {
