@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import {
   AttestationSchema, checkBindingPolicy, CONTRACT_NAME, CONTRACT_VERSION, DispatchIntentSchema, InstanceSchema,
-  reasonOf, type BindingRecord, type CapabilityOffer, type VerifiedClaims,
+  reasonOf, decide, type BindingRecord, type CapabilityOffer, type PolicyAction, type VerifiedClaims,
 } from '@platfolio/contracts';
 import type { ExtensionDescriptor, KernelContext, Request, Response_, RouteDefinition } from '@platfolio/kernel';
 import { badRequest, bearerToken, notFound, send, unauthorized, type Authorizer } from './respond.ts';
@@ -48,7 +48,7 @@ const bodyOf = <T>(request: Request): Body<T> => {
   return { ok: true, value: request.body === undefined ? undefined : (request.body as T) };
 };
 
-type Scope = { context: KernelContext; claims: VerifiedClaims; personId: string; teamId: string };
+type Scope = { context: KernelContext; claims: VerifiedClaims; personId: string; role: 'owner' | 'member'; teamId: string };
 type ScopedHandler = (scope: Scope, request: Request, params: Record<string, string>) => Promise<Response_>;
 
 /**
@@ -61,7 +61,7 @@ type ScopedHandler = (scope: Scope, request: Request, params: Record<string, str
  * Cross-team reads answer 404, not 403. A 403 confirms the record exists, which is a finding in itself; the
  * caller is told nothing about what they cannot see.
  */
-async function resolveScope(context: KernelContext, request: Request, params: Record<string, string>, viaTeamId?: string): Promise<{ ok: true; scope: Scope } | { ok: false; response: Response_ }> {
+async function resolveScope(context: KernelContext, request: Request, params: Record<string, string>, action: PolicyAction, viaTeamId?: string): Promise<{ ok: true; scope: Scope } | { ok: false; response: Response_ }> {
   const auth = await authorize(context, request);
   if (auth.ok === false) return { ok: false, response: auth.response };
   // #177: the verified claims resolve to a **person**, and membership is read from the person. Keying teams
@@ -83,21 +83,44 @@ async function resolveScope(context: KernelContext, request: Request, params: Re
     teamId = found.value.teamId;
   }
   if (teamId === undefined) return { ok: false, response: badRequest('this operation needs a team or an instance the caller belongs to') };
-  if (!teams.includes(teamId)) {
-    // Same 404 whether the resource exists or not, so the answer cannot be probed for membership.
-    return { ok: false, response: { status: 404, body: { error: 'not-found', message: 'no such resource for this principal' } } };
+  // One decision, from one table. Membership used to be the whole answer here, which made owner and member
+  // identical and left D43's owner-only destroy nowhere to live.
+  const membership = await context.store.getTeamMember(teamId, person.id);
+  const verdict = decide({ action, membership: membership.ok ? { role: membership.value.role } : null });
+  if (verdict.ok === false) {
+    // 404 for a non-member, 403 for an under-roled one: the first protects existence, the second is advice
+    // the caller is entitled to because they can already see the resource.
+    return { ok: false, response: { status: verdict.status, body: { error: verdict.error.code, message: reasonOf(verdict.error) } } };
   }
-  return { ok: true, scope: { context, claims: auth.claims, personId: person.id, teamId } };
+  return { ok: true, scope: { context, claims: auth.claims, personId: person.id, role: verdict.role, teamId } };
+}
+
+/**
+ * Which operation authorises as what. Populated by `scoped()` at build time rather than maintained by hand,
+ * so the route-table test can assert coverage over the routes that actually exist -- a hand-written list would
+ * silently keep passing after someone added a route and forgot to add it here, which is the exact mistake this
+ * table is meant to prevent.
+ */
+export const OPERATION_ACTIONS = new Map<string, PolicyAction>();
+
+/** Record what an operation authorises as. `scoped()` does this for its own routes; the handful of handlers
+ *  that resolve a team from a body, or filter a list instead of gating one resource, register explicitly --
+ *  otherwise the coverage test would pass for the routes that happen to use the wrapper and ignore the rest. */
+function actionFor(operationId: string, action: PolicyAction): void {
+  OPERATION_ACTIONS.set(operationId, action);
 }
 
 /** Wraps a handler so the scope is resolved before it runs. Team-scoped routes are built with this only. */
-function scoped(method: string, path: string, operationId: string, handler: ScopedHandler): RouteDefinition {
+function scoped(method: string, path: string, operationId: string, action: PolicyAction, handler: ScopedHandler): RouteDefinition {
+  actionFor(operationId, action);
   return {
     method,
     path,
     operationId,
     handle: async (request, params, context) => {
-      const resolved = await resolveScope(context, request, params);
+      // No default action: a new route cannot exist without naming what it authorises. That is the whole
+      // difference between a policy and a habit, and the route-table test enforces the naming.
+      const resolved = await resolveScope(context, request, params, action);
       if (resolved.ok === false) return resolved.response;
       return handler(resolved.scope, request, params);
     },
@@ -106,6 +129,14 @@ function scoped(method: string, path: string, operationId: string, handler: Scop
 
 export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
   const now = () => nowOf(deps);
+
+  // Registered here rather than inside a handler, so the coverage assertion sees the surface that exists
+  // instead of the surface that happened to be exercised first. These are the operations that resolve a team
+  // from a body, or filter a list by membership, instead of going through `scoped()` -- nothing else would
+  // record them, and an unlabelled operation is indistinguishable from an unguarded one.
+  actionFor('createInstance', 'instance.create');
+  actionFor('listInstances', 'instance.read');
+  actionFor('listAudit', 'audit.read');
 
   const core: ExtensionDescriptor = {
     id: 'core',
@@ -176,6 +207,9 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
       {
         method: 'GET', path: '/api/v1/instances', operationId: 'listInstances',
         handle: async (request, _params, context) => {
+          // A filtered read of the caller's own teams. It still names its action, because an unlabelled
+          // operation is indistinguishable from an unguarded one.
+          actionFor('listInstances', 'instance.read');
           const auth = await authorize(context, request);
           if (auth.ok === false) return auth.response;
           const resolved = await context.store.resolvePerson({ issuer: auth.claims.issuer, subject: auth.claims.subject });
@@ -190,6 +224,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
       {
         method: 'POST', path: '/api/v1/instances', operationId: 'createInstance',
         handle: async (request, params, context) => {
+          actionFor('createInstance', 'instance.create');
           const parsed = bodyOf<{ teamId?: unknown; name?: unknown; platform?: unknown }>(request);
           if (parsed.ok === false) return badRequest(parsed.error);
           const input = InstanceSchema.pick({ teamId: true, name: true, platform: true }).safeParse(parsed.value ?? {});
@@ -197,7 +232,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
           // Membership is checked against the team named in the body, which resolveScope cannot read from
           // params. Passing it explicitly keeps the decision in one place: the caller may act for that team or
           // get the same 404 as if the team did not exist.
-          const resolved = await resolveScope(context, request, params, input.data.teamId);
+          const resolved = await resolveScope(context, request, params, 'instance.create', input.data.teamId);
           if (resolved.ok === false) return resolved.response;
           const created = await context.store.createInstance(input.data);
           if (created.ok === false) return { status: 400, body: { error: created.code, message: reasonOf(created) } };
@@ -232,13 +267,13 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
           });
         },
       },
-      scoped('GET', '/api/v1/instances/{instanceId}', 'getInstance', async (scope, _request, params) => {
+      scoped('GET', '/api/v1/instances/{instanceId}', 'getInstance', 'instance.read', async (scope, _request, params) => {
         const found = await scope.context.store.getInstance(params.instanceId ?? '');
         // resolveScope already proved the instance exists and is the caller's team's; a mismatch here means the
         // row went away mid-request, which is a 404 like any other missing record.
         return found.ok ? send('getInstance', 200, found.value) : notFound('instance', params.instanceId ?? '');
       }),
-      scoped('PUT', '/api/v1/instances/{instanceId}/plan', 'putPlan', async (scope, request, params) => {
+      scoped('PUT', '/api/v1/instances/{instanceId}/plan', 'putPlan', 'instance.plan.write', async (scope, request, params) => {
         const parsed = bodyOf<{ plan?: unknown }>(request);
         if (parsed.ok === false) return badRequest(parsed.error);
         const plan = parsed.value?.plan;
@@ -262,7 +297,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
     id: 'dispatches',
     requires: ['store', 'identity'],
     routes: [
-      scoped('POST', '/api/v1/instances/{instanceId}/dispatches', 'createDispatch', async (scope, request, params) => {
+      scoped('POST', '/api/v1/instances/{instanceId}/dispatches', 'createDispatch', 'instance.dispatch', async (scope, request, params) => {
         const instanceId = params.instanceId ?? '';
         const plan = await scope.context.store.getPlan(instanceId);
         if (plan.ok === false) return notFound('plan', instanceId);
@@ -335,7 +370,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
           return send('postAttestation', 202, { accepted: true, dispatchId: recorded.value.dispatchId, result: recorded.value.result });
         },
       },
-      scoped('GET', '/api/v1/instances/{instanceId}/latest-attestation', 'getLatestAttestation', async (scope, _request, params) => {
+      scoped('GET', '/api/v1/instances/{instanceId}/latest-attestation', 'getLatestAttestation', 'instance.read', async (scope, _request, params) => {
         const latest = await scope.context.store.latestAttestation(params.instanceId ?? '');
         return latest.ok ? send('getLatestAttestation', 200, latest.value) : notFound('attestation', params.instanceId ?? '');
       }),
@@ -438,7 +473,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
           return send('listAvailableCapabilities', 200, [...seen.values()]);
         },
       },
-      scoped('POST', '/api/v1/instances/{instanceId}/capability', 'publishCapability', async (scope, request, params) => {
+      scoped('POST', '/api/v1/instances/{instanceId}/capability', 'publishCapability', 'capability.publish', async (scope, request, params) => {
         const parsed = bodyOf<{ capability?: unknown; outputs?: unknown }>(request);
         if (parsed.ok === false) return badRequest(parsed.error);
         const capability = parsed.value?.capability;
@@ -449,7 +484,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
         await scope.context.store.appendAudit({ actorKind: 'user', actorRef: scope.personId, action: 'capability.publish', target: params.instanceId ?? '', detail: { capability } });
         return send('publishCapability', 200, published.value);
       }),
-      scoped('PUT', '/api/v1/instances/{instanceId}/capability/{capability}/shares', 'shareCapability', async (scope, request, params) => {
+      scoped('PUT', '/api/v1/instances/{instanceId}/capability/{capability}/shares', 'shareCapability', 'capability.share', async (scope, request, params) => {
         const parsed = bodyOf<{ toTeamId?: unknown }>(request);
         if (parsed.ok === false) return badRequest(parsed.error);
         const toTeamId = parsed.value?.toTeamId;
@@ -459,7 +494,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
         await scope.context.store.appendAudit({ actorKind: 'user', actorRef: scope.personId, action: 'capability.share', target: params.instanceId ?? '', detail: { capability: params.capability ?? '', toTeamId } });
         return send('shareCapability', 200, shared.value);
       }),
-      scoped('DELETE', '/api/v1/instances/{instanceId}/capability/{capability}/shares/{toTeamId}', 'revokeCapabilityShare', async (scope, _request, params) => {
+      scoped('DELETE', '/api/v1/instances/{instanceId}/capability/{capability}/shares/{toTeamId}', 'revokeCapabilityShare', 'capability.share', async (scope, _request, params) => {
         // The team is in the path, not a body: the transport does not read DELETE bodies, and a revoke that
         // cannot say which share it means is a foot-gun rather than a convenience.
         const toTeamId = params.toTeamId;
@@ -469,10 +504,10 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
         await scope.context.store.appendAudit({ actorKind: 'user', actorRef: scope.personId, action: 'capability.revoke', target: params.instanceId ?? '', detail: { capability: params.capability ?? '', toTeamId } });
         return send('revokeCapabilityShare', 200, { revoked: true });
       }),
-      scoped('GET', '/api/v1/instances/{instanceId}/bindings', 'listBindings', async (scope, _request, params) => {
+      scoped('GET', '/api/v1/instances/{instanceId}/bindings', 'listBindings', 'instance.read', async (scope, _request, params) => {
         return send('listBindings', 200, await scope.context.store.listBindings(params.instanceId ?? ''));
       }),
-      scoped('PUT', '/api/v1/instances/{instanceId}/bindings/{capability}', 'bindCapability', async (scope, request, params) => {
+      scoped('PUT', '/api/v1/instances/{instanceId}/bindings/{capability}', 'bindCapability', 'capability.bind', async (scope, request, params) => {
         const parsed = bodyOf<{ providerInstanceId?: unknown; destinations?: unknown }>(request);
         if (parsed.ok === false) return badRequest(parsed.error);
         const providerInstanceId = parsed.value?.providerInstanceId;
@@ -497,13 +532,13 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
         await scope.context.store.appendAudit({ actorKind: 'user', actorRef: scope.personId, action: 'capability.bind', target: consumer.value.id, detail: { capability, providerInstanceId } });
         return send('bindCapability', 200, bound.value);
       }),
-      scoped('DELETE', '/api/v1/instances/{instanceId}/bindings/{capability}', 'unbindCapability', async (scope, _request, params) => {
+      scoped('DELETE', '/api/v1/instances/{instanceId}/bindings/{capability}', 'unbindCapability', 'capability.bind', async (scope, _request, params) => {
         const removed = await scope.context.store.unbindCapability(params.instanceId ?? '', params.capability ?? '');
         if (removed.ok === false) return { status: removed.code === 'not-found' ? 404 : 400, body: { error: removed.code, message: reasonOf(removed) } };
         await scope.context.store.appendAudit({ actorKind: 'user', actorRef: scope.personId, action: 'capability.unbind', target: params.instanceId ?? '', detail: { capability: params.capability ?? '' } });
         return { status: 204, body: undefined };
       }),
-      scoped('GET', '/api/v1/instances/{instanceId}/consumers', 'listConsumers', async (scope, _request, params) => {
+      scoped('GET', '/api/v1/instances/{instanceId}/consumers', 'listConsumers', 'instance.read', async (scope, _request, params) => {
         // The deletion-guard answer (D43): refuse a destroy while this is non-empty.
         return send('listConsumers', 200, await scope.context.store.listConsumers(params.instanceId ?? ''));
       }),

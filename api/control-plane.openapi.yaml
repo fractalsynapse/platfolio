@@ -596,6 +596,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
   /api/v1/instances/{instanceId}/capability/{capability}/shares/{toTeamId}:
@@ -629,6 +631,8 @@ paths:
                   revoked: { type: boolean, const: true }
         '401':
           $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -758,6 +762,16 @@ components:
         attacker's header claims (algorithm-confusion is the reason the allowed set is checked, not assumed).
 
   responses:
+    Forbidden:
+      description: |
+        The caller is a member of the team and can see the resource, but the action needs a higher role (#178).
+        403 rather than the 404 used for non-members: hiding existence protects people who have no right to
+        know it, and is useless advice to someone who already does.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: conflict, message: 'capability.share requires the owner role on this team' }
+
     NotFound:
       description: |
         No such resource, or a resource belonging to a team the caller is not a member of -- one answer for

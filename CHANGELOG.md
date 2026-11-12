@@ -7,6 +7,31 @@ change; entries describe merged intent, not aspirations.
 
 ### Added
 
+- **The policy module (#178, D43).** `packages/contracts/src/policy.ts`: one table mapping each action to its
+  minimum role, and one `decide()` that every scoped route asks. Handlers no longer compare roles, so `owner`
+  and `member` finally differ -- `capability.share` and `instance.destroy` are owner-only, and the second is
+  asserted now even though the destroy route does not exist yet, so it cannot ship looser than the decision.
+  Two different answers by design: a non-member gets 404 (existence is not theirs to learn), an under-roled
+  member gets 403 naming the role that would suffice -- they can already see the resource, so advice beats a
+  mystery.
+- A build-time action registry lets a test walk the routes and assert **every operation names an action** and
+  **every action in the table is exercised**, so the coverage is over the surface that exists rather than over a
+  hand-kept list that drifts.
+- **D46** recorded: platform email goes through a configured **remote SMTP provider** in staging/production and
+  **Mailpit** in the local Compose stack, with sending asserted through Mailpit's message API in tests
+  (#187). Option A stands for identity -- the IdP asserts whether an address is verified, so platfolio does not
+  build its own proof-of-ownership flow; an invitation is an offer of membership, not evidence of an address.
+
+### Fixed
+
+- Two actions had no registered route (`instance.create`, `audit.read`) because their handlers resolve a team
+  from a body or filter a list instead of going through the wrapper -- caught by the coverage test the change
+  itself introduced. Registration first lived inside the handler body, so it only recorded actions whose
+  endpoints a test happened to hit: a green assertion that depended on test order.
+
+
+### Added
+
 - **Persons and identities (#177, D44).** `persons` and `identities (issuer, subject) → person_id`
   (migration `007`), and membership rekeyed from a bare `sub` onto the person. Two realms that mint the same
   subject string are now provably two people: the conformance suite asserts it against **both** drivers, which

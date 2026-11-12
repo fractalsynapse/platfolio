@@ -26892,6 +26892,21 @@ var defaults = import_lib.default.defaults;
 var nonce = "a".repeat(32);
 var planHash = "b".repeat(64);
 
+// packages/contracts/src/policy.ts
+var PolicyActionSchema = external_exports.enum([
+  "instance.read",
+  "instance.create",
+  "instance.plan.write",
+  "instance.dispatch",
+  "instance.destroy",
+  "capability.publish",
+  "capability.share",
+  "capability.bind",
+  "audit.read",
+  "team.member.manage",
+  "team.invite"
+]);
+
 // apps/managed-action/src/runner.ts
 var RELEASE = { version: process.env.PLATFOLIO_ACTION_VERSION ?? "0.0.0-dev", commitSha: process.env.PLATFOLIO_ACTION_SHA ?? "0".repeat(40), imageDigest: `sha256:${"0".repeat(64)}` };
 function readIntent(env) {
