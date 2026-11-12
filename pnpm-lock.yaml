@@ -239,9 +239,6 @@ importers:
       '@platfolio/contracts':
         specifier: workspace:*
         version: link:../contracts
-      '@platfolio/manifest':
-        specifier: workspace:*
-        version: link:../manifest
       cordis:
         specifier: 4.0.0-rc.12
         version: 4.0.0-rc.12

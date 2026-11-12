@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { InfraPlanSchema, planIssues } from '@platfolio/contracts';
-import { RailwayInfraProvider, samplePlan } from '@platfolio/contracts';
+import { RailwayInfraProvider } from '@platfolio/contracts';
 import { RailwayMock } from '../../../packages/contracts/test/railway-mock.ts';
 import { buildPlan, parse } from '../src/index.ts';
 

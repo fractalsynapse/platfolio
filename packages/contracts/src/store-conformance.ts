@@ -1,5 +1,5 @@
 import { AttestationSchema, type Attestation } from './attestation.ts';
-import { RepoConnectionSchema, reasonOf, type CapabilityOffer, type DispatchRecord, type Store, type StoreError, type StoreResult } from './persistence.ts';
+import { RepoConnectionSchema, reasonOf, type DispatchRecord, type Store, type StoreError, type StoreResult } from './persistence.ts';
 import { checkBindingPolicy } from './binding-policy.ts';
 
 /**
@@ -210,6 +210,9 @@ const expectErr = (result: { ok: boolean; value?: unknown } & Partial<StoreError
     const available = await store.availableOffersForTeam(team.id, 'identity');
     if (available.length !== 1) return { status: 'fail', detail: `in-team discovery gave ${String(available.length)} offers` };
     const republished = mustOk(await store.publishCapability({ instanceId: offer.instanceId, teamId: team.id, capability: 'identity', outputs: [{ output: 'issuer', kind: 'url', state: 'issued-and-placed' }] }), 'republish');
+    if (republished.instanceId !== offer.instanceId || republished.capability !== offer.capability) {
+      return { status: 'fail', detail: `republish returned a different offer: ${JSON.stringify(republished)}` };
+    }
     const offers = await store.listCapabilityOffers(team.id);
     if (offers.length !== 1) return { status: 'fail', detail: `republish accumulated ${String(offers.length)} offers` };
     return { status: 'pass', detail: 'bound, both directions listed, in-team discovery works, republish is idempotent' };

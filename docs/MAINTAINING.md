@@ -124,6 +124,16 @@ npx -y tsx scripts/check-contracts.ts         # contracts:check
 CI installs its own pnpm and is unaffected, so a locally unverifiable wrapper never excuses a merge: run the
 scripts directly, or don't merge. Record which you did.
 
+Two corrections to that, learned the hard way:
+
+- **pnpm can work here** when all of its writable state is inside the workspace, which is what a lockfile update
+  needs: `TMPDIR="$PWD/.tmp" npm_config_cache="$PWD/.cache/npm" npx -y pnpm@12.4.2 install --lockfile-only
+  --store-dir "$PWD/.cache/pnpm-store"`. The failures were the read-only default store *and* my own wrong flag —
+  `--lock-only` is not `--lockfile-only`, and pnpm's "did not run" is not a store problem.
+- **Dead code cannot come back**: `noUnusedLocals` and `noUnusedParameters` are on in the root `tsconfig.json`,
+  found after the sweep listed 29 dead declarations. An intentionally unused parameter is prefixed `_` — the
+  convention the compiler honours, rather than a comment claiming the value is deliberate.
+
 ## Release policy
 
 Integration into `staging` does not close an implementation issue. When a release is requested:

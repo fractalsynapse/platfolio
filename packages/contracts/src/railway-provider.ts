@@ -1213,7 +1213,7 @@ export class RailwayInfraProvider implements InfraProvider {
      * deleted inside the window. One retry with a short pause keeps the surface honest -- if both attempts
      * fail, the reason still lands in DeleteResult.failures rather than in an empty catch.
      */
-    private async deleteServiceWithRetry(projectId: string, environment: EnvironmentNode, service: ServiceNode, credential: RailwayCredential): Promise<void> {
+    private async deleteServiceWithRetry(_projectId: string, environment: EnvironmentNode, service: ServiceNode, credential: RailwayCredential): Promise<void> {
       let lastError: unknown;
       for (let attempt = 0; attempt < 2; attempt += 1) {
         try {
@@ -1261,7 +1261,7 @@ export class RailwayInfraProvider implements InfraProvider {
    * is the only stable identity a plan can match on. An unreadable answer is empty rather than an error: a
    * volume is created in that case, and the duplicate it might have caused is reported by the read-back below.
    */
-  private async volumeInstances(projectId: string, environmentId: string, credential: RailwayCredential): Promise<{ volumeId: string; volumeName: string; serviceId: string; mountPath: string }[]> {
+  private async volumeInstances(_projectId: string, environmentId: string, credential: RailwayCredential): Promise<{ volumeId: string; volumeName: string; serviceId: string; mountPath: string }[]> {
     const data = await this.transport.graphql<{ environment: { volumeInstances?: { edges: { node: { serviceId?: string | null; mountPath?: string | null; volumeId?: string | null; volume?: { name?: string | null } | null } }[] } | null } | null }>({
       operation: 'environment.volumeInstances',
       credential,

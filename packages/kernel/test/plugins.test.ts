@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { Context, Service } from 'cordis';
+import { Context } from 'cordis';
 import { createIdentityFixture, defaultIdentityConfig, runIdentityConformance, signToken } from '@platfolio/contracts';
 import { createKernel, disposeKernel } from '../src/app.ts';
 import { IdentityService } from '../src/identity.ts';

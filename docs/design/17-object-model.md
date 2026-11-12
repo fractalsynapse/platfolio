@@ -74,9 +74,12 @@ Ordered by how much damage they do if we build the CLI and API on top of them as
   instead of deleting them.
 
 
-**2. `Instance.platform` is a template id in a field called platform.** Rename to `template`, and add
-`templateRef` (repository + commit SHA) so the origin is recorded the way the action's pin is -- by commit, not
-by a movable tag (D30 law 3). Cheap now, expensive after the CLI exposes the field name.
+**2. `Instance.platform` is a template id in a field called platform.** → **Done (#180, D45).** The field is
+   `template`, and `templateRef: { repo, commitSha }` records the origin -- `commitSha` constrained to a full
+   lowercase hex commit by schema *and* database CHECK, because a movable tag must not be stored as a fixed
+   anchor (D30 law 3). Names are slugs, unique per team (`instances (team_id, name)`), enforced in both drivers,
+   and an old payload carrying `platform` is refused rather than ignored. Same collision fixed in
+   `InfraPlan.manifestRef`, which the provider is written against.
 
 **3. Membership is keyed on a bare `sub` from a single issuer.** → **Done (#177).** `persons` and
   `identities (issuer, subject) → person_id` exist (migration `007`), membership references the person, and the
@@ -100,10 +103,13 @@ by a movable tag (D30 law 3). Cheap now, expensive after the CLI exposes the fie
   exists, not over a hand-maintained list that drifts.
 
 
-**5. State is per instance; reality is per environment.** `Instance.state` is one value, while attestation
-already carries `environment`, and a staging that is `degraded` with a production that is `live` is a normal
-Tuesday. Add environment-scoped state (instance + environment + state + applied plan hash) and keep an
-instance-level rollup for lists. If the CLI ships reading one field, it has to keep reading it forever.
+**5. State is per instance; reality is per environment.** → **Done (#179).** `instance_environments
+   (`(instance_id, environment)` → state, applied plan hash, last attestation, migration `009`) is written by
+   the controller from each attestation's own environment, and `Instance.state` is now a rollup with a stated
+   rule: production's state when a production row exists, otherwise the worst environment, `pending` when there
+   are none -- absence is not health. `rollupState()` lives in contracts, not in whichever driver noticed it
+   first, and its severity order is total (`degraded` outranks `live`, not `failed`; `removed` is terminal, not
+   merely bad). Instance responses carry `environments`, so no client has to guess which truth it is reading.
 
 Absent but not a defect: entitlements and limits (M4), members' invitations, and the transfer/export path
 (MVP item 9). Listed so nobody mistakes "not built yet" for "the model forbids it".

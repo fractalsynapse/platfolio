@@ -311,8 +311,3 @@ export interface TemplateRepositoryRequest {
   includeAllBranches?: boolean;
 }
 
-export const TEMPLATE_REPO_BODY_CONSTRAINTS = {
-  /** `git_ref` selects the template's branch/tag/SHA; omitted means the template's default branch. */
-  gitRef: 'optional',
-  owner: 'required for an installation token, because the app must be installed on the target owner',
-} as const;

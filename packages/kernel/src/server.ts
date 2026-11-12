@@ -1,5 +1,5 @@
 import { Context, Service } from 'cordis';
-import { createServer, type IncomingMessage, type RequestListener, type ServerResponse } from 'node:http';
+import { createServer, type IncomingMessage, type RequestListener } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { z } from 'zod';
 

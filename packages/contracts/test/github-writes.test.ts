@@ -55,7 +55,7 @@ test('a binary blob is refused before any request leaves', async () => {
 });
 
 test('a refused write reports the endpoint, status and GitHub reason', async () => {
-  const fetchImpl = (async (url: string, init?: { method?: string }) => ({
+  const fetchImpl = (async (_url: string, _init?: { method?: string }) => ({
     ok: false, status: 422,
     async json() { return {}; },
     async text() { return '{"message":"Validation Failed"}'; },
@@ -67,7 +67,7 @@ test('a refused write reports the endpoint, status and GitHub reason', async () 
 test('environment presence is a read, never a create (measured: creation needs administration)', async () => {
   // 404 is what GitHub answers for an environment that does not exist; the harness default of 204 would have
   // made this test assert an imaginary response code.
-  const { sent, writes } = harness({ 'GET /repos/o/r/environments/production': () => ({}) });
+  const { sent } = harness({ 'GET /repos/o/r/environments/production': () => ({}) });
   const notFound = new GithubRepositoryWrites({
     token: 't',
     fetch: (async () => ({ ok: false, status: 404, async json() { return {}; }, async text() { return ''; } })) as unknown as typeof globalThis.fetch,

@@ -36,7 +36,6 @@ const DOCS = /'((?:query|mutation)\s+[^']*?)'/g;
 /** Field names used at each depth, plus the args each was given -- parsed with targeted regexes
  * rather than a hand-rolled GraphQL parser, because a gate that misparses is worse than none. */
 const FIELD_WITH_ARGS = /\b([A-Za-z_][A-Za-z0-9_]*)\s*\(([^()]*)\)/g;
-const ROOT_FIELD = /^\s*(?:query|mutation)\s*(?:[A-Za-z0-9_]+)?\s*(?:\(([^)]*)\))?\s*\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*(\(|\{)/;
 const VARIABLE_TYPES = /\$([A-Za-z0-9_]+)\s*:\s*\[?([A-Za-z_][A-Za-z0-9_!]*)\]?!?/g;
 
 function namedOf(ref: TypeRef | undefined): string | null {
@@ -121,7 +120,7 @@ function validateDoc(doc: string, schema: Schema, file: string, problems: string
 }
 
 /** Types reachable from the root field's selection, to a small depth -- enough to name most fields. */
-function collectReachableTypes(rootName: string, field: FieldInfo): Set<string> {
+function collectReachableTypes(rootName: string, _field: FieldInfo): Set<string> {
   const seen = new Set<string>([rootName]);
   const queue: Array<{ typeName: string; depth: number }> = [{ typeName: rootName, depth: 0 }];
   while (queue.length) {

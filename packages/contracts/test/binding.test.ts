@@ -91,6 +91,10 @@ test('the team summary is what lets a UI say "two of three consumers are stale"'
   assert.deepEqual([row!.ok, row!.total], [3, 3]);
   const stale = summarise([base, { ...other, providerGeneration: '00000000' }, { ...fresh, providerGeneration: '00000000' }], [IDENTITY]);
   assert.equal(stale[0]!.attention.length, 2);
+  // The fixture an earlier version of this test built and then never used: when the supplier's value
+  // changes, every consumer of it belongs in attention -- that is the summary's whole reason to exist.
+  const rotatedRow = summarise([base, other, fresh], rotated);
+  assert.equal(rotatedRow[0]!.attention.length, 3, 'a rotated supplier value should surface on every consumer of it');
   assert.equal(stale[0]!.ok, 1);
 });
 

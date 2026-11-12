@@ -44,8 +44,6 @@ function servicesOf(m: Manifest): [string, ServiceSpec][] {
 /** Post-schema rules the manifest spec says the schema alone cannot express. */
 export function validateManifest(unknown: unknown): Issue[] {
   const issues: Issue[] = [];
-  const raw = typeof unknown === 'string' ? unknown : JSON.stringify(unknown);
-
   const parsed = ManifestSchema.safeParse(typeof unknown === 'string' ? {} : unknown);
   if (!parsed.success) {
     for (const i of parsed.error.issues) {
