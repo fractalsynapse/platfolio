@@ -42,8 +42,24 @@ export type InstanceState = z.infer<typeof InstanceStateSchema>;
 export const InstanceSchema = z.object({
   id: z.string().min(1),
   teamId: z.string().min(1),
-  name: z.string().min(1).max(80),
-  platform: z.string().min(1),
+  /**
+   * Addressed `team/name`, like a repository (D45). Slug rules rather than free text: a name that needs
+   * quoting, escaping, or a disambiguating id is a name that will be broken somewhere downstream -- a URL, a
+   * CLI argument, a shell. Uniqueness per team is enforced by a database constraint and by the schema check
+   * below, so the in-memory double cannot be the only one enforcing it.
+   */
+  name: z.string().min(1).max(80).regex(/^[a-z0-9]([a-z0-9-]{0,78}[a-z0-9])?$/, 'names are lowercase slugs: a-z, 0-9 and single hyphens, no leading or trailing hyphen'),
+  /**
+   * The template this instance was created from. This column used to be called `platform` while storing a
+   * template identifier, which is the vocabulary collision D45 removes: three different things were called
+   * "platform", and one of them was a public API field.
+   */
+  template: z.string().min(1),
+  /** Where the template came from, pinned by commit -- a tag is not a trust anchor (D30 law 3). */
+  templateRef: z.object({
+    repo: z.string().min(3).max(200),
+    commitSha: z.string().regex(/^[0-9a-f]{40}$/, 'record the full commit, not a movable tag'),
+  }).strict().optional(),
   state: InstanceStateSchema,
   /** The provider is a swappable capability (D1); the instance records which one it is on. */
   provider: z.enum(['railway', 'fake']).default('railway'),
@@ -250,6 +266,43 @@ export const IdentitySchema = z.object({
 export type Identity = z.infer<typeof IdentitySchema>;
 
 
+/**
+ * One environment's state. The instance keeps a rollup field for compatibility and for "is this thing
+ * working at all", but the honest answer is per environment: staging can be degraded while production is
+ * live, and a single value forces one of those two lies (#179).
+ */
+export const InstanceEnvironmentStateSchema = z.object({
+  instanceId: z.string().min(1),
+  environment: z.string().min(1).max(60),
+  state: InstanceStateSchema,
+  appliedPlanHash: z.string().optional(),
+  attestationId: z.string().optional(),
+  updatedAt: z.string().min(1),
+}).strict();
+export type InstanceEnvironmentState = z.infer<typeof InstanceEnvironmentStateSchema>;
+
+/**
+ * Severity order for the rollup, worst last. A total order rather than a boolean, because "is it healthy"
+ * has more than two answers and the rollup must be a rule, not a vibe: `degraded` outranks `live` but not
+ * `failed`, and a `removed` environment is terminal rather than merely bad.
+ */
+const SEVERITY: InstanceState[] = ['live', 'paused', 'provisioning', 'pending', 'deprovisioning', 'degraded', 'failed', 'removed'];
+
+/**
+ * The rollup rule, stated because it is a product decision and not arithmetic.
+ *
+ * Production is what the tenant's customers touch, so its state is the headline; without a production row
+ * yet, the worst environment wins, because an unverified staging failure is worth surfacing before anything
+ * is called healthy. A row that does not exist contributes nothing -- absence is not health, hence the
+ * `pending` default at the caller.
+ */
+export function rollupState(rows: readonly InstanceEnvironmentState[], productionEnvironment = 'production'): InstanceState {
+  if (rows.length === 0) return 'pending';
+  const production = rows.find((r) => r.environment === productionEnvironment);
+  if (production) return production.state;
+  return rows.reduce((worst, r) => (SEVERITY.indexOf(r.state) > SEVERITY.indexOf(worst) ? r.state : worst), 'live' as InstanceState);
+}
+
 export type StoreError =
   | { code: 'not-found'; what: string; id: string }
   | { code: 'conflict'; reason: string }
@@ -274,7 +327,7 @@ export function reasonOf(error: StoreError): string {
 }
 
 export interface NewTeam { name: string }
-export interface NewInstance { teamId: string; name: string; platform: string; state?: InstanceState; provider?: 'railway' | 'fake' }
+export interface NewInstance { teamId: string; name: string; template: string; templateRef?: { repo: string; commitSha: string }; state?: InstanceState; provider?: 'railway' | 'fake' }
 
 /**
  * The capability. Deliberately free of `query`, `transaction`, `pool` and `row` -- a second implementation
@@ -336,6 +389,16 @@ export interface Store {
    * Membership. `put` is idempotent by (teamId, subject): re-adding a member updates the role rather than
    * accumulating rows, because an audit of "who could see this" must have one answer.
    */
+  // ---------- per-environment state (#179) ----------
+  /**
+   * Record one environment's state. The instance rollup is recomputed by the caller (or by the controller),
+   * never derived inside the driver -- a second implementation that quietly disagrees about the rollup is
+   * exactly the drift this project keeps paying to avoid.
+   */
+  setInstanceEnvironment(input: { instanceId: string; environment: string; state: InstanceState; appliedPlanHash?: string; attestationId?: string }): Promise<StoreResult<InstanceEnvironmentState>>;
+  getInstanceEnvironment(instanceId: string, environment: string): Promise<StoreResult<InstanceEnvironmentState>>;
+  listInstanceEnvironments(instanceId: string): Promise<InstanceEnvironmentState[]>;
+
   // ---------- persons and identities (#177, D44) ----------
   /**
    * Find or create the person behind a verified claim pair. Idempotent on `(issuer, subject)`, and called on

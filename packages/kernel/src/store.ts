@@ -95,6 +95,9 @@ export class StoreService extends Service<z.infer<typeof StoreConfigSchema>> {
   listBindings(...args: Parameters<Store['listBindings']>) { return this.inner.listBindings(...args); }
   listConsumers(...args: Parameters<Store['listConsumers']>) { return this.inner.listConsumers(...args); }
   unbindCapability(...args: Parameters<Store['unbindCapability']>) { return this.inner.unbindCapability(...args); }
+  setInstanceEnvironment(...args: Parameters<Store['setInstanceEnvironment']>) { return this.inner.setInstanceEnvironment(...args); }
+  getInstanceEnvironment(...args: Parameters<Store['getInstanceEnvironment']>) { return this.inner.getInstanceEnvironment(...args); }
+  listInstanceEnvironments(...args: Parameters<Store['listInstanceEnvironments']>) { return this.inner.listInstanceEnvironments(...args); }
   putPlan(instanceId: string, plan: unknown, planHash: string) { return this.inner.putPlan(instanceId, plan, planHash); }
   getPlan(instanceId: string) { return this.inner.getPlan(instanceId); }
   createDispatch(input: Parameters<Store['createDispatch']>[0]) { return this.inner.createDispatch(input); }

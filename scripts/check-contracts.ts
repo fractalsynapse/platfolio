@@ -71,7 +71,29 @@ const update = process.argv.includes('--update');
 const previous = fs.existsSync(BASELINE) ? fs.readFileSync(BASELINE, 'utf8') : '';
 const previousSurface = previous.split('\n```txt\n')[1]?.split('\n```')[0] ?? '';
 
+// Classify the change before touching the baseline. `--update` used to write and exit 0 whatever the diff
+// contained, so a breaking removal and an additive line looked identical in the log: the tool's silence read
+// as success, and the version decision went unrecorded. Removals must now be acknowledged with a reason --
+// "additive -> minor, removal -> major" is only a rule if something enforces which side a change falls on.
+const classify = (from: string, to: string) => {
+  const prev = new Set(from.split('\n').map((l) => l.trim()).filter(Boolean));
+  const next = new Set(to.split('\n').map((l) => l.trim()).filter(Boolean));
+  return { added: [...next].filter((l) => !prev.has(l)), removed: [...prev].filter((l) => !next.has(l)) };
+};
+const ack = process.argv.find((a) => a.startsWith('--ack-breaking='))?.slice('--ack-breaking='.length);
+const diff = classify(previousSurface, surface);
+
+if (update && diff.removed.length > 0 && !ack) {
+  console.error(`${String(diff.removed.length)} public surface line(s) REMOVED or renamed -- that is a major bump, not a baseline refresh:`);
+  for (const line of diff.removed.slice(0, 12)) console.error(`  - ${line.slice(0, 140)}`);
+  console.error('\nIf intentional: tsx scripts/check-contracts.ts --update --ack-breaking="<why this is acceptable now>"');
+  process.exit(1);
+}
+
 if (update) {
+  console.log(diff.removed.length > 0
+    ? `BREAKING accepted: ${String(diff.removed.length)} line(s) removed -> derived bump MAJOR. Reason: ${ack ?? 'NOT STATED'}`
+    : `additive only: ${String(diff.added.length)} line(s) added -> derived bump MINOR`);
   fs.mkdirSync(path.dirname(BASELINE), { recursive: true });
   fs.writeFileSync(BASELINE, `# contracts public surface
 

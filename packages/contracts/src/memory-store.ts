@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { Attestation } from './attestation.ts';
-import { AttestationRecordSchema, AuditEntrySchema, BindingRecordSchema, CapabilityOfferSchema, CapabilityShareSchema, IdentitySchema, PersonSchema, TeamMemberSchema, DispatchRecordSchema, InstanceSchema, ProviderConnectionSchema, RepoConnectionSchema, TeamSchema, newId,
-  type AttestationRecord, type AuditEntry, type BindingRecord, type CapabilityOffer, type CapabilityShare, type NewBinding, type NewCapabilityOffer, type NewCapabilityShare, type DispatchRecord, type Instance, type ProviderConnection, type RepoConnection, type Store, type StoreError, type StoreResult, type Team, type TeamMember, type Identity, type Person } from './persistence.ts';
+import { AttestationRecordSchema, AuditEntrySchema, BindingRecordSchema, CapabilityOfferSchema, CapabilityShareSchema, IdentitySchema, PersonSchema, TeamMemberSchema, DispatchRecordSchema, InstanceEnvironmentStateSchema, InstanceSchema, ProviderConnectionSchema, RepoConnectionSchema, TeamSchema, newId,
+  type AttestationRecord, type AuditEntry, type BindingRecord, type CapabilityOffer, type CapabilityShare, type NewBinding, type NewCapabilityOffer, type NewCapabilityShare, type DispatchRecord, type Instance, type InstanceEnvironmentState, type ProviderConnection, type RepoConnection, type Store, type StoreError, type NewInstance, type StoreResult, type Team, type TeamMember, type Identity, type Person } from './persistence.ts';
 import { reasonOf } from './persistence.ts';
 import { checkAttestationPolicy } from './dispatch-policy.ts';
 
@@ -36,6 +36,7 @@ export class MemoryStore implements Store {
   private readonly repos = new Map<string, RepoConnection>();
   private readonly providers = new Map<string, ProviderConnection>();
   private readonly dispatches = new Map<string, DispatchRecord>();
+  private readonly envStates = new Map<string, InstanceEnvironmentState>();
   private readonly plans = new Map<string, { instanceId: string; planHash: string; plan: unknown }>();
   private readonly persons = new Map<string, Person>();
   private readonly identities = new Map<string, Identity>();
@@ -82,12 +83,19 @@ export class MemoryStore implements Store {
     return [...this.teams.values()].map(copy);
   }
 
-  async createInstance(input: { teamId: string; name: string; platform: string; state?: Instance['state']; provider?: Instance['provider'] }) {
+  async createInstance(input: NewInstance) {
     if (this.closed) return this.refuse('createInstance');
     if (!this.teams.has(input.teamId)) return err({ code: 'not-found', what: 'team', id: input.teamId });
+    // Uniqueness per team, mirrored from the database's unique index (D45). If only one driver enforced it,
+    // the suite would pass on one and the other would be free to drift -- which is the failure mode the
+    // second implementation exists to catch, not one it should itself exhibit.
+    if ([...this.instances.values()].some((i) => i.teamId === input.teamId && i.name === input.name)) {
+      return err({ code: 'conflict', reason: `team ${input.teamId} already has an instance named "${input.name}"` });
+    }
     const now = this.clock();
     const admitted = admit(InstanceSchema, {
-      id: newId('inst'), teamId: input.teamId, name: input.name, platform: input.platform,
+      id: newId('inst'), teamId: input.teamId, name: input.name, template: input.template,
+      ...(input.templateRef === undefined ? {} : { templateRef: input.templateRef }),
       state: input.state ?? 'pending', provider: input.provider ?? 'railway', createdAt: now, updatedAt: now,
     }, 'instance');
     if (!admitted.accepted) return err({ code: 'conflict', reason: admitted.reason });
@@ -287,6 +295,37 @@ export class MemoryStore implements Store {
     return ok({ removed: true });
   }
 
+  async setInstanceEnvironment(input: { instanceId: string; environment: string; state: Instance['state']; appliedPlanHash?: string; attestationId?: string }) {
+    if (this.closed) return this.refuse('setInstanceEnvironment');
+    if (!this.instances.has(input.instanceId)) return err({ code: 'not-found', what: 'instance', id: input.instanceId });
+    // A patch, not a replace: a writer that mentions only the state must not silently shed the hash and the
+    // attestation the row already carried -- the rollup would then be computed from rows that lost their own
+    // provenance, and the first version of this driver did exactly that.
+    const prior = this.envStates.get(`${input.instanceId}\u0000${input.environment}`);
+    // Merged into locals first. The previous version inlined `a ?? b === undefined` inside a conditional
+    // spread, which parses as `a ?? (b === undefined)` -- a boolean -- so the field was dropped whenever the
+    // caller *did* supply it. The suite caught it; the bug was introduced by the fix for a different bug in
+    // the same three lines, which is what a gate is for.
+    const appliedPlanHash = input.appliedPlanHash ?? prior?.appliedPlanHash;
+    const attestationId = input.attestationId ?? prior?.attestationId;
+    const admitted = admit(InstanceEnvironmentStateSchema, {
+      instanceId: input.instanceId, environment: input.environment, state: input.state,
+      ...(appliedPlanHash === undefined ? {} : { appliedPlanHash }),
+      ...(attestationId === undefined ? {} : { attestationId }),
+      updatedAt: this.clock(),
+    }, 'instance environment state');
+    if (!admitted.accepted) return err({ code: 'conflict', reason: admitted.reason });
+    this.envStates.set(`${admitted.value.instanceId}\u0000${admitted.value.environment}`, admitted.value);
+    return ok(admitted.value);
+  }
+  async getInstanceEnvironment(instanceId: string, environment: string) {
+    const found = this.envStates.get(`${instanceId}\u0000${environment}`);
+    return found ? ok(copy(found)) : err({ code: 'not-found', what: 'instance environment', id: `${instanceId}/${environment}` });
+  }
+  async listInstanceEnvironments(instanceId: string) {
+    return [...this.envStates.values()].filter((e) => e.instanceId === instanceId).sort((a, b) => a.environment.localeCompare(b.environment)).map(copy);
+  }
+
   async putPlan(instanceId: string, plan: unknown, planHash: string) {
     if (this.closed) return this.refuse('putPlan');
     if (!this.instances.has(instanceId)) return err({ code: 'not-found', what: 'instance', id: instanceId });
@@ -375,6 +414,7 @@ export class MemoryStore implements Store {
     this.closed = true;
     this.teams.clear();
     this.plans.clear();
+    this.envStates.clear();
     this.members.clear();
     this.persons.clear();
     this.identities.clear();

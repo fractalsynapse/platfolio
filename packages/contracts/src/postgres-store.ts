@@ -1,7 +1,7 @@
 import { Pool, type PoolClient } from 'pg';
 import {
-  AttestationRecordSchema, AuditEntrySchema, BindingRecordSchema, CapabilityOfferSchema, CapabilityShareSchema, DispatchRecordSchema, IdentitySchema, PersonSchema, TeamMemberSchema, InstanceSchema, ProviderConnectionSchema, RepoConnectionSchema, TeamSchema, newId,
-  type AttestationRecord, type AuditEntry, type BindingRecord, type CapabilityOffer, type CapabilityShare, type NewBinding, type NewCapabilityOffer, type NewCapabilityShare, type DispatchRecord, type Instance, type ProviderConnection, type RepoConnection, type Store, type StoreError, type StoreResult, type Team, type Identity, type Person, type TeamMember,
+  AttestationRecordSchema, AuditEntrySchema, BindingRecordSchema, CapabilityOfferSchema, CapabilityShareSchema, DispatchRecordSchema, IdentitySchema, PersonSchema, TeamMemberSchema, InstanceEnvironmentStateSchema, InstanceSchema, ProviderConnectionSchema, RepoConnectionSchema, TeamSchema, newId,
+  type AttestationRecord, type AuditEntry, type BindingRecord, type CapabilityOffer, type CapabilityShare, type NewBinding, type NewCapabilityOffer, type NewCapabilityShare, type DispatchRecord, type Instance, type InstanceEnvironmentState, type ProviderConnection, type RepoConnection, type Store, type StoreError, type NewInstance, type StoreResult, type Team, type Identity, type Person, type TeamMember,
 } from './persistence.ts';
 import { reasonOf } from './persistence.ts';
 import { checkAttestationPolicy } from './dispatch-policy.ts';
@@ -145,22 +145,28 @@ export class PostgresStore implements Store {
     return admitted.accepted ? ok(admitted.value) : err({ code: 'conflict', reason: admitted.reason });
   }
 
-  async createInstance(input: { teamId: string; name: string; platform: string; state?: Instance['state']; provider?: Instance['provider'] }) {
+  async createInstance(input: NewInstance) {
     const now = new Date().toISOString();
     const admitted = admit(InstanceSchema, {
-      id: newId('inst'), teamId: input.teamId, name: input.name, platform: input.platform,
+      id: newId('inst'), teamId: input.teamId, name: input.name, template: input.template,
+      ...(input.templateRef === undefined ? {} : { templateRef: input.templateRef }),
       state: input.state ?? 'pending', provider: input.provider ?? 'railway', createdAt: now, updatedAt: now,
     }, 'instance');
     if (!admitted.accepted) return err({ code: 'conflict', reason: admitted.reason });
     const i = admitted.value;
     try {
       await this.pool.query(
-        `INSERT INTO ${this.q('instances')} (id, team_id, name, platform, state, provider, created_at, updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-        [i.id, i.teamId, i.name, i.platform, i.state, i.provider, i.createdAt, i.updatedAt]);
+        `INSERT INTO ${this.q('instances')} (id, team_id, name, template, template_repo, template_commit, state, provider, created_at, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+        [i.id, i.teamId, i.name, i.template, i.templateRef?.repo ?? null, i.templateRef?.commitSha ?? null, i.state, i.provider, i.createdAt, i.updatedAt]);
     } catch (error) {
+      const code = (error as { code?: string }).code;
       // A foreign-key violation is the referential guard the suite asserts; report it as a typed refusal.
-      if ((error as { code?: string }).code === '23503') return err({ code: 'not-found', what: 'team', id: input.teamId });
+      if (code === '23503') return err({ code: 'not-found', what: 'team', id: input.teamId });
+      // The unique index on (team_id, name) is D45's rule, and it must surface as the same typed conflict the
+      // double raises -- otherwise the two drivers answer the same collision differently, and only one of
+      // them is what production runs.
+      if (code === '23505') return err({ code: 'conflict', reason: `team ${input.teamId} already has an instance named "${input.name}"` });
       throw error;
     }
     return ok(i);
@@ -180,7 +186,9 @@ export class PostgresStore implements Store {
 
   private asInstance(row: Row): StoreResult<Instance> {
     const admitted = admit(InstanceSchema, {
-      id: row.id, teamId: row.team_id, name: row.name, platform: row.platform, state: row.state, provider: row.provider,
+      id: row.id, teamId: row.team_id, name: row.name, template: row.template,
+      ...(row.template_repo === null || row.template_commit === null ? {} : { templateRef: { repo: String(row.template_repo), commitSha: String(row.template_commit) } }),
+      state: row.state, provider: row.provider,
       ...(row.desired_plan_hash === null ? {} : { desiredPlanHash: String(row.desired_plan_hash) }),
       ...(row.last_applied_plan_hash === null ? {} : { lastAppliedPlanHash: String(row.last_applied_plan_hash) }),
       createdAt: iso(row.created_at), updatedAt: iso(row.updated_at),
@@ -486,6 +494,55 @@ export class PostgresStore implements Store {
     const row = rows[0];
     if (!row) return err({ code: 'not-found', what: 'person', id: `${issuer}/${subject}` });
     return this.getPerson(String(row.person_id));
+  }
+
+  async setInstanceEnvironment(input: { instanceId: string; environment: string; state: Instance['state']; appliedPlanHash?: string; attestationId?: string }) {
+    const admitted = admit(InstanceEnvironmentStateSchema, {
+      instanceId: input.instanceId, environment: input.environment, state: input.state,
+      ...(input.appliedPlanHash === undefined ? {} : { appliedPlanHash: input.appliedPlanHash }),
+      ...(input.attestationId === undefined ? {} : { attestationId: input.attestationId }),
+      updatedAt: new Date().toISOString(),
+    }, 'instance environment state');
+    if (!admitted.accepted) return err({ code: 'conflict', reason: admitted.reason });
+    const e = admitted.value;
+    try {
+      // Same patch semantics as the double: an omitted field keeps its previous value rather than being
+      // overwritten with null. Both drivers must agree on this or a test written against one passes while the
+      // other loses provenance silently.
+      await this.pool.query(
+        `INSERT INTO ${this.q('instance_environments')} (instance_id, environment, state, applied_plan_hash, last_attestation_id, updated_at)
+         VALUES ($1,$2,$3,$4,$5,now())
+         ON CONFLICT (instance_id, environment) DO UPDATE SET state = EXCLUDED.state,
+           applied_plan_hash = COALESCE(EXCLUDED.applied_plan_hash, ${this.q('instance_environments')}.applied_plan_hash),
+           last_attestation_id = COALESCE(EXCLUDED.last_attestation_id, ${this.q('instance_environments')}.last_attestation_id),
+           updated_at = now()`,
+        [e.instanceId, e.environment, e.state, input.appliedPlanHash ?? null, input.attestationId ?? null]);
+    } catch (error) {
+      if ((error as { code?: string }).code === '23503') return err({ code: 'not-found', what: 'instance', id: e.instanceId });
+      throw error;
+    }
+    return ok(e);
+  }
+
+  async getInstanceEnvironment(instanceId: string, environment: string) {
+    const rows = (await this.pool.query(`SELECT * FROM ${this.q('instance_environments')} WHERE instance_id = $1 AND environment = $2`, [instanceId, environment])).rows as Row[];
+    const row = rows[0];
+    return row ? this.asEnvState(row) : err({ code: 'not-found', what: 'instance environment', id: `${instanceId}/${environment}` });
+  }
+
+  private asEnvState(row: Row): StoreResult<InstanceEnvironmentState> {
+    const admitted = admit(InstanceEnvironmentStateSchema, {
+      instanceId: row.instance_id, environment: row.environment, state: row.state,
+      ...(row.applied_plan_hash === null ? {} : { appliedPlanHash: String(row.applied_plan_hash) }),
+      ...(row.last_attestation_id === null ? {} : { attestationId: String(row.last_attestation_id) }),
+      updatedAt: iso(row.updated_at),
+    }, 'instance environment row');
+    return admitted.accepted ? ok(admitted.value) : err({ code: 'conflict', reason: admitted.reason });
+  }
+
+  async listInstanceEnvironments(instanceId: string) {
+    const rows = (await this.pool.query(`SELECT * FROM ${this.q('instance_environments')} WHERE instance_id = $1 ORDER BY environment ASC`, [instanceId])).rows as Row[];
+    return values(rows.map((r) => this.asEnvState(r)));
   }
 
   async putTeamMember(member: Omit<TeamMember, 'addedAt'> & { addedAt?: string }) {

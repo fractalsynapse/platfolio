@@ -72,7 +72,7 @@ function livePlan(): InfraPlan {
     provider: 'railway',
     contract: '1.0.0',
     planHash: 'e26'.padEnd(16, '0'),
-    manifestRef: { platform: 'livecheck', version: '0.0.0' },
+    manifestRef: { template: 'livecheck', version: '0.0.0' },
     environments: [
       { name: 'production', services: [service(1, [{ variable: 'DATABASE_URL', database: 'e2e-db', output: 'DATABASE_URL' }])], domains: [{ host: 'web.up.railway.app', service: 'web', port: 80, verificationName: 'unused' }], databases: [{ name: 'e2e-db', kind: 'postgres' }], buckets: [] },
       { name: 'staging', cloneFrom: 'production', services: [service(1, [])], domains: [], databases: [], buckets: [] },

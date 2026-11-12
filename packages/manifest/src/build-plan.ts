@@ -107,7 +107,7 @@ export function buildPlan(manifest: Manifest, config: InstanceConfig): InfraPlan
     contract: '1.0.0',
     // Hash of the rendered desired state, so a re-apply of an unchanged manifest is idempotent.
     planHash: createHash('sha256').update(JSON.stringify({ platform, version: manifest.metadata.version, environments })).digest('hex'),
-    manifestRef: { platform, version: manifest.metadata.version },
+    manifestRef: { template: platform, version: manifest.metadata.version },
     environments,
   };
 

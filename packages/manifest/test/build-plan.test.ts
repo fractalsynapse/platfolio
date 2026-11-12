@@ -33,7 +33,7 @@ test('a manifest becomes a plan the contract accepts', () => {
   assert.doesNotThrow(() => InfraPlanSchema.parse(plan));
   assert.deepEqual(planIssues(plan), [], JSON.stringify(planIssues(plan)));
   assert.equal(plan.provider, 'railway');
-  assert.equal(plan.manifestRef.platform, 'example-web-app');
+  assert.equal(plan.manifestRef.template, 'example-web-app');
   assert.match(plan.planHash, /^[a-f0-9]{16,64}$/, 'planHash is a real digest, so re-applies are idempotent');
 });
 

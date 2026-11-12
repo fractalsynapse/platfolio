@@ -105,7 +105,7 @@ test('the lifecycle: record, register a plan, dispatch, fetch once, attest, reco
     const teamId = await createTeamWith(app.ctx);
     const post = { ...app.asUser(scoped()), method: 'POST' as const };
 
-    const created = await app.call('/api/v1/instances', { ...post, body: JSON.stringify({ teamId, name: 'marketing', platform: 'starter-web' }) });
+    const created = await app.call('/api/v1/instances', { ...post, body: JSON.stringify({ teamId, name: 'marketing', template: 'starter-web' }) });
     againstSpec('createInstance', 201, created.body);
     const instance = created.body as { id: string; state: string };
     assert.equal(instance.state, 'pending', 'a 201 records intent; nothing was verified, so nothing may claim progress (D30 law 1)');
@@ -120,7 +120,7 @@ test('the lifecycle: record, register a plan, dispatch, fetch once, attest, reco
 
     const plan = {
       instanceId: instance.id, teamId, provider: 'railway', contract: '1.0.0', planHash: 'b'.repeat(64),
-      manifestRef: { platform: 'starter-web', version: '1.0.0' },
+      manifestRef: { template: 'starter-web', version: '1.0.0' },
       environments: [{ name: 'production', services: [], databases: [], volumes: [], buckets: [], domains: [] }],
     };
     const registered = await app.call(`/api/v1/instances/${instance.id}/plan`, { method: 'PUT', ...app.asUser(scoped()), body: JSON.stringify({ plan }) });
@@ -184,7 +184,7 @@ test('a partial attestation degrades the instance rather than calling it live', 
   const app = await startApp({ reconcileIntervalMs: 60 });
   try {
     const teamId = await createTeamWith(app.ctx);
-    const instance = must(await app.ctx.store.createInstance({ teamId, name: 'worker', platform: 'starter-worker' }), 'createInstance');
+    const instance = must(await app.ctx.store.createInstance({ teamId, name: 'worker', template: 'starter-worker' }), 'createInstance');
     const planHash = 'a'.repeat(64);
     must(await app.ctx.store.putPlan(instance.id, { instanceId: instance.id, planHash }, planHash), 'putPlan');
     const dispatch = must(await app.ctx.store.createDispatch({
@@ -211,6 +211,56 @@ test('a partial attestation degrades the instance rather than calling it live', 
   }
 });
 
+test('staging can be degraded while production is live, and both are recorded (#179)', async () => {
+  const app = await startApp({ reconcileIntervalMs: 60 });
+  try {
+    const teamId = await createTeamWith(app.ctx);
+    const created = await app.call('/api/v1/instances', { ...app.asUser(scoped()), method: 'POST', body: JSON.stringify({ teamId, name: 'two-envs', template: 'starter-web' }) });
+    assert.equal(created.status, 201, JSON.stringify(created.body));
+    const instanceId = (created.body as { id: string }).id;
+    const planHash = 'c'.repeat(64);
+    const plan = { instanceId, teamId, provider: 'railway', contract: '1.0.0', planHash, manifestRef: { template: 'starter-web', version: '1.0.0' }, environments: [] };
+    await app.call(`/api/v1/instances/${instanceId}/plan`, { method: 'PUT', ...app.asUser(scoped()), body: JSON.stringify({ plan }) });
+
+    const attest = async (environment: string, result: 'ok' | 'partial') => {
+      const issued = await app.call(`/api/v1/instances/${instanceId}/dispatches`, { ...app.asUser(scoped()), method: 'POST', body: JSON.stringify({ action: 'apply', environment }) });
+      assert.equal(issued.status, 201, `dispatch for ${environment}: ${JSON.stringify(issued.body)}`);
+      const intent = (issued.body as { intent: Record<string, string> }).intent;
+      await app.call(`/api/v1/instances/${instanceId}/dispatches/${intent.dispatchId}`);
+      const body = {
+        dispatchId: intent.dispatchId, instanceId, nonce: intent.nonce, planHash: intent.planHash,
+        action: 'apply', environment, result,
+        resources: [{ kind: 'service', name: 'web', externalId: 'svc-1', status: 'live' }],
+        release: { version: '0.4.0', commitSha: 'c'.repeat(40), imageDigest: `sha256:${'d'.repeat(64)}` },
+        durationMs: 500, finishedAt: new Date().toISOString(),
+        ...(result === 'partial' ? { errorCode: 'domain:create-refused' } : {}),
+      };
+      const posted = await app.call('/api/v1/attestations', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+      assert.equal(posted.status, 202, `attestation for ${environment}: ${posted.text}`);
+    };
+
+    await attest('production', 'ok');
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await attest('staging', 'partial');
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    const read = await app.call(`/api/v1/instances/${instanceId}`, app.asUser(scoped()));
+    assert.equal(read.status, 200);
+    againstSpec('getInstance', 200, read.body);
+    const instance = read.body as { state: string; environments: Array<{ environment: string; state: string; appliedPlanHash?: string }> };
+    const byEnv = Object.fromEntries(instance.environments.map((e) => [e.environment, e.state]));
+    assert.equal(byEnv.production, 'live', `production should be live, got ${JSON.stringify(byEnv)}`);
+    assert.equal(byEnv.staging, 'degraded', `a partial attestation should leave staging degraded, got ${JSON.stringify(byEnv)}`);
+    assert.equal(instance.state, 'live', 'the rollup follows production: a staging problem is not a production outage, and pretending otherwise hides real incidents');
+    const listed = await app.call('/api/v1/instances', app.asUser(scoped()));
+    againstSpec('listInstances', 200, listed.body);
+    assert.equal((listed.body as Array<{ environments: unknown[] }>).length, 1);
+    assert.ok(Array.isArray((listed.body as Array<{ environments: unknown[] }>)[0]?.environments), 'the list must carry environments too, or the CLI has to fetch each instance to be honest');
+  } finally {
+    await disposeKernel(app.ctx);
+  }
+});
+
 test('requests are bounded, and a malformed body refuses cleanly instead of throwing', async () => {
   const app = await startApp();
   try {
@@ -221,7 +271,7 @@ test('requests are bounded, and a malformed body refuses cleanly instead of thro
     const emptyBody = await app.call('/api/v1/instances', { ...app.asUser(scoped()), method: 'POST' });
     assert.equal(emptyBody.status, 400, 'a POST with no body is a bad request, not a null-pointer 500');
 
-    const wrongType = await app.call('/api/v1/instances', { ...app.asUser(scoped()), method: 'POST', body: JSON.stringify({ teamId: 42, name: 'x', platform: 'starter-web' }) });
+    const wrongType = await app.call('/api/v1/instances', { ...app.asUser(scoped()), method: 'POST', body: JSON.stringify({ teamId: 42, name: 'x', template: 'starter-web' }) });
     assert.equal(wrongType.status, 400, 'a non-string teamId is refused by the shared schema, not coerced');
 
     const auditLimit = await app.call('/api/v1/audit?limit=9999', app.asUser(scoped()));
@@ -242,8 +292,8 @@ test('cross-team reads are indistinguishable from missing ones (#173)', async ()
   try {
     const mine = await createTeamWith(app.ctx);
     const theirs = must(await app.ctx.store.createTeam({ name: 'not-mine' }), 'createTeam').id;
-    const stranger = must(await app.ctx.store.createInstance({ teamId: theirs, name: 'secret-svc', platform: 'starter-web' }), 'createInstance');
-    const mineInstance = must(await app.ctx.store.createInstance({ teamId: mine, name: 'mine', platform: 'starter-web' }), 'createInstance');
+    const stranger = must(await app.ctx.store.createInstance({ teamId: theirs, name: 'secret-svc', template: 'starter-web' }), 'createInstance');
+    const mineInstance = must(await app.ctx.store.createInstance({ teamId: mine, name: 'mine', template: 'starter-web' }), 'createInstance');
     const token = scoped();
 
     const list = await app.call('/api/v1/instances', app.asUser(token));
@@ -266,7 +316,7 @@ test('cross-team reads are indistinguishable from missing ones (#173)', async ()
     }
 
     // Existence of a team is the same question, asked at creation time.
-    const createTheirs = await app.call('/api/v1/instances', { ...app.asUser(token), method: 'POST', body: JSON.stringify({ teamId: theirs, name: 'x', platform: 'starter-web' }) });
+    const createTheirs = await app.call('/api/v1/instances', { ...app.asUser(token), method: 'POST', body: JSON.stringify({ teamId: theirs, name: 'x', template: 'starter-web' }) });
     assert.equal(createTheirs.status, 404, 'a caller was allowed to plant an instance in another team');
 
     // Unauthenticated stays 401: the distinction is between "who are you" and "not yours", and the API must
@@ -294,7 +344,7 @@ test('every instance-scoped route enforces membership rather than trusting the h
   const app = await startApp();
   try {
     const theirs = must(await app.ctx.store.createTeam({ name: 'enumerated' }), 'createTeam').id;
-    const foreign = must(await app.ctx.store.createInstance({ teamId: theirs, name: 'probe', platform: 'starter-web' }), 'createInstance');
+    const foreign = must(await app.ctx.store.createInstance({ teamId: theirs, name: 'probe', template: 'starter-web' }), 'createInstance');
     const instanceRoutes = ROUTE_MANIFEST.filter((r) => r.path.startsWith('/api/v1/instances') && r.path !== '/api/v1/instances' && !r.path.includes('/dispatches/{dispatchId}'));
     assert.ok(instanceRoutes.length >= 4, `expected the scoped routes to be enumerated, got ${String(instanceRoutes.length)}`);
     for (const route of instanceRoutes) {

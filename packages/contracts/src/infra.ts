@@ -134,7 +134,7 @@ export const InfraPlanSchema = z.object({
   contract: z.string().min(1),
   /** Hash of the rendered desired state; the idempotency key across retries. */
   planHash: z.string().regex(/^[a-f0-9]{16,64}$/),
-  manifestRef: z.object({ platform: NameSchema, version: NameSchema }),
+  manifestRef: z.object({ template: NameSchema, version: NameSchema }),
   environments: z.array(EnvironmentPlanSchema).min(1),
 });
 

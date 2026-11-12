@@ -25146,7 +25146,7 @@ var InfraPlanSchema = external_exports.object({
   contract: external_exports.string().min(1),
   /** Hash of the rendered desired state; the idempotency key across retries. */
   planHash: external_exports.string().regex(/^[a-f0-9]{16,64}$/),
-  manifestRef: external_exports.object({ platform: NameSchema, version: NameSchema }),
+  manifestRef: external_exports.object({ template: NameSchema, version: NameSchema }),
   environments: external_exports.array(EnvironmentPlanSchema).min(1)
 });
 var DnsRecordStateSchema = external_exports.object({
@@ -25895,7 +25895,7 @@ var RailwayInfraProvider = class {
    * Railway identifies projects by name within a workspace, and a platfolio instance id is not a Railway
    * id, so the mapping is derived. It is a function of the instance id **alone** — including the platform
    * would make `readState(instanceId)` unanswerable, because readState is not given a plan. An earlier
-   * version of this method embedded `manifestRef.platform`, and the conformance suite caught it: apply
+   * version of this method embedded `manifestRef.template`, and the conformance suite caught it: apply
    * succeeded, then readState could not find the project it had just created.
    */
   projectName(plan) {
@@ -26758,8 +26758,24 @@ var InstanceStateSchema = external_exports.enum(["pending", "provisioning", "liv
 var InstanceSchema = external_exports.object({
   id: external_exports.string().min(1),
   teamId: external_exports.string().min(1),
-  name: external_exports.string().min(1).max(80),
-  platform: external_exports.string().min(1),
+  /**
+   * Addressed `team/name`, like a repository (D45). Slug rules rather than free text: a name that needs
+   * quoting, escaping, or a disambiguating id is a name that will be broken somewhere downstream -- a URL, a
+   * CLI argument, a shell. Uniqueness per team is enforced by a database constraint and by the schema check
+   * below, so the in-memory double cannot be the only one enforcing it.
+   */
+  name: external_exports.string().min(1).max(80).regex(/^[a-z0-9]([a-z0-9-]{0,78}[a-z0-9])?$/, "names are lowercase slugs: a-z, 0-9 and single hyphens, no leading or trailing hyphen"),
+  /**
+   * The template this instance was created from. This column used to be called `platform` while storing a
+   * template identifier, which is the vocabulary collision D45 removes: three different things were called
+   * "platform", and one of them was a public API field.
+   */
+  template: external_exports.string().min(1),
+  /** Where the template came from, pinned by commit -- a tag is not a trust anchor (D30 law 3). */
+  templateRef: external_exports.object({
+    repo: external_exports.string().min(3).max(200),
+    commitSha: external_exports.string().regex(/^[0-9a-f]{40}$/, "record the full commit, not a movable tag")
+  }).strict().optional(),
   state: InstanceStateSchema,
   /** The provider is a swappable capability (D1); the instance records which one it is on. */
   provider: external_exports.enum(["railway", "fake"]).default("railway"),
@@ -26872,6 +26888,14 @@ var IdentitySchema = external_exports.object({
   subject: external_exports.string().min(1),
   personId: external_exports.string().min(1),
   verifiedAt: external_exports.string().min(1)
+}).strict();
+var InstanceEnvironmentStateSchema = external_exports.object({
+  instanceId: external_exports.string().min(1),
+  environment: external_exports.string().min(1).max(60),
+  state: InstanceStateSchema,
+  appliedPlanHash: external_exports.string().optional(),
+  attestationId: external_exports.string().optional(),
+  updatedAt: external_exports.string().min(1)
 }).strict();
 
 // node_modules/.pnpm/pg@8.23.1/node_modules/pg/esm/index.mjs

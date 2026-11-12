@@ -36,9 +36,9 @@ async function start() {
     assert.ok(check.ok, `${operationId} ${String(status)} violates the spec: ${check.errors.join('; ')}\nbody: ${JSON.stringify(body).slice(0, 240)}`);
   };
   /** A team, its owner subject, and one instance in it. */
-  const teamWithInstance = async (c: KernelContext, name: string, platform: string) => {
+  const teamWithInstance = async (c: KernelContext, name: string, template: string) => {
     const team = must(await c.store.createTeam({ name }), 'createTeam');
-    return { teamId: team.id, instance: must(await c.store.createInstance({ teamId: team.id, name: `${name}-app`, platform }), 'createInstance') };
+    return { teamId: team.id, instance: must(await c.store.createInstance({ teamId: team.id, name: `${name}-app`, template }), 'createInstance') };
   };
   return { ctx, call, againstSpec, teamWithInstance };
 }
@@ -56,8 +56,8 @@ test('in-team sharing works, and both sides can see the dependency', async () =>
   const app = await start();
   try {
     const provider = must(await app.ctx.store.createTeam({ name: 'platforms' }), 'team');
-    const idp = must(await app.ctx.store.createInstance({ teamId: provider.id, name: 'idp', platform: 'shared-identity' }), 'idp');
-    const web = must(await app.ctx.store.createInstance({ teamId: provider.id, name: 'shop', platform: 'starter-web' }), 'web');
+    const idp = must(await app.ctx.store.createInstance({ teamId: provider.id, name: 'idp', template: 'shared-identity' }), 'idp');
+    const web = must(await app.ctx.store.createInstance({ teamId: provider.id, name: 'shop', template: 'starter-web' }), 'web');
     const owner = must(await app.ctx.store.resolvePerson({ issuer: fixture.issuer, subject: 'user-conformance' }), 'resolvePerson');
     must(await app.ctx.store.putTeamMember({ teamId: provider.id, personId: owner.person.id, role: 'owner' }), 'member');
 
@@ -151,7 +151,7 @@ test('binding is refused when the destinations cannot be filled, and self-bindin
 
     // A second instance in the same team, so this exercises the destination check rather than tripping the
     // self-binding guard again -- the mistake in the first version of this test.
-    const consumer = must(await app.ctx.store.createInstance({ teamId: team.teamId, name: 'shop', platform: 'starter-web' }), 'consumer');
+    const consumer = must(await app.ctx.store.createInstance({ teamId: team.teamId, name: 'shop', template: 'starter-web' }), 'consumer');
     const missing = await app.call(`/api/v1/instances/${consumer.id}/bindings/identity`, { method: 'PUT', body: JSON.stringify({ providerInstanceId: team.instance.id, destinations: [{ output: 'client_secret', into: ['OIDC_CLIENT_SECRET'] }] }) });
     assert.equal(missing.status, 400, 'binding an output the provider does not publish is a broken promise, not a partial success');
     assert.match(JSON.stringify(missing.body), /does not offer: client_secret/);

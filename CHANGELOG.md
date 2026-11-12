@@ -5,6 +5,44 @@ change; entries describe merged intent, not aspirations.
 
 "## [Unreleased]
 
+### Changed — **breaking**
+
+- **`Instance.platform` is now `Instance.template` (#180, D45), and instance names are `team/name` slugs.**
+  The old field stored a template id under a name that meant three different things in this codebase; the
+  rename reaches the public API document, the request body, both store drivers and `InfraPlan.manifestRef`,
+  which carried the same collision. An old payload is **refused, not ignored** -- a request still sending
+  `platform` fails validation instead of silently dropping a field, which is the difference between a rename
+  and a data-loss bug. Names must satisfy the slug pattern declared on `InstanceSchema.name` (lowercase alphanumerics with interior hyphens, 1-80) and are **unique per team**
+  (`instances (team_id, name)`), enforced in the schema, in Postgres and in the in-memory double.
+  `templateRef: { repo, commitSha }` records where a template came from, with `commitSha` constrained to a
+  full lowercase hex commit by both the schema and a database CHECK: a tag or branch is a movable anchor, and
+  D30 law 3 says it cannot be stored as a fixed one.
+  **Derived contracts bump: MAJOR** (12 public surface lines removed). Accepted now because there is no tenant
+  on either service (AGENTS status) and nothing outside this repository consumes the field yet.
+- **`Instance.state` is a rollup, not the truth (#179).** Production's state when a production environment
+  exists, otherwise the worst among the environments, `pending` when there are none. `GET /api/v1/instances*`
+  now returns `environments: [{ environment, state, appliedPlanHash?, attestationId?, updatedAt }]`, so a
+  client never has to guess whether the headline number is production's reality or a blend of everything.
+
+### Added
+
+- `instance_environments` (migration `009`), `Store.setInstanceEnvironment` / `getInstanceEnvironment` /
+  `listInstanceEnvironments` in both drivers under one conformance case, and `rollupState()` in contracts --
+  the rule lives beside the schema rather than inside whichever driver noticed it first.
+- **`check-contracts.ts --update` now classifies changes** and refuses to refresh the baseline over a removal
+  without `--ack-breaking="<reason>"`, printing the derived bump. Previously it wrote whatever the diff
+  contained and exited 0, so this exact breaking rename would have passed as a routine refresh.
+
+### Fixed
+
+- A precedence bug in the in-memory driver's new patch semantics: `a ?? b === undefined` parses as
+  `a ?? (b === undefined)`, so the merged field was dropped precisely when the caller *supplied* it. Caught by
+  the conformance suite; introduced while fixing a different bug in the same three lines.
+- Both drivers had disagreed on upsert semantics (the double replaced the row, Postgres preserved untouched
+  columns). One suite, two drivers: the disagreement is the suite doing its job, and preserving provenance is
+  the behaviour the rollup depends on.
+
+
 ### Added
 
 - **The policy module (#178, D43).** `packages/contracts/src/policy.ts`: one table mapping each action to its

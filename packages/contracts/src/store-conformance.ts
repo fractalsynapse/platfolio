@@ -68,7 +68,7 @@ const expectErr = (result: { ok: boolean; value?: unknown } & Partial<StoreError
     const store = await fresh();
     const team = await store.createTeam({ name: 'seed-team' });
     if (!team.ok) throw new Error('seed team create failed');
-    const instance = await store.createInstance({ teamId: team.value.id, name: 'seed-app', platform: 'starter-web' });
+    const instance = await store.createInstance({ teamId: team.value.id, name: 'seed-app', template: 'starter-web' });
     if (!instance.ok) throw new Error('seed instance create failed');
     return { store, team: team.value, instance: instance.value };
   };
@@ -91,6 +91,20 @@ const expectErr = (result: { ok: boolean; value?: unknown } & Partial<StoreError
       : { status: 'fail', detail: 'listTeams did not include the created team' };
   });
 
+  await add('instance names are unique per team and reusable across teams (D45)', async () => {
+    const { store, team, instance } = await seed();
+    const dupe = await store.createInstance({ teamId: team.id, name: instance.name, template: 'starter-web' });
+    const verdict = expectErr(dupe, 'conflict', 'a second instance with the same name in the same team');
+    if (verdict.status === 'fail') return verdict;
+    const other = mustOk(await store.createTeam({ name: 'other-team' }), 'other team');
+    const reused = await store.createInstance({ teamId: other.id, name: instance.name, template: 'starter-web' });
+    // Two teams naming their own `marketing` is normal; a team having two is the collision. If both were
+    // refused, `team/name` addressing would be over-constrained and users would invent suffixes.
+    if (!reused.ok) return { status: 'fail', detail: `the same name in another team was refused: ${reasonOf(reused)}` };
+    const badName = await store.createInstance({ teamId: team.id, name: 'Has Space', template: 'starter-web' });
+    return expectErr(badName, 'conflict', 'a non-slug instance name');
+  });
+
   await add('unknown ids answer with typed errors, never exceptions', async () => {
     const store = await fresh();
     const team = await store.getTeam('team-does-not-exist');
@@ -102,7 +116,7 @@ const expectErr = (result: { ok: boolean; value?: unknown } & Partial<StoreError
 
   await add('referential guards: no instance without a team, no connection without an instance', async () => {
     const store = await fresh();
-    const orphan = await store.createInstance({ teamId: 'team-missing', name: 'x', platform: 'starter-web' });
+    const orphan = await store.createInstance({ teamId: 'team-missing', name: 'x', template: 'starter-web' });
     const a = expectErr(orphan, 'not-found', 'instance with unknown team');
     if (a.status === 'fail') return a;
     const conn = await store.putRepoConnection({ instanceId: 'inst-missing', repo: 'acme/app', defaultBranch: 'main', actionRef: 'e'.repeat(40), installedAt: new Date().toISOString() });
@@ -176,8 +190,8 @@ const expectErr = (result: { ok: boolean; value?: unknown } & Partial<StoreError
 
   await add('bindings: same team binds, and both directions are queryable', async () => {
     const { store, team } = await seed();
-    const providerInst = mustOk(await store.createInstance({ teamId: team.id, name: 'identity', platform: 'shared-identity' }), 'provider instance');
-    const consumerInst = mustOk(await store.createInstance({ teamId: team.id, name: 'app', platform: 'starter-web' }), 'consumer instance');
+    const providerInst = mustOk(await store.createInstance({ teamId: team.id, name: 'identity', template: 'shared-identity' }), 'provider instance');
+    const consumerInst = mustOk(await store.createInstance({ teamId: team.id, name: 'app', template: 'starter-web' }), 'consumer instance');
     const offer = mustOk(await store.publishCapability({
       instanceId: providerInst.id, teamId: team.id, capability: 'identity',
       outputs: [{ output: 'issuer', kind: 'url', state: 'issued-and-placed' }, { output: 'client_secret', kind: 'secret', state: 'not-issued' }],
@@ -216,8 +230,8 @@ const expectErr = (result: { ok: boolean; value?: unknown } & Partial<StoreError
     const store = await fresh();
     const teamA = mustOk(await store.createTeam({ name: 'team-a' }), 'teamA');
     const teamB = mustOk(await store.createTeam({ name: 'team-b' }), 'teamB');
-    const providerInst = mustOk(await store.createInstance({ teamId: teamA.id, name: 'idp', platform: 'shared-identity' }), 'provider');
-    const consumerInst = mustOk(await store.createInstance({ teamId: teamB.id, name: 'app', platform: 'starter-web' }), 'consumer');
+    const providerInst = mustOk(await store.createInstance({ teamId: teamA.id, name: 'idp', template: 'shared-identity' }), 'provider');
+    const consumerInst = mustOk(await store.createInstance({ teamId: teamB.id, name: 'app', template: 'starter-web' }), 'consumer');
     mustOk(await store.publishCapability({ instanceId: providerInst.id, teamId: teamA.id, capability: 'identity', outputs: [{ output: 'issuer', kind: 'url', state: 'issued-and-placed' }] }), 'publish');
 
     const offerRead = await store.getCapabilityOffer(providerInst.id, 'identity');
@@ -241,6 +255,35 @@ const expectErr = (result: { ok: boolean; value?: unknown } & Partial<StoreError
     return hidden.length === 0
       ? { status: 'pass', detail: 'share gates the bind; revoke ages to stale and withdraws discovery' }
       : { status: 'fail', detail: 'the revoked offer is still discoverable to the former consumer' };
+  });
+
+  await add('per-environment state: two environments, two truthful rows (#179)', async () => {
+    const { store, instance } = await seed();
+    const missingInstance = await store.setInstanceEnvironment({ instanceId: 'inst-never', environment: 'production', state: 'live' });
+    const guard = expectErr(missingInstance, 'not-found', 'state for an unknown instance');
+    if (guard.status === 'fail') return guard;
+
+    const production = mustOk(await store.setInstanceEnvironment({ instanceId: instance.id, environment: 'production', state: 'live', appliedPlanHash: 'a'.repeat(64) }), 'set production');
+    const staging = mustOk(await store.setInstanceEnvironment({ instanceId: instance.id, environment: 'staging', state: 'degraded', attestationId: 'disp-1' }), 'set staging');
+    if (production.state !== 'live' || staging.state !== 'degraded') return { status: 'fail', detail: 'rows did not round-trip their states' };
+
+    const rows = await store.listInstanceEnvironments(instance.id);
+    if (rows.length !== 2) return { status: 'fail', detail: `expected two environments, got ${String(rows.length)}` };
+
+    // Upsert must not lose a value the second writer did not mention: the rollup would otherwise be computed
+    // from rows that quietly shed their hashes.
+    mustOk(await store.setInstanceEnvironment({ instanceId: instance.id, environment: 'staging', state: 'degraded', appliedPlanHash: 'b'.repeat(64) }), 'restaging');
+    const after = mustOk(await store.getInstanceEnvironment(instance.id, 'staging'), 'read staging');
+    if (after.appliedPlanHash !== 'b'.repeat(64)) return { status: 'fail', detail: `explicit hash not applied: ${String(after.appliedPlanHash)}` };
+    mustOk(await store.setInstanceEnvironment({ instanceId: instance.id, environment: 'staging', state: 'degraded' }), 'touch staging again');
+    const kept = await store.getInstanceEnvironment(instance.id, 'staging');
+    if (!kept.ok) return { status: 'fail', detail: 'row lost on a no-op update' };
+    const stillThere = kept.ok && (kept.value.attestationId === 'disp-1' || kept.value.appliedPlanHash !== undefined);
+    const all = await store.listInstanceEnvironments('inst-none-exists');
+    if (all.length !== 0) return { status: 'fail', detail: 'an unknown instance listed someone else\'s environments' };
+    return stillThere
+      ? { status: 'pass', detail: 'two states recorded independently, upsert preserves, isolation holds' }
+      : { status: 'fail', detail: 'a re-write with fewer fields dropped the values it did not mention' };
   });
 
   await add('a plan is stored by its own digest, and a malformed hash is refused', async () => {
@@ -344,8 +387,8 @@ const expectErr = (result: { ok: boolean; value?: unknown } & Partial<StoreError
     const store = await fresh();
     const t = await store.createTeam({ name: 'ordering' });
     if (!t.ok) return { status: 'fail', detail: 'team failed' };
-    const a = await store.createInstance({ teamId: t.value.id, name: 'a', platform: 'starter-web' });
-    const b = await store.createInstance({ teamId: t.value.id, name: 'b', platform: 'starter-web' });
+    const a = await store.createInstance({ teamId: t.value.id, name: 'a', template: 'starter-web' });
+    const b = await store.createInstance({ teamId: t.value.id, name: 'b', template: 'starter-web' });
     if (!a.ok || !b.ok) return { status: 'fail', detail: 'instances failed' };
     const mk = async (instanceId: string, id: string, finished: string) => {
       const d = await store.createDispatch({
