@@ -3,7 +3,7 @@ import type { Attestation } from './attestation.ts';
 import { AttestationRecordSchema, AuditEntrySchema, BindingRecordSchema, CapabilityOfferSchema, CapabilityShareSchema, IdentitySchema, PersonSchema, TeamMemberSchema, DispatchRecordSchema, InstanceEnvironmentStateSchema, InstanceSchema, InvitationSchema, ProviderConnectionSchema, RepoConnectionSchema, TeamSchema, newId,
   type AttestationRecord, type AuditEntry, type BindingRecord, type CapabilityOffer, type CapabilityShare, type NewBinding, type NewCapabilityOffer, type NewCapabilityShare, type DispatchRecord, type Instance, type InstanceEnvironmentState, type Invitation, type NewInvitation, type ProviderConnection, type RepoConnection, type Store, type StoreError, type NewInstance, type StoreResult, type Team, type TeamMember, type Identity, type Person } from './persistence.ts';
 import { reasonOf } from './persistence.ts';
-import { normaliseEmail } from './persistence.ts';
+import { normaliseEmail, normaliseName } from './persistence.ts';
 import { checkAttestationPolicy } from './dispatch-policy.ts';
 
 /**
@@ -72,7 +72,13 @@ export class MemoryStore implements Store {
 
   async createTeam(input: { name: string }) {
     if (this.closed) return this.refuse('createTeam');
-    const admitted = admit(TeamSchema, { id: newId('team'), name: input.name, createdAt: this.clock() }, 'team');
+    // Uniqueness mirrored from Postgres's unique index (D45): `team/name` addresses one thing only if the
+    // team half cannot collide, and a rule enforced by one driver is a rule the other will forget.
+    const name = normaliseName(input.name);
+    if ([...this.teams.values()].some((x) => x.name === name)) {
+      return err({ code: 'conflict', reason: `a team named "${name}" already exists` });
+    }
+    const admitted = admit(TeamSchema, { id: newId('team'), name, createdAt: this.clock() }, 'team');
     if (!admitted.accepted) return err({ code: 'conflict', reason: admitted.reason });
     this.teams.set(admitted.value.id, admitted.value);
     return ok(admitted.value);

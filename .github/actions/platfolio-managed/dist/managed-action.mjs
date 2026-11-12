@@ -26758,9 +26758,11 @@ var SecretNameSchema = external_exports.object({
   source: external_exports.enum(["preserve", "tenant-set", "generated"]).default("preserve"),
   set: external_exports.boolean().default(false)
 }).strict();
+var SLUG_PATTERN = /^[a-z0-9]([a-z0-9-]{0,39}[a-z0-9])?$/;
+var SLUG_MESSAGE = "names are slugs: lowercase letters, digits and interior hyphens, 1-40 characters";
 var TeamSchema = external_exports.object({
   id: external_exports.string().min(1),
-  name: external_exports.string().min(1).max(120),
+  name: external_exports.string().min(1).max(40).regex(SLUG_PATTERN, SLUG_MESSAGE),
   createdAt: external_exports.string().min(1)
 }).strict();
 var InstanceStateSchema = external_exports.enum(["pending", "provisioning", "live", "degraded", "paused", "failed", "deprovisioning", "removed"]);
@@ -26773,7 +26775,7 @@ var InstanceSchema = external_exports.object({
    * CLI argument, a shell. Uniqueness per team is enforced by a database constraint and by the schema check
    * below, so the in-memory double cannot be the only one enforcing it.
    */
-  name: external_exports.string().min(1).max(80).regex(/^[a-z0-9]([a-z0-9-]{0,78}[a-z0-9])?$/, "names are lowercase slugs: a-z, 0-9 and single hyphens, no leading or trailing hyphen"),
+  name: external_exports.string().min(1).max(40).regex(SLUG_PATTERN, SLUG_MESSAGE),
   /**
    * The template this instance was created from. This column used to be called `platform` while storing a
    * template identifier, which is the vocabulary collision D45 removes: three different things were called

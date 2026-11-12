@@ -29,9 +29,21 @@ export const SecretNameSchema = z.object({
 }).strict();
 export type SecretName = z.infer<typeof SecretNameSchema>;
 
+/**
+ * The one slug rule for anything that becomes a URL segment or a CLI argument (D45).
+ *
+ * Defined once and reused for team names and instance names, because this project has already paid for
+ * parallel copies of a security-adjacent rule: two patterns drift, one driver enforces its version, and the
+ * disagreement surfaces as data that cannot be addressed. The database mirrors it as a CHECK and the shared
+ * suite asserts it against both drivers.
+ */
+export const SLUG_PATTERN = /^[a-z0-9]([a-z0-9-]{0,39}[a-z0-9])?$/;
+export const SLUG_MESSAGE = 'names are slugs: lowercase letters, digits and interior hyphens, 1-40 characters';
+
+/** `team/name` addressing means BOTH halves are slugs; a team name with a space is not addressable. */
 export const TeamSchema = z.object({
   id: z.string().min(1),
-  name: z.string().min(1).max(120),
+  name: z.string().min(1).max(40).regex(SLUG_PATTERN, SLUG_MESSAGE),
   createdAt: z.string().min(1),
 }).strict();
 export type Team = z.infer<typeof TeamSchema>;
@@ -48,7 +60,7 @@ export const InstanceSchema = z.object({
    * CLI argument, a shell. Uniqueness per team is enforced by a database constraint and by the schema check
    * below, so the in-memory double cannot be the only one enforcing it.
    */
-  name: z.string().min(1).max(80).regex(/^[a-z0-9]([a-z0-9-]{0,78}[a-z0-9])?$/, 'names are lowercase slugs: a-z, 0-9 and single hyphens, no leading or trailing hyphen'),
+  name: z.string().min(1).max(40).regex(SLUG_PATTERN, SLUG_MESSAGE),
   /**
    * The template this instance was created from. This column used to be called `platform` while storing a
    * template identifier, which is the vocabulary collision D45 removes: three different things were called
@@ -342,6 +354,11 @@ export type Invitation = z.infer<typeof InvitationSchema>;
  * drivers had been lower-casing without trimming.
  */
 export function normaliseEmail(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+/** Team and instance names are case-folded too, so `Acme` and `acme` cannot be two teams. */
+export function normaliseName(value: string): string {
   return value.trim().toLowerCase();
 }
 

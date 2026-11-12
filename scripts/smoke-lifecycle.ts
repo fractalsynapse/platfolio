@@ -178,8 +178,29 @@ if (typeof providerId === 'string') {
   check('the provider can see who depends on it', list.some((b: Record<string, unknown>) => b.consumerInstanceId === instanceId), `${String(list.length)} consumer(s) -- the question #177 exists to answer`);
   const persisted = await reader.listConsumers(providerId);
   check('bindings survive as rows, read from a second process', persisted.length === 1, `${String(persisted.length)} row(s) in capability_bindings`);
+  // D43 / #196: the destroy must be refused while the dependency exists -- and the refusal must name it.
+  const blockedDestroy = await call(`/api/v1/instances/${providerId}`, { method: 'DELETE' }, accessToken);
+  check('destroy is refused while a consumer depends on it', blockedDestroy.status === 409, `${String(blockedDestroy.status)} ${blockedDestroy.text.slice(0, 80)}`);
+  check('and the refusal names what would break', String(blockedDestroy.text).includes(instanceId), '#176 exists so this answer is a query, not a guess');
+
   const unbound = await call(`/api/v1/instances/${instanceId}/bindings/identity`, { method: 'DELETE' }, accessToken);
   check('unbind answers 204 with no body', unbound.status === 204 && unbound.text === '', `${String(unbound.status)} body=${JSON.stringify(unbound.text).slice(0, 20)}`);
+  const allowedDestroy = await call(`/api/v1/instances/${providerId}`, { method: 'DELETE' }, accessToken);
+  check('with no dependants the destroy is accepted as 202', allowedDestroy.status === 202, `${String(allowedDestroy.status)} ${allowedDestroy.text.slice(0, 70)}`);
+  check('202 records the decision rather than claiming teardown', String(allowedDestroy.text).includes('deprovisioning'), 'the provider call is execution-plane work (#196), and this endpoint must not say it finished');
+
+  // #195: self-service teams, live -- including that the name is an address and so collides.
+  const teamSlug = `smoke-${suffix}`;
+  const madeTeam = await call('/api/v1/teams', { method: 'POST', body: JSON.stringify({ name: teamSlug.toUpperCase() }) }, accessToken);
+  check('a person can create their own team', madeTeam.status === 201, `${String(madeTeam.status)} ${madeTeam.text.slice(0, 70)}`);
+  check('the name was normalised to the addressable form', (madeTeam.json as { name?: string } | undefined)?.name === teamSlug, String((madeTeam.json as { name?: string } | undefined)?.name));
+  const collide = await call('/api/v1/teams', { method: 'POST', body: JSON.stringify({ name: teamSlug }) }, accessToken);
+  check('a second team with the same name is refused 409', collide.status === 409, String(collide.status));
+  const badName = await call('/api/v1/teams', { method: 'POST', body: JSON.stringify({ name: 'Has Space' }) }, accessToken);
+  check('a name that cannot be a URL segment is refused 400', badName.status === 400, String(badName.status));
+  const teamsList = await call('/api/v1/teams', {}, accessToken);
+  const listed = Array.isArray(teamsList.json) ? teamsList.json : [];
+  check('the caller can list the teams they belong to', listed.some((x: Record<string, unknown>) => x.teamId === (madeTeam.json as { teamId?: string })?.teamId), `${String(listed.length)} team(s)`);
 } else {
   check('capability published', false, `second instance could not be created: ${String(second.status)}`);
 }

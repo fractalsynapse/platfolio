@@ -25,12 +25,15 @@ selections it has already made are recorded, not improvised:
 | Control-plane API design (the validation mechanism itself) | [api/control-plane.openapi.yaml](api/control-plane.openapi.yaml) — spec first, then the handler |
 
 Status: foundation poured, interfaces first (D40, [16](docs/design/16-foundation-build-order.md)). Slices 1
-and 2 of that plan are delivered (360 tests): `apps/control-plane` boots on the vendored runtime with
+and 2 of that plan are delivered (364 tests): `apps/control-plane` boots on the vendored runtime with
 Keycloak-verified bearer auth, persistent records (`Store` as a capability with a Postgres implementation and
 an in-memory double under one conformance suite, gated in CI against a live database), a controller
 that turns accepted attestations into stored state, and capability bindings that make shared services
 queryable (#176): what an instance offers, which teams may consume it, and who depends on it -- the question a
-destroy must ask first. There is **one API**: `apps/control-plane`, validated against the OpenAPI
+destroy must ask first -- and `DELETE /api/v1/instances/{id}` now asks it (#196): a destroy that would strand a
+consumer is refused 409 with the dependants named. It records `deprovisioning` and returns 202; **provider
+teardown is not wired**, and the endpoint says so, because a tenant reading "destroyed" would reclaim their
+own compute. There is **one API**: `apps/control-plane`, validated against the OpenAPI
 document (D41). `apps/status-api` -- the first-draft service that predates it -- was **deleted** rather than
 kept beside it, because two services where one is intended means two request paths and only one of them checked.
 The *deployed* Railway container still runs that deleted service's image, so the historical claim stands: a real
@@ -42,7 +45,8 @@ run, cross-team reads answer 404 rather than 403 so existence is not leakable, a
 walked by a test so a future instance-scoped route cannot skip the guard. Roles are enforced from one table
 (`POLICY[action] = minimumRole`, #178), so `owner` and `member` differ: sharing a capability and destroying an
 instance are owner-only, and a new route must name its action or the coverage test fails.
-Instances are addressed `team/name` with slug names unique per team, carry `template`/`templateRef` (#180, D45),
+Teams are self-service now (#195): `POST /api/v1/teams` makes the caller its owner, and a team name is a
+platform-unique slug because it is the first half of every address. Instances are addressed `team/name` with slug names unique per team, carry `template`/`templateRef` (#180, D45),
 and report state **per environment** with `Instance.state` as a stated rollup (#179) -- staging degraded next to
 production live is a real Tuesday, not a contradiction to average away. `check-contracts.ts --update` refuses a
 breaking baseline refresh without `--ack-breaking`, and says which bump the change implies. Platform email is the

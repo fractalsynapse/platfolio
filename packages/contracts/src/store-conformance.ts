@@ -54,6 +54,15 @@ export async function runStoreConformance(make: () => Promise<Store> | Store): P
   };
   const fresh = async () => await make();
   /** Unwrap a StoreResult in a case body: a refused setup step is a failure with a reason, not a null. */
+let teamSeq = 0;
+/**
+ * Team names are platform-unique now (#195), and the Postgres suite runs every case inside ONE scratch
+ * schema -- so a literal name reused across cases collides with the previous case's row. A counter keeps each
+ * case independent, which is what the memory driver already had for free from a fresh store per case. Without
+ * this the two drivers would disagree about isolation itself, not about the rule under test.
+ */
+function tName(base: string): string { return `${base}-${String(++teamSeq)}`; }
+
 function mustOk<T>(result: StoreResult<T>, label: string): T {
   if (result.ok) return result.value;
   throw new Error(`${label} refused: ${reasonOf(result)}`);
@@ -66,7 +75,7 @@ const expectErr = (result: { ok: boolean; value?: unknown } & Partial<StoreError
 
   const seed = async () => {
     const store = await fresh();
-    const team = await store.createTeam({ name: 'seed-team' });
+    const team = await store.createTeam({ name: tName('seed-team') });
     if (!team.ok) throw new Error('seed team create failed');
     const instance = await store.createInstance({ teamId: team.value.id, name: 'seed-app', template: 'starter-web' });
     if (!instance.ok) throw new Error('seed instance create failed');
@@ -91,12 +100,38 @@ const expectErr = (result: { ok: boolean; value?: unknown } & Partial<StoreError
       : { status: 'fail', detail: 'listTeams did not include the created team' };
   });
 
+  await add('team names are normalised, slugged and platform-unique (D45, #195)', async () => {
+    const { store } = await seed();
+    const suffix = String(++teamSeq);   // both spellings must land on the same name, so they share a suffix
+    const made = mustOk(await store.createTeam({ name: `  Acme-Corp-${suffix} ` }), 'createTeam');
+    if (made.name !== `acme-corp-${suffix}`) return { status: 'fail', detail: `not normalised: "${made.name}"` };
+    const dupe = await store.createTeam({ name: `ACME-CORP-${suffix}` });
+    const dupeVerdict = expectErr(dupe, 'conflict', 'a second team whose normalised name collides');
+    if (dupeVerdict.status === 'fail') return dupeVerdict;
+    // The address test: `team/name` is a URL segment, so these are not style preferences.
+    // Names that stay invalid AFTER normalisation and suffixing. `UPPER` is not one of them: uppercase input
+    // is normalised, not refused -- which is the friendlier reading of D45 and the one the pair above asserts.
+    // My first version listed it here and the suite correctly refused to pass.
+    for (const bad of ['Has Space', '-lead', 'trail-', 'a'.repeat(41), 'with/slash', 'under_score']) {
+      // No suffix here: a refused name never persists, so there is nothing to collide with. Suffixing it was
+      // my own error twice over -- it turned `-lead` into a valid slug by giving it a body, and `trail-` into a
+      // valid one by giving it something to stop trailing. A fixture can defeat the thing it means to test.
+      const refused = await store.createTeam({ name: bad });
+      if (refused.ok) return { status: 'fail', detail: `accepted the team name "${bad}"` };
+    }
+    const readBack = mustOk(await store.getTeam(made.id), 'getTeam');
+    // Compared against what was stored, not against a literal -- my first version hard-coded 'acme-corp' and
+    // then failed on its own suffix, which is the same class of mistake as a snapshot that has to be edited.
+    if (readBack.name !== made.name) return { status: 'fail', detail: `round-trip lost the name: ${readBack.name} != ${made.name}` };
+    return { status: 'pass', detail: 'normalised, refused non-slugs, collides case-insensitively' };
+  });
+
   await add('instance names are unique per team and reusable across teams (D45)', async () => {
     const { store, team, instance } = await seed();
     const dupe = await store.createInstance({ teamId: team.id, name: instance.name, template: 'starter-web' });
     const verdict = expectErr(dupe, 'conflict', 'a second instance with the same name in the same team');
     if (verdict.status === 'fail') return verdict;
-    const other = mustOk(await store.createTeam({ name: 'other-team' }), 'other team');
+    const other = mustOk(await store.createTeam({ name: tName('other-team') }), 'other team');
     const reused = await store.createInstance({ teamId: other.id, name: instance.name, template: 'starter-web' });
     // Two teams naming their own `marketing` is normal; a team having two is the collision. If both were
     // refused, `team/name` addressing would be over-constrained and users would invent suffixes.
@@ -137,7 +172,7 @@ const expectErr = (result: { ok: boolean; value?: unknown } & Partial<StoreError
     const identitiesA = await store.listIdentities(first.person.id);
     if (identitiesA.length !== 1) return { status: 'fail', detail: `person A lists ${String(identitiesA.length)} identities` };
 
-    const team = mustOk(await store.createTeam({ name: 'identity-team' }), 'createTeam');
+    const team = mustOk(await store.createTeam({ name: tName('identity-team') }), 'createTeam');
     mustOk(await store.putTeamMember({ teamId: team.id, personId: first.person.id, role: 'owner' }), 'putTeamMember');
     const byA = await store.teamsForPerson(first.person.id);
     const byB = await store.teamsForPerson(twin.person.id);
@@ -149,7 +184,7 @@ const expectErr = (result: { ok: boolean; value?: unknown } & Partial<StoreError
 
   await add('persons may hold several proofs, and dropping one does not revoke access', async () => {
     const store = await fresh();
-    const team = mustOk(await store.createTeam({ name: 'multi-proof' }), 'createTeam');
+    const team = mustOk(await store.createTeam({ name: tName('multi-proof') }), 'createTeam');
     const person = mustOk(await store.resolvePerson({ issuer: 'https://first.test', subject: 'p1' }), 'first proof');
     mustOk(await store.putTeamMember({ teamId: team.id, personId: person.person.id, role: 'member' }), 'member');
     mustOk(await store.linkIdentity({ personId: person.person.id, issuer: 'https://second.test', subject: 'p1' }), 'second proof');

@@ -159,3 +159,7 @@ Recorded in [01](01-product-and-decisions.md) after this page was written; the a
    schema and the database and exercised through the conformance suite, because an application-layer check would
    be a second rule the in-memory double would not reproduce.
 
+**Team naming (#195, D45):** the team half of `team/name` is a slug, normalised on write and
+unique across the platform -- enforced in the schema, in Postgres (`011`) and in the shared suite. Destroying an
+instance (#196) consults `consumers` (#176) and refuses 409 while anything depends on it; it records
+`deprovisioning` rather than claiming teardown, which remains execution-plane work.

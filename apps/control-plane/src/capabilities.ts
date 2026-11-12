@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import {
   AttestationSchema, checkBindingPolicy, CONTRACT_NAME, CONTRACT_VERSION, DispatchIntentSchema, InstanceSchema,
-  reasonOf, decide, checkInvitationAcceptance, rollupState, type BindingRecord, type CapabilityOffer, type PolicyAction, type VerifiedClaims,
+  reasonOf, decide, checkInvitationAcceptance, bindingImpact, normaliseName, rollupState, type BindingRecord, type CapabilityOffer, type PolicyAction, type VerifiedClaims,
 } from '@platfolio/contracts';
 import type { ExtensionDescriptor, KernelContext, Request, Response_, RouteDefinition } from '@platfolio/kernel';
 import { badRequest, bearerToken, notFound, send, unauthorized } from './respond.ts';
@@ -273,6 +273,26 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
           });
         },
       },
+      scoped('DELETE', '/api/v1/instances/{instanceId}', 'destroyInstance', 'instance.destroy', async (scope, _request, params) => {
+        // The reason #176 exists. `decide` already proved this caller is an OWNER of the team that holds the
+        // instance (D43); this proves the destroy will not strand something that is running.
+        const consumers = await scope.context.store.listConsumers(params.instanceId ?? '');
+        if (consumers.length > 0) {
+          // 409 naming the dependants. Not 202-with-a-warning: an API that says yes to a destructive operation
+          // it knows is unsafe has made the tenant's outage its own.
+          return {
+            status: 409,
+            body: { error: 'conflict', message: `removing this instance would strand: ${bindingImpact(consumers).join('; ')}` },
+          };
+        }
+        // Recorded, not claimed done: provider teardown is a dispatch the action executes and attests (#196).
+        // Reporting completed destruction the control plane has not performed is a lie with consequences -- a
+        // tenant reads it as licence to reclaim their own compute.
+        const moved = await scope.context.store.updateInstanceState(params.instanceId ?? '', 'deprovisioning');
+        if (moved.ok === false) return { status: moved.code === 'not-found' ? 404 : 400, body: { error: moved.code, message: reasonOf(moved) } };
+        await scope.context.store.appendAudit({ actorKind: 'user', actorRef: scope.personId, action: 'instance.destroy', target: moved.value.id, detail: { from: scope.role, state: 'deprovisioning' } });
+        return send('destroyInstance', 202, { instanceId: moved.value.id, state: 'deprovisioning', recorded: true });
+      }),
       scoped('GET', '/api/v1/instances/{instanceId}', 'getInstance', 'instance.read', async (scope, _request, params) => {
         const found = await scope.context.store.getInstance(params.instanceId ?? '');
         // resolveScope already proved the instance exists and is the caller's team's; a mismatch here means the
@@ -682,7 +702,70 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
     ],
   };
 
-  return [core, instances, dispatches, audit, bindings, invitations, controller];
+  // Teams (#195, D44). These are not team-scoped routes -- there is no team to scope to yet. Creation is
+  // guarded by authentication plus the verified person, and the caller becomes the owner in the same
+  // operation, because a team nobody owns cannot invite, share, or destroy anything and has no way out of that.
+  const teams: ExtensionDescriptor = {
+    id: 'teams',
+    requires: ['store', 'identity'],
+    routes: [
+      {
+        method: 'GET', path: '/api/v1/teams', operationId: 'listTeams',
+        handle: async (request, _params, context) => {
+          const auth = await authorize(context, request);
+          if (auth.ok === false) return auth.response;
+          const resolved = await context.store.resolvePerson({ issuer: auth.claims.issuer, subject: auth.claims.subject });
+          if (resolved.ok === false) return { status: 503, body: { error: 'principal-unresolved', message: reasonOf(resolved) } };
+          const teamIds = await context.store.teamsForPerson(resolved.value.person.id);
+          const rows: Array<{ teamId: string; name: string; role: 'owner' | 'member' }> = [];
+          // Read from membership, never from a `teamId` the caller supplied: that would be the client
+          // asserting its own scope, which is the thing #173 moved out of handlers entirely.
+          for (const teamId of teamIds) {
+            const [team, member] = await Promise.all([context.store.getTeam(teamId), context.store.getTeamMember(teamId, resolved.value.person.id)]);
+            if (team.ok && member.ok) rows.push({ teamId, name: team.value.name, role: member.value.role });
+          }
+          return send('listTeams', 200, rows);
+        },
+      },
+      {
+        method: 'POST', path: '/api/v1/teams', operationId: 'createTeam',
+        handle: async (request, _params, context) => {
+          const auth = await authorize(context, request);
+          if (auth.ok === false) return auth.response;
+          const parsed = bodyOf<{ name?: unknown }>(request);
+          if (parsed.ok === false) return badRequest(parsed.error);
+          if (typeof parsed.value?.name !== 'string' || parsed.value.name.trim().length === 0) return badRequest('name is required');
+          const resolved = await context.store.resolvePerson({ issuer: auth.claims.issuer, subject: auth.claims.subject });
+          if (resolved.ok === false) return { status: 503, body: { error: 'principal-unresolved', message: reasonOf(resolved) } };
+          const personId = resolved.value.person.id;
+          // Normalised here so the 409 message names the address the caller will actually type, and refused by
+          // the schema if it is not a slug at all: `team/name` is a URL segment (D45).
+          const name = normaliseName(parsed.value.name);
+          const created = await context.store.createTeam({ name });
+          if (created.ok === false) {
+            const status = created.code === 'conflict' && reasonOf(created).includes('already exists') ? 409 : 400;
+            return { status, body: { error: created.code, message: reasonOf(created) } };
+          }
+          const member = await context.store.putTeamMember({ teamId: created.value.id, personId, role: 'owner' });
+          if (member.ok === false) {
+            // Reported, not papered over -- and no rollback. The first version of this branch called a
+            // `deleteTeam` method I had invented for the purpose, which the seam does not have and does not
+            // need: a half-applied team is unrecoverable only in theory, because both rows were just read
+            // back as existing (the person was resolved above, the team was inserted here). Adding a deletion
+            // capability to erase a state that requires the database to have lost a row it just accepted would
+            // be a new API for a bug in someone else's transaction -- and dead code the moment it is unwired.
+            // If this ever does fire, the operator hears about it through the audit trail and a 503.
+            await context.store.appendAudit({ actorKind: 'system', actorRef: 'teams', action: 'team.ownership-failed', target: created.value.id, detail: { personId, reason: reasonOf(member) } });
+            return { status: 503, body: { error: member.code, message: `team created but ownership failed: ${reasonOf(member)}` } };
+          }
+          await context.store.appendAudit({ actorKind: 'user', actorRef: personId, action: 'team.create', target: created.value.id, detail: { name } });
+          return send('createTeam', 201, { teamId: created.value.id, name: created.value.name, role: 'owner' });
+        },
+      },
+    ],
+  };
+
+  return [core, instances, dispatches, audit, teams, bindings, invitations, controller];
 }
 
 export type { VerifiedClaims };
