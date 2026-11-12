@@ -112,3 +112,25 @@ export {
   type PolicyDecision,
   type PolicyInput,
 } from './policy.ts';
+export {
+  EMAIL_CONTRACT,
+  EmailAddressSchema,
+  EmailFailureSchema,
+  EmailMessageSchema,
+  EmailReceiptSchema,
+  MailboxMessageSchema,
+  failureOf,
+  type EmailAddress,
+  type EmailFailure,
+  type EmailMessage,
+  type EmailReceipt,
+  type EmailResult,
+  type EmailTransport,
+  type EmailTransportName,
+  type MailboxMessage,
+  type MailboxReader,
+} from './email.ts';
+export { emailConformanceCases, emailResults, recordEmailCase } from './email-conformance.ts';
+export { MailpitEmailTransport, type MailpitOptions } from './mailpit-email.ts';
+export { MemoryEmailTransport, type MemoryEmailOptions } from './memory-email.ts';
+export { SmtpEmailTransport, type SmtpOptions } from './smtp-email.ts';

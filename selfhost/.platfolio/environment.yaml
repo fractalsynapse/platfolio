@@ -56,3 +56,65 @@
     Build identity, injected as a build ARG by the image job and reported by /version. Never inferred from the
     filesystem at runtime, because a container that guesses its own version is a container that lies in an
     attestation.
+
+# Email (D46). Derived from what `configFromEnv` reads, like every other name here: an inventory that lists a
+# variable nobody consumes is the mistake the previous version of this file made with sessions.
+- name: PLATFOLIO_EMAIL_DRIVER
+  kind: value
+  required: false
+  enum: [smtp, mailpit, memory]
+  service: api
+  description: >-
+    Which transport exists at all. Absent means the control plane has no sender: an unconfigured default would
+    let platfolio mail people under an identity no operator chose. `smtp` in staging and production, `mailpit`
+    or `memory` locally, and `memory` in tests.
+- name: PLATFOLIO_EMAIL_FROM
+  kind: value
+  required: false
+  default: platfolio@localhost
+  service: api
+  description: The envelope sender. platfolio's own address, never a tenant's.
+- name: PLATFOLIO_SMTP_HOST
+  kind: value
+  required: false
+  service: api
+  description: The relay. A remote SMTP provider in production (D46), Mailpit on the loopback network in development.
+- name: PLATFOLIO_SMTP_PORT
+  kind: value
+  required: false
+  default: "587"
+  service: api
+- name: PLATFOLIO_SMTP_SECURE
+  kind: value
+  required: false
+  default: "false"
+  service: api
+  description: '"true" means implicit TLS (465). Otherwise STARTTLS is negotiated when the relay offers it.'
+- name: PLATFOLIO_SMTP_STARTTLS
+  kind: value
+  required: false
+  default: require
+  enum: [require, allow, off]
+  service: api
+  description: >-
+    `require` refuses to send to a relay that will not upgrade -- the default, and the one production must use.
+    `off` exists for the loopback dev sink and is spelled out in the Compose file so it cannot be mistaken for
+    a production setting. Credentials are never sent over an unencrypted connection regardless of this value.
+- name: PLATFOLIO_SMTP_USER
+  kind: value
+  required: false
+  service: api
+- name: PLATFOLIO_SMTP_PASSWORD
+  kind: secret
+  required: false
+  service: api
+  description: >-
+    Held in the environment, never persisted by platfolio, never echoed into a failure reason (D4). The SMTP
+    client passes through the same redaction as attestations, because a relay can put anything in a 5xx line.
+- name: PLATFOLIO_MAILPIT_URL
+  kind: value
+  required: false
+  service: api
+  description: >-
+    The read-back endpoint for local runs only. A production relay offers no mailbox to read, and `readable`
+    says so rather than pretending.

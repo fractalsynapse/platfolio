@@ -22,12 +22,25 @@ services:
       # Without a database the control plane starts in-memory and says so; that is a development mode, not a
       # deployment, and the readiness of a real one comes from the migrations ledger.
       PLATFOLIO_DB_URL: ${PLATFOLIO_DB_URL:-}
+      # Email (D46): a remote relay in a real deployment. `require` for STARTTLS is the default and is written
+      # explicitly here so a reviewer can see it rather than trust a default.
+      PLATFOLIO_EMAIL_DRIVER: ${PLATFOLIO_EMAIL_DRIVER:-smtp}
+      PLATFOLIO_EMAIL_FROM: ${PLATFOLIO_EMAIL_FROM:-platfolio@platfolio.dev}
+      PLATFOLIO_SMTP_HOST: ${PLATFOLIO_SMTP_HOST}
+      PLATFOLIO_SMTP_PORT: ${PLATFOLIO_SMTP_PORT:-587}
+      PLATFOLIO_SMTP_STARTTLS: require
+      PLATFOLIO_SMTP_USER: ${PLATFOLIO_SMTP_USER}
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
       timeout: 3s
       retries: 3
     x-platfolio:
+      # Declared by NAME, never by value (D4). The validator refused the literal I first wrote -- a credential
+      # appearing in an env assignment is exactly what this platform must not store or read -- so the hosting
+      # layer supplies it at run time and platfolio only knows it exists.
+      secrets:
+        - { name: PLATFOLIO_SMTP_PASSWORD, source: shared-variable }
       public: true
       # No custom domain until DNS ownership of platfolio.dev is confirmed. Measured (E27): attaching a host
       # we cannot verify sticks at `applying` forever and the certificate never issues -- a state that looks
