@@ -88,10 +88,17 @@ by a movable tag (D30 law 3). Cheap now, expensive after the CLI exposes the fie
   who does the platform think I am, and which teams does that person belong to.
 
 
-**4. Roles are an enum with no policy in front of them.** Today every handler asks `teams.includes(teamId)`,
-which is membership, not role -- an `owner` and a `member` can currently do the same things, and `destroy` will
-need to be different. Add one module (`packages/contracts/src/policy.ts`) mapping *action* → *minimum role*,
-and make handlers ask it rather than comparing enums. `viewer` and `billing` then cost a row, not a rewrite.
+**4. Roles are an enum with no policy in front of them.** → **Done (#178).** `packages/contracts/src/policy.ts`
+  holds one table, `POLICY[action] = minimumRole`, and one function, `decide({ action, membership })`. Handlers
+  no longer compare roles; they name an action and ask. Two answers, deliberately different: a non-member gets
+  **404** (existence is not for them to learn), an under-roled member gets **403** with the role that would
+  suffice -- they can already see the resource, so honest advice beats a mystery. `capability.share` and
+  `instance.destroy` are owner-only (D42, D43); the destroy route does not exist yet, and the test asserts the
+  decision anyway so the route cannot ship looser than the policy.
+  A registry populated at **build** time lets a test walk the routes and assert that every one names an
+  action, and that every action in the table is exercised by something -- the coverage is over the surface that
+  exists, not over a hand-maintained list that drifts.
+
 
 **5. State is per instance; reality is per environment.** `Instance.state` is one value, while attestation
 already carries `environment`, and a staging that is `degraded` with a production that is `live` is a normal

@@ -35,7 +35,9 @@ GitHub-initiated dispatch end to end, which remains the only full loop proven ag
 
 Team membership is enforced at the capability boundary (#173): handlers receive a resolved scope or never
 run, cross-team reads answer 404 rather than 403 so existence is not leakable, and the route table itself is
-walked by a test so a future instance-scoped route cannot skip the guard.
+walked by a test so a future instance-scoped route cannot skip the guard. Roles are enforced from one table
+(`POLICY[action] = minimumRole`, #178), so `owner` and `member` differ: sharing a capability and destroying an
+instance are owner-only, and a new route must name its action or the coverage test fails.
 
 What is still **not** delivered, stated because the earlier version of this paragraph was the first thing an
 agent read and it had gone stale: no Stripe integration, no CLI or web UI, and no tenant on either service.

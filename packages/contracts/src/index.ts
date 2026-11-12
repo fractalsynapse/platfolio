@@ -99,3 +99,13 @@ export {
   type NewCapabilityShare,
 } from './persistence.ts';
 export { checkBindingPolicy, bindingImpact, type BindingRequest, type BindingVerdict } from './binding-policy.ts';
+export {
+  POLICY,
+  PolicyActionSchema,
+  ROLE_RANK,
+  decide,
+  uncoveredActions,
+  type PolicyAction,
+  type PolicyDecision,
+  type PolicyInput,
+} from './policy.ts';
