@@ -98,14 +98,14 @@ test('the team summary is what lets a UI say "two of three consumers are stale"'
   assert.equal(stale[0]!.ok, 1);
 });
 
-test('the two reference samples describe a provider and a consumer of the same capability', async () => {
-  // `samples/`, not `templates/`: these are illustrative manifests for tests and docs. The three templates that
+test('the two reference fixtures describe a provider and a consumer of the same capability', async () => {
+  // `packages/manifest/test/fixtures/`, not `templates/`: these are manifest fixtures for tests and docs. The three templates that
   // get published to repositories live in `templates/` -- the naming split is the point of the reorganisation,
   // and this test's own title used to argue against it.
   const fs = await import('node:fs');
   const path = await import('node:path');
   const { parse } = await import('../../manifest/src/index.ts');
-  const read = (name: string) => fs.readFileSync(path.resolve('samples', name, 'manifest.yaml'), 'utf8');
+  const read = (name: string) => fs.readFileSync(path.resolve('packages/manifest/test/fixtures', name + '-manifest.yaml'), 'utf8');
   const provider = parse(read('full-stack')).manifest!;
   const consumer = parse(read('web-app')).manifest!;
 

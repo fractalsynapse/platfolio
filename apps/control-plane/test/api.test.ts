@@ -11,7 +11,7 @@ import {
 import { loadSpec, operationsOf, validateResponse, type RouteManifestEntry, type SpecDocument } from '@platfolio/api-contract';
 import { ROUTE_MANIFEST } from '../src/routes.ts';
 
-const spec: SpecDocument = loadSpec(fs.readFileSync(path.resolve(import.meta.dirname, '../../../api/control-plane.openapi.yaml'), 'utf8'));
+const spec: SpecDocument = loadSpec(fs.readFileSync(path.resolve(import.meta.dirname, '../openapi.yaml'), 'utf8'));
 const fixture = createIdentityFixture();
 const scoped = (extra: string[] = []) => signToken(fixture, { scope: ['platfolio.user', ...extra].join(' ') });
 // 40 hex, exactly. My first version was 42 characters and the OpenAPI pattern refused it -- the gate working

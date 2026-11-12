@@ -166,7 +166,7 @@ supply. Mixing them would list wiring as something to type in.
 
 Validation reuses the plan rule rather than a second one: a reference to a database the manifest does not
 declare is rejected by the contract (`unknown-database`), and the provider refuses to build a plan whose
-wiring it could not resolve. `samples/web-app` declares one (`DATABASE_URL` from `app-db`) so the
+wiring it could not resolve. `packages/manifest/test/fixtures/web-app-manifest.yaml` declares one (`DATABASE_URL` from `app-db`) so the
 catalog exercises it.
 
 ### Domains: literal hosts are provisional (OD12)
@@ -328,11 +328,11 @@ schema change and gets its own `apiVersion` review.
 
 ## Worked examples to write next
 
-1. `samples/web-app/manifest.yaml` — `api-service`, one service, Postgres, object storage of
+1. `packages/manifest/test/fixtures/web-app-manifest.yaml` — `api-service`, one service, Postgres, object storage of
    repository clones, API-key auth, no identity host. Verify: can it be deployed with zero secrets
    known to platfolio? Its AI-context generation workload needs a resource ceiling and a queue,
    otherwise one tenant saturates its own project (and its own bill — correct under D1).
-2. `samples/full-stack/manifest.yaml` — `full-stack-web`, Keycloak dependency already in the
+2. `packages/manifest/test/fixtures/full-stack-manifest.yaml` — `full-stack-web`, Keycloak dependency already in the
    platform, so both `hosted-realm` and `byo-oidc` modes must be exercised. Verify: realm import
    round-trip and that ejecting leaves a working, self-contained ArcNexus with its own IdP.
 3. `ops/platfolio/manifest.yaml` — platfolio hosting itself, which is how the renderer stays honest.

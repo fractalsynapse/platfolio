@@ -40,3 +40,8 @@ Thumbs.db
 
 # one-off framework probes that were never meant to be committed
 probe.ts
+
+# Local scratch for tooling that insists on writing inside the workspace (docker buildx
+# config, npm/pnpm caches). Never a source directory; committed once by accident while
+# debugging the self-host image build.
+.tmp/

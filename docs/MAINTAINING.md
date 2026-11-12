@@ -46,7 +46,7 @@ only substantive change from the starter's policy is scope: this is now an appli
 ## Branching and gating
 
 Every tier also runs `graphql:check`: each GraphQL document in the provider and the live-runner script
-is validated against a committed introspection snapshot (`api/railway-schema.json`, refreshable with
+is validated against a committed introspection snapshot (`packages/contracts/railway-graphql-schema.json`, refreshable with
 `scripts/refresh-railway-schema.ts`). This exists because Railway's API answers *unknown fields* with a
 validation error at runtime and *unknown payloads* with `status: applied` — so both classes of mistake are
 invisible until a tenant's apply fails or silently succeeds. The check is negative-tested against the four

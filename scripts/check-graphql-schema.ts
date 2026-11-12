@@ -10,13 +10,13 @@
  * static check turns all four into CI failures instead of tenant-visible incidents.
  *
  *   tsx scripts/check-graphql-schema.ts             # validate
- *   tsx scripts/check-graphql-schema.ts --snapshot   # refresh api/railway-schema.json from the live API
+ *   tsx scripts/check-graphql-schema.ts --snapshot   # refresh packages/contracts/railway-graphql-schema.json from the live API
  */
 import fs from 'node:fs';
 import path from 'node:path';
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
-const SCHEMA_FILE = path.join(ROOT, 'api', 'railway-schema.json');
+const SCHEMA_FILE = path.join(ROOT, 'packages', 'contracts', 'railway-graphql-schema.json');
 const SOURCES = [
   'packages/contracts/src/railway-provider.ts',
   'packages/contracts/src/railway-transport.ts',

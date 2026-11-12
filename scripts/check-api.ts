@@ -14,7 +14,7 @@ import path from 'node:path';
 import { checkRouteManifest, checkSpec, loadSpec, operationsOf, type RouteManifestEntry } from '../packages/api-contract/src/index.ts';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
-const SPEC_PATH = path.join(ROOT, 'api/control-plane.openapi.yaml');
+const SPEC_PATH = path.join(ROOT, 'apps/control-plane/openapi.yaml');
 const ROUTES_MODULE = path.join(ROOT, 'apps/control-plane/src/routes.ts');
 
 const problems: string[] = [];
