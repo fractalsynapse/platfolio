@@ -91,6 +91,12 @@ export { PostgresStore, type PostgresStoreOptions } from './postgres-store.ts';
 export { applyMigrations, dropSchema, safeSchema, type MigrateOptions, type MigrateResult } from './migrations.ts';
 export { runStoreConformance, type StoreCaseResult, type StoreReport } from './store-conformance.ts';
 export {
+  InvitationSchema,
+  checkInvitationAcceptance,
+  normaliseEmail,
+  type Invitation,
+  type NewInvitation,
+  type AcceptVerdict,
   BindingRecordSchema,
   CapabilityOfferSchema,
   CapabilityShareSchema,
@@ -132,5 +138,6 @@ export {
 } from './email.ts';
 export { emailConformanceCases, emailResults, recordEmailCase } from './email-conformance.ts';
 export { MailpitEmailTransport, type MailpitOptions } from './mailpit-email.ts';
+export { NullEmailTransport } from './email.ts';
 export { MemoryEmailTransport, type MemoryEmailOptions } from './memory-email.ts';
 export { SmtpEmailTransport, type SmtpOptions } from './smtp-email.ts';

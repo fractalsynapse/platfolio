@@ -58,7 +58,7 @@ export const EmailFailureSchema = z.object({
 export type EmailFailure = z.infer<typeof EmailFailureSchema>;
 
 export type EmailResult = EmailReceipt | EmailFailure;
-export type EmailTransportName = 'smtp' | 'mailpit' | 'memory';
+export type EmailTransportName = 'smtp' | 'mailpit' | 'memory' | 'none';
 
 /** The seam every implementation satisfies. */
 export interface EmailTransport {
@@ -91,4 +91,22 @@ export const EMAIL_CONTRACT = { name: 'email.transport', version: '1.0.0' } as c
 
 export function failureOf(result: EmailResult): EmailFailure | null {
   return result.accepted ? null : result;
+}
+
+/**
+ * The null transport (D46). Installed when no sender is configured, so the capability is always present and
+ * always answers honestly.
+ *
+ * This exists because of a bug I wrote first: the invitations capability declared `email` as a requirement,
+ * and with no email service installed the extension lost its ROUTES -- an operator who forgot to configure a
+ * relay got 404 on a real endpoint with nothing in the log to explain it. A missing collaborator must not be
+ * able to erase a route table. Presence with an explicit refusal is the shape that survives that.
+ */
+export class NullEmailTransport implements EmailTransport {
+  readonly driver = 'none' as const;
+  async send(): Promise<EmailResult> {
+    return { accepted: false, code: 'not-configured', reason: 'no email transport is configured on this control plane' };
+  }
+  async ping() { return false; }
+  async close() { /* nothing to release */ }
 }

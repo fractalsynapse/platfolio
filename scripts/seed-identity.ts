@@ -34,6 +34,9 @@ const users: Array<{ username: string; email: string; scoped: boolean }> = [
   { username: 'adrian', email: 'adrian@example.com', scoped: true },
   // Deliberately without the role: the 403 path in the API needs a real principal to demonstrate it.
   { username: 'no-scope', email: 'noscope@example.com', scoped: false },
+  // A person to invite, for the live invitation round trip: a distinct verified address in the same realm, so
+  // `hire` can sign in and claim an invitation that `adrian` created.
+  { username: 'hire', email: 'hire@example.com', scoped: true },
 ];
 
 const log = (message: string): void => {

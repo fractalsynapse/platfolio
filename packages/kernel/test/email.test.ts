@@ -40,8 +40,18 @@ test('an unknown driver is refused by the schema, not defaulted', async () => {
   await assert.rejects(() => createKernel({ email: { driver: 'sendgrid', from: 'p@t.test' } as never, requiredServices: ['email'] }), /Invalid enum|driver/);
 });
 
-test('no email config means no email capability at all', async () => {
+test('no email config means an honest refusal, not a missing capability', async () => {
+  // This test used to assert `ctx.email === undefined`. That was the design I shipped first, and integration
+  // caught it: an extension declaring `email` in `requires` then lost its ROUTES, so an operator with no relay
+  // configured got a 404 on an endpoint that exists. A capability that may be absent is a value
+  // (`driver: 'none'`), never a hole in the route table.
   const ctx = await createKernel({ requiredServices: [] });
-  assert.equal(ctx.email, undefined, 'an unconfigured control plane must not gain a sender by accident');
+  assert.equal(ctx.email.driver, 'none', 'the capability is present and says which driver it is');
+  assert.equal(ctx.email.readable, false);
+  const result = await ctx.email.send({ to: ['someone@example.test'], subject: 's', text: 't' });
+  assert.equal(result.accepted, false, 'the null transport never pretends it sent something');
+  if (result.accepted === false) assert.equal(result.code, 'not-configured');
+  assert.equal(await ctx.email.ping(), false);
+  assert.deepEqual(await ctx.email.listMessages('x@y.test'), [], 'absence of power answers empty');
   await disposeKernel(ctx);
 });

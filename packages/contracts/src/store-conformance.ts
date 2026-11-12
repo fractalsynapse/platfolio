@@ -260,6 +260,85 @@ const expectErr = (result: { ok: boolean; value?: unknown } & Partial<StoreError
       : { status: 'fail', detail: 'the revoked offer is still discoverable to the former consumer' };
   });
 
+  await add('invitations: pending is not a membership, and one address one pending row (D44)', async () => {
+    const { store, team } = await seed();
+    const owner = mustOk(await store.resolvePerson({ issuer: 'https://inviter.test', subject: 'inviter' }), 'inviter person');
+    mustOk(await store.putTeamMember({ teamId: team.id, personId: owner.person.id, role: 'owner' }), 'owner member');
+    // Counted against the fixture's own baseline rather than an absolute: `seed()` creates what it creates,
+    // and an assertion of `1` would have been a claim about the suite rather than about invitations.
+    const personsBefore = (await store.listPersons()).length;
+    const invitation = mustOk(await store.createInvitation({ teamId: team.id, email: '  New-Hire@Example.TEST ', role: 'member', invitedBy: owner.person.id }), 'create');
+    if (invitation.email !== 'new-hire@example.test') return { status: 'fail', detail: `address not normalised: ${invitation.email}` };
+
+    // Inviting a stranger must not create a person, an identity, or a membership -- the three ways a naive
+    // implementation leaks an unauthorised role into the authorization table.
+    const members = await store.listTeamMembers(team.id);
+    if (members.length !== 1) return { status: 'fail', detail: `an invitation created a membership: ${String(members.length)} members` };
+    const persons = await store.listPersons();
+    if (persons.length !== personsBefore) return { status: 'fail', detail: `an invitation created ${String(persons.length - personsBefore)} person row(s) for someone who has not proven anything yet` };
+
+    const dupe = await store.createInvitation({ teamId: team.id, email: 'new-hire@example.test', role: 'owner', invitedBy: owner.person.id });
+    const verdict = expectErr(dupe, 'conflict', 'a second pending invitation for the same address');
+    if (verdict.status === 'fail') return verdict;
+    // Different casing is the same person -- otherwise two pending rows with different roles is a real state.
+    const dupeCase = await store.createInvitation({ teamId: team.id, email: 'NEW-HIRE@example.test', role: 'member', invitedBy: owner.person.id });
+    if (dupeCase.ok) return { status: 'fail', detail: 'case-only difference produced a second pending invitation' };
+
+    const listed = await store.listInvitations(team.id);
+    if (listed.length !== 1) return { status: 'fail', detail: `team listing gave ${String(listed.length)} rows` };
+    const noTeam = await store.createInvitation({ teamId: 'team-missing', email: 'x@example.test', role: 'member', invitedBy: owner.person.id });
+    return expectErr(noTeam, 'not-found', 'an invitation into a team that does not exist');
+  });
+
+  await add('invitations: acceptance is atomic and grants exactly the invited role', async () => {
+    const { store, team } = await seed();
+    const inviter = mustOk(await store.resolvePerson({ issuer: 'https://inviter.test', subject: 'inviter' }), 'inviter');
+    mustOk(await store.putTeamMember({ teamId: team.id, personId: inviter.person.id, role: 'owner' }), 'owner');
+    const invitation = mustOk(await store.createInvitation({ teamId: team.id, email: 'hire@example.test', role: 'member', invitedBy: inviter.person.id }), 'create');
+    const invitee = mustOk(await store.resolvePerson({ issuer: 'https://idp-b.test', subject: 'hire-1' }), 'invitee person');
+
+    const accepted = mustOk(await store.acceptInvitation(invitation.id, invitee.person.id), 'accept');
+    if (accepted.invitation.state !== 'accepted' || accepted.invitation.acceptedBy !== invitee.person.id) {
+      return { status: 'fail', detail: `invitation state: ${JSON.stringify(accepted.invitation)}` };
+    }
+    const member = mustOk(await store.getTeamMember(team.id, invitee.person.id), 'read membership');
+    if (member.role !== 'member') return { status: 'fail', detail: `granted ${member.role} instead of the invited role` };
+    const teams = await store.teamsForPerson(invitee.person.id);
+    if (!teams.includes(team.id)) return { status: 'fail', detail: `accepted but not a member of anything: ${JSON.stringify(teams)}` };
+
+    const again = await store.acceptInvitation(invitation.id, invitee.person.id);
+    const secondVerdict = expectErr(again, 'conflict', 'a second acceptance of the same invitation');
+    if (secondVerdict.status === 'fail') return secondVerdict;
+    const ghost = await store.acceptInvitation('inv-does-not-exist', invitee.person.id);
+    return expectErr(ghost, 'not-found', 'acceptance of an unknown invitation');
+  });
+
+  await add('invitations: expiry and revocation are observed, and a receipt is a field', async () => {
+    const { store, team } = await seed();
+    const inviter = mustOk(await store.resolvePerson({ issuer: 'https://inviter.test', subject: 'inviter' }), 'inviter');
+    const live = mustOk(await store.createInvitation({ teamId: team.id, email: 'live@example.test', role: 'member', invitedBy: inviter.person.id }), 'live');
+    const stale = mustOk(await store.createInvitation({ teamId: team.id, email: 'stale@example.test', role: 'member', invitedBy: inviter.person.id, ttlDays: -1 }), 'already expired');
+    const aged = await store.findInvitationsForEmail('stale@example.test');
+    if (aged[0]?.state !== 'expired') return { status: 'fail', detail: `expired row reads as ${String(aged[0]?.state)}` };
+    const refused = await store.acceptInvitation(stale.id, inviter.person.id);
+    const expiryVerdict = expectErr(refused, 'conflict', 'acceptance of an expired invitation');
+    if (expiryVerdict.status === 'fail') return expiryVerdict;
+
+    const withReceipt = mustOk(await store.setInvitationEmailResult(live.id, { receipt: 'mailpit-id-1' }), 'receipt');
+    if (withReceipt.emailReceipt !== 'mailpit-id-1') return { status: 'fail', detail: 'the transport receipt did not stick' };
+    // A later failed resend must not erase the earlier success, and vice versa: both are facts (D46).
+    const afterError = mustOk(await store.setInvitationEmailResult(live.id, { error: 'relay 550' }), 'error');
+    if (afterError.emailReceipt !== 'mailpit-id-1') return { status: 'fail', detail: 'a failure write erased the prior receipt' };
+    const unknown = await store.setInvitationEmailResult('inv-nope', { receipt: 'x' });
+    const unknownVerdict = expectErr(unknown, 'not-found', 'a receipt for an unknown invitation');
+    if (unknownVerdict.status === 'fail') return unknownVerdict;
+
+    const revoked = mustOk(await store.revokeInvitation(live.id), 'revoke');
+    if (revoked.state !== 'revoked') return { status: 'fail', detail: `revoked row reads ${revoked.state}` };
+    const acceptAfterRevoke = await store.acceptInvitation(live.id, inviter.person.id);
+    return expectErr(acceptAfterRevoke, 'conflict', 'acceptance after revocation');
+  });
+
   await add('per-environment state: two environments, two truthful rows (#179)', async () => {
     const { store, instance } = await seed();
     const missingInstance = await store.setInstanceEnvironment({ instanceId: 'inst-never', environment: 'production', state: 'live' });

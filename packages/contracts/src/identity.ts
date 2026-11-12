@@ -38,6 +38,15 @@ export const VerifiedClaimsSchema = z.object({
   expiresAt: z.string().min(1),
   /** GitHub-environment claim, carried only when present; the production gate in the attestation contract needs it. */
   environment: z.string().optional(),
+  /**
+   * The identity provider's own assertion about this person's address (D46), read from the token and never
+   * supplied by the caller. An invitation is accepted by whoever the IdP says owns the address; a request body
+   * claiming "my email is..." would make the root of trust a typed string -- the authorization-by-mailbox
+   * problem D46 explicitly declines to create.
+   */
+  email: z.string().min(3).max(320).optional(),
+  /** `email_verified` in the IdP's vocabulary. Absent means not asserted, which is NOT the same as true. */
+  emailVerified: z.boolean().optional(),
 });
 export type VerifiedClaims = z.infer<typeof VerifiedClaimsSchema>;
 
@@ -157,6 +166,8 @@ function judge(payload: Record<string, unknown>, config: IdentityConfig, require
   if (requiredScope !== undefined && !scope.includes(requiredScope)) return fail('scope', `required scope "${requiredScope}" not granted (token has: ${scope.join(', ') || 'none'})`);
   const clientId = typeof payload.azp === 'string' && payload.azp ? payload.azp : typeof payload.client_id === 'string' ? payload.client_id : '';
   const environment = typeof payload.environment === 'string' ? payload.environment : undefined;
+  const email = typeof payload.email === 'string' && payload.email.length > 0 ? payload.email : undefined;
+  const emailVerified = typeof payload.email_verified === 'boolean' ? payload.email_verified : undefined;
   const parsed = VerifiedClaimsSchema.safeParse({
     subject: payload.sub,
     issuer: String(payload.iss),
@@ -165,6 +176,8 @@ function judge(payload: Record<string, unknown>, config: IdentityConfig, require
     scope,
     expiresAt: new Date(exp * 1000).toISOString(),
     ...(environment === undefined ? {} : { environment }),
+    ...(email === undefined ? {} : { email }),
+    ...(emailVerified === undefined ? {} : { emailVerified }),
   });
   if (!parsed.success) return fail('malformed', `claims did not satisfy the verified shape: ${parsed.error.issues.map((i) => i.message).join('; ')}`);
   return { ok: true, claims: parsed.data };

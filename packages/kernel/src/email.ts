@@ -1,6 +1,6 @@
 import { Context, Service } from 'cordis';
 import { z } from 'zod';
-import { MailpitEmailTransport, MemoryEmailTransport, SmtpEmailTransport, type EmailMessage, type EmailResult, type EmailTransport, type MailboxMessage, type MailboxReader } from '@platfolio/contracts';
+import { MailpitEmailTransport, MemoryEmailTransport, NullEmailTransport, SmtpEmailTransport, type EmailMessage, type EmailResult, type EmailTransport, type MailboxMessage, type MailboxReader } from '@platfolio/contracts';
 
 /**
  * The email capability as `ctx.email` (D46) -- the same construction rule as storage and the provider: the
@@ -12,7 +12,7 @@ import { MailpitEmailTransport, MemoryEmailTransport, SmtpEmailTransport, type E
  * acquire the same power by choosing a driver.
  */
 export const EmailConfigSchema = z.object({
-  driver: z.enum(['memory', 'mailpit', 'smtp']).default('memory'),
+  driver: z.enum(['none', 'memory', 'mailpit', 'smtp']).default('none'),
   /** Envelope sender. Never a tenant's address: this is platfolio's own mail identity (D4). */
   from: z.string().min(3).default('platfolio@localhost'),
   /** smtp */
@@ -61,9 +61,14 @@ export class EmailService extends Service<EmailConfig> {
       if (!config.baseUrl) throw new Error('email driver "mailpit" requires a baseUrl (PLATFOLIO_MAILPIT_URL)');
       this.inner = new MailpitEmailTransport({ url: config.baseUrl, from: config.from, timeoutMs: config.timeoutMs });
       this.readable = true;
-    } else {
+    } else if (config.driver === 'memory') {
       this.inner = new MemoryEmailTransport();
       this.readable = true;
+    } else {
+      // 'none': present, honest, and refuses with `not-configured`. Chosen as the default so an operator who
+      // configures nothing sends nothing -- and, crucially, so the routes that mail exist either way.
+      this.inner = new NullEmailTransport();
+      this.readable = false;
     }
   }
 

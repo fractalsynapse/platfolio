@@ -83,6 +83,9 @@ export interface TokenOptions {
   kid?: string | null;
   alg?: string;
   environment?: string;
+  /** Address assertion, for the invitation flow (D46). */
+  email?: string;
+  emailVerified?: boolean;
   extra?: Record<string, unknown>;
   /** Sign with something other than the fixture key, to break the signature without breaking the header. */
   secretKey?: 'public-key-as-hmac' | 'wrong-rsa';
@@ -106,6 +109,9 @@ export function signToken(fixture: IdentityFixture, options: TokenOptions = {}):
     ...(options.notBeforeIn === undefined || options.notBeforeIn === null ? {} : { nbf: now + options.notBeforeIn }),
     ...(options.scope === undefined ? {} : { scope: options.scope }),
     ...(options.environment === undefined ? {} : { environment: options.environment }),
+    // The IdP's assertions about the address (D46). Named `email_verified` because that is the wire claim.
+    ...(options.email === undefined ? {} : { email: options.email }),
+    ...(options.emailVerified === undefined ? {} : { email_verified: options.emailVerified }),
     ...(options.extra ?? {}),
   };
   const signingInput = `${b64url(JSON.stringify(header))}.${b64url(JSON.stringify(payload))}`;

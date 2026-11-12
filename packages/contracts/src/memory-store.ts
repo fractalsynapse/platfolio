@@ -1,8 +1,9 @@
 import { z } from 'zod';
 import type { Attestation } from './attestation.ts';
-import { AttestationRecordSchema, AuditEntrySchema, BindingRecordSchema, CapabilityOfferSchema, CapabilityShareSchema, IdentitySchema, PersonSchema, TeamMemberSchema, DispatchRecordSchema, InstanceEnvironmentStateSchema, InstanceSchema, ProviderConnectionSchema, RepoConnectionSchema, TeamSchema, newId,
-  type AttestationRecord, type AuditEntry, type BindingRecord, type CapabilityOffer, type CapabilityShare, type NewBinding, type NewCapabilityOffer, type NewCapabilityShare, type DispatchRecord, type Instance, type InstanceEnvironmentState, type ProviderConnection, type RepoConnection, type Store, type StoreError, type NewInstance, type StoreResult, type Team, type TeamMember, type Identity, type Person } from './persistence.ts';
+import { AttestationRecordSchema, AuditEntrySchema, BindingRecordSchema, CapabilityOfferSchema, CapabilityShareSchema, IdentitySchema, PersonSchema, TeamMemberSchema, DispatchRecordSchema, InstanceEnvironmentStateSchema, InstanceSchema, InvitationSchema, ProviderConnectionSchema, RepoConnectionSchema, TeamSchema, newId,
+  type AttestationRecord, type AuditEntry, type BindingRecord, type CapabilityOffer, type CapabilityShare, type NewBinding, type NewCapabilityOffer, type NewCapabilityShare, type DispatchRecord, type Instance, type InstanceEnvironmentState, type Invitation, type NewInvitation, type ProviderConnection, type RepoConnection, type Store, type StoreError, type NewInstance, type StoreResult, type Team, type TeamMember, type Identity, type Person } from './persistence.ts';
 import { reasonOf } from './persistence.ts';
+import { normaliseEmail } from './persistence.ts';
 import { checkAttestationPolicy } from './dispatch-policy.ts';
 
 /**
@@ -36,6 +37,7 @@ export class MemoryStore implements Store {
   private readonly repos = new Map<string, RepoConnection>();
   private readonly providers = new Map<string, ProviderConnection>();
   private readonly dispatches = new Map<string, DispatchRecord>();
+  private readonly invitations = new Map<string, Invitation>();
   private readonly envStates = new Map<string, InstanceEnvironmentState>();
   private readonly plans = new Map<string, { instanceId: string; planHash: string; plan: unknown }>();
   private readonly persons = new Map<string, Person>();
@@ -295,6 +297,88 @@ export class MemoryStore implements Store {
     return ok({ removed: true });
   }
 
+  async createInvitation(input: NewInvitation) {
+    if (this.closed) return this.refuse('createInvitation');
+    if (!this.teams.has(input.teamId)) return err({ code: 'not-found', what: 'team', id: input.teamId });
+    const email = normaliseEmail(input.email);
+    // The same rule the partial unique index enforces in Postgres: one pending invitation per address per
+    // team. Refused as a conflict rather than silently replaced, because replacing would withdraw a live
+    // invitation that the invited person may already be acting on.
+    if ([...this.invitations.values()].some((i) => i.teamId === input.teamId && i.email === email && i.state === 'pending')) {
+      return err({ code: 'conflict', reason: `a pending invitation already exists for ${email} in this team` });
+    }
+    const now = this.clock();
+    const ttl = input.ttlDays ?? 14;
+    const admitted = admit(InvitationSchema, {
+      id: newId('inv'), teamId: input.teamId, email, role: input.role, state: 'pending', invitedBy: input.invitedBy,
+      createdAt: now, expiresAt: new Date(Date.parse(now) + ttl * 86_400_000).toISOString(),
+    }, 'invitation');
+    if (!admitted.accepted) return err({ code: 'conflict', reason: admitted.reason });
+    this.invitations.set(admitted.value.id, admitted.value);
+    return ok(copy(admitted.value));
+  }
+  async getInvitation(id: string) {
+    const found = this.invitations.get(id);
+    return found ? ok(copy(found)) : err({ code: 'not-found', what: 'invitation', id });
+  }
+  async listInvitations(teamId: string) {
+    return [...this.invitations.values()].filter((i) => i.teamId === teamId).map((i) => copy(this.ageIfExpired(i)));
+  }
+  async findInvitationsForEmail(email: string) {
+    const wanted = normaliseEmail(email);
+    return [...this.invitations.values()].filter((i) => i.email === wanted).map((i) => copy(this.ageIfExpired(i)));
+  }
+  private ageIfExpired(invitation: Invitation): Invitation {
+    // Expiry is observed on read rather than by a sweeper: a pending row past its date has no different
+    // *meaning*, only a different truth-value for acceptance, and a background job that "fixes" it would be a
+    // second answer to the same question.
+    if (invitation.state === 'pending' && Date.parse(invitation.expiresAt) <= Date.parse(this.clock())) {
+      const aged = { ...invitation, state: 'expired' as const };
+      this.invitations.set(invitation.id, aged);
+      return aged;
+    }
+    return invitation;
+  }
+  async acceptInvitation(invitationId: string, personId: string) {
+    const current = this.invitations.get(invitationId);
+    if (!current) return err({ code: 'not-found', what: 'invitation', id: invitationId });
+    const aged = this.ageIfExpired(current);
+    if (aged.state !== 'pending') return err({ code: 'conflict', reason: `invitation is ${aged.state}` });
+    if (!this.persons.has(personId)) return err({ code: 'not-found', what: 'person', id: personId });
+    const now = this.clock();
+    const accepted: Invitation = { ...aged, state: 'accepted', acceptedBy: personId, acceptedAt: now };
+    // Both writes or neither, in this order: the membership is the thing that grants, so it must not exist
+    // without the recorded acceptance, and an accepted invitation granting nothing is a lie in the other
+    // direction. The double has no transaction; the database does, and the shared suite asserts the outcome.
+    const memberKey = `${accepted.teamId}\u0000${personId}`;
+    const existing = this.members.get(memberKey);
+    const member: TeamMember = existing
+      ? { ...existing, role: accepted.role }
+      : { teamId: accepted.teamId, personId, role: accepted.role, addedAt: now };
+    this.members.set(memberKey, member);
+    this.invitations.set(invitationId, accepted);
+    return ok({ invitation: copy(accepted), member: copy(member) });
+  }
+  async revokeInvitation(id: string) {
+    const found = this.invitations.get(id);
+    if (!found) return err({ code: 'not-found', what: 'invitation', id });
+    if (found.state === 'accepted') return err({ code: 'conflict', reason: 'an accepted invitation is a membership; remove the member instead' });
+    const revoked: Invitation = { ...found, state: 'revoked', revokedAt: this.clock() };
+    this.invitations.set(id, revoked);
+    return ok(copy(revoked));
+  }
+  async setInvitationEmailResult(id: string, result: { receipt?: string; error?: string }) {
+    const found = this.invitations.get(id);
+    if (!found) return err({ code: 'not-found', what: 'invitation', id });
+    const updated: Invitation = {
+      ...found,
+      ...(result.receipt === undefined ? {} : { emailReceipt: result.receipt }),
+      ...(result.error === undefined ? {} : { emailError: result.error }),
+    };
+    this.invitations.set(id, updated);
+    return ok(copy(updated));
+  }
+
   async setInstanceEnvironment(input: { instanceId: string; environment: string; state: Instance['state']; appliedPlanHash?: string; attestationId?: string }) {
     if (this.closed) return this.refuse('setInstanceEnvironment');
     if (!this.instances.has(input.instanceId)) return err({ code: 'not-found', what: 'instance', id: input.instanceId });
@@ -415,6 +499,7 @@ export class MemoryStore implements Store {
     this.teams.clear();
     this.plans.clear();
     this.envStates.clear();
+    this.invitations.clear();
     this.members.clear();
     this.persons.clear();
     this.identities.clear();

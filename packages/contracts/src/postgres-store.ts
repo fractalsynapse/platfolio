@@ -1,9 +1,10 @@
 import { Pool } from 'pg';
 import {
-  AttestationRecordSchema, AuditEntrySchema, BindingRecordSchema, CapabilityOfferSchema, CapabilityShareSchema, DispatchRecordSchema, IdentitySchema, PersonSchema, TeamMemberSchema, InstanceEnvironmentStateSchema, InstanceSchema, ProviderConnectionSchema, RepoConnectionSchema, TeamSchema, newId,
-  type AttestationRecord, type AuditEntry, type BindingRecord, type CapabilityOffer, type NewBinding, type NewCapabilityOffer, type NewCapabilityShare, type DispatchRecord, type Instance, type InstanceEnvironmentState, type ProviderConnection, type RepoConnection, type Store, type StoreError, type NewInstance, type StoreResult, type Team, type Person, type TeamMember,
+  AttestationRecordSchema, AuditEntrySchema, BindingRecordSchema, CapabilityOfferSchema, CapabilityShareSchema, DispatchRecordSchema, IdentitySchema, PersonSchema, TeamMemberSchema, InstanceEnvironmentStateSchema, InstanceSchema, InvitationSchema, ProviderConnectionSchema, RepoConnectionSchema, TeamSchema, newId,
+  type AttestationRecord, type AuditEntry, type BindingRecord, type CapabilityOffer, type NewBinding, type NewCapabilityOffer, type NewCapabilityShare, type DispatchRecord, type Instance, type InstanceEnvironmentState, type Invitation, type NewInvitation, type ProviderConnection, type RepoConnection, type Store, type StoreError, type NewInstance, type StoreResult, type Team, type Person, type TeamMember,
 } from './persistence.ts';
 import { reasonOf } from './persistence.ts';
+import { normaliseEmail } from './persistence.ts';
 import { checkAttestationPolicy } from './dispatch-policy.ts';
 import type { Attestation } from './attestation.ts';
 
@@ -485,6 +486,133 @@ export class PostgresStore implements Store {
     const row = rows[0];
     if (!row) return err({ code: 'not-found', what: 'person', id: `${issuer}/${subject}` });
     return this.getPerson(String(row.person_id));
+  }
+
+  async createInvitation(input: NewInvitation) {
+    const email = normaliseEmail(input.email);
+    const now = new Date();
+    const expires = new Date(now.getTime() + (input.ttlDays ?? 14) * 86_400_000);
+    const admitted = admit(InvitationSchema, {
+      id: newId('inv'), teamId: input.teamId, email, role: input.role, state: 'pending', invitedBy: input.invitedBy,
+      createdAt: now.toISOString(), expiresAt: expires.toISOString(),
+    }, 'invitation');
+    if (!admitted.accepted) return err({ code: 'conflict', reason: admitted.reason });
+    const i = admitted.value;
+    try {
+      await this.pool.query(
+        `INSERT INTO ${this.q('invitations')} (id, team_id, email, role, state, invited_by, created_at, expires_at)
+         VALUES ($1,$2,$3,$4,'pending',$5,$6,$7)`,
+        [i.id, i.teamId, i.email, i.role, i.invitedBy, i.createdAt, i.expiresAt]);
+    } catch (error) {
+      const code = (error as { code?: string }).code;
+      if (code === '23505') return err({ code: 'conflict', reason: `a pending invitation already exists for ${email} in this team` });
+      if (code === '23503') return err({ code: 'not-found', what: 'team', id: i.teamId });
+      throw error;
+    }
+    return ok(i);
+  }
+
+  private asInvitation(row: Row): StoreResult<Invitation> {
+    const admitted = admit(InvitationSchema, {
+      id: row.id, teamId: row.team_id, email: row.email, role: row.role, state: row.state, invitedBy: row.invited_by,
+      createdAt: iso(row.created_at), expiresAt: iso(row.expires_at),
+      ...(row.accepted_by === null ? {} : { acceptedBy: String(row.accepted_by) }),
+      ...(row.accepted_at === null ? {} : { acceptedAt: iso(row.accepted_at) }),
+      ...(row.revoked_at === null ? {} : { revokedAt: iso(row.revoked_at) }),
+      ...(row.email_receipt === null ? {} : { emailReceipt: String(row.email_receipt) }),
+      ...(row.email_error === null ? {} : { emailError: String(row.email_error) }),
+    }, 'invitation row');
+    return admitted.accepted ? ok(admitted.value) : err({ code: 'conflict', reason: admitted.reason });
+  }
+
+  /**
+   * Reads pass through this so an expired pending row is reported as `expired` by BOTH drivers. The double
+   * aged on read and Postgres did not, and the shared suite caught the disagreement: an invitation that reads
+   * `pending` but refuses acceptance is the kind of answer that makes a UI lie.
+   */
+  private ageRow(row: Row): Row {
+    if (row.state === 'pending' && Date.parse(iso(row.expires_at)) <= Date.now()) return { ...row, state: 'expired' };
+    return row;
+  }
+
+  async getInvitation(id: string) {
+    const rows = (await this.pool.query(`SELECT * FROM ${this.q('invitations')} WHERE id = $1`, [id])).rows as Row[];
+    const row = rows[0];
+    if (!row) return err({ code: 'not-found', what: 'invitation', id });
+    return this.asInvitation(row);
+  }
+
+  async listInvitations(teamId: string) {
+    const rows = (await this.pool.query(`SELECT * FROM ${this.q('invitations')} WHERE team_id = $1 ORDER BY created_at DESC`, [teamId])).rows as Row[];
+    return values(rows.map((r) => this.asInvitation(this.ageRow(r))));
+  }
+
+  async findInvitationsForEmail(email: string) {
+    const wanted = normaliseEmail(email);
+    const rows = (await this.pool.query(
+      `SELECT * FROM ${this.q('invitations')} WHERE email = lower($1) ORDER BY created_at DESC`, [wanted])).rows as Row[];
+    return values(rows.map((r) => this.asInvitation(this.ageRow(r))));
+  }
+
+  async acceptInvitation(invitationId: string, personId: string) {
+    // One transaction: a membership without a recorded acceptance, or an acceptance that grants nothing, are
+    // both real states a two-statement version can reach when the second call fails. The double has no
+    // transaction; the shared suite asserts the outcome, which is why both had better have it.
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      const rows = (await client.query(
+        `UPDATE ${this.q('invitations')} SET state = 'accepted', accepted_by = $2, accepted_at = now()
+          WHERE id = $1 AND state = 'pending' AND expires_at > now() RETURNING *`, [invitationId, personId])).rows as Row[];
+      const updated = rows[0];
+      if (!updated) {
+        await client.query('ROLLBACK');
+        const existing = await this.getInvitation(invitationId);
+        if (!existing.ok) return err({ code: 'not-found', what: 'invitation', id: invitationId });
+        return err({ code: 'conflict', reason: `invitation is ${existing.value.state} and cannot be accepted` });
+      }
+      const invitation = this.asInvitation(updated);
+      if (!invitation.ok) { await client.query('ROLLBACK'); return invitation; }
+      const memberRows = (await client.query(
+        `INSERT INTO ${this.q('team_members')} (team_id, person_id, role, added_at)
+         VALUES ($1,$2,$3,now())
+         ON CONFLICT (team_id, person_id) DO UPDATE SET role = EXCLUDED.role
+         RETURNING *`, [updated.team_id, personId, updated.role])).rows as Row[];
+      const member = memberRows[0];
+      if (!member) { await client.query('ROLLBACK'); return err({ code: 'conflict', reason: 'membership write returned nothing' }); }
+      await client.query('COMMIT');
+      const admittedMember = admit(TeamMemberSchema, { teamId: member.team_id, personId: member.person_id, role: member.role, addedAt: iso(member.added_at) }, 'team member row');
+      if (!admittedMember.accepted) return err({ code: 'conflict', reason: admittedMember.reason });
+      return ok({ invitation: invitation.value, member: admittedMember.value });
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async revokeInvitation(id: string) {
+    const rows = (await this.pool.query(
+      `UPDATE ${this.q('invitations')} SET state = 'revoked', revoked_at = now()
+        WHERE id = $1 AND state IN ('pending','expired') RETURNING *`, [id])).rows as Row[];
+    const row = rows[0];
+    if (!row) {
+      const existing = await this.getInvitation(id);
+      if (!existing.ok) return existing;
+      return err({ code: 'conflict', reason: `invitation is ${existing.value.state} and cannot be revoked` });
+    }
+    return this.asInvitation(row);
+  }
+
+  async setInvitationEmailResult(id: string, result: { receipt?: string; error?: string }) {
+    const rows = (await this.pool.query(
+      `UPDATE ${this.q('invitations')}
+          SET email_receipt = COALESCE($2, email_receipt), email_error = COALESCE($3, email_error)
+        WHERE id = $1 RETURNING *`, [id, result.receipt ?? null, result.error ?? null])).rows as Row[];
+    const row = rows[0];
+    if (!row) return err({ code: 'not-found', what: 'invitation', id });
+    return this.asInvitation(row);
   }
 
   async setInstanceEnvironment(input: { instanceId: string; environment: string; state: Instance['state']; appliedPlanHash?: string; attestationId?: string }) {
