@@ -80,6 +80,15 @@ services:
       # where it bit.
       PLATFOLIO_BUILD_TIME: '2026-11-11T00:00:00.000Z'
       PLATFOLIO_RECONCILE_INTERVAL_MS: '5000'
+      # Email (D46): the real client against a real SMTP server, no stub in sight. startTls is off ONLY
+      # because this is loopback to a dev sink; the same line in a production manifest would leak credentials
+      # to anyone on the path.
+      PLATFOLIO_EMAIL_DRIVER: smtp
+      PLATFOLIO_EMAIL_FROM: platfolio@localhost
+      PLATFOLIO_SMTP_HOST: mailpit
+      PLATFOLIO_SMTP_PORT: '1025'
+      PLATFOLIO_SMTP_STARTTLS: 'off'
+      PLATFOLIO_MAILPIT_URL: http://mailpit:8025
     ports:
       - '8082:8080'
     volumes:
@@ -89,6 +98,28 @@ services:
         condition: service_healthy
       identity:
         condition: service_started
+      mailpit:
+        condition: service_started
+
+  # Mailpit (D46): an SMTP sink and a mailbox that tests can read. Everything platfolio sends in development
+  # lands here, and `email:smoke` asserts on it through Mailpit's HTTP API -- "the invitation was sent to this
+  # address with this link" becomes a checked fact rather than a log line somebody eyeballs. UI :8025, SMTP :1025.
+  mailpit:
+    image: axllent/mailpit:v1.24.0
+    environment:
+      # Development only: a local sink that accepts any credentials, so the SMTP client's auth path is
+      # exercised without a real relay. A production transport never sets these.
+      MP_SMTP_AUTH_ACCEPT_ANY: '1'
+      MP_SMTP_AUTH_ALLOW_INSECURE: '1'
+      MP_MAX_MESSAGES: '5000'
+    ports:
+      - '8025:8025'
+      - '1025:1025'
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
 
 volumes:
   platfolio-pgdata:

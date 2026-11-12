@@ -4,12 +4,15 @@ import { CustodyService, CustodyConfigSchema } from './custody.ts';
 import { IdentityService } from './identity.ts';
 import { requireServices } from './startup.ts';
 import { ServerService, ServerConfigSchema } from './server.ts';
+import { EmailService, EmailConfigSchema } from './email.ts';
 import { StoreService, StoreConfigSchema } from './store.ts';
 import { ExtensionService, type ExtensionDescriptor } from './extension.ts';
 import { InfraService, ProviderConfigSchema } from './infra-provider.ts';
 import type { IdentityConfig, Jwk, VariablePort, RedactionSinks } from '@platfolio/contracts';
 
 export interface KernelOptions {
+  /** Email transport selection (D46). Absent means no email capability is installed at all. */
+  email?: import('./email.ts').EmailConfigInput;
   provider?: 'fake' | 'railway';
   contract?: string;
   custody?: 'managed' | 'strict';
@@ -92,6 +95,12 @@ async function install(ctx: Context, options: KernelOptions): Promise<Context> {
     if (storeConfig.migrate) await ctx.store.migrate();
   } else if (options.store) {
     await ctx.plugin(StoreService, StoreConfigSchema.parse(options.store));
+  }
+
+  if (options.email) {
+    // Installed before the server so a capability can reach email at boot, and only when configured -- an
+    // unconfigured control plane does not silently gain a sender it never asked for.
+    await ctx.plugin(EmailService, EmailConfigSchema.parse(options.email));
   }
 
   if (options.server) {

@@ -26931,6 +26931,38 @@ var PolicyActionSchema = external_exports.enum([
   "team.invite"
 ]);
 
+// packages/contracts/src/email.ts
+var EmailAddressSchema = external_exports.string().min(3).max(320).refine(
+  (value) => /^[^@\s]+@[^@\s]+\.[A-Za-z]{2,}$/.test(value),
+  { message: "a plain addr-spec is required; display names and group syntax are the transport's concern, not this contract's" }
+);
+var EmailMessageSchema = external_exports.object({
+  to: external_exports.array(EmailAddressSchema).min(1).max(50),
+  subject: external_exports.string().min(1).max(998),
+  text: external_exports.string().min(1).max(2e5),
+  html: external_exports.string().max(4e5).optional(),
+  /** The address mail should be *replied to*; defaults to the configured from-address. Never a tenant secret. */
+  replyTo: EmailAddressSchema.optional(),
+  /** A stable id for correlation (e.g. an invitation id) -- carried as a header so a reply can be traced. */
+  correlationId: external_exports.string().min(1).max(120).optional()
+}).strict();
+var EmailReceiptSchema = external_exports.object({
+  accepted: external_exports.literal(true),
+  /** Provider-side id when it gives one; Mailpit's message id is what makes local assertion possible. */
+  providerId: external_exports.string().max(200).optional(),
+  messageId: external_exports.string().min(1).max(200),
+  sentAt: external_exports.string().min(1)
+}).strict();
+var EmailFailureSchema = external_exports.object({
+  accepted: external_exports.literal(false),
+  code: external_exports.enum(["rejected", "transport-unavailable", "not-configured", "payload-too-large", "auth-failed"]),
+  reason: external_exports.string().min(1).max(500)
+}).strict();
+var MailboxMessageSchema = EmailMessageSchema.extend({
+  providerId: external_exports.string().max(200),
+  receivedAt: external_exports.string().min(1)
+}).strict();
+
 // apps/managed-action/src/runner.ts
 var RELEASE = { version: process.env.PLATFOLIO_ACTION_VERSION ?? "0.0.0-dev", commitSha: process.env.PLATFOLIO_ACTION_SHA ?? "0".repeat(40), imageDigest: `sha256:${"0".repeat(64)}` };
 function readIntent(env) {

@@ -99,3 +99,36 @@ jobs:
 
       - name: Run the suite with the database present (nothing may skip silently)
         run: pnpm run test
+
+  email:
+    name: Email transport against Mailpit
+    # The SMTP client is hand-written, so the only honest proof is a real server. Unit tests cover framing and
+    # typed failures against a scripted socket; this covers the dialogue against Mailpit itself, including the
+    # `SIZE 0` and header-visibility behaviours that the scripted server had no idea about.
+    runs-on: ubuntu-latest
+    services:
+      mailpit:
+        image: axllent/mailpit:v1.24.0
+        ports: ['1025:1025', '8025:8025']
+        env:
+          MP_SMTP_AUTH_ACCEPT_ANY: '1'
+          MP_SMTP_AUTH_ALLOW_INSECURE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.4.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.1'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Wait for the mailbox
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8025/api/v1/info >/dev/null 2>&1; then echo ready; exit 0; fi
+            sleep 2
+          done
+          echo "mailpit never answered"; exit 1
+      - name: Send and assert
+        run: pnpm run email:smoke

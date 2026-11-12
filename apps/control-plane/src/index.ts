@@ -12,6 +12,9 @@ export interface BootConfig {
   host: string;
   port: number;
   build: { version: string; commit: string; buildTime: string };
+  /** Absent unless PLATFOLIO_EMAIL_DRIVER names one. There is no default: an unconfigured control plane has
+   *  no sender at all, rather than one that mails people under an identity no operator chose. */
+  email?: import('@platfolio/kernel').EmailConfigInput;
 }
 
 /** Fail closed on missing identity config: a control plane that starts without knowing its issuer is an open door with a logo on it. */
@@ -29,6 +32,22 @@ export function configFromEnv(env: NodeJS.ProcessEnv): BootConfig {
       commit: env.PLATFOLIO_COMMIT ?? '0'.repeat(40),
       buildTime: env.PLATFOLIO_BUILD_TIME ?? new Date(0).toISOString(),
     },
+      // Email is configured or absent -- never defaulted on. A control plane that quietly gains a sender can
+      // mail people under an identity no operator chose, and only the driver knows whether anything was
+      // delivered. D4 applies to its credential: a name and a presence check, the value never leaves here.
+      ...(env.PLATFOLIO_EMAIL_DRIVER === undefined ? {} : {
+        email: {
+          driver: env.PLATFOLIO_EMAIL_DRIVER as 'smtp' | 'mailpit' | 'memory',
+          from: env.PLATFOLIO_EMAIL_FROM ?? 'platfolio@localhost',
+          ...(env.PLATFOLIO_SMTP_HOST === undefined ? {} : { host: env.PLATFOLIO_SMTP_HOST }),
+          ...(env.PLATFOLIO_SMTP_PORT === undefined ? {} : { port: Number(env.PLATFOLIO_SMTP_PORT) }),
+          ...(env.PLATFOLIO_SMTP_SECURE === undefined ? {} : { secure: env.PLATFOLIO_SMTP_SECURE === 'true' }),
+          ...(env.PLATFOLIO_SMTP_STARTTLS === undefined ? {} : { startTls: env.PLATFOLIO_SMTP_STARTTLS as 'require' | 'allow' | 'off' }),
+          ...(env.PLATFOLIO_SMTP_USER === undefined ? {} : { user: env.PLATFOLIO_SMTP_USER }),
+          ...(env.PLATFOLIO_SMTP_PASSWORD === undefined ? {} : { password: env.PLATFOLIO_SMTP_PASSWORD }),
+          ...(env.PLATFOLIO_MAILPIT_URL === undefined ? {} : { baseUrl: env.PLATFOLIO_MAILPIT_URL }),
+        },
+      }),
   };
 }
 
@@ -59,6 +78,7 @@ export async function boot(config: BootConfig, fetchImpl: typeof fetch = fetch) 
     custody: 'strict',
     identity,
     store: storeConfig,
+    ...(config.email === undefined ? {} : { email: config.email }),
     server: { host: config.host, port: config.port },
     extensions: buildCapabilities({ build: config.build }),
     requiredServices: ['identity', 'server', 'store', 'extensions'],

@@ -25,7 +25,7 @@ selections it has already made are recorded, not improvised:
 | Control-plane API design (the validation mechanism itself) | [api/control-plane.openapi.yaml](api/control-plane.openapi.yaml) — spec first, then the handler |
 
 Status: foundation poured, interfaces first (D40, [16](docs/design/16-foundation-build-order.md)). Slices 1
-and 2 of that plan are delivered (347 tests): `apps/control-plane` boots on the vendored runtime with
+and 2 of that plan are delivered (353 tests): `apps/control-plane` boots on the vendored runtime with
 Keycloak-verified bearer auth, persistent records (`Store` as a capability with a Postgres implementation and
 an in-memory double under one conformance suite, gated in CI against a live database), a controller
 that turns accepted attestations into stored state, and capability bindings that make shared services
@@ -45,7 +45,11 @@ instance are owner-only, and a new route must name its action or the coverage te
 Instances are addressed `team/name` with slug names unique per team, carry `template`/`templateRef` (#180, D45),
 and report state **per environment** with `Instance.state` as a stated rollup (#179) -- staging degraded next to
 production live is a real Tuesday, not a contradiction to average away. `check-contracts.ts --update` refuses a
-breaking baseline refresh without `--ack-breaking`, and says which bump the change implies.
+breaking baseline refresh without `--ack-breaking`, and says which bump the change implies. Platform email is the
+same seam shape (D46, #187): `smtp` in production, Mailpit in the local stack, an in-memory double in tests,
+one conformance suite each side of `EmailTransport`/`MailboxReader` -- a relay cannot be read back and the
+contract says so rather than pretending. `email:smoke` proves the hand-written SMTP client against a real
+server, and CI runs it.
 
 What is still **not** delivered, stated because the earlier version of this paragraph was the first thing an
 agent read and it had gone stale: no Stripe integration, no CLI or web UI, and no tenant on either service.

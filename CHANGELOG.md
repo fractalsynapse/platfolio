@@ -5,6 +5,41 @@ change; entries describe merged intent, not aspirations.
 
 "## [Unreleased]
 
+### Added
+
+- **Platform email is a capability seam (#187, D46)**: one `EmailTransport` interface in contracts, three
+  drivers chosen by configuration -- `smtp` (a hand-written client over sockets, no new dependency), `mailpit`
+  (HTTP), `memory` (the double) -- plus a single conformance suite that both readable drivers run. Nothing in
+  the control plane knows which one it is talking to, and an unconfigured control plane has **no sender at
+  all** rather than a defaulted one.
+- **`MailboxReader` is a separate interface, not a method on the sender.** Mailpit and the double can answer
+  "what landed in the mailbox"; a production relay cannot, and `ctx.email.readable` says so. That separation is
+  the difference between a seam and a leak: tests may assert on a mailbox, and a deployment cannot acquire the
+  same power by picking a driver.
+- **Mailpit in the local stack** (`axllent/mailpit:v1.24.0`, UI :8025, SMTP :1025) and `pnpm run email:smoke`,
+  which sends through the *real* SMTP client to the *real* server and reads the message back over HTTP --
+  subject, body and correlation header all verified as delivered. **9/9 checks pass live.** A CI job now runs
+  it on every merge to `staging` and `main`, because a hand-written protocol client is exactly the code that
+  should not be proven only against a mock.
+- `pnpm run email:smoke` and the eleven email/SMTP/kernel service tests (18 in total across the three files).
+
+### Fixed
+
+- **`SIZE 0` means "no limit", and my client read it as a limit of zero** -- every message was refused as
+  `payload-too-large` against the first real server it ever talked to. RFC 1870 is unambiguous; the scripted
+  test server advertised a real size, so nothing caught it until it met Mailpit.
+- **Mailpit's `query=to:` filter cannot be trusted for correctness** -- it returned unrelated messages, so an
+  assertion on "the invitation was sent to this address" would have been reading somebody else's mail.
+  Recipients are now filtered locally after parsing.
+- **The Mailpit driver was written from an imagined API and rewritten from measurement**: `Email` not `Address`,
+  `Text` not `PlainText`, headers as a map, `Reply-To` refused inside `Headers`, `/api/v1/messages` rather than
+  v2, no body in the list, no headers in the detail, and the correlation id observable **only** in
+  `/api/v1/message/{id}/raw`. The unit fake was rebuilt from the same probe output so it no longer tests an
+  invention.
+- The email service now augments `Context` like every other kernel service (`ctx.email` is typed, not
+  discovered), and its config is an input type so operators can omit the defaults.
+
+
 ### Fixed
 
 - **A container that listened but served nothing.** `apps/control-plane` only installed the Store service when
