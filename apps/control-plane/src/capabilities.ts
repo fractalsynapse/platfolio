@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import {
   AttestationSchema, checkBindingPolicy, CONTRACT_NAME, CONTRACT_VERSION, DispatchIntentSchema, InstanceSchema,
-  reasonOf, decide, type BindingRecord, type CapabilityOffer, type PolicyAction, type VerifiedClaims,
+  reasonOf, decide, rollupState, type BindingRecord, type CapabilityOffer, type PolicyAction, type VerifiedClaims,
 } from '@platfolio/contracts';
 import type { ExtensionDescriptor, KernelContext, Request, Response_, RouteDefinition } from '@platfolio/kernel';
 import { badRequest, bearerToken, notFound, send, unauthorized, type Authorizer } from './respond.ts';
@@ -218,16 +218,22 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
           // Filtered by membership, not by "there is only one team in the demo". An outsider sees an empty
           // list, which is the same answer as a member of an empty team -- no signal about what exists.
           const visible = await Promise.all(teams.map((teamId) => context.store.listInstances(teamId)));
-          return send('listInstances', 200, visible.flat());
+          // Each instance carries its environment rows, so a client never has to guess whether `state` is
+          // production's truth or the average of everything (#179).
+          const instances = visible.flat();
+          const withEnvs = await Promise.all(instances.map(async (instance) => ({
+            ...instance, environments: await context.store.listInstanceEnvironments(instance.id),
+          })));
+          return send('listInstances', 200, withEnvs);
         },
       },
       {
         method: 'POST', path: '/api/v1/instances', operationId: 'createInstance',
         handle: async (request, params, context) => {
           actionFor('createInstance', 'instance.create');
-          const parsed = bodyOf<{ teamId?: unknown; name?: unknown; platform?: unknown }>(request);
+          const parsed = bodyOf<{ teamId?: unknown; name?: unknown; template?: unknown }>(request);
           if (parsed.ok === false) return badRequest(parsed.error);
-          const input = InstanceSchema.pick({ teamId: true, name: true, platform: true }).safeParse(parsed.value ?? {});
+          const input = InstanceSchema.pick({ teamId: true, name: true, template: true }).safeParse(parsed.value ?? {});
           if (!input.success) return badRequest(input.error.issues.map((i) => `${i.path.join('.') || '<root>'} ${i.message}`).join('; '));
           // Membership is checked against the team named in the body, which resolveScope cannot read from
           // params. Passing it explicitly keeps the decision in one place: the caller may act for that team or
@@ -236,7 +242,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
           if (resolved.ok === false) return resolved.response;
           const created = await context.store.createInstance(input.data);
           if (created.ok === false) return { status: 400, body: { error: created.code, message: reasonOf(created) } };
-          await context.store.appendAudit({ actorKind: 'user', actorRef: resolved.scope.claims.subject, action: 'instance.create', target: created.value.id, detail: { platform: created.value.platform, teamId: created.value.teamId } });
+          await context.store.appendAudit({ actorKind: 'user', actorRef: resolved.scope.claims.subject, action: 'instance.create', target: created.value.id, detail: { template: created.value.template, teamId: created.value.teamId } });
           // A 201 records intent. Nothing about provisioning is claimed, because nothing was verified
           // (D30 law 1): state stays `pending` and only a reconciled attestation moves it.
           return send('createInstance', 201, created.value);
@@ -271,7 +277,8 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
         const found = await scope.context.store.getInstance(params.instanceId ?? '');
         // resolveScope already proved the instance exists and is the caller's team's; a mismatch here means the
         // row went away mid-request, which is a 404 like any other missing record.
-        return found.ok ? send('getInstance', 200, found.value) : notFound('instance', params.instanceId ?? '');
+        if (found.ok === false) return notFound('instance', params.instanceId ?? '');
+        return send('getInstance', 200, { ...found.value, environments: await scope.context.store.listInstanceEnvironments(found.value.id) });
       }),
       scoped('PUT', '/api/v1/instances/{instanceId}/plan', 'putPlan', 'instance.plan.write', async (scope, request, params) => {
         const parsed = bodyOf<{ plan?: unknown }>(request);
@@ -427,10 +434,25 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
               : attested.result === 'partial' ? 'degraded'
                 : attested.result === 'failed' ? 'failed'
                   : instance.state;
-            if (next === instance.state && instance.lastAppliedPlanHash === attested.planHash) continue;
-            const updated = await context.store.updateInstanceState(instance.id, next, { lastAppliedPlanHash: attested.planHash });
+            // Per environment (#179): an attestation names one environment, and recording it as "the
+            // instance's state" was the lie that staging degraded could erase production live.
+            const wrote = await context.store.setInstanceEnvironment({
+              instanceId: instance.id, environment: attested.environment, state: next,
+              appliedPlanHash: attested.planHash, attestationId: attested.dispatchId,
+            });
+            if (wrote.ok === false) {
+              context.logger.error(`controller: environment state write refused for ${instance.id}/${attested.environment}: ${reasonOf(wrote)}`);
+              continue;
+            }
+            const rows = await context.store.listInstanceEnvironments(instance.id);
+            const rollup = rollupState(rows);
+            if (rollup === instance.state && instance.lastAppliedPlanHash === attested.planHash) continue;
+            const updated = await context.store.updateInstanceState(instance.id, rollup, { lastAppliedPlanHash: attested.planHash });
             if (updated.ok) {
-              await context.store.appendAudit({ actorKind: 'controller', actorRef: `sweep-${String(sweeps)}`, action: 'instance.state', target: instance.id, detail: { from: instance.state, to: next, dispatchId: attested.dispatchId } });
+              await context.store.appendAudit({
+                actorKind: 'controller', actorRef: `sweep-${String(sweeps)}`, action: 'instance.state', target: instance.id,
+                detail: { from: instance.state, to: rollup, environment: attested.environment, environmentState: next, dispatchId: attested.dispatchId },
+              });
             }
           }
           sweeps += 1;

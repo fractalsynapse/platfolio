@@ -35,7 +35,7 @@ async function start() {
     const member = must(await ctx.store.resolvePerson({ issuer: fixture.issuer, subject: 'member-subject' }), 'member person');
     must(await ctx.store.putTeamMember({ teamId: team.id, personId: owner.person.id, role: 'owner' }), 'owner member');
     must(await ctx.store.putTeamMember({ teamId: team.id, personId: member.person.id, role: 'member' }), 'plain member');
-    const instance = must(await ctx.store.createInstance({ teamId: team.id, name: 'svc', platform: 'shared-identity' }), 'createInstance');
+    const instance = must(await ctx.store.createInstance({ teamId: team.id, name: 'svc', template: 'shared-identity' }), 'createInstance');
     return { team, owner, member, instance };
   };
   return { ctx, call, seed };

@@ -153,6 +153,10 @@ Integration into `staging` does not close an implementation issue. When a releas
 
 A release that includes a new platform catalog entry must satisfy that platform's manifest CI gates;
   a release that changes a capability contract states the derived bump and why.
+- `check-contracts.ts --update` **classifies** before writing: removals or renames are refused unless passed
+  `--ack-breaking="<reason>"`, and the run prints the derived bump (`MAJOR` when anything was removed, `MINOR`
+  when only added). Before this, `--update` wrote whatever the diff contained and exited 0, so a breaking
+  removal and an additive line were indistinguishable in the log.
 - platfolio code and documents are **licensed under Apache-2.0** (D18). `LICENSE` at the root is that
   grant: never edit, move, or replace it as a side effect of tooling work, and treat any change to it
   as a maintainer decision. `vendor/cordis/LICENSE` (MIT, © 2021–present Shigma) is a third party's

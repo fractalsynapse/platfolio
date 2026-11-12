@@ -190,12 +190,19 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [teamId, name, platform]
+              required: [teamId, name, template]
               properties:
                 teamId: { type: string, minLength: 1 }
-                name: { type: string, minLength: 1, maxLength: 80 }
-                platform: { type: string, minLength: 1, description: Catalog identifier, e.g. starter-web }
-            example: { teamId: team-1f7c2b, name: marketing, platform: starter-web }
+                name: { type: string, minLength: 1, maxLength: 80, pattern: '^[a-z0-9]([a-z0-9-]{0,78}[a-z0-9])?$' }
+                template: { type: string, minLength: 1, description: Catalog identifier, e.g. starter-web }
+                templateRef:
+                  type: object
+                  additionalProperties: false
+                  required: [repo, commitSha]
+                  properties:
+                    repo: { type: string, minLength: 3, maxLength: 200 }
+                    commitSha: { type: string, pattern: '^[0-9a-f]{40}$' }
+            example: { teamId: team-1f7c2b, name: marketing, template: starter-web }
       responses:
         '201':
           description: Instance recorded.
@@ -883,13 +890,47 @@ components:
     Instance:
       type: object
       additionalProperties: false
-      required: [id, teamId, name, platform, state, provider, createdAt, updatedAt]
+      required: [id, teamId, name, template, state, provider, createdAt, updatedAt]
       properties:
         id: { type: string, minLength: 1 }
         teamId: { type: string, minLength: 1 }
-        name: { type: string, minLength: 1, maxLength: 80 }
-        platform: { type: string, minLength: 1 }
-        state: { type: string, enum: [pending, provisioning, live, degraded, paused, failed, deprovisioning, removed] }
+        name:
+          type: string
+          minLength: 1
+          maxLength: 80
+          pattern: '^[a-z0-9]([a-z0-9-]{0,78}[a-z0-9])?$'
+          description: |
+            The half of `team/name` a person types (D45). Slug rules, enforced in the schema and the database:
+            a name needing escapes or a disambiguating id is a name that will break in a URL, a CLI argument,
+            or a shell.
+        template: { type: string, minLength: 1, description: 'The template this instance was created from. Formerly the field `platform`, which stored a template id -- D45.' }
+        templateRef:
+          type: object
+          additionalProperties: false
+          required: [repo, commitSha]
+          properties:
+            repo: { type: string, minLength: 3, maxLength: 200 }
+            commitSha: { type: string, pattern: '^[0-9a-f]{40}$', description: 'Pinned by commit, never by a movable tag (D30 law 3).' }
+        state:
+          type: string
+          enum: [pending, provisioning, live, degraded, paused, failed, deprovisioning, removed]
+          description: |
+            The rollup, not the truth: production's state when a production environment exists, otherwise the
+            worst among the environments (#179). `environments` below is what actually happened per place.
+        environments:
+          type: array
+          description: One row per environment the instance has. Absent until the first reconcile.
+          items:
+            type: object
+            additionalProperties: false
+            required: [instanceId, environment, state, updatedAt]
+            properties:
+              instanceId: { type: string }
+              environment: { type: string, minLength: 1, maxLength: 60 }
+              state: { type: string, enum: [pending, provisioning, live, degraded, paused, failed, deprovisioning, removed] }
+              appliedPlanHash: { type: string }
+              attestationId: { type: string }
+              updatedAt: { type: string, format: date-time }
         provider: { type: string, enum: [railway, fake] }
         desiredPlanHash: { type: string, pattern: '^[0-9a-f]{64}$' }
         lastAppliedPlanHash: { type: string, pattern: '^[0-9a-f]{64}$' }

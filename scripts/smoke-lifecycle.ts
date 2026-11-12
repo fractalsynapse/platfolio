@@ -64,7 +64,7 @@ const teamId = String(teams[0]?.id);
 check('a seeded team exists', true, teamId);
 
 const suffix = Date.now().toString(36).slice(-6);
-const created = await call('/api/v1/instances', { method: 'POST', body: JSON.stringify({ teamId, name: `smoke-${suffix}`, platform: 'starter-web' }) }, accessToken);
+const created = await call('/api/v1/instances', { method: 'POST', body: JSON.stringify({ teamId, name: `smoke-${suffix}`, template: 'starter-web' }) }, accessToken);
 const instanceId = created.json?.id as string | undefined;
 check('create instance over HTTP', created.status === 201 && typeof instanceId === 'string', `${String(created.status)} ${created.text.slice(0, 90)}`);
 check('a created instance starts pending, not live', created.json?.state === 'pending', `state=${String(created.json?.state)}`);
@@ -73,7 +73,7 @@ if (!instanceId) { await reader.close(); process.exit(1); }
 const planHash = createHmac('sha256', 'smoke').update(instanceId).digest('hex');
 const plan = {
   instanceId, teamId, provider: 'railway', contract: '1.0.0', planHash,
-  manifestRef: { platform: 'starter-web', version: '0.1.0' },
+  manifestRef: { template: 'starter-web', version: '0.1.0' },
   environments: [{ name: 'production', services: [], databases: [], volumes: [], buckets: [], domains: [] }],
 };
 const registered = await call(`/api/v1/instances/${instanceId}/plan`, { method: 'PUT', body: JSON.stringify({ plan }) }, accessToken);
@@ -122,6 +122,12 @@ const persisted = await reader.getAttestation(intent.dispatchId);
 check('the attestation is a row, not a memory', persisted.ok && persisted.value.result === 'ok', persisted.ok ? `result=${persisted.value.result} actor=${persisted.value.actorKind}` : 'attestation not readable cross-process');
 
 // Restart-proof by construction: a fresh store reading the same schema sees the same instance.
+// Per-environment state (#179): the instance the attestation was for is live, and the rollup follows it.
+const envCheck = await call(`/api/v1/instances/${instanceId}`, {}, accessToken);
+const envs = (envCheck.json as { environments?: Array<{ environment: string; state: string }>; state?: string } | undefined);
+check('the reconciled environment is recorded per environment', (envs?.environments ?? []).some((e) => e.environment === 'production' && e.state === 'live'), JSON.stringify(envs?.environments ?? []));
+check('the instance rollup agrees with production, not with an average', envs?.state === 'live', `state=${String(envs?.state)}`);
+
 const listAfterRestart = await call('/api/v1/instances', {}, accessToken);
 check('authenticated list reflects the record', listAfterRestart.status === 200 && JSON.stringify(listAfterRestart.json ?? []).includes(instanceId), `${String(listAfterRestart.status)}`);
 
@@ -138,7 +144,7 @@ check('membership resolves through the person, not the subject string', (who?.te
 // through the database from this process, because the whole point is that the API cannot create it.
 const otherTeams = (await reader.listTeams()).filter((x) => x.name === 'other-workspace');
 if (otherTeams.length === 1) {
-  const foreign = await reader.createInstance({ teamId: otherTeams[0]?.id ?? '', name: `foreign-${suffix}`, platform: 'starter-web' });
+  const foreign = await reader.createInstance({ teamId: otherTeams[0]?.id ?? '', name: `foreign-${suffix}`, template: 'starter-web' });
   if (foreign.ok) {
     const listed = await call('/api/v1/instances', {}, accessToken);
     const ids = JSON.stringify(listed.json ?? []);
@@ -157,7 +163,7 @@ if (otherTeams.length === 1) {
 // Capabilities and bindings, live (#177): publish, discover, bind, and see the dependency from both ends.
 // This runs against the container, so it proves the routes are wired and the Postgres tables exist -- not
 // merely that the handlers compile against a map.
-const second = await call('/api/v1/instances', { method: 'POST', body: JSON.stringify({ teamId, name: `identity-${suffix}`, platform: 'shared-identity' }) }, accessToken);
+const second = await call('/api/v1/instances', { method: 'POST', body: JSON.stringify({ teamId, name: `identity-${suffix}`, template: 'shared-identity' }) }, accessToken);
 const providerId = (second.json as { id?: string } | undefined)?.id;
 if (typeof providerId === 'string') {
   const published = await call(`/api/v1/instances/${providerId}/capability`, { method: 'POST', body: JSON.stringify({ capability: 'identity', outputs: [{ output: 'issuer', kind: 'url', state: 'issued-and-placed' }] }) }, accessToken);

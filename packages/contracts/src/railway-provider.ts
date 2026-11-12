@@ -519,7 +519,7 @@ export class RailwayInfraProvider implements InfraProvider {
    * Railway identifies projects by name within a workspace, and a platfolio instance id is not a Railway
    * id, so the mapping is derived. It is a function of the instance id **alone** — including the platform
    * would make `readState(instanceId)` unanswerable, because readState is not given a plan. An earlier
-   * version of this method embedded `manifestRef.platform`, and the conformance suite caught it: apply
+   * version of this method embedded `manifestRef.template`, and the conformance suite caught it: apply
    * succeeded, then readState could not find the project it had just created.
    */
   private projectName(plan: { instanceId: string }): string {
