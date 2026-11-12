@@ -119,7 +119,7 @@ test('a Compose document reaches the same plan the manifest format does', () => 
   assert.deepEqual(plan.environments[0]!.services[0]!.references, [{ variable: 'DATABASE_URL', database: 'db' }]);
 });
 
-test('platfolio\'s own service is describable in this format (step 7)', () => {
+test('platfolio can describe and plan its own deployment (step 7, #172)', () => {
   const root = path.resolve('.');
   const dir = path.join(root, 'selfhost');
   if (!fs.existsSync(path.join(dir, 'compose.yaml'))) {
@@ -128,30 +128,45 @@ test('platfolio\'s own service is describable in this format (step 7)', () => {
   const base = fs.readFileSync(path.join(dir, 'compose.yaml'), 'utf8');
   const overlay = fs.readFileSync(path.join(dir, 'compose.prod.yaml'), 'utf8');
   const parsed = parseCompose([base, overlay]);
+  // This used to assert the OPPOSITE -- "the tree cannot describe a deployable self-host" -- because the
+  // overlay pinned a digest belonging to a deleted service and had no image of its own. #172 changed that:
+  // the pin is now read from the registry by scripts/render-selfhost-overlay.ts, so the composition renders.
+  // The assertion is inverted rather than deleted, and the history is here because the previous state was a
+  // real finding, not a mistake to erase.
+  assert.deepEqual(parsed.issues.map((x) => x.code), [], JSON.stringify(parsed.issues.map((x) => x.code)));
+  assert.ok(parsed.manifest, 'the self-host composition must produce a manifest');
+  assert.equal(parsed.manifest.metadata.name, 'platfolio-control-plane');
+  assert.equal(validateManifest(parsed.manifest).length, 0, JSON.stringify(validateManifest(parsed.manifest)));
 
-  // What is TRUE today, asserted rather than papered over. The tree cannot describe a deployable self-host,
-  // because a deployable description needs a digest and `platfolio-control-plane` has never been built and
-  // published. The previous version of this file pinned a digest belonging to `apps/status-api` -- a real
-  // digest of bytes whose source no longer exists, which is the worst kind of green: every check passed and
-  // the pin pointed at nothing we can account for.
-  assert.equal(parsed.manifest, undefined, 'an unpinned first-party service must not produce a plan');
-  assert.ok(parsed.issues.some((i) => i.code === 'compose-image-unpinned'), `expected the missing-pin refusal, got ${JSON.stringify(parsed.issues)}`);
+  const services = Object.keys(parsed.manifest.spec.services).sort();
+  assert.deepEqual(services, ['api', 'identity'], 'the control plane and its identity provider, and no more');
 
-  // And what the FORMAT can do, proven with a clearly synthetic pin so the two claims are not confused.
-  // This digest is not a build: it exists to check that the reference case would render if #146's release job
-  // had produced an image. When that job publishes, the assertion above flips to a real digest and this block
-  // becomes redundant -- that is the diff that says self-hosting started working.
-    // The SHA-256 of the empty string: valid hex, unmistakably not a build, and refused if anyone later makes
-  // the guard accept all-zeros placeholders -- which build-plan already does (#84), as this test discovered by
-  // having its own fake pin rejected.
-  const SYNTHETIC_PIN = 'services:\n  api:\n    image: ghcr.io/fractalsynapse/platfolio-control-plane:staging@sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\n';
-  const renderable = parseCompose([base, SYNTHETIC_PIN]);
-  assert.deepEqual(renderable.issues.map((i) => i.code), [], JSON.stringify(renderable.issues.map((i) => i.code)));
-  assert.equal(renderable.manifest!.metadata.name, 'platfolio-control-plane');
-  assert.equal(validateManifest(renderable.manifest!).length, 0);
-  const plan = buildPlan(renderable.manifest!, { instanceId: 'control-plane', teamId: 'platfolio' });
-  assert.equal(plan.environments[0]!.services[0]!.healthPath, '/healthz');
-  assert.match(plan.environments[0]!.services[0]!.digest!, /^sha256:[0-9a-f]{64}$/, 'a plan without a digest is a plan that can be moved under it');
+  const plan = buildPlan(parsed.manifest, { instanceId: 'selfhost', teamId: 'platfolio' });
+  const production = plan.environments.find((e) => e.name === 'production');
+  assert.ok(production, 'the composition enables production');
+  const byName = new Map(production.services.map((s) => [s.name, s]));
+
+  // Every planned service is pinned by digest -- the rule that refused a placeholder for a tenant (#84) is
+  // applied to ourselves, which is the only way to know it is a rule and not a tenant-facing formality.
+  for (const name of ['api', 'identity']) {
+    const s = byName.get(name);
+    assert.ok(s, `${name} missing from the plan`);
+    assert.match(s.digest, /^sha256:[0-9a-f]{64}$/, `${name} has no digest pin`);
+    assert.ok(s.healthPath.length > 0, `${name} has no health path, so the provider cannot tell live from present`);
+  }
+  assert.equal(byName.get('api')?.healthPath, '/healthz');
+  // The command finding from #172: Keycloak is pointless without its start command, and the renderer had been
+  // dropping every list-valued Compose `command` on the floor.
+  assert.equal(byName.get('identity')?.command, 'start', 'a list-valued command must survive to the plan');
+  assert.equal(byName.get('api')?.command, undefined, 'the api service has no command override');
+
+  // One shared database, wired into both applications by reference -- the same `references` mechanism a tenant
+  // uses, and each selects its own schema so neither can move the other's migrations.
+  assert.deepEqual(production.databases.map((d) => `${d.name}:${d.kind}`), ['main:postgres']);
+  for (const [service, variable] of [['api', 'PLATFOLIO_DB_URL'], ['identity', 'KC_DB_URL']] as const) {
+    const refs = byName.get(service)?.references ?? [];
+    assert.ok(refs.some((r) => r.variable === variable && r.database === 'main'), `${service} is not wired to the shared database`);
+  }
 });
 
 test('the generated prod overlay is deterministic, which is what makes drift detectable', () => {
