@@ -42,6 +42,11 @@ jobs:
         run: |
           test -f apps/control-plane/Dockerfile || { echo "Dockerfile missing"; exit 1; }
           grep -q "frozen-lockfile" apps/control-plane/Dockerfile || { echo "image install is not lockfile-frozen"; exit 1; }
+          # Runtime files the app reads. Asserted here because their absence is invisible to `docker build`
+          # and fatal on the first validated request: without api/ every spec-checked response 500s on ENOENT,
+          # and without db/ PLATFOLIO_DB_MIGRATE=true cannot migrate.
+          grep -q "^COPY api ./api" apps/control-plane/Dockerfile || { echo "Dockerfile does not ship api/ -- spec-validated responses would 500"; exit 1; }
+          grep -q "^COPY db ./db" apps/control-plane/Dockerfile || { echo "Dockerfile does not ship db/ -- migrations cannot run"; exit 1; }
 
       - name: Build
         run: |
@@ -82,6 +87,16 @@ jobs:
             sleep 2
           done
           if [ -z "$ok" ]; then echo "healthz never answered"; docker logs cp-smoke; exit 1; fi
+          # /healthz only proves something is listening. These two prove the API is actually mounted: /version
+          # answers with the build identity baked in by this workflow, and an unauthenticated data route answers
+          # 401 rather than 404 -- which is exactly the check that was missing when a container came up with a
+          # listener and zero registered routes.
+          version=$(docker exec cp-smoke node -e "fetch('http://127.0.0.1:8080/version').then(r=>r.text()).then(t=>process.stdout.write(t))")
+          echo "  /version -> $version"
+          echo "$version" | grep -q '"commit"' || { echo "/version did not answer with build identity"; docker logs cp-smoke; exit 1; }
+          code=$(docker exec cp-smoke node -e "fetch('http://127.0.0.1:8080/api/v1/instances').then(r=>process.stdout.write(String(r.status)))")
+          echo "  unauthenticated GET /api/v1/instances -> $code"
+          [ "$code" = "401" ] || { echo "expected 401 from the auth guard, got $code -- routes are not registered or the guard is not applied"; docker logs cp-smoke; exit 1; }
           echo "container healthy"
           docker stop cp-smoke
           kill $JWKS_PID 2>/dev/null || true

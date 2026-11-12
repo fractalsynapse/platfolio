@@ -5,6 +5,27 @@ change; entries describe merged intent, not aspirations.
 
 "## [Unreleased]
 
+### Fixed
+
+- **A container that listened but served nothing.** `apps/control-plane` only installed the Store service when
+  `PLATFOLIO_DB_URL` was set; with no database configured the plugin never ran and boot died with
+  `required capability "store" is not present` -- true, and useless, because the cause was a missing line of
+  configuration, not a missing plugin. The in-memory double is now selected explicitly and announced with a
+  warning ("this is development, not a deployment"), which is what [selfhost/compose.yaml](selfhost/compose.yaml)
+  and the docs already claimed happened.
+- **The image was missing two runtime directories.** `api/control-plane.openapi.yaml` is read at request time to
+  validate responses, and `db/migrations` to migrate; neither was copied, so a built container 500'd with ENOENT
+  on the first validated request. Both are copied now, and `image.yml`'s build-context check asserts their
+  presence -- because `docker build` succeeds happily without them.
+- **`/version` answered 500 on any container run without build args.** The Dockerfile's ARG defaults were
+  `unknown`, inherited from the deleted service, while the published schema requires a hex commit and a
+  date-time build time -- so the contract was violated by the image's own defaults. They are now epoch-and-zeros:
+  unmistakably synthetic, and valid. The OpenAPI gate caught a latent defect that CI had never exercised,
+  because CI always passes the args.
+- The CI smoke no longer stops at `/healthz`, which only proves a listener: it now asserts `/version` answers
+  with build identity and that an unauthenticated data route answers **401** -- a mounted, guarded API. Both of
+  the bugs above passed the old smoke.
+
 ### Removed
 
 - **`apps/status-api` is deleted: one API, the real one.** It was the first-draft service that predated the
