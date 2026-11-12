@@ -4,7 +4,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { checkRouteManifest, checkSpec, declaredResponseKeys, loadSpec, operationsOf, validateResponse, type SpecDocument } from '../src/index.ts';
 
-const SPEC_PATH = path.resolve(import.meta.dirname, '../../../api/control-plane.openapi.yaml');
+const SPEC_PATH = path.resolve(import.meta.dirname, '../../../apps/control-plane/openapi.yaml');
 const spec = loadSpec(await fs.readFile(SPEC_PATH, 'utf8'));
 
 /** Deep-copy then mutate, so each test breaks one thing in a real document rather than inventing a toy one. */

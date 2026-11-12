@@ -22,7 +22,7 @@ selections it has already made are recorded, not improvised:
 | Vendored framework provenance and rules | [vendor/CORDIS.md](vendor/CORDIS.md) |
 | Change, review, check and release policy | [docs/MAINTAINING.md](docs/MAINTAINING.md) |
 | Project-specific procedures | [.agents/skills/README.md](.agents/skills/README.md) |
-| Control-plane API design (the validation mechanism itself) | [api/control-plane.openapi.yaml](api/control-plane.openapi.yaml) — spec first, then the handler |
+| Control-plane API design (the validation mechanism itself) | [apps/control-plane/openapi.yaml](apps/control-plane/openapi.yaml) — spec first, then the handler |
 
 Status: foundation poured, interfaces first (D40, [16](docs/design/16-foundation-build-order.md)). Slices 1
 and 2 of that plan are delivered (364 tests): `apps/control-plane` boots on the vendored runtime with
@@ -83,14 +83,16 @@ The layout is therefore explicit, and a new file goes where its **kind** goes:
 | Path | What lives there | Rule it enforces |
 | --- | --- | --- |
 | `templates/` | The three platform templates published to `fractalsynapse/platfolio-*` repositories | The only thing called a template is a template |
-| `samples/` | Illustrative manifests used by tests and [03](docs/design/03-manifest-spec.md) | Test input is not a catalog entry |
+| `packages/manifest/test/fixtures/` | Manifest fixtures the tests and [03](docs/design/03-manifest-spec.md) parse | Test input is not a catalog entry, and does not live at the top level |
 | `selfhost/` | platfolio's own deployment: Compose service, `x-platfolio` hosting semantics, generated prod overlay, environment inventory | One service definition, not one per app directory |
 | `apps/<name>/` | Source, Dockerfile, `package.json` -- the deployable artifact itself | Deployment *shape* does not live with the app |
 | `packages/contracts/` | Capability interfaces, DTO schemas, conformance suites, provider implementations | Framework-free; the only place a seam is defined |
 | `packages/kernel/` | The only package permitted to import Cordis (D15) | Plugin wiring, never business rules |
-| `api/` | `control-plane.openapi.yaml` (design and validation, D41), `contracts.api.md`, provider schema snapshot | Spec precedes handler |
+| `apps/<name>/openapi.yaml` | The HTTP contract of the app it sits beside (D41) | The spec is the app's own file, not a documentation folder |
+| `packages/contracts/api.md` | Generated public-surface baseline for the contracts package | Lives with what it measures; `check-contracts` writes it |
+| `packages/contracts/railway-graphql-schema.json` | Captured provider schema, evidence for `graphql:check` | Provider evidence sits with the provider implementation |
 | `db/` | Forward-only migrations and Postgres init scripts | Readiness comes from the migrations ledger |
-| `platform-templates`, `platforms/`, `apps/status-api` | **gone** (Nov 2026): see CHANGELOG | A directory with one member that duplicates another app's file was the bug; a second API that duplicates the first is the same bug with an endpoint surface |
+| `platform-templates`, `platforms/`, `apps/status-api`, `api/`, `samples/` | **gone** (Nov 2026): see CHANGELOG | A directory with one member that duplicates another app's file was the bug; a second API that duplicates the first is the same bug with an endpoint surface |
 | `examples/` | Third-party reference clones (Cordis at its tag, a scaffold). Gitignored | Reference material is not project source |
 
 If a change would create a second copy of a fact -- a digest, a service definition, a schema, a permission
@@ -99,7 +101,7 @@ list -- fix the ownership instead of adding a file and keeping them in step.
 ## API rule: design in OpenAPI first, and let the spec validate
 
 Every control-plane HTTP operation is **designed before it is implemented**, in
-`api/control-plane.openapi.yaml`. The specification is not documentation that drifts behind the code; it is
+`apps/control-plane/openapi.yaml`. The specification is not documentation that drifts behind the code; it is
 the validation mechanism for every endpoint:
 
 - **Nothing is added to the API by writing a handler.** A route that is not in the spec fails

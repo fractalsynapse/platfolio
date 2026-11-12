@@ -11,7 +11,7 @@ import { redactCredentialShaped, type VerificationFailure, type VerifiedClaims }
  * document, and the document is supposed to be the thing that is checked.
  */
 
-const specPath = path.resolve(import.meta.dirname, '../../../api/control-plane.openapi.yaml');
+const specPath = path.resolve(import.meta.dirname, '../openapi.yaml');
 let cachedSpec: SpecDocument | undefined;
 export function spec(): SpecDocument {
   cachedSpec ??= loadSpec(fs.readFileSync(specPath, 'utf8'));

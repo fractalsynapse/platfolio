@@ -1,5 +1,0 @@
-control-plane: cannot start: startup: required capability "store" is not present on the context after 5000ms.
-  Cordis gives no diagnostic for this -- the property is simply undefined.
-  Check, in order: (1) is the providing plugin registered at all? (2) does its `static provide` match
-  the name asked here? (3) did that plugin throw during setup (see the error logged above, if any)?
-  Provided names present now: baseUrl, fiber, reflect, registry, events, logger.

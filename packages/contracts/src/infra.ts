@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 /**
  * The `infra.provider` capability: everything platfolio needs from an infrastructure provider, and
- * nothing it should not have. This module is API-stable (see api/contracts.api.md); provider
+ * nothing it should not have. This module is API-stable (see packages/contracts/api.md); provider
  * implementations import these types and never the framework.
  *
  * Two rules are structural, not advisory:

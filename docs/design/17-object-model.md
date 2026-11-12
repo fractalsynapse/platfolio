@@ -138,7 +138,7 @@ Three properties the CLI inherits from the decisions above, and the reason to fi
 - **Nothing secret in a flag.** No command accepts a secret value; secrets are named, and the tenant places
   them (D4). The CLI can show presence and health, and cannot show or store the value.
 - **One language, two surfaces.** Every CLI verb is an HTTP call against
-  [api/control-plane.openapi.yaml](../../api/control-plane.openapi.yaml) (D41). If a CLI action cannot be built on
+  [apps/control-plane/openapi.yaml](../../apps/control-plane/openapi.yaml) (D41). If a CLI action cannot be built on
   the published API, the API is missing an operation -- that is a defect in the API, not an excuse for a
   private back door.
 

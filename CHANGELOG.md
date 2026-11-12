@@ -5,6 +5,37 @@ change; entries describe merged intent, not aspirations.
 
 "## [Unreleased]
 
+### Changed — layout
+
+- **`api/` is gone; each file moved to the thing it describes.** The directory held three unrelated kinds and
+  two of them were a mystery to the person reading the tree, which is the definition of a wrong home:
+  - `api/control-plane.openapi.yaml` → **`apps/control-plane/openapi.yaml`** -- the contract belongs to the app
+    that implements it, and D41's "spec precedes handler" reads better when the spec is the first file next to
+    the handlers.
+  - `api/contracts.api.md` → **`packages/contracts/api.md`** -- it is that package's generated public surface,
+    written by `check-contracts --update`.
+  - `api/railway-schema.json` → **`packages/contracts/railway-graphql-schema.json`** -- captured evidence for
+    the Railway provider that lives in that package, consumed by `graphql:check`.
+- **`samples/` is gone.** Its two manifests were fixtures for the manifest package's tests and for
+  [03](docs/design/03-manifest-spec.md), sitting at the top level where a reader reasonably assumes they are
+  product surface; they are now `packages/manifest/test/fixtures/{web-app,full-stack}-manifest.yaml`, beside
+  the tests that parse them, next to the rejection fixtures that already lived there. The `.platfolio/
+  environment.yaml` they carried moved too -- and restoring it is in the "found by the gate" list below,
+  because my first pass deleted it.
+- **`.tmp/` was committed** (112 files) while debugging the self-host image build -- docker buildx config, npm
+  caches, log tails. Untracked, ignored, and the reason recorded in `.gitignore` so nobody wonders whether it
+  is load-bearing. This is the same class of mistake as the rest of this session's findings: a thing that exists
+  because a tool wrote it there, not because the project chose it.
+
+### Found by the gates, not by reading
+
+- **Deleting `samples/` removed a file I had not noticed**: `web-app/.platfolio/environment.yaml`, an inventory
+  fixture the renderer tests parse. Three test files failed on ENOENT within seconds of the move, the file was
+  restored from git and relocated, and the episode is worth keeping in the changelog because it is the same
+  shape as every other one this session -- a directory looked smaller than its references, and only the
+  execution of the tests knew the difference.
+
+
 ### Added — platfolio hosted by platfolio (#172, first run)
 
 - **`scripts/selfhost-deploy.ts`** deploys platfolio's own stack through platfolio's own machinery:

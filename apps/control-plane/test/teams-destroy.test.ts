@@ -7,7 +7,7 @@ import { buildCapabilities } from '../src/capabilities.ts';
 import { createIdentityFixture, defaultIdentityConfig, reasonOf, signToken, type StoreResult } from '@platfolio/contracts';
 import { loadSpec, validateResponse, type SpecDocument } from '@platfolio/api-contract';
 
-const spec: SpecDocument = loadSpec(fs.readFileSync(path.resolve(import.meta.dirname, '../../../api/control-plane.openapi.yaml'), 'utf8'));
+const spec: SpecDocument = loadSpec(fs.readFileSync(path.resolve(import.meta.dirname, '../openapi.yaml'), 'utf8'));
 const fixture = createIdentityFixture();
 const token = (subject: string) => signToken(fixture, { scope: 'platfolio.user', subject });
 const build = { version: '9.9.9', commit: 'a'.repeat(40), buildTime: '2026-11-11T00:00:00.000Z' };

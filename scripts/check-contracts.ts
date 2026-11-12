@@ -16,7 +16,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
-const BASELINE = path.join(ROOT, 'api', 'contracts.api.md');
+const BASELINE = path.join(ROOT, 'packages/contracts/api.md');
 const WORK = path.join(ROOT, '.tmp-contracts');
 
 function run(cmd: string, args: string[]): { ok: boolean; out: string } {
@@ -109,7 +109,7 @@ ${surface}\`\`\`
 }
 
 if (!previous) {
-  console.error('error: no baseline at api/contracts.api.md; run `tsx scripts/check-contracts.ts --update` and commit it');
+  console.error('error: no baseline at packages/contracts/api.md; run `tsx scripts/check-contracts.ts --update` and commit it');
   process.exit(1);
 }
 

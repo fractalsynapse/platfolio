@@ -24,12 +24,11 @@ COPY packages/api-contract/package.json packages/api-contract/
 COPY apps/control-plane/package.json apps/control-plane/
 COPY pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile --prod --filter @platfolio/control-plane...
-# The OpenAPI document and the migrations are runtime files, not build-time extras, and missing either one was
-# only visible by running the container: every spec-validated response 500s with ENOENT on `api/`, and a
-# deployment that sets PLATFOLIO_DB_MIGRATE=true cannot migrate without `db/`. A Dockerfile that copies the
-# source and forgets the data the source reads at runtime is the same class of bug as a build that passes and
-# a container that does not serve.
-COPY api ./api
+# The migrations are a runtime file, not a build-time extra: a deployment with PLATFOLIO_DB_MIGRATE=true cannot
+# migrate without `db/`, and `docker build` reports no problem when it is missing. The OpenAPI document no
+# longer needs its own COPY because it lives inside apps/control-plane (moved there with the app it governs),
+# so the layer that copies the app carries the spec -- which is the same fact the container had to learn the
+# hard way once already, when the document sat outside the app and the image omitted it.
 COPY db ./db
 COPY packages/contracts ./packages/contracts
 COPY packages/kernel ./packages/kernel

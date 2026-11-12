@@ -188,7 +188,7 @@ unstable. Mechanics in [vendor/CORDIS.md](../../vendor/CORDIS.md).
   each other:
 
   1. [05 § I2](05-identity.md) promises *"P1 users live in a per-team realm"* — one identity per team.
-  2. [samples/full-stack/manifest.yaml](../../samples/full-stack/manifest.yaml) puts `keycloak` **inside the
+  2. [packages/manifest/test/fixtures/full-stack-manifest.yaml](../../packages/manifest/test/fixtures/full-stack-manifest.yaml) puts `keycloak` **inside the
      ArcNexus instance's services**, with `identity.mode: hosted-realm`. Deploy TreeDX and ArcNexus for one
      team and the model yields two Keycloaks and two user databases — exactly what I2 forbids.
   3. The same fixture carried `OIDC_ISSUER: placeholder-resolved-at-apply-time`, because there is no way to

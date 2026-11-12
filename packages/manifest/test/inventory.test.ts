@@ -6,7 +6,7 @@ import { buildPlan } from '../src/build-plan.ts';
 import { applyInventory, deriveObligations, parse, parseInventory, validateInventory } from '../src/index.ts';
 import type { InventoryEntry, Manifest } from '../src/index.ts';
 
-const manifest = (name: string): Manifest => parse(fs.readFileSync(path.resolve('samples', name, 'manifest.yaml'), 'utf8')).manifest!;
+const manifest = (name: string): Manifest => parse(fs.readFileSync(path.resolve('packages/manifest/test/fixtures', name + '-manifest.yaml'), 'utf8')).manifest!;
 const WEB = manifest('web-app');
 const pin = (n: string) => `sha256:${Array.from(n).map((c) => c.charCodeAt(0).toString(16).padStart(2, '0')).join('').padEnd(64, '0').slice(0, 64)}`;
 const pinned = (m: Manifest): Manifest => {
@@ -16,7 +16,7 @@ const pinned = (m: Manifest): Manifest => {
 const codes = (issues: { code: string }[]) => issues.map((i) => i.code);
 
 test('the shipped inventory parses, with every kind represented', () => {
-  const text = fs.readFileSync(path.resolve('samples/web-app/.platfolio/environment.yaml'), 'utf8');
+  const text = fs.readFileSync(path.resolve('packages/manifest/test/fixtures/web-app-environment.yaml'), 'utf8');
   const parsed = parseInventory(text);
   assert.deepEqual(parsed.issues, [], JSON.stringify(parsed.issues));
   assert.equal(new Set(parsed.entries.map((e) => e.kind)).size, 4, JSON.stringify(codes(parsed.entries as unknown as { code: string }[])));
@@ -92,7 +92,7 @@ test('a reference to a service that is not placed in that environment is caught'
 });
 
 test('obligations separate what a tenant supplies from what the provider resolves', () => {
-  const text = fs.readFileSync(path.resolve('samples/web-app/.platfolio/environment.yaml'), 'utf8');
+  const text = fs.readFileSync(path.resolve('packages/manifest/test/fixtures/web-app-environment.yaml'), 'utf8');
   const o = deriveObligations(parseInventory(text).entries, WEB);
   assert.deepEqual(o.secrets.map((s) => s.name).sort(), ['APP_API_SIGNING_KEY', 'GIT_PROVIDER_TOKEN']);
   assert.deepEqual(o.references.map((r) => r.variable), ['DATABASE_URL'], 'wiring is not an obligation');
@@ -103,7 +103,7 @@ test('obligations separate what a tenant supplies from what the provider resolve
 });
 
 test('applying the inventory fills the manifest and is idempotent', () => {
-  const text = fs.readFileSync(path.resolve('samples/web-app/.platfolio/environment.yaml'), 'utf8');
+  const text = fs.readFileSync(path.resolve('packages/manifest/test/fixtures/web-app-environment.yaml'), 'utf8');
   const entries = parseInventory(text).entries;
   const once = applyInventory(pinned(WEB), entries);
   const twice = applyInventory(once, entries);
@@ -118,7 +118,7 @@ test('applying the inventory fills the manifest and is idempotent', () => {
 });
 
 test('an applied inventory produces a plan the contract accepts, wiring included', () => {
-  const text = fs.readFileSync(path.resolve('samples/web-app/.platfolio/environment.yaml'), 'utf8');
+  const text = fs.readFileSync(path.resolve('packages/manifest/test/fixtures/web-app-environment.yaml'), 'utf8');
   const plan = buildPlan(applyInventory(pinned(WEB), parseInventory(text).entries), { instanceId: 'inst-1', teamId: 'team-1' });
   const prod = plan.environments[0]!;
   assert.deepEqual(prod.databases, [{ name: 'app-db', kind: 'postgres' }]);
