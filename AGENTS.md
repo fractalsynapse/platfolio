@@ -30,8 +30,12 @@ Keycloak-verified bearer auth, persistent records (`Store` as a capability with 
 an in-memory double under one conformance suite, gated in CI against a live database), a controller
 that turns accepted attestations into stored state, and capability bindings that make shared services
 queryable (#176): what an instance offers, which teams may consume it, and who depends on it -- the question a
-destroy must ask first. `apps/status-api` plus the managed action have run a real
-GitHub-initiated dispatch end to end, which remains the only full loop proven against a deployed control plane.
+destroy must ask first. There is **one API**: `apps/control-plane`, validated against the OpenAPI
+document (D41). `apps/status-api` -- the first-draft service that predates it -- was **deleted** rather than
+kept beside it, because two services where one is intended means two request paths and only one of them checked.
+The *deployed* Railway container still runs that deleted service's image, so the historical claim stands: a real
+GitHub-initiated dispatch ran end to end against it. It cannot be rebuilt from this tree, and replacing it is
+#172.
 
 Team membership is enforced at the capability boundary (#173): handlers receive a resolved scope or never
 run, cross-team reads answer 404 rather than 403 so existence is not leakable, and the route table itself is
@@ -47,8 +51,10 @@ What is still **not** delivered, stated because the earlier version of this para
 agent read and it had gone stale: no Stripe integration, no CLI or web UI, and no tenant on either service.
 A person is now a `persons` row with proofs in `identities`, and membership attaches to the person (#177), so a
 second issuer or a machine client does not need a parallel authorization scheme.
-The deployed control plane is still the older in-memory `status-api`; the cutover to `apps/control-plane`
-needs a hosted Keycloak first (#172). Do not describe planned behavior as delivered, and prefer the evidence
+The cutover needs two things the repository cannot fake: a **hosted identity provider** (#172, D34) and a
+**published image with a real digest** (#146). `selfhost/compose.prod.yaml` deliberately has no `image:` line --
+its previous pin was the digest of the deleted service's bytes, and the manifest renderer refuses an unpinned
+first-party service rather than accepting a placeholder (#84). Do not describe planned behavior as delivered, and prefer the evidence
 tier a claim actually holds: measured, tested, or designed-and-unexercised. Provider-specific claims need a
 live check, and CI substitutes for none of them.
 Run `pnpm run verify` for the whole gate set. The skills under
@@ -70,7 +76,7 @@ The layout is therefore explicit, and a new file goes where its **kind** goes:
 | `packages/kernel/` | The only package permitted to import Cordis (D15) | Plugin wiring, never business rules |
 | `api/` | `control-plane.openapi.yaml` (design and validation, D41), `contracts.api.md`, provider schema snapshot | Spec precedes handler |
 | `db/` | Forward-only migrations and Postgres init scripts | Readiness comes from the migrations ledger |
-| `platform-templates`, `platforms/` | **gone** (Nov 2026): see CHANGELOG's layout entry | A directory with one member that duplicates another app's file was the bug |
+| `platform-templates`, `platforms/`, `apps/status-api` | **gone** (Nov 2026): see CHANGELOG | A directory with one member that duplicates another app's file was the bug; a second API that duplicates the first is the same bug with an endpoint surface |
 | `examples/` | Third-party reference clones (Cordis at its tag, a scaffold). Gitignored | Reference material is not project source |
 
 If a change would create a second copy of a fact -- a digest, a service definition, a schema, a permission

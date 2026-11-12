@@ -43,11 +43,22 @@ export async function boot(config: BootConfig, fetchImpl: typeof fetch = fetch) 
     allowedAlgorithms: ['RS256'],
   });
   const storeUrl = process.env.PLATFOLIO_DB_URL;
+  // A control plane with no database is a development mode, not a broken one -- but it has to say so. The
+  // previous shape omitted the `store` config entirely when PLATFOLIO_DB_URL was unset, so the Store service
+  // was never installed and boot died with `required capability "store" is not present`: true, and useless,
+  // because the cause was a missing line of configuration rather than a missing plugin. The container that
+  // CI builds has no database, and this is what made that visible.
+  const storeConfig = storeUrl
+    ? { driver: 'postgres' as const, connectionString: storeUrl, ...(process.env.PLATFOLIO_DB_MIGRATE === 'true' ? { migrate: true } : {}) }
+    : { driver: 'memory' as const };
+  if (!storeUrl) {
+    process.emitWarning('PLATFOLIO_DB_URL is not set: running on the in-memory store. Nothing survives a restart -- this is development, not a deployment.');
+  }
   const ctx = await createKernel({
     provider: 'fake',
     custody: 'strict',
     identity,
-    ...(storeUrl ? { store: { driver: 'postgres' as const, connectionString: storeUrl, ...(process.env.PLATFOLIO_DB_MIGRATE === 'true' ? { migrate: true } : {}) } } : {}),
+    store: storeConfig,
     server: { host: config.host, port: config.port },
     extensions: buildCapabilities({ build: config.build }),
     requiredServices: ['identity', 'server', 'store', 'extensions'],

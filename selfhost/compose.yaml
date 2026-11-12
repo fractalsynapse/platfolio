@@ -7,23 +7,35 @@
 name: platfolio-control-plane
 
 services:
-  status:
+  api:
     build:
       context: ../../
-      dockerfile: apps/status-api/Dockerfile
+      dockerfile: apps/control-plane/Dockerfile
     expose: ["8080"]
     environment:
       NODE_ENV: production
+      # Every name below is declared in .platfolio/environment.yaml, which is the same inventory format every
+      # hosted platform uses -- platfolio hosting itself has no exemption from its own contract (D33).
+      PLATFOLIO_IDENTITY_ISSUER: ${PLATFOLIO_IDENTITY_ISSUER}
+      PLATFOLIO_IDENTITY_AUDIENCE: ${PLATFOLIO_IDENTITY_AUDIENCE}
+      PLATFOLIO_IDENTITY_JWKS_URI: ${PLATFOLIO_IDENTITY_JWKS_URI}
+      # Without a database the control plane starts in-memory and says so; that is a development mode, not a
+      # deployment, and the readiness of a real one comes from the migrations ledger.
+      PLATFOLIO_DB_URL: ${PLATFOLIO_DB_URL:-}
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
     x-platfolio:
       public: true
       # No custom domain until DNS ownership of platfolio.dev is confirmed. Measured (E27): attaching a host
       # we cannot verify sticks at `applying` forever and the certificate never issues -- a state that looks
       # like progress and is not. The first self-host run uses Railway's generated host, which does reach
       # `active` + a valid certificate without any delegation.
-      # domains: [status.platfolio.dev]
+      # domains: [api.platfolio.dev]
       environments: [production]
+
 
 x-platfolio:
   metadata:
@@ -46,6 +58,6 @@ x-platfolio:
     onEject: [compose, data-export]
     onDelete: { graceDays: 30, backupAgeOutDays: 90 }
   release:
-    registryImage: ghcr.io/fractalsynapse/platfolio-status-api
-    dockerfile: apps/status-api/Dockerfile
+    registryImage: ghcr.io/fractalsynapse/platfolio-control-plane
+    dockerfile: apps/control-plane/Dockerfile
     tagPattern: "{branch}"

@@ -9,9 +9,10 @@ import {
 } from '../src/index.ts';
 
 const ROOT = path.resolve('templates');
-// A real digest of a real image, standing in for what the tenant's release pipeline would pin. The
-// assertions below are about the plan's shape, not about which bytes that image contains.
-const PIN = { image: 'ghcr.io/fractalsynapse/platfolio-status-api', tag: 'staging', digest: 'sha256:704e2d24f888e2502e27271723cdd8d7493b1a7fd8530a93f25ab916c2e7df95' };
+// A real digest captured from a real build (of the service this one replaced), standing in for what the
+// tenant's release pipeline would pin. The assertions are about the plan's shape, not about which bytes the
+// image contains -- so the name moved to the current service while the digest stays a genuine 64-hex value.
+const PIN = { image: 'ghcr.io/fractalsynapse/platfolio-control-plane', tag: 'staging', digest: 'sha256:704e2d24f888e2502e27271723cdd8d7493b1a7fd8530a93f25ab916c2e7df95' };
 
 function load(dir: string, pinned: boolean): { manifest: Manifest | undefined; issues: string[] } {
   const base = fs.readFileSync(path.join(ROOT, dir, 'compose.yaml'), 'utf8');

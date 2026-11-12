@@ -5,6 +5,58 @@ change; entries describe merged intent, not aspirations.
 
 "## [Unreleased]
 
+### Fixed
+
+- **A container that listened but served nothing.** `apps/control-plane` only installed the Store service when
+  `PLATFOLIO_DB_URL` was set; with no database configured the plugin never ran and boot died with
+  `required capability "store" is not present` -- true, and useless, because the cause was a missing line of
+  configuration, not a missing plugin. The in-memory double is now selected explicitly and announced with a
+  warning ("this is development, not a deployment"), which is what [selfhost/compose.yaml](selfhost/compose.yaml)
+  and the docs already claimed happened.
+- **The image was missing two runtime directories.** `api/control-plane.openapi.yaml` is read at request time to
+  validate responses, and `db/migrations` to migrate; neither was copied, so a built container 500'd with ENOENT
+  on the first validated request. Both are copied now, and `image.yml`'s build-context check asserts their
+  presence -- because `docker build` succeeds happily without them.
+- **`/version` answered 500 on any container run without build args.** The Dockerfile's ARG defaults were
+  `unknown`, inherited from the deleted service, while the published schema requires a hex commit and a
+  date-time build time -- so the contract was violated by the image's own defaults. They are now epoch-and-zeros:
+  unmistakably synthetic, and valid. The OpenAPI gate caught a latent defect that CI had never exercised,
+  because CI always passes the args.
+- The CI smoke no longer stops at `/healthz`, which only proves a listener: it now asserts `/version` answers
+  with build identity and that an unauthenticated data route answers **401** -- a mounted, guarded API. Both of
+  the bugs above passed the old smoke.
+
+### Removed
+
+- **`apps/status-api` is deleted: one API, the real one.** It was the first-draft service that predated the
+  OpenAPI-validated control plane, and keeping it meant two request paths where only one was checked against
+  the specification (D41) -- the duplication the layout rule exists to prevent, with an endpoint surface instead
+  of a file. `apps/control-plane` already serves everything the managed action calls (`/api/v1/instances/…/dispatches/{id}`
+  and `/api/v1/attestations`, both nonce-bound rather than user-scoped), so nothing in the contract moved.
+  **The deployed Railway container keeps running the deleted service's image until #172 replaces it**; that is
+  stated rather than glossed, because the end-to-end dispatch loop proven against it cannot be rebuilt from this
+  tree anymore, and a reader of this changelog should know which evidence still describes reality.
+- The build pipeline moved with it: `image.yml` now builds `apps/control-plane/Dockerfile` (the battle-tested
+  single-stage status-api Dockerfile, adapted, with its hard-won comments intact), publishes
+  `platfolio-control-plane`, and gained a **fail-closed check** asserting the container refuses to start without
+  identity configuration. Its smoke test boots against a shape-only JWKS and proves boot, health and build
+  identity -- **not** signature verification, which is proven against a real Keycloak in the Compose stack and
+  in the live tenant run.
+- `selfhost/.platfolio/environment.yaml` described variables the code never reads (`SESSION_SIGNING_KEY` -- there
+  are no platform sessions; `PUBLIC_ORIGIN` -- nothing reads it) and called the JWKS URI optional when the control
+  plane refuses to start without it. Rewritten from what `apps/control-plane` actually consumes: a stale inventory
+  is worse than none, because an operator trusting it ships something that cannot boot.
+
+### Fixed
+
+- **`selfhost/compose.prod.yaml` was pinning bytes nobody can account for** -- a real digest of the deleted
+  service's image. It now carries **no `image:` line**, and the step-7 test asserts the consequence
+  (`compose-image-unpinned`, no plan) instead of pretending otherwise, while a separate block proves the
+  *format* renders using the SHA-256 of the empty string as an unmistakably synthetic pin. Writing a placeholder
+  digest would have been the same mistake in a new costume, and `buildPlan` already refuses them (#84) -- which
+  this change discovered by having its own test rejected by its own guard.
+
+
 ### Removed — legacy sweep
 
 - **The repository was carrying dead declarations, and 29 of them are gone.** `noUnusedLocals` and

@@ -1,20 +1,58 @@
 # Obligations for the control plane, in the same inventory format every platform uses (D33).
 # Declaring these for ourselves is the cheap way to find out whether the format answers the questions an
 # operator actually asks; a first-party deployment that skips it proves nothing about ergonomics.
-- name: SESSION_SIGNING_KEY
-  kind: secret
-  required: true
-  rotate: on-demand
-  service: status
-  description: Signs control-plane session tokens. Rotating it signs every tenant out.
-- name: KEYCLOAK_ISSUER
-  kind: output
-  from: identity#issuer
-  service: status
-  description: Provided by the team Keycloak realm once it is hosted (D34). Optional until then.
-- name: PUBLIC_ORIGIN
+#
+# This list is derived from what `apps/control-plane` reads, not from what an earlier design expected. The
+# previous version named SESSION_SIGNING_KEY (there are no platform sessions -- tokens are the IdP's) and
+# PUBLIC_ORIGIN (nothing reads it), and called KEYCLOAK_ISSUER optional when the control plane now refuses to
+# start without it. A stale inventory is worse than none: an operator trusting it will deploy something that
+# cannot boot.
+- name: PLATFOLIO_IDENTITY_ISSUER
   kind: value
-  # Matches the generated host for now; becomes the custom origin once DNS is delegated.
-  default: https://status-production-54d3.up.railway.app
-  service: status
-  description: Canonical origin used for OIDC redirects and deep links.
+  required: true
+  service: api
+  description: >-
+    The `iss` this platform will accept, verified against nothing else. Required: a control plane that starts
+    without knowing its issuer is an open door with a logo on it.
+- name: PLATFOLIO_IDENTITY_JWKS_URI
+  kind: output
+  from: identity#jwks
+  required: true
+  service: api
+  description: >-
+    Where signing keys are fetched. Required for the same reason -- without it, identity "verifies" nothing.
+    Provided by the team Keycloak realm once it is hosted (D34); until then this is the blocking gap for a
+    first-party deployment (#172).
+- name: PLATFOLIO_IDENTITY_AUDIENCE
+  kind: value
+  required: true
+  default: platfolio-api
+  service: api
+  description: The audience a token must carry. Checked, so a token minted for another service is refused.
+- name: PLATFOLIO_DB_URL
+  kind: secret
+  required: false
+  service: api
+  description: >-
+    Postgres connection string. Absent means the in-memory double and no persistence -- a development mode, not
+    a deployment. Holds a credential, so it is a secret in the inventory's vocabulary and is never logged (D4).
+- name: PLATFOLIO_DB_MIGRATE
+  kind: value
+  required: false
+  default: "false"
+  service: api
+  description: Apply migrations at boot. Off by default so two replicas do not race the ledger.
+- name: PLATFOLIO_RECONCILE_INTERVAL_MS
+  kind: value
+  required: false
+  default: "60000"
+  service: api
+  description: How often the controller turns accepted attestations into instance state.
+- name: PLATFOLIO_VERSION
+  kind: value
+  required: false
+  service: api
+  description: >-
+    Build identity, injected as a build ARG by the image job and reported by /version. Never inferred from the
+    filesystem at runtime, because a container that guesses its own version is a container that lies in an
+    attestation.

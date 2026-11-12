@@ -125,14 +125,33 @@ test('platfolio\'s own service is describable in this format (step 7)', () => {
   if (!fs.existsSync(path.join(dir, 'compose.yaml'))) {
     assert.fail('selfhost/compose.yaml is the reference case for D29; it must stay in the tree');
   }
-  const docs = [fs.readFileSync(path.join(dir, 'compose.yaml'), 'utf8'), fs.readFileSync(path.join(dir, 'compose.prod.yaml'), 'utf8')];
-  const parsed = parseCompose(docs);
-  assert.deepEqual(parsed.issues, [], JSON.stringify(parsed.issues));
-  assert.equal(parsed.manifest!.metadata.name, 'platfolio-control-plane');
-  assert.equal(validateManifest(parsed.manifest!).length, 0);
-  const plan = buildPlan(parsed.manifest!, { instanceId: 'control-plane', teamId: 'platfolio' });
-  assert.match(plan.environments[0]!.services[0]!.digest, /^sha256:[0-9a-f]{64}$/);
+  const base = fs.readFileSync(path.join(dir, 'compose.yaml'), 'utf8');
+  const overlay = fs.readFileSync(path.join(dir, 'compose.prod.yaml'), 'utf8');
+  const parsed = parseCompose([base, overlay]);
+
+  // What is TRUE today, asserted rather than papered over. The tree cannot describe a deployable self-host,
+  // because a deployable description needs a digest and `platfolio-control-plane` has never been built and
+  // published. The previous version of this file pinned a digest belonging to `apps/status-api` -- a real
+  // digest of bytes whose source no longer exists, which is the worst kind of green: every check passed and
+  // the pin pointed at nothing we can account for.
+  assert.equal(parsed.manifest, undefined, 'an unpinned first-party service must not produce a plan');
+  assert.ok(parsed.issues.some((i) => i.code === 'compose-image-unpinned'), `expected the missing-pin refusal, got ${JSON.stringify(parsed.issues)}`);
+
+  // And what the FORMAT can do, proven with a clearly synthetic pin so the two claims are not confused.
+  // This digest is not a build: it exists to check that the reference case would render if #146's release job
+  // had produced an image. When that job publishes, the assertion above flips to a real digest and this block
+  // becomes redundant -- that is the diff that says self-hosting started working.
+    // The SHA-256 of the empty string: valid hex, unmistakably not a build, and refused if anyone later makes
+  // the guard accept all-zeros placeholders -- which build-plan already does (#84), as this test discovered by
+  // having its own fake pin rejected.
+  const SYNTHETIC_PIN = 'services:\n  api:\n    image: ghcr.io/fractalsynapse/platfolio-control-plane:staging@sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\n';
+  const renderable = parseCompose([base, SYNTHETIC_PIN]);
+  assert.deepEqual(renderable.issues.map((i) => i.code), [], JSON.stringify(renderable.issues.map((i) => i.code)));
+  assert.equal(renderable.manifest!.metadata.name, 'platfolio-control-plane');
+  assert.equal(validateManifest(renderable.manifest!).length, 0);
+  const plan = buildPlan(renderable.manifest!, { instanceId: 'control-plane', teamId: 'platfolio' });
   assert.equal(plan.environments[0]!.services[0]!.healthPath, '/healthz');
+  assert.match(plan.environments[0]!.services[0]!.digest!, /^sha256:[0-9a-f]{64}$/, 'a plan without a digest is a plan that can be moved under it');
 });
 
 test('the generated prod overlay is deterministic, which is what makes drift detectable', () => {
