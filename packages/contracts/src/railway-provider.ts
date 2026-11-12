@@ -791,7 +791,7 @@ export class RailwayInfraProvider implements InfraProvider {
       credential,
       // `CustomDomain.status` is an OBJECT (verified + certificateStatus enum), not a scalar -- a mock
       // that accepted a string here hid it for a whole test cycle. Measured 2026-11-08.
-      query: 'query ($projectId: String!, $environmentId: String!) { environment(projectId: $projectId, id: $environmentId) { serviceInstances { edges { node { id serviceId numReplicas source { image } latestDeployment { status } domains { customDomains { id domain syncStatus status { verified certificateStatus verificationDnsHost verificationToken dnsRecords { fqdn hostlabel zone recordType requiredValue currentValue status purpose } } } serviceDomains { id domain syncStatus } } } } } } }',
+      query: 'query ($projectId: String!, $environmentId: String!) { environment(projectId: $projectId, id: $environmentId) { serviceInstances { edges { node { id serviceId numReplicas source { image } latestDeployment { status } activeDeployments { status } domains { customDomains { id domain syncStatus status { verified certificateStatus verificationDnsHost verificationToken dnsRecords { fqdn hostlabel zone recordType requiredValue currentValue status purpose } } } serviceDomains { id domain syncStatus } } } } } } }',
       variables: { projectId, environmentId },
     });
     const out = new Map<string, InstanceInfo>();
@@ -812,7 +812,22 @@ export class RailwayInfraProvider implements InfraProvider {
       out.set(serviceId, {
         instanceId: typeof node.id === 'string' ? node.id : serviceId,
         rawStatus: typeof deployment?.status === 'string' ? deployment.status : undefined,
-        status: STATUS_MAP[deployment?.status ?? ''] ?? 'pending',
+        // `SUCCESS` is a deployment outcome, not a process state. Measured on our own deployment
+        // (2026-11-12): Keycloak exited, and Railway still listed an older SUCCESS deployment as active while
+        // the UI called the service "completed". Mapping SUCCESS straight to `live` means a service that has
+        // stopped -- including one that exited 0 -- is reported as running, and then `verified` counts it as
+        // healthy, and then the controller tells a tenant their platform is up. Nothing running is `stopped`,
+        // whatever the last deployment's outcome was.
+        status: (() => {
+          const mapped = STATUS_MAP[deployment?.status ?? ''] ?? 'pending';
+          const active = node.activeDeployments as Array<{ status?: string }> | undefined;
+          // Absence of the field is not evidence of absence of the process: a query that does not select
+          // `activeDeployments` must not turn every healthy service into `stopped`. That is the mistake this
+          // change made first -- applyPlan's other query lacked the field, so a serving control plane was
+          // reported stopped while it answered 200 on /healthz. The downgrade needs positive evidence.
+          const running = active === undefined ? true : active.some((a) => a.status === 'SUCCESS');
+          return mapped === 'live' && !running ? 'stopped' : mapped;
+        })(),
         image: source?.image ?? 'unknown',
         numReplicas: typeof node.numReplicas === 'number' ? node.numReplicas : 0,
         ...(() => {
@@ -944,7 +959,7 @@ export class RailwayInfraProvider implements InfraProvider {
         // Railway services are project-level; the instance is the thing that exists per environment, so
         // it is the identity readState reports -- using the service id here duplicated one identity across
         // two environments and the conformance suite called it a duplicate.
-        out.push({ name: service.name, environment: environment.name, externalId: info.instanceId, status: info.status, image: info.image, numReplicas: info.numReplicas });
+        out.push({ name: service.name, environment: environment.name, externalId: info.instanceId, status: info.status, ...(info.rawStatus === undefined ? {} : { rawStatus: info.rawStatus }), image: info.image, numReplicas: info.numReplicas });
         for (const host of info.domainHosts) {
           const state = info.domainStates[host];
           domains.push({

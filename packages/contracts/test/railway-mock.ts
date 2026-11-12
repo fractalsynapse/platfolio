@@ -26,6 +26,9 @@ export interface MockOptions {
   templateRevealAfter?: number;
   /** A template deploy accepted but whose service never surfaces -- the stuck-provisioning case. */
   templateNeverReveals?: boolean;
+  /** Report a successful deployment with nothing running behind it: the exit-0 case measured on our own
+   *  stack on 2026-11-12, where Railway called a stopped Keycloak "completed". */
+  completedOnly?: boolean;
   /** Refuse serviceDelete for template-created services, modelling #80's survivor. */
   refuseTemplateServiceDelete?: boolean;
   /** Model a partial delete: projectDelete answers true but the project remains readable (#111). */
@@ -67,13 +70,14 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
 
   private readonly workspaceToken = 'mock-workspace-token-AAAAAAAAAAAAAAAAAAAA';
   private readonly projectToken = 'mock-project-token-BBBBBBBBBBBBBBBBBBBBBBBB';
-  private readonly options: Required<Pick<MockOptions, 'secretsPresent' | 'settleAfter' | 'outcome'>> & MockOptions;
+  private readonly options: Required<Pick<MockOptions, 'secretsPresent' | 'settleAfter' | 'outcome' | 'completedOnly'>> & MockOptions;
 
   constructor(options: MockOptions = {}) {
     // Every option has to be listed here: the normalization below silently drops unknown keys, which is how
     // templateNeverReveals looked "ignored" -- the guard was correct and never received the flag. A double
     // that drops its own configuration is the same failure class as a stub that passes vacuously.
     this.options = {
+      completedOnly: options.completedOnly ?? false,
       templateRevealAfter: options.templateRevealAfter ?? 2,
       templateNeverReveals: options.templateNeverReveals ?? false,
       refuseTemplateServiceDelete: options.refuseTemplateServiceDelete ?? false,
@@ -436,6 +440,13 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
               numReplicas: instance.numReplicas,
               source: { image: instance.image },
               latestDeployment: { status: instance.status },
+              // What is actually RUNNING. The real API returns this (measured 2026-11-12 on our own
+              // deployment: a service whose process had exited still showed an older SUCCESS deployment as
+              // active), and a mock that always invented an active deployment would let the provider keep
+              // mapping "finished" to "live" forever. `completedOnly` simulates the exit-0 case.
+              activeDeployments: instance.status === 'SUCCESS' && this.options.completedOnly === false
+                ? [{ status: 'SUCCESS' }]
+                : [],
               // Mirrors the measured API: custom status is an object, service syncStatus an enum.
               domains: {
                 // Records mirror Railway's disclosure: a routing host that is NOT the service hostname,

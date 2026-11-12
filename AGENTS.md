@@ -68,7 +68,7 @@ the registrar (#199). The published image digest is now looked up rather than ty
 `selfhost/compose.prod.yaml` carries a real pin -- having previously carried a *real digest of the deleted
 service's bytes*, which every check passed. The renderer still refuses an unpinned first-party service rather
 than accepting a placeholder (#84), and `selfhost-deploy.ts --dry-run` is how you find out before a provider
-call does. Do not describe planned behavior as delivered, and prefer the evidence
+call does. A service that finished is not a service that runs: `live` requires something active behind the deployment, and an exited one reads `stopped` with the provider's own word kept as `rawStatus` (#202 follow-up). Do not describe planned behavior as delivered, and prefer the evidence
 tier a claim actually holds: measured, tested, or designed-and-unexercised. Provider-specific claims need a
 live check, and CI substitutes for none of them.
 Run `pnpm run verify` for the whole gate set. The skills under

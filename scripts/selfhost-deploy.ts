@@ -43,7 +43,7 @@ const credentials: RailwayCredentialSource = {
   async forEnvironment(): Promise<RailwayCredential> { return { kind: 'workspace', token }; },
 };
 
-function loadPlan(): InfraPlan {
+function loadManifest(): NonNullable<ReturnType<typeof parseCompose>['manifest']> {
   const base = fs.readFileSync(path.join(root, 'selfhost/compose.yaml'), 'utf8');
   const overlay = fs.readFileSync(path.join(root, 'selfhost/compose.prod.yaml'), 'utf8');
   const parsed = parseCompose([base, overlay]);
@@ -59,7 +59,7 @@ function loadPlan(): InfraPlan {
     for (const i of issues) console.error(`    - ${i.path}: ${i.code} -- ${i.message}`);
     process.exit(1);
   }
-  return buildPlan(parsed.manifest, { instanceId: 'selfhost', teamId: 'platfolio' });
+  return parsed.manifest;
 }
 
 function describePlan(plan: InfraPlan): void {
@@ -139,7 +139,33 @@ if (arg('bootstrap-vars')) {
   process.exit(0);
 }
 
-const plan = loadPlan();
+const manifest = loadManifest();
+
+
+if (arg('from-state')) {
+  const host = value('issuer-host');
+  const authHost = value('auth-host');
+  if (!host || !authHost) {
+    console.error('  --from-state needs --issuer-host= and --auth-host= (read back from the provider, never typed)');
+    process.exit(1);
+  }
+  // Patched into the MANIFEST, before buildPlan -- not into the plan afterwards. The first version assigned
+  // these values to `plan.environments[...].services[...]` and the apply then reported `noop`: planHash is
+  // computed over the environments inside buildPlan, so mutating the plan afterward left the hash describing
+  // the old content and the provider correctly concluded nothing had changed. A hash that does not cover what
+  // is applied is a hash that is lying, and the fix was to stop editing after it was computed.
+  for (const [service, sets] of [
+    ['api', { PLATFOLIO_IDENTITY_ISSUER: `https://${authHost}/realms/platfolio`, PLATFOLIO_IDENTITY_JWKS_URI: `https://${authHost}/realms/platfolio/protocol/openid-connect/certs` }],
+    ['identity', { KC_HOSTNAME: authHost }],
+  ] as const) {
+    const svc = manifest.spec.services[service];
+    if (!svc) { console.error(`  no "${service}" service in the composition`); process.exit(1); }
+    for (const [name, literal] of Object.entries(sets)) svc.env[name] = literal;
+  }
+  console.log(`  composition patched: api issuer https://${authHost}/realms/platfolio, identity hostname ${authHost}`);
+}
+
+const plan = buildPlan(manifest, { instanceId: 'selfhost', teamId: 'platfolio' });
 
 if (arg('strip-domains')) {
   for (const e of plan.environments) e.domains = [];
@@ -157,29 +183,6 @@ if (arg('generated-domains')) {
     e.domains = e.services.map((s) => ({ host: `${s.name}.generated.up.railway.app`, service: s.name, port: s.port, verificationName: `${s.name}-verify` }));
     console.log(`  requesting Railway-generated hosts for ${e.domains.map((d) => d.service).join(', ')}`);
   }
-}
-
-if (arg('from-state')) {
-  const host = value('issuer-host');
-  const authHost = value('auth-host');
-  if (!host || !authHost) {
-    console.error('  --from-state needs --issuer-host= and --auth-host= (read back from the provider, never typed)');
-    process.exit(1);
-  }
-  for (const e of plan.environments) {
-    for (const s of e.services) {
-      const set = (name: string, literal: string): void => {
-        const found = s.env.find((x) => x.name === name);
-        if (found) found.literal = literal; else s.env.push({ name, literal });
-      };
-      if (s.name === 'api') {
-        set('PLATFOLIO_IDENTITY_ISSUER', `https://${authHost}/realms/platfolio`);
-        set('PLATFOLIO_IDENTITY_JWKS_URI', `https://${authHost}/realms/platfolio/protocol/openid-connect/certs`);
-      }
-      if (s.name === 'identity') set('KC_HOSTNAME', authHost);
-    }
-  }
-  console.log(`  identity config rewritten from measured hosts: issuer https://${authHost}/realms/platfolio, api https://${host}`);
 }
 
 describePlan(plan);
