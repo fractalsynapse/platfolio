@@ -61,10 +61,14 @@ What is still **not** delivered, stated because the earlier version of this para
 agent read and it had gone stale: no Stripe integration, no CLI or web UI, and no tenant on either service.
 A person is now a `persons` row with proofs in `identities`, and membership attaches to the person (#177), so a
 second issuer or a machine client does not need a parallel authorization scheme.
-The cutover needs two things the repository cannot fake: a **hosted identity provider** (#172, D34) and a
-**published image with a real digest** (#146). `selfhost/compose.prod.yaml` deliberately has no `image:` line --
-its previous pin was the digest of the deleted service's bytes, and the manifest renderer refuses an unpinned
-first-party service rather than accepting a placeholder (#84). Do not describe planned behavior as delivered, and prefer the evidence
+The control plane is **deployed and answering on a public HTTPS host**, built by this repository, with its
+database created and migrated by its own plan (#172's first run). It is not yet the live service for tenants:
+Keycloak does not boot (a `references` dialect gap, #198) and the `platfolio.dev` CNAMEs are not yet set at
+the registrar (#199). The published image digest is now looked up rather than typed (`selfhost:overlay:check`), so
+`selfhost/compose.prod.yaml` carries a real pin -- having previously carried a *real digest of the deleted
+service's bytes*, which every check passed. The renderer still refuses an unpinned first-party service rather
+than accepting a placeholder (#84), and `selfhost-deploy.ts --dry-run` is how you find out before a provider
+call does. Do not describe planned behavior as delivered, and prefer the evidence
 tier a claim actually holds: measured, tested, or designed-and-unexercised. Provider-specific claims need a
 live check, and CI substitutes for none of them.
 Run `pnpm run verify` for the whole gate set. The skills under

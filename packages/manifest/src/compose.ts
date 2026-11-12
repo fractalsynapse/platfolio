@@ -201,7 +201,19 @@ export function parseCompose(texts: string | string[]): ParsedCompose {
       digest,
       port,
       ...(healthPathOf(svc.healthcheck) ? { healthPath: healthPathOf(svc.healthcheck) } : {}),
-      ...(typeof svc.command === 'string' ? { start: svc.command } : {}),
+      // A Compose `command` is canonically a LIST (`["start", "--x"]`), and a string is the other accepted
+      // form. Reading only the string form silently dropped every list-valued command, which is how the
+      // hosted Keycloak came up with no arguments at all and printed its own usage text -- the provider had a
+      // correct `startCommand` path waiting for a value that never arrived. Elements containing whitespace are
+      // quoted because Railway parses this string with a shell.
+      ...(() => {
+        const command = svc.command;
+        if (typeof command === 'string') return command.length > 0 ? { start: command } : {};
+        if (!Array.isArray(command)) return {};
+        const parts = command.map(String);
+        if (parts.length === 0) return {};
+        return { start: parts.map((p) => (/\s/.test(p) ? `"${p.replace(/"/g, '\"')}"` : p)).join(' ') };
+      })(),
       ...(typeof svcX.preDeploy === 'string' ? { preDeploy: svcX.preDeploy } : {}),
       ...(typeof svcX.rootDirectory === 'string' ? { rootDirectory: svcX.rootDirectory } : {}),
       ...(asNum(deploy.replicas) ? { replicas: asNum(deploy.replicas) } : {}),

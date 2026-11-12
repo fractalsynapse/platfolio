@@ -35,7 +35,11 @@
     "db:seed-dev": "tsx scripts/seed-dev-data.ts",
     "lifecycle:smoke": "tsx scripts/smoke-lifecycle.ts",
     "email:smoke": "tsx scripts/email-smoke.ts",
-    "invitations:smoke": "tsx scripts/smoke-invitations.ts"
+    "invitations:smoke": "tsx scripts/smoke-invitations.ts",
+    "selfhost:plan": "tsx scripts/selfhost-deploy.ts",
+    "selfhost:apply": "tsx scripts/selfhost-deploy.ts --apply --strip-domains",
+    "selfhost:overlay": "tsx scripts/render-selfhost-overlay.ts",
+    "selfhost:overlay:check": "tsx scripts/render-selfhost-overlay.ts --check"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

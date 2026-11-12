@@ -1,0 +1,215 @@
+/**
+ * Host platfolio with platfolio's own machinery (#172, D29/D33).
+ *
+ * This is the same path a tenant's platform takes -- compose + prod overlay -> manifest -> validation -> plan
+ * -> provider -- with no Railway dashboard clicks and no hand-written GraphQL. If the format cannot describe
+ * this deployment, that is a product defect, and finding it here is cheaper than a tenant finding it. That is
+ * not a figure of speech: this script is how we learned the renderer turns `environment:` entries into plan
+ * literals, so Compose-style `${VAR}` placeholders would have been shipped to the provider verbatim.
+ *
+ * Phases, because identity creates a chicken and an egg:
+ *   1. `--apply --strip-domains`  deploy with Railway's generated hosts, so something is reachable.
+ *   2. `--apply --from-state`     set the issuer/JWKS/hostname literals from the hosts the provider actually
+ *                                 granted and re-apply. Asserting a URL before it exists bakes in a host that
+ *                                 serves nothing (E27).
+ *   3. `--apply`                  attach `api.platfolio.dev` / `auth.platfolio.dev` and report the DNS records
+ *                                 the provider asks for. Railway reports pending forever for a zone we cannot
+ *                                 edit, and this prints the exact record a human has to add.
+ *
+ * `--dry-run` (default) renders and validates the plan and touches nothing.
+ */
+import fs from 'node:fs';
+import path from 'node:path';
+import { parseCompose } from '../packages/manifest/src/compose.ts';
+import { validateManifest } from '../packages/manifest/src/validate.ts';
+import { buildPlan } from '../packages/manifest/src/build-plan.ts';
+import type { InfraPlan } from '../packages/contracts/src/infra.ts';
+import { RailwayInfraProvider } from '../packages/contracts/src/railway-provider.ts';
+import type { RailwayCredential, RailwayCredentialSource } from '../packages/contracts/src/railway-transport.ts';
+
+const root = path.resolve(import.meta.dirname, '..');
+const arg = (name: string) => process.argv.includes(`--${name}`);
+const value = (name: string) => process.argv.find((a) => a.startsWith(`--${name}=`))?.slice(`--${name}=`.length);
+
+const token = process.env.RAILWAY_TOKEN ?? '';
+const workspaceId = process.env.RAILWAY_WORKSPACE_ID ?? '';
+
+/**
+ * The managed tier's single grant (D24): one least-privilege workspace token. Minting per-environment project
+ * tokens instead is #135's open question, not a choice this script gets to make silently.
+ */
+const credentials: RailwayCredentialSource = {
+  async workspace(): Promise<RailwayCredential> { return { kind: 'workspace', token }; },
+  async forEnvironment(): Promise<RailwayCredential> { return { kind: 'workspace', token }; },
+};
+
+function loadPlan(): InfraPlan {
+  const base = fs.readFileSync(path.join(root, 'selfhost/compose.yaml'), 'utf8');
+  const overlay = fs.readFileSync(path.join(root, 'selfhost/compose.prod.yaml'), 'utf8');
+  const parsed = parseCompose([base, overlay]);
+  if (parsed.issues.length > 0) {
+    console.error('  the renderer refused our own composition:');
+    for (const i of parsed.issues) console.error(`    - ${i.path}: ${i.code} -- ${i.message}`);
+    process.exit(1);
+  }
+  if (!parsed.manifest) { console.error('  no manifest produced'); process.exit(1); }
+  const issues = validateManifest(parsed.manifest);
+  if (issues.length > 0) {
+    console.error('  manifest validation refused:');
+    for (const i of issues) console.error(`    - ${i.path}: ${i.code} -- ${i.message}`);
+    process.exit(1);
+  }
+  return buildPlan(parsed.manifest, { instanceId: 'selfhost', teamId: 'platfolio' });
+}
+
+function describePlan(plan: InfraPlan): void {
+  console.log(`  plan: ${String(plan.environments.length)} environment(s), contract ${plan.contract}, provider ${plan.provider}`);
+  for (const e of plan.environments) {
+    console.log(`    env ${e.name}: databases=[${e.databases.map((d) => `${d.name}:${d.kind}`).join(', ') || 'none'}]`);
+    for (const s of e.services) {
+      const env = s.env.map((x) => (x.literal === undefined ? `${x.name}=*declared-name*` : `${x.name}=${x.literal}`)).join(' ');
+      console.log(`      ${s.name}: ${s.image}@${s.digest.slice(7, 19)}… port ${String(s.port)} replicas ${String(s.replicas)}`);
+      console.log(`        refs=[${(s.references ?? []).map((r) => `${r.variable}<-${r.database}`).join(', ') || 'none'}]`);
+      console.log(`        env: ${env}`);
+    }
+    console.log(`      domains: ${e.domains.length > 0 ? e.domains.map((d) => `${d.host}->${d.service}:${String(d.port)}`).join(', ') : '(generated hosts only)'}`);
+  }
+}
+
+if (arg('bootstrap-vars')) {
+  // An operator step, not a platform capability: platfolio must never hold a TENANT's secret values (D4), and
+  // the provider deliberately refuses to create a declared secret it cannot find. This first-party deployment
+  // is the other side of that rule -- platfolio's own credentials, supplied by whoever runs the deploy, read
+  // from the local environment and written to Railway. Names go in logs; values never do.
+  const supplied: Record<string, string | undefined> = {
+    KEYCLOAK_ADMIN: process.env.KEYCLOAK_ADMIN,
+    KEYCLOAK_ADMIN_PASSWORD: process.env.KEYCLOAK_ADMIN_PASSWORD,
+  };
+  const project = await (await fetch('https://backboard.railway.com/graphql/v2', {
+    method: 'POST', headers: { 'content-type': 'application/json', authorization: token },
+    body: JSON.stringify({ query: 'query($w:String!){ projects(workspaceId:$w, first:50){ edges{ node{ id name } } } }', variables: { w: workspaceId } }),
+  })).json() as { data?: { projects?: { edges?: Array<{ node: { id: string; name: string } }> } } };
+  // Resolved by what is IN the project, not by its name: the provider names projects after the *instance*
+  // (`platfolio-selfhost`, by design -- railway-provider's own comment records that keying the name to the
+  // manifest identity was caught by the conformance suite), so matching a hardcoded string would break the
+  // first time an instance id differs from a template id.
+  const withServices = async (id: string) => {
+    const r = await (await fetch('https://backboard.railway.com/graphql/v2', {
+      method: 'POST', headers: { 'content-type': 'application/json', authorization: token },
+      body: JSON.stringify({ query: 'query($id:String!){ project(id:$id){ services(first:20){ edges{ node{ id name } } } } }', variables: { id } }),
+    })).json() as { data?: { project?: { services?: { edges?: Array<{ node: { id: string; name: string } }> } } } };
+    return r.data?.project?.services?.edges ?? [];
+  };
+  let target: { node: { id: string; name: string } } | undefined;
+  let foundServices: Array<{ node: { id: string; name: string } }> = [];
+  for (const candidate of project.data?.projects?.edges ?? []) {
+    const list = await withServices(candidate.node.id);
+    const names = new Set(list.map((x) => x.node.name));
+    if (names.has('api') && names.has('identity')) { target = candidate; foundServices = list; break; }
+  }
+  if (!target) { console.error('  no project in this workspace has both an `api` and an `identity` service; run the apply first'); process.exit(1); }
+  const envs = await (await fetch('https://backboard.railway.com/graphql/v2', {
+    method: 'POST', headers: { 'content-type': 'application/json', authorization: token },
+    body: JSON.stringify({ query: 'query($id:String!){ project(id:$id){ environments(first:10){ edges{ node{ id name } } } } }', variables: { id: target.node.id } }),
+  })).json() as { data?: { project?: { environments?: { edges?: Array<{ node: { id: string; name: string } }> } } } };
+  const production = (envs.data?.project?.environments?.edges ?? []).find((e) => e.node.name === 'production');
+  if (!production) { console.error('  no production environment found'); process.exit(1); }
+  // Railway variables are per SERVICE, not per environment, and the field is `name` -- both read off the
+  // provider's own working call rather than guessed, because guessing produced a validation error naming a
+  // field that does not exist.
+  const services = foundServices;
+  const owner = (needle: string) => services.find((x) => x.node.name === needle)?.node.id;
+  const plan2: Array<{ service: string; variable: string }> = [
+    { service: 'identity', variable: 'KEYCLOAK_ADMIN' },
+    { service: 'identity', variable: 'KEYCLOAK_ADMIN_PASSWORD' },
+  ];
+  for (const entry of plan2) {
+    const value = supplied[entry.variable];
+    if (value === undefined || value.length === 0) { console.error(`  ${entry.variable} is not set in the local environment`); process.exit(1); }
+    const serviceId = owner(entry.service);
+    if (!serviceId) { console.error(`  no "${entry.service}" service in this project yet -- run the apply first`); process.exit(1); }
+    const r = await (await fetch('https://backboard.railway.com/graphql/v2', {
+      method: 'POST', headers: { 'content-type': 'application/json', authorization: token },
+      body: JSON.stringify({ query: 'mutation($input:VariableUpsertInput!){ variableUpsert(input:$input) }', variables: { input: { projectId: target.node.id, environmentId: production.node.id, serviceId, name: entry.variable, value, skipDeploys: true } } }),
+    })).json() as { errors?: Array<{ message: string }> };
+    if (r.errors) { console.error(`  ${entry.variable}: ${JSON.stringify(r.errors).slice(0, 140)}`); process.exit(1); }
+    console.log(`  set ${entry.service}.${entry.variable} (value withheld${entry.variable.includes('PASSWORD') ? ', marked secret' : ''})`);
+  }
+  console.log(`  project ${target.node.id}, environment ${production.node.id} -- re-run the apply to let the plan find them`);
+  process.exit(0);
+}
+
+const plan = loadPlan();
+
+if (arg('strip-domains')) {
+  for (const e of plan.environments) e.domains = [];
+  console.log('  custom domains stripped for this pass; Railway generated hosts will be used');
+}
+
+if (arg('generated-domains')) {
+  // A sentinel hostname ending in `.up.railway.app` makes the provider ask Railway to mint one and read the
+  // actual host back (railway-provider's createDomain does exactly that); the alternative is to sit without a
+  // URL until DNS lands at a registrar we do not control, which is E27 all over again.
+  for (const e of plan.environments) {
+    // Every planned service here is meant to be reachable -- the database is a `database`, not a service -- and
+    // `verificationName` is required by the plan schema even though a Railway-minted host never needs the TXT
+    // record (that is the custom-domain path, where it carries the DNS proof).
+    e.domains = e.services.map((s) => ({ host: `${s.name}.generated.up.railway.app`, service: s.name, port: s.port, verificationName: `${s.name}-verify` }));
+    console.log(`  requesting Railway-generated hosts for ${e.domains.map((d) => d.service).join(', ')}`);
+  }
+}
+
+if (arg('from-state')) {
+  const host = value('issuer-host');
+  const authHost = value('auth-host');
+  if (!host || !authHost) {
+    console.error('  --from-state needs --issuer-host= and --auth-host= (read back from the provider, never typed)');
+    process.exit(1);
+  }
+  for (const e of plan.environments) {
+    for (const s of e.services) {
+      const set = (name: string, literal: string): void => {
+        const found = s.env.find((x) => x.name === name);
+        if (found) found.literal = literal; else s.env.push({ name, literal });
+      };
+      if (s.name === 'api') {
+        set('PLATFOLIO_IDENTITY_ISSUER', `https://${authHost}/realms/platfolio`);
+        set('PLATFOLIO_IDENTITY_JWKS_URI', `https://${authHost}/realms/platfolio/protocol/openid-connect/certs`);
+      }
+      if (s.name === 'identity') set('KC_HOSTNAME', authHost);
+    }
+  }
+  console.log(`  identity config rewritten from measured hosts: issuer https://${authHost}/realms/platfolio, api https://${host}`);
+}
+
+describePlan(plan);
+
+if (!arg('apply')) {
+  console.log('\n  DRY RUN -- nothing was created or changed. Re-run with --apply.');
+  process.exit(0);
+}
+
+if (!token || !workspaceId) {
+  console.error('  --apply needs RAILWAY_TOKEN and RAILWAY_WORKSPACE_ID in the environment');
+  process.exit(1);
+}
+
+// Keycloak's cold start against a shared Postgres runs past the provider's default three-minute
+// window, and timing out a deploy that is merely slow would leave a half-deployed first-party stack.
+const provider = new RailwayInfraProvider({ credentials, workspaceId, deployBudget: Number(process.env.PLATFOLIO_DEPLOY_BUDGET ?? 4), deployTimeoutMs: Number(process.env.PLATFOLIO_DEPLOY_TIMEOUT_MS ?? 600_000) });
+const info = provider.describe();
+console.log(`\n  applying via ${info.provider} (contract ${info.contract}; ${String(info.operations.length)} operations)...`);
+const result = await provider.applyPlan(plan);
+// `verified` is the provider's own claim that every step was read back, and it is the only thing here that
+// makes "deployed" mean anything -- applyPlan returns the state it observed, not the state it intended.
+console.log(`  apply: instance=${result.instanceId} verified=${String(result.verified)} noop=${String(result.noop)} plan=${result.planHash.slice(0, 12)}…`);
+for (const f of result.failures) console.log(`    FAILURE ${f.step}: ${f.code} -- ${f.message}`);
+for (const n of result.notes ?? []) console.log(`    note ${n.step}: ${n.code} -- ${n.message}`);
+for (const s of result.services) console.log(`    service ${s.name}: ${s.status}${s.externalId ? ` (${s.externalId})` : ''}`);
+for (const d of result.domains) {
+  console.log(`    domain ${d.host}: dns=${d.dnsStatus} cert=${d.certificateStatus ?? 'n/a'} target=${d.targetService}`);
+  if (d.records) console.log(`      provider asks for: ${JSON.stringify(d.records)}`);
+}
+const reachable = result.domains.map((d) => d.host).filter((h) => h.endsWith('.up.railway.app'));
+if (reachable.length > 0) console.log(`\n  generated hosts: ${reachable.map((h) => `https://${h}`).join(', ')}`);
+process.exit(result.verified && result.failures.length === 0 ? 0 : 1);

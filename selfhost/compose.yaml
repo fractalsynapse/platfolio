@@ -2,8 +2,9 @@
 # x-platfolio for hosting semantics. This is a first-party deployment, not a catalog entry -- D28 keeps the
 # shipped catalog free of platform identities, and this one is deliberately excluded from it.
 #
-# The point of authoring it this way is that step 7 stops being an exception: the control plane is hosted by
-# the same code path a tenant uses, so any rough edge in the format is found here rather than by a tenant.
+# The point of authoring it this way is that hosting platfolio stops being an exception: the control plane is
+# deployed by the same code path a tenant uses (parse -> validate -> plan -> provider), so every rough edge in
+# the format is found here rather than by a tenant. #172 is the first time that has been attempted for real.
 name: platfolio-control-plane
 
 services:
@@ -14,51 +15,113 @@ services:
     expose: ["8080"]
     environment:
       NODE_ENV: production
-      # Every name below is declared in .platfolio/environment.yaml, which is the same inventory format every
-      # hosted platform uses -- platfolio hosting itself has no exemption from its own contract (D33).
-      PLATFOLIO_IDENTITY_ISSUER: ${PLATFOLIO_IDENTITY_ISSUER}
-      PLATFOLIO_IDENTITY_AUDIENCE: ${PLATFOLIO_IDENTITY_AUDIENCE}
-      PLATFOLIO_IDENTITY_JWKS_URI: ${PLATFOLIO_IDENTITY_JWKS_URI}
-      # Without a database the control plane starts in-memory and says so; that is a development mode, not a
-      # deployment, and the readiness of a real one comes from the migrations ledger.
-      PLATFOLIO_DB_URL: ${PLATFOLIO_DB_URL:-}
-      # Email (D46): a remote relay in a real deployment. `require` for STARTTLS is the default and is written
-      # explicitly here so a reviewer can see it rather than trust a default.
-      PLATFOLIO_EMAIL_DRIVER: ${PLATFOLIO_EMAIL_DRIVER:-smtp}
-      PLATFOLIO_EMAIL_FROM: ${PLATFOLIO_EMAIL_FROM:-platfolio@platfolio.dev}
-      PLATFOLIO_SMTP_HOST: ${PLATFOLIO_SMTP_HOST}
-      PLATFOLIO_SMTP_PORT: ${PLATFOLIO_SMTP_PORT:-587}
+      # No Compose-style `${VAR}` anywhere in this file, and that is a finding rather than a style choice: the
+      # renderer turns `environment:` entries into plan literals (build-plan maps every value straight through),
+      # so `${PLATFOLIO_DB_URL}` here would have been *written to the provider as the nine-character string*
+      # and the control plane would fail at boot with a message about a malformed DSN. Values that vary per
+      # deployment arrive one of three ways -- a provider-resolved `reference` below, a declared `secret` name,
+      # or a literal this script overrides with what it measured. Anything else is a placeholder that looks
+      # configured.
+      PLATFOLIO_IDENTITY_AUDIENCE: platfolio-api
+      # Issuer and JWKS are set by scripts/selfhost-deploy.ts from the host the provider actually granted,
+      # because asserting them before DNS lands would bake in a URL that serves nothing (E27). They are listed
+      # here so the inventory and the plan agree about which names this service needs.
+      PLATFOLIO_IDENTITY_ISSUER: https://auth.platfolio.dev/realms/platfolio
+      PLATFOLIO_IDENTITY_JWKS_URI: https://auth.platfolio.dev/realms/platfolio/protocol/openid-connect/certs
+      # Its own schema, not `public`: the identity provider shares this database instance (see `identity`), and
+      # two applications writing migrations into one schema is a collision waiting for its first upgrade.
+      PLATFOLIO_DB_SCHEMA: platfolio
+      # Migrations run at boot here and this is the one place that decision is written down: a single replica
+      # starts before traffic, so there is no race to lose. Replicas would use PLATFOLIO_DB_MIGRATE=false.
+      PLATFOLIO_DB_MIGRATE: 'true'
+      PLATFOLIO_RECONCILE_INTERVAL_MS: '60000'
+      # Email (D46). `none` until a relay is configured deliberately: the null transport refuses, reports
+      # honestly and leaves the routes mounted, which is safer than a half-configured sender that appears to work.
+      PLATFOLIO_EMAIL_DRIVER: none
+      PLATFOLIO_EMAIL_FROM: platfolio@platfolio.dev
       PLATFOLIO_SMTP_STARTTLS: require
-      PLATFOLIO_SMTP_USER: ${PLATFOLIO_SMTP_USER}
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
       timeout: 3s
       retries: 3
     x-platfolio:
+      # The wiring the provider resolves into a connection string: the operator never types it and the value
+      # never passes through platfolio's hands (D4). Note where it lives -- under x-platfolio, not as a top-level
+      # Compose key. The renderer refuses an unknown service field rather than dropping it, which is how I found
+      # I had put it in the wrong place: a silent drop here would have shipped a service with no database.
+      references:
+        - { variable: PLATFOLIO_DB_URL, database: main }
       # Declared by NAME, never by value (D4). The validator refused the literal I first wrote -- a credential
       # appearing in an env assignment is exactly what this platform must not store or read -- so the hosting
       # layer supplies it at run time and platfolio only knows it exists.
-      secrets:
-        - { name: PLATFOLIO_SMTP_PASSWORD, source: shared-variable }
+      # No SMTP secret is declared while PLATFOLIO_EMAIL_DRIVER is `none`. Declaring a credential the running
+      # config never reads is not caution, it is noise: the provider correctly refuses a plan whose declared
+      # secret has no value, so a phantom name would block the very deploy this file is meant to describe.
+      # Add the entry back the moment a relay is configured -- with `driver: smtp`, the provider will require
+      # the name to exist, and that is the point of declaring it rather than inlining a value (D4).
+      secrets: []
       public: true
-      # No custom domain until DNS ownership of platfolio.dev is confirmed. Measured (E27): attaching a host
-      # we cannot verify sticks at `applying` forever and the certificate never issues -- a state that looks
-      # like progress and is not. The first self-host run uses Railway's generated host, which does reach
-      # `active` + a valid certificate without any delegation.
-      # domains: [api.platfolio.dev]
+      # The user's direction is that platfolio lives at platfolio.dev. Declared here, and #172 measures whether
+      # it actually resolves rather than asserting it: E27 measured that a host whose zone we cannot edit sticks
+      # at `applying` forever with no certificate -- which looks like progress and is not. platfolio.dev's zone
+      # is 101domain-managed, so this needs one CNAME per subdomain from whoever holds that registrar login.
+      domains: [api.platfolio.dev]
       environments: [production]
 
+  identity:
+    # Upstream Keycloak, pinned by digest (D29/D30 law 3: a tag is a thing that moves). `ownership: external`
+    # is what the format calls a service we host but do not develop -- the same posture a tenant has toward
+    # their dependencies, which is the point of dogfooding.
+    image: keycloak/keycloak:26.8.2@sha256:c126f032d43b941ed7c5ccca7d6571596d8eab84d748afd7c86989e48ef07b8f
+    command: ['start']
+    expose: ["8080"]
+    environment:
+      KC_DB: postgres
+      KC_DB_SCHEMA: keycloak
+      # The port is an ENVIRONMENT setting in Keycloak 26, not a start flag. My first version passed
+      # `--http-port=8080` and the container printed its own usage text and exited -- which the provider
+      # reported honestly as a failed deployment rather than as success with a dead service.
+      KC_HTTP_PORT: '8080'
+      KC_HOSTNAME_STRICT: 'false'
+      KC_PROXY_HEADERS: xforwarded
+      KC_HTTP_ENABLED: 'true'
+      # Written by the deploy script from the host the provider granted. Keycloak stamps the `iss` claim from
+      # its own hostname setting, so if this and the control plane's issuer do not agree exactly, every token
+      # is refused -- which is the correct failure, and one worth being explicit about in the file that sets it.
+      KC_HOSTNAME: auth.platfolio.dev
+      KC_HEALTH_ENABLED: 'true'
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/realms/master').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 6
+    x-platfolio:
+      references:
+        - { variable: KC_DB_URL, database: main }
+      secrets:
+        # Keycloak's initial admin, by name. The seed script reads the same variable from the environment it is
+        # run with; platfolio stores no secret values (D4).
+        - { name: KEYCLOAK_ADMIN, source: shared-variable }
+        - { name: KEYCLOAK_ADMIN_PASSWORD, source: shared-variable }
+      public: true
+      domains: [auth.platfolio.dev]
+      ownership: external
+      environments: [production]
 
+  # One provider-managed Postgres for the whole deployment. `singleUser` semantics apply: Railway creates the
+  # service and the connection string, and the two applications above each get their own schema.
 x-platfolio:
   metadata:
     name: platfolio-control-plane
     version: 0.4.0
     title: Platfolio Control Plane
     summary: The control plane hosting itself, so the hosting path is tested on software we own.
-    archetype: api-service
+    archetype: full-stack-web
     repository: https://github.com/fractalsynapse/platfolio
   capabilities: []
+  resources:
+    database: { name: main, kind: postgres }
   environments:
     production: { enabled: true, branch: staging }
     staging: { enabled: false }

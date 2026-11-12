@@ -5,6 +5,44 @@ change; entries describe merged intent, not aspirations.
 
 "## [Unreleased]
 
+### Added — platfolio hosted by platfolio (#172, first run)
+
+- **`scripts/selfhost-deploy.ts`** deploys platfolio's own stack through platfolio's own machinery:
+  compose + overlay → manifest → validation → plan → provider. Nothing was typed into the Railway console.
+  Phases exist because identity is circular: deploy with Railway-generated hosts, read them back, then set the
+  issuer/JWKS/hostname literals from what the provider actually granted. `--dry-run` is the default.
+- **`scripts/render-selfhost-overlay.ts`** looks the image digest up from the registry instead of a human
+  copying it, with `--check` as a drift gate (#146 for our own service). The overlay now pins
+  `platfolio-control-plane:staging@sha256:54ce1c59…`, read from the `docker-content-digest` header.
+- The self-host composition grew a second service and a shared database: `api` + `identity` (Keycloak 26.8.2,
+  digest-pinned at authoring time) against one provider-managed Postgres, each selecting its own schema, wired
+  by `references` -- the same mechanism a tenant uses, applied to us.
+
+### Fixed
+
+- **List-valued Compose `command` was silently dropped on its way to the plan.** `compose.ts` mapped
+  `command → start` only `typeof command === 'string'`, so `command: ['start']` produced a service with *no*
+  start command: the hosted Keycloak booted with no arguments and printed its own usage text. Found by
+  deploying, not by reading -- the provider already had a correct `startCommand` path waiting for a value that
+  never arrived. Arrays are now joined (whitespace-bearing elements quoted), asserted in the step-7 test.
+- `selfhost/compose.yaml` had Compose-style `${VAR}` values that would have been shipped to the provider as
+  literal nine-character strings: the renderer turns `environment:` entries into plan **literals**, so
+  placeholders read as configured. Replaced with provider-resolved `references`, declared secret *names*, and
+  literals -- and one override path (`--from-state`) that takes values the deployment measured.
+
+### Notes
+
+- **Deployed and verified live**: the control plane answers on a generated Railway host with an issued
+  certificate -- `/healthz` ok, **`/readyz` reporting `database: ok`** (its schema was created and migrated by
+  its own plan), `/version` reporting `commit: 8f01370` = staging head. `#172` stays open: **Keycloak does not
+  boot yet** -- the shared-database `references` wiring yields a `postgresql://…` URL while Keycloak wants a
+  `jdbc:postgresql://…`, which is a manifest-format gap (#198), and `api.platfolio.dev` /
+  `auth.platfolio.dev` need one CNAME each at the registrar that holds platfolio.dev's zone (#199).
+- The self-host step-7 test asserts the **opposite** of what it used to -- it previously proved the composition
+  could *not* yet be planned. The inversion is recorded in the file rather than presented as if it had always
+  passed.
+
+
 ### Added — **breaking** (team names)
 
 - **Self-service team creation (#195, D44).** `POST /api/v1/teams` and `GET /api/v1/teams`. Until now the only
