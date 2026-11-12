@@ -5,6 +5,37 @@ change; entries describe merged intent, not aspirations.
 
 "## [Unreleased]
 
+### Fixed — a finished deployment was being reported as a running service
+
+`SUCCESS` is a deployment outcome, not a process state, and the Railway provider mapped it to `live`. Found
+because the maintainer looked at the Railway console and saw the identity service shown as **"completed"** —
+which for a server is never an acceptable steady state. Measured on our own stack: Keycloak's container had
+exited, its latest deployment read `FAILED` while an older `SUCCESS` deployment was still listed as active.
+
+- `ServiceStateSchema` gains a **`stopped`** status and an optional **`rawStatus`**, so the normalized value
+  ("not running") and the provider's own word ("SUCCESS") are both visible. Without `rawStatus`, an operator
+  reading `stopped` cannot tell whether the platform exited cleanly, crashed, or was never deployed — which is
+  the difference between a config bug and a crash loop.
+- `RailwayInfraProvider` now reads `activeDeployments` and reports `stopped` when a service's last deployment
+  succeeded but nothing is running. **`verified` can no longer be earned by a service that has exited**, and
+  `applyPlan`'s wait treats it as terminal rather than polling a finished process until it times out.
+- A regression the fix itself introduced, caught by checking reality rather than the test output: `applyPlan`'s
+  other status query did not select the new field, so a *serving* control plane and its healthy database were
+  reported `stopped` while `/healthz` answered 200. Absence of evidence is not evidence of absence — the
+  downgrade now requires positive evidence (`activeDeployments` present and empty), and every query that reads
+  deployment status selects the field.
+- New falsification test (`railway-status.test.ts`): the same plan with nothing running reports every service
+  `stopped`, `verified: false`, a failure recorded, and `rawStatus: 'SUCCESS`; with something running it is
+  `live` and verified — the healthy path must still be able to say yes, or the fix is only pessimism.
+- The Railway double gained a `completedOnly` option precisely because the real API returns this state. A mock
+  that always invents an active deployment cannot express the bug, which is how it survived as long as it did.
+
+Contracts classification: **additive → MINOR** (`stopped` and optional `rawStatus` add lines, remove none).
+Worth naming as a gate limitation: the same widening applied to a `type X = 'a' | 'b'` union earlier today
+classified as **MAJOR**, because that spelling replaces a line. A classification that depends on how a type is
+written rather than what it means is a weaker gate than it looks.
+
+
 ### Changed — layout
 
 - **`api/` is gone; each file moved to the thing it describes.** The directory held three unrelated kinds and

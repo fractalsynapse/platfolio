@@ -173,7 +173,13 @@ export const ServiceStateSchema = z.object({
   environment: NameSchema,
   externalId: z.string().min(1),
   /** Provider deployment status, normalized. */
-  status: z.enum(['pending', 'building', 'deploying', 'live', 'failed', 'crashed', 'sleeping', 'awaiting-approval', 'removed']),
+  status: z.enum(['pending', 'building', 'deploying', 'live', 'stopped', 'failed', 'crashed', 'sleeping', 'awaiting-approval', 'removed']),
+  /**
+   * What the provider literally said, kept beside the normalized value. Needed for the case found on our own
+   * deployment: a Railway `SUCCESS` with nothing running behind it normalizes to `stopped`, and an operator
+   * reading only `stopped` cannot tell whether the platform finished, crashed, or was never deployed.
+   */
+  rawStatus: z.string().optional(),
   image: z.string().min(1),
   numReplicas: z.number().int().min(0),
 });
