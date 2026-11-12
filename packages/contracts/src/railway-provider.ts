@@ -1062,7 +1062,7 @@ export class RailwayInfraProvider implements InfraProvider {
           }
         }
       }
-      await this.wireReferences(projectId, environmentId, database, envName, environment, serviceIds, token);
+      await this.wireReferences(projectId, environmentId, database, envName, environment, serviceIds, token, failures, notes);
       return;
     }
 
@@ -1136,7 +1136,7 @@ export class RailwayInfraProvider implements InfraProvider {
       // Wire every service in this environment that references the database, using Railway's own reference
       // expression so the credential is resolved by the provider: platfolio writes an expression and never
       // sees the value it stands for.
-      await this.wireReferences(projectId, environmentId, database, envName, environment, serviceIds, token);
+      await this.wireReferences(projectId, environmentId, database, envName, environment, serviceIds, token, failures, notes);
     } catch (error) {
       failures.push({ step, code: 'database-provision-failed', message: (error as Error).message.slice(0, 240) });
     }
@@ -1152,13 +1152,37 @@ export class RailwayInfraProvider implements InfraProvider {
    * The custody guarantee comes from never reading variable values anywhere in this provider
    * (`configVariableNames` takes keys only) and from the D24 tier choice, not from the expression syntax.
    */
-  private async wireReferences(projectId: string, environmentId: string, database: { name: string; kind: string }, envName: string, environment: { name: string; services: ServicePlan[] }, serviceIds: Map<string, string>, credential: RailwayCredential): Promise<void> {
+  private async wireReferences(projectId: string, environmentId: string, database: { name: string; kind: string }, envName: string, environment: { name: string; services: ServicePlan[] }, serviceIds: Map<string, string>, credential: RailwayCredential, failures: ApplyResult['failures'], notes: NonNullable<ApplyResult['notes']>): Promise<void> {
     for (const service of environment.services) {
       for (const reference of service.references ?? []) {
         if (reference.database !== database.name) continue;
         const target = serviceIds.get(`${envName}/${service.name}`);
         if (!target) continue;
-        const expression = '$' + `{{${database.name}.${reference.output ?? 'DATABASE_URL'}}}`;
+        const output = reference.output ?? 'DATABASE_URL';
+        // #198: the reference mechanism was never the limitation -- `output` already selects which variable on
+        // the database service to point at, so a JDBC-style DSN is writable as components today. What was
+        // missing is *trust*: nothing checked that the name exists, so a typo would write a reference that
+        // resolves to nothing and the service would fail at boot with a message about an unresolvable host.
+        // Existence is checked against the provider's own config read, which returns names with values
+        // redacted -- the same measured property that keeps secrets out of our memory (see ensureSecrets).
+        const sourceId = serviceIds.get(`${envName}/${database.name}`);
+        const available = sourceId ? await this.configVariableNames(projectId, environmentId, sourceId) : [];
+        if (sourceId && available.length > 0 && !available.includes(output)) {
+          failures.push({
+            step: `references.${service.name}.${reference.variable}`,
+            code: 'reference-output-missing',
+            message: `database "${database.name}" exposes no variable named "${output}"; available: ${[...new Set(available)].sort().slice(0, 12).join(', ')} (names only -- values are redacted by the provider)`,
+          });
+          continue;
+        }
+        if (!sourceId || available.length === 0) {
+          notes.push({
+            step: `references.${service.name}.${reference.variable}`,
+            code: 'reference-output-unverified',
+            message: `the database service's variable list could not be read, so "${output}" was written without checking it exists`,
+          });
+        }
+        const expression = '$' + `{{${database.name}.${output}}}`;
         await this.upsertVariable(projectId, environmentId, target, reference.variable, expression, credential);
       }
     }

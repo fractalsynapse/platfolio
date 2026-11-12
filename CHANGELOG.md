@@ -5,6 +5,48 @@ change; entries describe merged intent, not aspirations.
 
 "## [Unreleased]
 
+### Added — reference outputs you can trust (#198)
+
+- **`references[].output` is now verified instead of hoped for.** The mechanism already existed — it names
+  *which* variable on the database service to point at, which is exactly how a JDBC-style consumer gets host,
+  port, database, user and password rather than one `postgresql://` URL. What was missing is that nothing
+  checked the name exists, so a typo wrote a reference resolving to nothing and the service failed at boot
+  blaming its own configuration. The provider now reads `environment.config` (names only; the API redacts
+  values) and refuses with **`reference-output-missing`**, listing what *is* available — an actionable message
+  instead of a mystery. Where the list can't be read, a `reference-output-unverified` note is recorded rather
+  than the check being silently skipped.
+- **The Railway double learned the template's real variable names** (`TEMPLATE_DATABASE_VARIABLES`, read from
+  the live service), because a mock with an empty variable set makes the new check either vacuous or wrong.
+- **platfolio's own composition now wires Keycloak by components** — `KC_DB_URL_HOST/PORT/DATABASE`,
+  `KC_DB_USERNAME`, `KC_DB_PASSWORD` from `PGHOST/PGPORT/POSTGRES_DB/POSTGRES_USER/POSTGRES_PASSWORD` — and the
+  step-7 test asserts that shape, including that no service is handed a whole URL it cannot parse.
+
+### Found while making our own identity service start (each one cost a deploy to learn)
+
+- **Railway's start command replaces the image command, it is not appended to an entrypoint.** A Compose
+  `command: ['start']` became `/opt/keycloak/bin/kc.sh start`'s missing half: `start` isn't an executable, so
+  the container exited instantly **with zero log lines** and looked like an opaque platform failure. Full path
+  in the composition, asserted in the plan test.
+- **Keycloak will not create the schema it is told to use** — `KC_DB_SCHEMA` produced
+  `ERROR: schema "keycloak" does not exist` after a *successful* JDBC connection. The manifest format has no
+  "create a schema" concept, so identity shares `public` while the control plane keeps its own schema (our
+  migrator creates that one). The gap is real for any tenant whose JVM app wants a private schema and is
+  recorded rather than worked around silently.
+- **Keycloak's config build was OOM-killed** at Railway's default memory ceiling (`kc.sh: line 170: 82 Killed
+  'java'`) before the schema error was ever reachable — now 2 GB via `deploy.resources.limits`.
+- **Stale variables survive a changed plan**, by design: the provider never deletes configuration a tenant may
+  have set by hand. That made pruning an explicit operator action, so `selfhost-deploy.ts` gained
+  `--prune-vars=service.VAR` and `--redeploy=service` — without the redeploy, `applyPlan` is idempotent by
+  `planHash` and a variable the plan no longer mentions would sit there winning forever (`KC_DB_URL` did,
+  until it was deleted and the service restarted).
+
+**Result, measured:** the identity service reports `SUCCESS` and Keycloak is initializing its schema over the
+component DSN; the API service is `live`; `api.platfolio.dev` and `auth.platfolio.dev` now resolve as
+unproxied CNAMEs to Railway and are attached, with certificate issuance still pending propagation (#199).
+`verified` remains `false` — correctly, because the identity service had not settled healthy at the moment of
+that apply and the provider refuses to round up.
+
+
 ### Fixed — a finished deployment was being reported as a running service
 
 `SUCCESS` is a deployment outcome, not a process state, and the Railway provider mapped it to `live`. Found

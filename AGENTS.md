@@ -25,7 +25,7 @@ selections it has already made are recorded, not improvised:
 | Control-plane API design (the validation mechanism itself) | [apps/control-plane/openapi.yaml](apps/control-plane/openapi.yaml) — spec first, then the handler |
 
 Status: foundation poured, interfaces first (D40, [16](docs/design/16-foundation-build-order.md)). Slices 1
-and 2 of that plan are delivered (364 tests): `apps/control-plane` boots on the vendored runtime with
+and 2 of that plan are delivered (366 tests): `apps/control-plane` boots on the vendored runtime with
 Keycloak-verified bearer auth, persistent records (`Store` as a capability with a Postgres implementation and
 an in-memory double under one conformance suite, gated in CI against a live database), a controller
 that turns accepted attestations into stored state, and capability bindings that make shared services
@@ -63,8 +63,9 @@ A person is now a `persons` row with proofs in `identities`, and membership atta
 second issuer or a machine client does not need a parallel authorization scheme.
 The control plane is **deployed and answering on a public HTTPS host**, built by this repository, with its
 database created and migrated by its own plan (#172's first run). It is not yet the live service for tenants:
-Keycloak does not boot (a `references` dialect gap, #198) and the `platfolio.dev` CNAMEs are not yet set at
-the registrar (#199). The published image digest is now looked up rather than typed (`selfhost:overlay:check`), so
+Keycloak now boots (its JDBC DSN is wired as verified `references[].output` components, #198), and
+`api.platfolio.dev` / `auth.platfolio.dev` are attached as unproxied CNAMEs (#199) with certificate issuance
+still pending — so seeded-realm and token flows are the next step, not the current claim. The published image digest is now looked up rather than typed (`selfhost:overlay:check`), so
 `selfhost/compose.prod.yaml` carries a real pin -- having previously carried a *real digest of the deleted
 service's bytes*, which every check passed. The renderer still refuses an unpinned first-party service rather
 than accepting a placeholder (#84), and `selfhost-deploy.ts --dry-run` is how you find out before a provider

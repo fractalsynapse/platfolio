@@ -26367,7 +26367,7 @@ var RailwayInfraProvider = class {
           }
         }
       }
-      await this.wireReferences(projectId, environmentId, database, envName, environment, serviceIds, token);
+      await this.wireReferences(projectId, environmentId, database, envName, environment, serviceIds, token, failures, notes);
       return;
     }
     try {
@@ -26429,7 +26429,7 @@ var RailwayInfraProvider = class {
         failures.push({ step, code: "database-not-deployed", message: `${database.kind} reached ${outcome.status} instead of success` });
         return;
       }
-      await this.wireReferences(projectId, environmentId, database, envName, environment, serviceIds, token);
+      await this.wireReferences(projectId, environmentId, database, envName, environment, serviceIds, token, failures, notes);
     } catch (error62) {
       failures.push({ step, code: "database-provision-failed", message: error62.message.slice(0, 240) });
     }
@@ -26444,13 +26444,31 @@ var RailwayInfraProvider = class {
    * The custody guarantee comes from never reading variable values anywhere in this provider
    * (`configVariableNames` takes keys only) and from the D24 tier choice, not from the expression syntax.
    */
-  async wireReferences(projectId, environmentId, database, envName, environment, serviceIds, credential) {
+  async wireReferences(projectId, environmentId, database, envName, environment, serviceIds, credential, failures, notes) {
     for (const service of environment.services) {
       for (const reference of service.references ?? []) {
         if (reference.database !== database.name) continue;
         const target = serviceIds.get(`${envName}/${service.name}`);
         if (!target) continue;
-        const expression = `\${{${database.name}.${reference.output ?? "DATABASE_URL"}}}`;
+        const output2 = reference.output ?? "DATABASE_URL";
+        const sourceId = serviceIds.get(`${envName}/${database.name}`);
+        const available = sourceId ? await this.configVariableNames(projectId, environmentId, sourceId) : [];
+        if (sourceId && available.length > 0 && !available.includes(output2)) {
+          failures.push({
+            step: `references.${service.name}.${reference.variable}`,
+            code: "reference-output-missing",
+            message: `database "${database.name}" exposes no variable named "${output2}"; available: ${[...new Set(available)].sort().slice(0, 12).join(", ")} (names only -- values are redacted by the provider)`
+          });
+          continue;
+        }
+        if (!sourceId || available.length === 0) {
+          notes.push({
+            step: `references.${service.name}.${reference.variable}`,
+            code: "reference-output-unverified",
+            message: `the database service's variable list could not be read, so "${output2}" was written without checking it exists`
+          });
+        }
+        const expression = `\${{${database.name}.${output2}}}`;
         await this.upsertVariable(projectId, environmentId, target, reference.variable, expression, credential);
       }
     }

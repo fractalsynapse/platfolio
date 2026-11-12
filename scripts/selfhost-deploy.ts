@@ -28,7 +28,7 @@ import { RailwayInfraProvider } from '../packages/contracts/src/railway-provider
 import type { RailwayCredential, RailwayCredentialSource } from '../packages/contracts/src/railway-transport.ts';
 
 const root = path.resolve(import.meta.dirname, '..');
-const arg = (name: string) => process.argv.includes(`--${name}`);
+const arg = (name: string) => process.argv.some((a) => a === `--${name}` || a.startsWith(`--${name}=`));
 const value = (name: string) => process.argv.find((a) => a.startsWith(`--${name}=`))?.slice(`--${name}=`.length);
 
 const token = process.env.RAILWAY_TOKEN ?? '';
@@ -136,6 +136,60 @@ if (arg('bootstrap-vars')) {
     console.log(`  set ${entry.service}.${entry.variable} (value withheld${entry.variable.includes('PASSWORD') ? ', marked secret' : ''})`);
   }
   console.log(`  project ${target.node.id}, environment ${production.node.id} -- re-run the apply to let the plan find them`);
+  process.exit(0);
+}
+
+if (arg('prune-vars')) {
+  // An operator action, spelled out rather than hidden in the provider: the provider writes the plan's
+  // references and never deletes variables a later plan dropped, because silently removing configuration a
+  // tenant may have set by hand is a worse surprise than a stale variable. Pruning is therefore ours to do
+  // deliberately when we change our own composition -- here `KC_DB_URL`, which Keycloak would otherwise prefer
+  // over the component references #198 introduced, and keep failing to parse.
+  const entries = (value('prune-vars') ?? '').split(',').map((x) => x.trim()).filter(Boolean).map((x) => {
+    const [serviceName, variable] = x.split('.');
+    if (!serviceName || !variable) { console.error(`  --prune-vars expects service.VARIABLE, got "${x}"`); process.exit(1); }
+    return { serviceName, variable };
+  });
+  if (entries.length === 0) { console.error('  usage: --prune-vars=identity.KC_DB_URL[,service.VAR...]'); process.exit(1); }
+  const auth = { 'content-type': 'application/json', authorization: token };
+  const call = async (query: string, variables?: Record<string, unknown>) => (await (await fetch('https://backboard.railway.com/graphql/v2', { method: 'POST', headers: auth, body: JSON.stringify({ query, variables }) })).json() as any);
+
+  const projects = await call('query($w:String!){ projects(workspaceId:$w, first:50){ edges{ node{ id name } } } }', { w: workspaceId });
+  const project = (projects.data?.projects?.edges ?? []).find((x: any) => x.node.name === 'platfolio-selfhost');
+  if (!project) { console.error('  no platfolio-selfhost project -- run the apply first'); process.exit(1); }
+  const projectId: string = project.node.id;
+  const detail = await call('query($p:String!){ project(id:$p){ environments(first:10){ edges{ node{ id name } } } services(first:30){ edges{ node{ id name } } } } }', { p: projectId });
+  const environmentId: string | undefined = (detail.data?.project?.environments?.edges ?? []).find((x: any) => x.node.name === 'production')?.node.id;
+  const nameToId = new Map<string, string>(((detail.data?.project?.services?.edges ?? []) as any[]).map((x) => [x.node.name, x.node.id]));
+  if (!environmentId) { console.error('  no production environment'); process.exit(1); }
+
+  const cfg = await call('query($p:String!,$e:String!){ environment(projectId:$p, id:$e){ config } }', { p: projectId, e: environmentId });
+  const raw = cfg.data?.environment?.config;
+  const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+  for (const entry of entries) {
+    const serviceId = nameToId.get(entry.serviceName);
+    if (!serviceId) { console.error(`  no service named "${entry.serviceName}" in this project`); process.exit(1); }
+    const present = Object.keys(parsed?.services?.[serviceId]?.variables ?? {});
+    if (!present.includes(entry.variable)) { console.log(`  ${entry.serviceName}.${entry.variable} already absent (of ${String(present.length)} variables)`); continue; }
+    const del = await call('mutation($input:VariableDeleteInput!){ variableDelete(input:$input) }', { input: { projectId, environmentId, serviceId, name: entry.variable } });
+    if (del.errors) { console.error(`  ${entry.serviceName}.${entry.variable}: ${JSON.stringify(del.errors).slice(0, 160)}`); process.exit(1); }
+    console.log(`  deleted ${entry.serviceName}.${entry.variable} -- re-apply to redeploy with the surviving references`);
+  }
+  // Pruning changes nothing the plan can see, and `applyPlan` is idempotent by planHash -- so without an
+  // explicit deploy the service would keep running with the old environment forever. The provider refuses to
+  // delete variables a plan dropped (a tenant may have set them by hand); restarting our own service is the
+  // other half of that same operator decision.
+  const redeploy = value('redeploy');
+  if (redeploy) {
+    const serviceId = nameToId.get(redeploy);
+    if (!serviceId) { console.error(`  --redeploy: no service named "${redeploy}"`); process.exit(1); }
+    const inst = await call('query($p:String!,$e:String!){ environment(projectId:$p, id:$e){ serviceInstances{ edges{ node{ serviceId id } } } } }', { p: projectId, e: environmentId });
+    const instanceId = (inst.data?.environment?.serviceInstances?.edges ?? []).find((x: any) => x.node.serviceId === serviceId)?.node?.id;
+    if (!instanceId) { console.error('  --redeploy: no service instance found'); process.exit(1); }
+    const dep = await call('mutation($e:String!,$s:String!){ serviceInstanceDeploy(environmentId:$e, serviceId:$s, latestCommit:true) }', { e: environmentId, s: serviceId });
+    if (dep.errors) { console.error(`  --redeploy failed: ${JSON.stringify(dep.errors).slice(0, 160)}`); process.exit(1); }
+    console.log(`  redeploy requested for ${redeploy} (instance ${String(instanceId).slice(0, 8)})`);
+  }
   process.exit(0);
 }
 

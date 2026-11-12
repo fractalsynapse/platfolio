@@ -157,15 +157,21 @@ test('platfolio can describe and plan its own deployment (step 7, #172)', () => 
   assert.equal(byName.get('api')?.healthPath, '/healthz');
   // The command finding from #172: Keycloak is pointless without its start command, and the renderer had been
   // dropping every list-valued Compose `command` on the floor.
-  assert.equal(byName.get('identity')?.command, 'start', 'a list-valued command must survive to the plan');
+  assert.equal(byName.get('identity')?.command, '/opt/keycloak/bin/kc.sh start', 'a list-valued command must survive to the plan, joined with quoting where needed');
   assert.equal(byName.get('api')?.command, undefined, 'the api service has no command override');
 
   // One shared database, wired into both applications by reference -- the same `references` mechanism a tenant
   // uses, and each selects its own schema so neither can move the other's migrations.
   assert.deepEqual(production.databases.map((d) => `${d.name}:${d.kind}`), ['main:postgres']);
-  for (const [service, variable] of [['api', 'PLATFOLIO_DB_URL'], ['identity', 'KC_DB_URL']] as const) {
+  for (const [service, variable] of [['api', 'PLATFOLIO_DB_URL'], ['identity', 'KC_DB_URL_HOST'], ['identity', 'KC_DB_PASSWORD']] as const) {
     const refs = byName.get(service)?.references ?? [];
     assert.ok(refs.some((r) => r.variable === variable && r.database === 'main'), `${service} is not wired to the shared database`);
+    // #198, asserted rather than commented: a driver that needs components gets components, each naming a
+    // SOURCE variable on the database service, and nothing is handed a postgres:// URL it cannot parse.
+    if (service === 'identity') {
+      assert.ok(refs.every((r) => typeof r.output === 'string' && r.output.length > 0), 'every identity reference must name its source variable');
+      assert.equal(refs.find((r) => r.variable === 'KC_DB_URL'), undefined, 'a postgres:// URL must not be handed to a JDBC consumer');
+    }
   }
 });
 
