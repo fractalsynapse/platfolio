@@ -395,3 +395,219 @@ export async function revokeInstallationAccessToken(input: { token: string; fetc
     throw new Error(`installation token revocation returned ${String(response.status)}`);
   }
 }
+
+/**
+ * ## Reading a tenant's declared platform (the middle of #172)
+ *
+ * platfolio has always known what it intends to deploy -- `buildPlan` turns a Compose document into an
+ * `InfraPlan` in-process. What it could not do was obtain that document for a repository it does not own, so
+ * the step from "a tenant installed platfolio" to "platfolio dispatched something" lived in an operator's
+ * shell (`open-install-pr.ts --platform <local checkout>`), reading the maintainer's filesystem instead of the
+ * tenant's repository. That is the gap this closes: the control plane reads the file, from a ref, over an API.
+ *
+ * Evidence tiers, because three of these statuses were inferred from GitHub's docs rather than met:
+ * `not-found` and `forbidden` are measured (the contents endpoint answers 404 for a missing path AND for a
+ * repository the installation cannot see -- which is why the two are kept distinguishable only when a
+ * directory listing succeeds; see `repositoryVisible`). `too-large` is documented (GitHub omits `content` and
+ * sets `size` above 1 MiB) and not yet provoked. A 409 has been seen only for ref/SHA mismatches in other
+ * endpoints and is reported as `ref-not-found` on GitHub's own wording, not on ours.
+ */
+export interface RepositoryFileRequest {
+  appId: number;
+  privateKeyPem: string;
+  installationId: number;
+  /** `owner/name`, exactly as GitHub spells it. */
+  repo: string;
+  /** Branch, tag, or 40-character commit SHA. A tag is allowed but platfolio pins commits (D29). */
+  ref: string;
+  /** Path within the repository, e.g. `compose.yaml`. No leading slash. */
+  path: string;
+  fetch?: typeof globalThis.fetch;
+}
+
+export interface RepositoryFile {
+  path: string;
+  ref: string;
+  repo: string;
+  /** Blob SHA GitHub reports -- the identity of THIS content, useful for cache and for a pinned read-back. */
+  sha: string;
+  size: number;
+  content: string;
+}
+
+export type RepositoryReadFailure =
+  | { kind: 'not-found'; detail: string }
+  /** The installation exists but cannot see this repository: the #130 limit, surfaced instead of guessed. */
+  | { kind: 'forbidden'; detail: string }
+  | { kind: 'ref-not-found'; detail: string }
+  /** Present but unreadable as a single file -- a directory, a submodule, or GitHub's 1 MiB cutoff. */
+  | { kind: 'not-a-file'; detail: string }
+  | { kind: 'too-large'; detail: string };
+
+export class RepositoryReadError extends Error {
+  readonly failure: RepositoryReadFailure;
+  readonly status: number;
+  constructor(failure: RepositoryReadFailure, status: number) {
+    super(`${failure.kind}: ${failure.detail}`);
+    this.name = 'RepositoryReadError';
+    // Assigned rather than declared as constructor parameters: `erasableSyntaxOnly` rejects parameter
+    // properties, because these files run through Node's type stripping and nothing else would emit the
+    // assignments. The compiler caught it immediately, which is the point of having the flag on.
+    this.failure = failure;
+    this.status = status;
+  }
+}
+
+export async function readRepositoryFile(request: RepositoryFileRequest): Promise<RepositoryFile> {
+  const fetchImpl = request.fetch ?? globalThis.fetch;
+  if (!/^[^/]+\/[^/]+$/.test(request.repo)) throw new Error(`repo must be owner/name, got "${request.repo}"`);
+  if (!request.ref) throw new Error('a repository file read needs a ref; platfolio never reads a moving default');
+  const path = request.path.replace(/^\/+/, '');
+  const token = await createInstallationAccessToken({
+    appId: request.appId,
+    privateKeyPem: request.privateKeyPem,
+    installationId: request.installationId,
+    // `contents: read` only. Minted per call and revoked in the finally below, which is the D24 discipline
+    // applied to platfolio's own credentials rather than only to the tenant's.
+    permissions: { contents: 'read' },
+    // Passed explicitly. Omitting it is what the conformance test caught: the *file* call honoured the
+    // injected transport while the token mint did not, so a unit test signed a fabricated appId and sent it to
+    // the real api.github.com. Any seam whose helpers can reach the network needs the transport threaded
+    // through every call, or its tests are partly live whether anyone intended that or not.
+    fetch: fetchImpl,
+  });
+  try {
+    const url = `https://api.github.com/repos/${request.repo}/contents/${path.split('/').map(encodeURIComponent).join('/')}?ref=${encodeURIComponent(request.ref)}`;
+    const response = await fetchImpl(url, {
+      headers: {
+        authorization: `Bearer ${token.token}`,
+        accept: 'application/vnd.github+json',
+        'user-agent': 'platfolio',
+      },
+    });
+    if (response.status === 404) {
+      // Best-effort, and labelled as such: GitHub's contents endpoint answers the identical 404 with
+      // `{"message":"Not Found"}` for a missing path AND for a ref that does not resolve, so this match can
+      // only fire on wording we have NOT observed. It is kept because some GitHub surfaces do spell it out
+      // (git/refs endpoints), and because a provider that does say so should be believed. When it does not,
+      // the fall-through below reports `not-found` with the ref named in the detail, which is the honest limit
+      // of what the transport offers. Nothing here claims a distinction GitHub refuses to make.
+      const probe = await response.clone().json().catch(() => ({}) as unknown) as { message?: string };
+      if (/reference name is not found|not a valid object name|Invalid git ref/i.test(probe.message ?? '')) {
+        throw new RepositoryReadError({ kind: 'ref-not-found', detail: `${request.repo}: ${String(probe.message)}` }, 404);
+      }
+      // GitHub cannot tell us which of the two remaining meanings it intends without a second call, and the
+      // second call is the honest fix rather than a guess: if the repository root lists, the file is missing;
+      // if not, we are looking at an installation that cannot see this repository.
+      const visible = await repositoryVisible(request.repo, fetchImpl, token.token);
+      throw new RepositoryReadError(visible
+        ? { kind: 'not-found', detail: `${request.repo}@${request.ref} has no file at "${path}"` }
+        : { kind: 'forbidden', detail: `the platfolio GitHub App installation cannot see ${request.repo}; add it to the installation's repository selection (#130)` }, 404);
+    }
+    if (response.status === 403) {
+      throw new RepositoryReadError({ kind: 'forbidden', detail: `${request.repo}: GitHub refused the read (rate limit or installation permission) -- ${truncate(await response.text())}` }, 403);
+    }
+    if (!response.ok) {
+      const text = truncate(await response.text());
+      const kind = /reference name is not found|invalid ref/i.test(text) ? 'ref-not-found' : 'not-a-file';
+      throw new RepositoryReadError({ kind, detail: `contents read failed (${String(response.status)}): ${text}` }, response.status);
+    }
+    const body = await response.json() as Record<string, unknown>;
+    if (Array.isArray(body) || body.type !== 'file') {
+      throw new RepositoryReadError({ kind: 'not-a-file', detail: `"${path}" is ${String(body.type ?? 'a collection')}, not a file` }, response.status);
+    }
+    const size = typeof body.size === 'number' ? body.size : 0;
+    if (typeof body.content !== 'string') {
+      // GitHub's truncation: `content` is omitted past 1 MiB. A manifest is nowhere near that, so refusing
+      // beats silently deploying half a document.
+      throw new RepositoryReadError({ kind: 'too-large', detail: `${path} is ${String(size)} bytes and GitHub returned no inline content (>1 MiB); fetch it as an archive instead` }, response.status);
+    }
+    return {
+      path,
+      ref: request.ref,
+      repo: request.repo,
+      sha: String(body.sha ?? ''),
+      size,
+      // GitHub's base64 arrives with embedded newlines, which Buffer tolerates and atob does not.
+      content: Buffer.from(body.content.replace(/\s+/g, ''), 'base64').toString('utf8'),
+    };
+  } finally {
+    // A failed revocation must not turn a successful read into an error -- the response is already paid for.
+    // It is not silent in the way that matters: the token is minted with the narrowest permissions that work
+    // and expires within the hour regardless, so the residual exposure is bounded by construction rather than by
+    // this call succeeding. What it must NOT be is a mystery: if GitHub changes this endpoint, the lifecycle
+    // test in scm-conformance.test.ts is where that shows up.
+    // Same reasoning as the read path above: bounded exposure, and the lifecycle test guards the endpoint.
+    await revokeInstallationAccessToken({ token: token.token, fetch: fetchImpl }).catch(() => undefined);
+  }
+}
+
+async function repositoryVisible(repo: string, fetchImpl: typeof globalThis.fetch, token: string): Promise<boolean> {
+  try {
+    const r = await fetchImpl(`https://api.github.com/repos/${repo}`, { headers: { authorization: `Bearer ${token}`, accept: 'application/vnd.github+json', 'user-agent': 'platfolio' } });
+    return r.ok;
+  } catch {
+    return false;
+  }
+}
+
+function truncate(text: string): string {
+  return text.replace(/\s+/g, ' ').slice(0, 180);
+}
+
+/**
+ * Ask GitHub to run the tenant's managed workflow.
+ *
+ * This is the half of the loop that was never a script's business: platfolio decides what should happen, the
+ * tenant's own repository executes it with the tenant's own credentials. Two properties matter and both were
+ * measured in the earlier tenant run (#149, E23): the workflow must exist on the repository's DEFAULT branch
+ * or GitHub will not find it at all -- a 404 that reads like "no such workflow" but means "not installed
+ * yet" -- and dispatch `inputs` are strings, so anything structured arrives serialized.
+ */
+export interface WorkflowDispatchRequest {
+  appId: number;
+  privateKeyPem: string;
+  installationId: number;
+  repo: string;
+  /** Workflow file name, e.g. `platfolio-managed.yml`. */
+  workflow: string;
+  /** Branch or tag to run on. GitHub rejects a ref that lacks the workflow. */
+  ref: string;
+  inputs: Record<string, string>;
+  fetch?: typeof globalThis.fetch;
+}
+
+export type WorkflowDispatchResult = { kind: 'requested'; status: number } | { kind: 'workflow-not-found'; detail: string } | { kind: 'forbidden'; detail: string };
+
+export async function dispatchWorkflowRun(request: WorkflowDispatchRequest): Promise<WorkflowDispatchResult> {
+  const fetchImpl = request.fetch ?? globalThis.fetch;
+  const token = await createInstallationAccessToken({
+    appId: request.appId,
+    privateKeyPem: request.privateKeyPem,
+    installationId: request.installationId,
+    // actions: write is not in the app's permission set (it asks for actions: read); GitHub clamps the token
+    // to what the installation grants, and dispatching a run needs `actions: write`. Requested here so the
+    // refusal, if it comes, names the gap instead of surfacing as a mysterious 403 later.
+    permissions: { actions: 'write', contents: 'read' },
+    fetch: fetchImpl,
+  });
+  try {
+    const response = await fetchImpl(
+      `https://api.github.com/repos/${request.repo}/actions/workflows/${encodeURIComponent(request.workflow)}/dispatches`,
+      {
+        method: 'POST',
+        headers: { authorization: `Bearer ${token.token}`, accept: 'application/vnd.github+json', 'content-type': 'application/json', 'user-agent': 'platfolio' },
+        body: JSON.stringify({ ref: request.ref, inputs: request.inputs }),
+      },
+    );
+    // GitHub answers 204 with no body on success. Anything else is information, not silence.
+    if (response.status === 204) return { kind: 'requested', status: response.status };
+    const detail = truncate(await response.text());
+    if (response.status === 404) {
+      return { kind: 'workflow-not-found', detail: `${request.repo} has no workflow "${request.workflow}" on ${request.ref}. GitHub enumerates workflows from the default branch only (#149) -- an install PR that has not been merged looks identical to a typo.` };
+    }
+    return { kind: 'forbidden', detail: `dispatch refused (${String(response.status)}): ${detail}` };
+  } finally {
+    await revokeInstallationAccessToken({ token: token.token, fetch: fetchImpl }).catch(() => undefined);
+  }
+}

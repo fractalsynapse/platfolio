@@ -5,6 +5,52 @@ change; entries describe merged intent, not aspirations.
 
 "## [Unreleased]
 
+### Added — platfolio can read a tenant's repository and ask GitHub to run it (the middle of #172)
+
+The control plane has always known how to turn a Compose document into an `InfraPlan`, and the runner has always
+known how to apply one. What was missing was the step in between: platfolio could not obtain the document from a
+repository it does not own, so "the tenant installed platfolio" reached "platfolio dispatched something" only
+through a maintainer's shell, reading the maintainer's filesystem (`open-install-pr.ts --platform selfhost`).
+Three operations close that, on the existing source-control seam rather than beside it:
+
+- **`readRepositoryFile`** — one file, at a pinned ref, over the Contents API. It distinguishes the two 404s
+  GitHub refuses to distinguish by making the second call (`repositoryVisible`): missing path versus an
+  installation that cannot see the repository at all, which is #130's actual failure and was previously a
+  guess. It refuses a directory listing, a submodule, and a file past GitHub's inline cutoff rather than
+  deploying half a document. Blob SHA is GitHub's own (`sha1("blob <n>\0…")`), so a plan can cite the identity
+  of exactly the content read.
+- **`dispatchWorkflowRun`** — asks GitHub to run the tenant's managed workflow, with #149's measured property
+  modelled: GitHub enumerates workflows from the DEFAULT branch only, so an unmerged install PR and a typo
+  return the identical 404, and the message says both causes instead of picking one.
+- Both mint a **per-operation installation token with the narrowest permissions that work** and revoke it in a
+  `finally` -- D24's least-privilege rule applied to platfolio's own credentials, not only the tenant's.
+
+**`MemoryScm`, `scm-conformance.ts`, and one suite run against both** (seam rule 3). Four things the suite caught
+while it was being written, each of which was a bug in the implementation:
+
+1. `constructor(readonly …)` parameter properties -- `erasableSyntaxOnly` refuses them, because these files run
+   through Node's type stripping and nothing would have emitted the assignments.
+2. **Token minting ignored the injected transport.** Reads were mocked, mints were not, so the "unit" test
+   signed a fabricated app id and POSTed it to the real `api.github.com`. Any seam whose helpers can reach the
+   network needs the transport threaded through *every* call, or its tests are partly live whether or not
+   anyone intended that.
+3. Revocation was asserted against the wrong URL. GitHub deletes a token at `DELETE /installation/token` (the
+   token removes itself), not at the mint endpoint; the double's stub had invented the latter.
+4. **A failure was being swallowed invisibly:** `revoke…().catch(() => undefined)` meant a broken revoke left no
+   trace. It is now caught *with stated reasoning* -- the token is scoped and expires within the hour regardless,
+   so residual exposure is bounded by construction -- and the lifecycle test is where an endpoint change shows
+   up. Silent is not the same as safe.
+
+One limitation recorded rather than papered over: GitHub answers the **same 404 with the same body** for a
+missing path and for a ref that does not resolve. An earlier draft matched GitHub wording for "bad ref" that we
+have never actually observed and would have reported a distinction the transport does not make. The suite now
+only demands that the failed ref is **named in the message**, accepts either classification, and the code says
+plainly that the regex is a guess about wording, not evidence.
+
+Contracts: **additive → MINOR** (74 lines, nothing removed or tightened). 371 tests, 0 skipped; api:check 30
+operations (unchanged -- no HTTP surface yet); docs gate green. This is the first of two changes: the seam now
+exists, the next exposes it as OpenAPI-validated operations.
+
 ### Fixed — the install tool verified the action pin in the *tenant's* repository
 
 `open-install-pr.ts` refuses to install unless the commit it is about to pin actually carries
