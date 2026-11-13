@@ -15,9 +15,9 @@ code, that is a schema change and needs its own review.
 ## Procedure
 
 1. **Write the fixture before the renderer.** Add `templates/<platform>/<version>/` with the manifest
-   and the two archetype fixtures. Declare `apiVersion` (schema) and `metadata.version` (platform
+   and the two example fixtures. Declare `apiVersion` (schema) and `metadata.version` (platform
    release) separately, plus `requires.platfolio`.
-2. **Pick the archetype, then override.** `api-service` or `full-stack-web` supply defaults and
+2. **Declare `kind` and `mode`, then override.** `api-service` or `full-stack-web` supply defaults and
    validation rules. Short manifests are the goal; a manifest that restates every default hides drift.
 3. **Secrets are names.** Every secret is `{ valueFrom: secret, source: … }` with a `value_source`
    from the closed enum. No field may hold a value; the secret-name lint must reject attempts rather
@@ -41,7 +41,7 @@ code, that is a schema change and needs its own review.
 ## Verification, in this order
 
 Schema validation → secret-name lint → domain conflict check → `railway config plan` on the scratch
-project → compose smoke test → the eject-to-Compose test for the archetype. All are CI gates, so
+project → compose smoke test → the eject-to-Compose test for the kind. All are CI gates, so
 "the manifest merges" means "it renders", not "it parses".
 
 ## Exclusions

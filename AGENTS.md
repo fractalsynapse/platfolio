@@ -99,9 +99,9 @@ meant to host** — nothing else, and nothing invented for the purpose:
 
 | Project | Why it is a test target |
 | --- | --- |
-| `fractalsynapse/platfolio-starter-web` | the web/API archetype — a frontend plus a queryable backend |
-| `fractalsynapse/platfolio-starter-worker` | the background-worker archetype |
-| `fractalsynapse/platfolio-shared-identity` | the shared-service archetype: one platform, many consumers |
+| `fractalsynapse/platfolio-starter-web` | `kind: web`, `mode: development` — a frontend plus a queryable backend, changed by someone |
+| `fractalsynapse/platfolio-starter-worker` | `kind: worker`, `mode: development` — accepts no connections, and that is the rule |
+| `fractalsynapse/platfolio-shared-identity` | `kind: web`, `mode: hosted` — one platform, many consumers, nothing developed here |
 | `fractalsynapse/platfolio` | **the platform managing itself** — managed hosting of platfolio is a shipping option, so it is a first-class test subject, not a special case |
 
 Those four are the three project types platfolio supports, plus itself. A new GitHub repository, Railway

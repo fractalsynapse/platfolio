@@ -3,7 +3,7 @@ import { appendFile, mkdir, readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 
 // The only reason this writes to disk rather than counting in memory: the file proves the volume survived a
-// container restart, which is the property the archetype exists to provide.
+// container restart, which is the property this kind exists to provide.
 const stateDir = process.env.STATE_DIR ?? '/var/lib/starter-worker';
 const log = `${stateDir}/jobs.jsonl`;
 const concurrency = Number(process.env.WORKER_CONCURRENCY ?? 4);

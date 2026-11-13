@@ -17,7 +17,8 @@ services:
       public: true
       # Deliberately no custom host here: an unverifiable domain sticks at `applying` forever without
       # failing, which reads as progress and is not. Add your own host once DNS ownership is confirmed.
-      environments: [production]
+      # D51: a developed platform runs in both environments, so the service names them.
+      environments: [production, staging]
 
 x-platfolio:
   metadata:
@@ -25,14 +26,15 @@ x-platfolio:
     version: 0.1.0
     title: Starter Web Service
     summary: An externally reachable UI plus a JSON API, with a managed Postgres.
-    archetype: full-stack-web
+    kind: web
+    mode: development
   requires:
     platfolio: ">=0.4.0 <1"
   resources:
     database: { name: app-db, kind: postgres }
   environments:
     production: { enabled: true, branch: main }
-    staging: { enabled: false }
+    staging: { enabled: true, branch: staging }
     preview: { enabled: false }
   dns: { ownershipVerification: txt, apexPolicy: cname-flattening-only }
   lifecycle: { onSuspend: scale-to-zero, onEject: [compose, data-export], onDelete: { graceDays: 30, backupAgeOutDays: 90 } }

@@ -170,7 +170,10 @@ export function renderInstallPullRequest(m: Manifest, opts: InstallOptions): Ins
     '',
     `# ${m.metadata.title} — managed by platfolio`,
     '',
-    `Platform \`${m.metadata.name}\` \`${m.metadata.version}\` (\`${m.metadata.archetype}\`).`,
+    // D51: kind and mode are the two facts that decide a platform's shape, and `hosted` is spelled out because
+    // it means the fork has no staging environment and no dev overlay -- something a reader would otherwise
+    // only discover from a missing file.
+    `Platform \`${m.metadata.name}\` \`${m.metadata.version}\` — **${m.metadata.kind}**, ${m.metadata.mode}${m.metadata.mode === 'hosted' ? ' (operated, not developed: production only)' : ''}${m.spec.provides ? `, offering the \`${m.spec.provides.name}\` capability to other platforms` : ''}.`,
     '',
     '## What runs here',
     '',

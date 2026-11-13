@@ -1,7 +1,7 @@
 # Starter worker service
 
 Background jobs with state on a volume that outlives the container. Nothing here accepts inbound
-connections, and that absence is the archetype: platfolio refuses this template if a host is ever attached,
+connections, and that absence is the kind: platfolio refuses this template if a host is ever attached,
 because "worker" is a promise about attack surface, not a label.
 
 ```sh

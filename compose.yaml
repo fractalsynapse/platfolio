@@ -79,7 +79,8 @@ services:
       # at `applying` forever with no certificate -- which looks like progress and is not. platfolio.dev's zone
       # is 101domain-managed, so this needs one CNAME per subdomain from whoever holds that registrar login.
       domains: [api.platfolio.dev]
-      environments: [production]
+      # Developed here, so it runs in both environments (D51: mode development implies staging).
+      environments: [production, staging]
 
   identity:
     # Upstream Keycloak, pinned by digest (D29/D30 law 3: a tag is a thing that moves). `ownership: external`
@@ -151,6 +152,8 @@ services:
       public: true
       domains: [auth.platfolio.dev]
       ownership: external
+      # Upstream Keycloak: nothing is developed in this service, so production only -- the same posture
+      # the shared-identity template takes. A staging Keycloak nobody changes is a second bill and no signal.
       environments: [production]
 
   # One provider-managed Postgres for the whole deployment. `singleUser` semantics apply: Railway creates the
@@ -161,14 +164,20 @@ x-platfolio:
     version: 0.4.0
     title: Platfolio Control Plane
     summary: The control plane hosting itself, so the hosting path is tested on software we own.
-    archetype: full-stack-web
+    # The same vocabulary the templates use (D51), because one set of rules now decides all four: platfolio
+    # is a web platform that is developed, so staging exists and production tracks the release branch.
+    kind: web
+    mode: development
     repository: https://github.com/fractalsynapse/platfolio
   capabilities: []
   resources:
     database: { name: main, kind: postgres }
   environments:
-    production: { enabled: true, branch: staging }
-    staging: { enabled: false }
+    # main is production, staging is staging. The line this replaces fed production from the staging
+    # branch, which was how the very first evidence run got an image quickly -- and then stayed, which is the
+    # kind of accident that makes the release model a rumour. CI publishes both tags (image.yml: ref_name).
+    production: { enabled: true, branch: main }
+    staging: { enabled: true, branch: staging }
     preview: { enabled: false }
   dns:
     ownershipVerification: txt

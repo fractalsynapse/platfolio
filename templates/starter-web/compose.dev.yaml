@@ -1,0 +1,44 @@
+# Local development for a starter-web fork (D51): an OVERLAY on `compose.yaml`, never a second definition of
+# the platform. The production description stays what platfolio reads; this file only adds what a laptop needs
+# to run it -- a local database container, published ports, and the credentials that are true only on loopback.
+#
+#   docker compose -f compose.yaml -f compose.dev.yaml up --build
+#
+# Nothing here reaches a deployment: `platform:plan` reads compose.yaml + compose.prod.yaml, and the dev
+# overlay is not part of the hosting contract. If a value appears here that the platform file also needs, that
+# is a signal the value belongs in the platform file instead.
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      NODE_ENV: development
+      # Loopback credentials, dev-only. The production description names its database as a managed resource and
+      # the provider resolves the URL at deploy time; locally that role is this container.
+      DATABASE_URL: postgres://postgres:dev-only@db:5432/app
+      PORT: '8080'
+    ports:
+      - '8080:8080'
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_PASSWORD: dev-only
+      POSTGRES_DB: app
+    ports:
+      - '5432:5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d app']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - app-pgdata:/var/lib/postgresql/data
+
+volumes:
+  app-pgdata:

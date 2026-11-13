@@ -50,20 +50,22 @@ test('starter-web: pinned overlay yields a public service plus provider-resolved
   assert.ok(web.domains.length > 0 || web.public, 'the point of this template is that it is reachable');
   assert.deepEqual(web.references, [{ variable: 'DATABASE_URL', database: 'app-db', output: 'DATABASE_URL' }], 'DATABASE_URL is wiring, not a tenant obligation');
   assert.ok(web.secrets.some((s) => s.name === 'APP_SESSION_KEY'));
-  assert.equal(manifest!.metadata.archetype, 'full-stack-web');
-  assert.deepEqual(enabledEnvironments(manifest!), ['production']);
+  assert.deepEqual([manifest!.metadata.kind, manifest!.metadata.mode], ['web', 'development'], 'the web template is a developed web platform (D51)');
+  // D51: starter-web is a starting point for CHANGE, so staging is enabled in the template itself
+  
+  assert.deepEqual(enabledEnvironments(manifest!), ['production', 'staging']);
 });
 
 test('starter-worker: no inbound host, and a volume declared to survive its service', () => {
   const { manifest } = load('starter-worker', true);
   assert.ok(manifest);
   const queue = manifest!.spec.services.queue!;
-  assert.equal(queue.public, false, 'a worker that accepts connections is not this archetype');
+  assert.equal(queue.public, false, 'a worker that accepts connections is not this kind');
   assert.deepEqual(queue.domains, []);
   const volume = manifest!.spec.resources.volumes.find((v) => v.name === 'job-state');
   assert.ok(volume, 'the retained volume must be declared');
   assert.equal(volume!.retention, 'survive', 'default deletion would destroy the state this exists to keep');
-  assert.equal(manifest!.metadata.archetype, 'worker');
+  assert.deepEqual([manifest!.metadata.kind, manifest!.metadata.mode], ['worker', 'development'], 'the worker template is a developed worker platform');
 });
 
 test('shared-identity: declares a capability with a secret output, and refuses to float an unpinned image', () => {
@@ -77,7 +79,7 @@ test('shared-identity: declares a capability with a secret output, and refuses t
   const outputs = manifest!.spec.provides?.outputs ?? [];
   assert.ok(outputs.some((o) => o.output === 'issuer' && o.kind === 'url'));
   assert.ok(outputs.some((o) => o.output === 'client_secret' && o.kind === 'secret'), 'declared as state; nothing here can hold its value');
-  assert.equal(manifest!.metadata.archetype, 'shared-service');
+  assert.deepEqual([manifest!.metadata.kind, manifest!.metadata.mode], ['web', 'hosted'], 'identity is a web platform that is operated, not developed -- sharing lives in provides');
 });
 
 test('all three templates build a plan the provider accepts, and the worker keeps its volume out of teardown', () => {

@@ -5,6 +5,52 @@ change; entries describe merged intent, not aspirations.
 
 "## [Unreleased]
 
+### Changed — a platform is described by `kind` and `mode`, not by an archetype (D51)
+
+The four labels `api-service | full-stack-web | worker | shared-service` were retired as authored input. Each
+problem with them was concrete:
+
+- **`shared-service` was a relationship wearing a shape.** A shared identity provider is a `web` platform in
+  `hosted` mode that declares `spec.provides` — and D34 already modelled the offering. Keeping it as a fourth
+  kind made the taxonomy a place where two different facts could hide.
+- **`api-service` and `full-stack-web` encoded service *counts*** ("at most 2", "at least 2"). Those described
+  our example manifests, not the platform, and they would have refused a tenant's legitimate third worker while
+  passing a badly-shaped two-service mess.
+- **The templates that are meant to be *changed* shipped with staging disabled.** starter-web and
+  starter-worker are starting points, and a fork whose only environment is production has nowhere to put a
+  change before it reaches users. That was reachable at all because nothing in the schema said
+  "development implies staging".
+
+What the schema says now:
+
+| Field | Values | What it decides |
+| --- | --- | --- |
+| `metadata.kind` | `web` \| `worker` | direction. `web` must expose at least one host; `worker` must publish none |
+| `metadata.mode` | `development` \| `hosted` | lifecycle. `development` requires staging; `hosted` forbids it |
+| `spec.provides` | present \| absent | whether other platforms can bind to it — and it requires `kind: web` |
+
+Rules that survive are about direction and lifecycle; the counts are gone. A `worker` that names a hostname is
+refused; a `web` platform with no reachable service is refused (it would report live while nobody could connect);
+`mode: development` without staging is refused with the reason in the message.
+
+**Migration, not breakage:** a document that still declares `archetype` is *translated* (kind from the label,
+mode inferred from the environments it declares), warned with `legacy-archetype`, and **the new rules do not
+bind it** — recorded as `metadata.legacyShape`. Without that gate, renaming a field would have made every
+existing manifest invalid on the version bump that introduced the new name, which is a migration that punishes
+the tenant for the platform's change of mind.
+
+**Templates aligned with platfolio (the architecture point behind the request):** starter-web and
+starter-worker gained `compose.dev.yaml` overlays — local database, published ports, loopback credentials — so
+a fork develops the way the platform itself does (`docker compose -f compose.yaml -f compose.dev.yaml up`). The
+worker overlay **publishes no port**, because a dev file that exposed one would be the first place the kind
+rule got quietly violated. shared-identity gets `kind: web, mode: hosted` and no dev overlay: nobody is
+developing Keycloak in a fork, and a staging Keycloak is a second bill for no signal.
+
+**Recorded as the gap it is, not fixed by improvisation:** the templates ship no image-publishing workflow, so
+a fork cannot generate the `compose.prod.yaml` pin that `platform:plan` and the install path require. platfolio
+has that mechanism (`.github/workflows/image.yml` plus `scripts/render-platform-overlay.ts`); the templates do
+not. Filed as #217 rather than writing CI for three repositories in a commit that was already about the schema.
+
 #### Measured: the flagship operation, on the real forge, through the git driver
 
 `POST /api/v1/instances/{id}/plan/from-repository` was run against a live control plane reading

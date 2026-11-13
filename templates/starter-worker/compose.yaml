@@ -1,5 +1,5 @@
 # Starter worker platform: scaled background processing with state on a volume that outlives the container.
-# Nothing here accepts inbound connections, and that absence is the archetype -- platfolio refuses this
+# Nothing here accepts inbound connections, and that absence is the kind -- platfolio refuses this
 # template if a host is ever attached to it.
 name: starter-worker
 
@@ -19,7 +19,7 @@ services:
       # under x-platfolio.resources.volumes, because Compose has no word for "keep this after the service".
       - job-state:/var/lib/starter-worker
     x-platfolio:
-      environments: [production]
+      environments: [production, staging]
 
 x-platfolio:
   metadata:
@@ -27,7 +27,8 @@ x-platfolio:
     version: 0.1.0
     title: Starter Worker Service
     summary: Scaled background workers that keep their state on a retained volume.
-    archetype: worker
+    kind: worker
+    mode: development
   requires:
     platfolio: ">=0.4.0 <1"
   resources:
@@ -35,7 +36,7 @@ x-platfolio:
       - { name: job-state, service: queue, mountPath: /var/lib/starter-worker, sizeGB: 5, retention: survive }
   environments:
     production: { enabled: true, branch: main }
-    staging: { enabled: false }
+    staging: { enabled: true, branch: staging }
     preview: { enabled: false }
   dns: { ownershipVerification: txt, apexPolicy: cname-flattening-only }
   lifecycle: { onSuspend: scale-to-zero, onEject: [compose, data-export], onDelete: { graceDays: 30, backupAgeOutDays: 90 } }

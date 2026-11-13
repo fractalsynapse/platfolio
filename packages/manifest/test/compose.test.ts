@@ -209,7 +209,7 @@ x-platfolio:
   resources:
     volumes:
       - { name: state, service: worker, mountPath: /var/lib/state, retention: survive }
-  metadata: { name: hibernate-demo, version: 0.1.0, title: Hibernate demo, archetype: api-service, summary: s }
+  metadata: { name: hibernate-demo, version: 0.1.0, title: Hibernate demo, summary: s, kind: web, mode: hosted }
   environments: { production: { enabled: true }, staging: { enabled: false }, preview: { enabled: false } }
 `;
   const parsed = parseCompose(base);
