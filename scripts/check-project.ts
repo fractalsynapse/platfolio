@@ -218,6 +218,49 @@ async function checkCredentialHygiene(): Promise<string[]> {
  */
 const GENERATED_HOST = /\b[a-z0-9]+-[a-z0-9]+-[0-9a-f]{6,}\.up\.railway\.app\b|\b[a-z0-9]{8}\.up\.railway\.app\b/;
 
+/**
+ * D49: the projects platfolio tests against are the projects platfolio ships.
+ *
+ * Code and configuration may name only the four real test targets -- the three template repositories and
+ * platfolio itself -- plus the two repositories that publish images. Anything else under this organization
+ * appearing in executable files is either a stray probe project (which will drift, because nothing uses it in
+ * anger) or a synthetic fixture squatting the namespace of a real asset, which is how a `widgets` fixture
+ * came to look like an asset nobody maintained.
+ *
+ * Prose is deliberately out of scope: CHANGELOG entries and dated research notes record what existed at the
+ * time, including probes that were deleted. Rewriting those would trade one kind of drift for a worse one --
+ * a history that flatters the present.
+ */
+const REAL_PROJECTS = new Set(['platfolio', 'platfolio-starter-web', 'platfolio-starter-worker', 'platfolio-shared-identity']);
+const PUBLISHED_IMAGES = new Set(['platfolio-control-plane', 'platfolio-status-api']);
+const EXECUTABLE_PATH = /^(apps|packages|scripts|selfhost|templates|db|\.github)\//;
+const ORG_REF = /fractalsynapse\/([A-Za-z0-9._-]+)/g;
+
+async function checkCommittedProjects(): Promise<string[]> {
+  const findings: string[] = [];
+  const out = spawnSync('git', ['ls-files'], { cwd: ROOT, encoding: 'utf8' });
+  if (out.status !== 0) return ['git ls-files failed; cannot verify test targets (D49)'];
+  for (const f of out.stdout.split('\n').filter(Boolean)) {
+    if (!EXECUTABLE_PATH.test(f) || /\.(png|jpg|gif|woff2?|lock)$/i.test(f)) continue;
+    if (f.startsWith('vendor/') || f.includes('/dist/')) continue;
+    let text: string;
+    try {
+      text = await fs.readFile(path.join(ROOT, f), 'utf8');
+    } catch {
+      continue;
+    }
+    if (!text.includes('fractalsynapse/')) continue;
+    for (const [i, line] of text.split('\n').entries()) {
+      for (const match of line.matchAll(ORG_REF)) {
+        const name = match[1]!;
+        if (REAL_PROJECTS.has(name) || PUBLISHED_IMAGES.has(name)) continue;
+        findings.push(`${f}:${String(i + 1)} names fractalsynapse/${name} in executable files -- D49 allows the four real projects (${[...REAL_PROJECTS].join(', ')}) and the published images; a fixture belongs under platfolio-fixtures/, and a fifth project belongs deleted`);
+      }
+    }
+  }
+  return findings;
+}
+
 async function checkCommittedEndpoints(): Promise<string[]> {
   const findings: string[] = [];
   const out = spawnSync('git', ['ls-files'], { cwd: ROOT, encoding: 'utf8' });
@@ -352,13 +395,15 @@ const { skills, problems: skillProblems } = await checkSkills();
 const workflowProblems = await checkWorkflows();
 const hygieneProblems = await checkCredentialHygiene();
 const endpointProblems = await checkCommittedEndpoints();
+const projectProblems = await checkCommittedProjects();
 const actionProblems = await checkActionManifests();
 
-const all = [...docProblems, ...skillProblems, ...workflowProblems, ...actionProblems, ...hygieneProblems, ...endpointProblems];
+const all = [...docProblems, ...skillProblems, ...workflowProblems, ...actionProblems, ...hygieneProblems, ...endpointProblems, ...projectProblems];
 say(`skills checked: ${skills.length} (${skills.map((s) => s.name).join(', ')})`);
 say(`workflows linted: ${workflowProblems.length === 0 ? 'clean' : `${workflowProblems.length} problem(s)`}`);
 say(`action manifests checked: ${actionProblems.length === 0 ? 'clean' : `${actionProblems.length} problem(s)`}`);
 say(`committed endpoints: ${endpointProblems.length === 0 ? 'no generated hostnames in tracked files' : `${endpointProblems.length} problem(s)`}`);
+say(`test targets (D49): ${projectProblems.length === 0 ? 'only the real projects are named in code' : `${projectProblems.length} problem(s)`}`);
 
 if (all.length) {
   console.error(`\n${all.length} problem(s):`);

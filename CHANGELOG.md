@@ -5,6 +5,46 @@ change; entries describe merged intent, not aspirations.
 
 "## [Unreleased]
 
+### Changed — testing happens on real projects, and the throwaway tenant is gone (D49)
+
+The maintainer's rule, written into [AGENTS.md](AGENTS.md) and recorded as **D49**: every test that exercises a
+deployed platform runs against `platfolio-starter-web`, `platfolio-starter-worker`, `platfolio-shared-identity`
+or **`platfolio` itself** -- the three project types platfolio supports, plus the platform managing itself.
+Extra projects were not merely untidy: a probe repository that works because it was hand-fitted proves nothing
+about a fork, and every hour spent on it is an hour the real templates spend drifting.
+
+- **`fractalsynapse/platfolio-e2e-tenant` is on its way out** (created ~2 hours earlier by me, for the install
+  run). It turns out to have been unnecessary: the watched install can target `platfolio` itself, which is
+  already in the App's installation selection and already carries the managed workflow -- so the answer to "what
+  can't we do with the four we have?" is, measured: nothing so far. **The deletion has not happened yet.**
+  `gh repo delete` was refused: *This API operation needs the "delete_repo" scope*, and the local CLI is not
+  authorised for it. Outstanding until either the scope is granted (`gh auth refresh -h github.com -s
+  delete_repo`) or the repository is removed in the UI. Writing "deleted" here would have been the exact habit
+  this project keeps having to correct itself for.
+- **Synthetic names no longer squat the publishing org.** Eight lines across
+  `packages/contracts/{src/conformance.ts,test/github-writes.test.ts}` and
+  `packages/manifest/test/fixtures/*` used `fractalsynapse/widgets`, `fractalsynapse/platfolio-template-web`
+  and `ghcr.io/fractalsynapse/example-*` for things that never existed. A fixture indistinguishable from an
+  asset is the worst of both: it looks maintainable and is nothing. They are `platfolio-fixtures/…` now, and one
+  test needed its org, template and tenant owner made consistently distinct -- which caught that the fake
+  template and the fake tenant had been the *same* org.
+- **`checkCommittedProjects`** in `check-project.ts` fails the build when executable files (apps, packages,
+  scripts, selfhost, templates, db, .github) name an org repository outside the four projects plus the two
+  published image repositories. Falsified both directions: adding a stray project name gives exit 1 and one
+  finding; the `platfolio-fixtures` pattern gives exit 0.
+  The gate caught its own source comment first. I reworded the comment rather than add a self-exemption -- an
+  allow-list that starts with "except the checker itself" is how a gate quietly stops meaning anything.
+- **Prose is exempt, deliberately and by argument.** CHANGELOG and dated research notes still name probes that
+  were deleted (`platfolio-probe-template`, `platfolio-status-api`). Rewriting history to satisfy a present-day
+  rule trades one kind of drift for a worse kind: a record that flatters the current design.
+
+Test *doubles* are untouched and the rule says why: `railway-mock`, `MemoryScm`, the fake provider, the
+in-memory Store and the manifest fixtures are the second implementation that keeps a seam from becoming
+accidentally provider-shaped (10 § The seams). The distinction the rule draws is **targets vs doubles** --
+a real thing that exists only for tests is the defect; an in-process fake that costs nothing to keep honest
+is not.
+
+
 ### Added — the missing middle is now an API operation, not a shell step (D48)
 
 Two operations, designed in [apps/control-plane/openapi.yaml](apps/control-plane/openapi.yaml) before their

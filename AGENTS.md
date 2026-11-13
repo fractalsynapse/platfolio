@@ -85,6 +85,42 @@ Run `pnpm run verify` for the whole gate set. The skills under
 `.agents/skills/` inherited from the starter package stay identical to their source; project
 guidance is added beside them, never by editing them.
 
+## Testing happens on real projects (D49)
+
+**Every test that exercises a deployed platform runs against one of the four things platfolio is actually
+meant to host** — nothing else, and nothing invented for the purpose:
+
+| Project | Why it is a test target |
+| --- | --- |
+| `fractalsynapse/platfolio-starter-web` | the web/API archetype — a frontend plus a queryable backend |
+| `fractalsynapse/platfolio-starter-worker` | the background-worker archetype |
+| `fractalsynapse/platfolio-shared-identity` | the shared-service archetype: one platform, many consumers |
+| `fractalsynapse/platfolio` | **the platform managing itself** — managed hosting of platfolio is a shipping option, so it is a first-class test subject, not a special case |
+
+Those four are the three project types platfolio supports, plus itself. A new GitHub repository, Railway
+project, or "sample" app created to make a test pass is a defect: it is never used in anger, it drifts from the
+templates everyone actually forks, and it hides the fact that the real projects were not exercised. Extra
+projects also cost the templates directly — a probe repo that works because it was hand-fitted proves nothing
+about a fork.
+
+**The boundary, stated because a literal reading would break the system.** This rule is about *targets*:
+deployed, provisioned, externally visible things. It does not abolish test doubles, and the project's own
+history says why. `railway-mock`, `MemoryScm`, the fake infra provider, the in-memory `Store`,
+`MemoryEmailTransport` and the parse fixtures under `packages/manifest/test/fixtures/` are the **second
+implementation that proves a seam is not accidentally provider-shaped** ([10 § The seams](docs/design/10-cordis-kernel-and-extension-seams.md)) —
+they run with no credentials and no network, they are what let CI assert a 403 shape at 3am, and deleting them
+would not make anything more real. What is not acceptable is a *real* thing that exists only for tests.
+
+Two consequences that are enforced rather than hoped for:
+
+- **Synthetic identities do not squat the publishing org.** A fake repository in a unit test is named under
+  `platfolio-fixtures/…`, never `fractalsynapse/…`: when a test's invented name is indistinguishable from a
+  real one, nobody can tell a fixture from an asset — and `fractalsynapse/widgets` had been passing as both.
+  `check-project.ts` fails the build on any org repository named in code or config that is not one of the four
+  (or the two published image repositories).
+- **`pnpm run verify` is the only test surface.** Anything that needs a fifth project is a sign the thing being
+  tested is not the thing being shipped.
+
 ## Repository layout: one thing, one home
 
 Duplication here has already caused a near-downgrade (two prod overlays, one forgotten) and a stale-pin loop.
@@ -93,7 +129,7 @@ The layout is therefore explicit, and a new file goes where its **kind** goes:
 | Path | What lives there | Rule it enforces |
 | --- | --- | --- |
 | `templates/` | The three platform templates published to `fractalsynapse/platfolio-*` repositories | The only thing called a template is a template |
-| `packages/manifest/test/fixtures/` | Manifest fixtures the tests and [03](docs/design/03-manifest-spec.md) parse | Test input is not a catalog entry, and does not live at the top level |
+| `packages/manifest/test/fixtures/` | Manifest fixtures the tests and [03](docs/design/03-manifest-spec.md) parse | Test input is not a catalog entry, and does not live at the top level. Fixtures are not projects (D49) |
 | `selfhost/` | platfolio's own deployment: Compose service, `x-platfolio` hosting semantics, generated prod overlay, environment inventory | One service definition, not one per app directory |
 | `apps/<name>/` | Source, Dockerfile, `package.json` -- the deployable artifact itself | Deployment *shape* does not live with the app |
 | `packages/contracts/` | Capability interfaces, DTO schemas, conformance suites, provider implementations | Framework-free; the only place a seam is defined |

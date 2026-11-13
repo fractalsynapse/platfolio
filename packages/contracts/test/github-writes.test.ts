@@ -113,16 +113,16 @@ test('a tenant repository is generated from a template with an explicit owner', 
   const { sent, writes } = harness({
     // The harness default of 204-with-no-body is right for a ref creation and wrong here: generating a
     // repository returns the repository object, and asserting against the wrong shape proves nothing.
-    'POST /repos/fractalsynapse/platfolio-template-web/generate': () => ({ full_name: 'fractalsynapse/widgets', html_url: 'https://github.com/fractalsynapse/widgets', clone_url: 'https://github.com/fractalsynapse/widgets.git' }),
+    'POST /repos/platfolio-fixtures/template-web/generate': () => ({ full_name: 'platfolio-fixtures/widgets', html_url: 'https://github.com/platfolio-fixtures/widgets', clone_url: 'https://github.com/platfolio-fixtures/widgets.git' }),
   });
   const created = await writes.createRepositoryFromTemplate({
-    templateOwner: 'fractalsynapse', templateRepo: 'platfolio-template-web', owner: 'fractalsynapse', name: 'widgets', description: 'd',
+      templateOwner: 'platfolio-fixtures', templateRepo: 'template-web', owner: 'acme-tenant', name: 'widgets', description: 'd',
   });
-  const post = sent.find((s) => s.path === '/repos/fractalsynapse/platfolio-template-web/generate');
+    const post = sent.find((s) => s.path === '/repos/platfolio-fixtures/template-web/generate');
   assert.equal(post?.method, 'POST');
-  assert.deepEqual(post?.body, { owner: 'fractalsynapse', name: 'widgets', private: true, include_all_branches: false, description: 'd' },
+    assert.deepEqual(post?.body, { owner: 'acme-tenant', name: 'widgets', private: true, include_all_branches: false, description: 'd' },
     'private by default: a tenant repository is not public until they say otherwise');
-  assert.deepEqual(created, { fullName: 'fractalsynapse/widgets', url: 'https://github.com/fractalsynapse/widgets', cloneUrl: 'https://github.com/fractalsynapse/widgets.git' });
+  assert.deepEqual(created, { fullName: 'platfolio-fixtures/widgets', url: 'https://github.com/platfolio-fixtures/widgets', cloneUrl: 'https://github.com/platfolio-fixtures/widgets.git' });
 });
 
 test('template generation failure names the endpoint, and carries no token', async () => {
