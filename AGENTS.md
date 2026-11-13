@@ -25,7 +25,7 @@ selections it has already made are recorded, not improvised:
 | Control-plane API design (the validation mechanism itself) | [apps/control-plane/openapi.yaml](apps/control-plane/openapi.yaml) — spec first, then the handler |
 
 Status: foundation poured, interfaces first (D40, [16](docs/design/16-foundation-build-order.md)). Slices 1
-and 2 of that plan are delivered (380 tests): `apps/control-plane` boots on the vendored runtime with
+and 2 of that plan are delivered (389 tests): `apps/control-plane` boots on the vendored runtime with
 Keycloak-verified bearer auth, persistent records (`Store` as a capability with a Postgres implementation and
 an in-memory double under one conformance suite, gated in CI against a live database), a controller
 that turns accepted attestations into stored state, and capability bindings that make shared services
@@ -60,8 +60,13 @@ nothing.
 Platfolio's operations are **API operations** (D48): a state change or a provider action that exists only in a
 script is a gap, not a design -- `POST /api/v1/instances/{id}/plan/from-repository` and `…/dispatches/{id}/trigger`
 exist because reading a tenant's repository from a maintainer's shell was invisible to `api:check`, to the scope
-guard and to the audit trail. `open-install-pr.ts` still carries install-rendering logic and still defaults to
-`--platform .`; that is recorded as remaining work.
+guard and to the audit trail. The seam now has two drivers, which is what proved the contract was provider-shaped:
+`github-app` (Contents API + workflow dispatch) and **`git`** (`GitScm`: reads at any ref over HTTPS/SSH, any
+forge; refuses to dispatch, because that is not a git concept). `PLATFOLIO_SCM_DRIVER` selects one. Measured end
+to end against the real forge -- `plan/from-repository` on `fractalsynapse/platfolio` returned the same blob
+SHAs `git hash-object` computes locally. `open-install-pr.ts` still carries install-rendering logic and still defaults to
+`--platform .` -- which, after D50 moved the platform files to the root, is at least the same directory a tenant uses;
+moving that rendering behind an operation is recorded as remaining work.
 
 What is still **not** delivered, stated because the earlier version of this paragraph was the first thing an
 agent read and it had gone stale: no Stripe integration, no CLI or web UI, and no tenant on either service.
@@ -72,9 +77,11 @@ database created and migrated by its own plan (#172's first run). It is not yet 
 Keycloak now boots (its JDBC DSN is wired as verified `references[].output` components, #198), and
 `api.platfolio.dev` / `auth.platfolio.dev` are **verified and certificate-issued** (#199 closed), the realm is
 seeded, and `identity:smoke` passes 11/11 **against those public URLs** — including a genuine master-realm token
-refused as `unknown-key`, which is D4 proven beyond loopback. What #172 still needs is the cutover: tenant
-repositories and this repo's managed workflow dispatching at `api.platfolio.dev` -- now a repository variable
-(D47) rather than an edit to committed files -- and one real install run through it. The published image digest is now looked up rather than typed (`platform:overlay:check`), so
+refused as `unknown-key`, which is D4 proven beyond loopback. What #172 still needs is the cutover: the three template
+repositories pointing at `api.platfolio.dev` (a `PLATFOLIO_URL` repository variable each, D47) and one install
+PR watched end to end. platfolio's own repository already dispatches there, and its hosting description now sits
+at the root exactly like a tenant's (D50) -- `selfhost/` and the separate root `docker-compose.yml` are gone, so
+the platform is described once and developed as an overlay. The published image digest is now looked up rather than typed (`platform:overlay:check`), so
 `compose.prod.yaml` carries a real pin -- having previously carried a *real digest of the deleted
 service's bytes*, which every check passed. The renderer still refuses an unpinned first-party service rather
 than accepting a placeholder (#84), and `platform-deploy.ts --dry-run` is how you find out before a provider

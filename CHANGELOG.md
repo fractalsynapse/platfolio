@@ -5,6 +5,31 @@ change; entries describe merged intent, not aspirations.
 
 "## [Unreleased]
 
+#### Measured: the flagship operation, on the real forge, through the git driver
+
+`POST /api/v1/instances/{id}/plan/from-repository` was run against a live control plane reading
+`fractalsynapse/platfolio` at a pushed commit:
+
+```
+status 200
+planHash ba8a56216f38c9a44e5662af04d8ed935c15299d384975c0ea334799405ca606
+  compose.yaml         blobSha=26aa66b27e0f317c189557079dfeed27aa90d93d  size=11752
+  compose.prod.yaml    blobSha=ffb06d6313bdb270220d59b8fe71e41e6df5d197  size=863
+instance state=pending  desiredPlanHash=ba8a56216f38c9a4…  templateRef repo=fractalsynapse/platfolio
+```
+
+Each blob SHA equals `git cat-file blob <sha>:<path> | git hash-object --stdin` computed locally, so the
+identity the API cites is the content, not a provider artefact. The credential in the remote URL appeared in
+the failure path as `https://[credential-redacted]@github.com/…` -- the masking held under a real attempt.
+
+**Three wiring defects existed only in the gap between components, and the suite could not see any of them:**
+`boot()` computed `config.scm` and never passed it to `createKernel`; the create-instance handler rejected the
+`templateRef` the OpenAPI document declares and this operation requires; and the shipped image had no git
+binary, so the driver's own classifier dressed a packaging problem up as a permissions problem. All three were
+found by calling the endpoint. The lesson is recorded at each site, and the boundary test now asserts the whole
+round trip so the pair cannot drift again.
+
+
 ### Changed — platfolio is described exactly like a tenant (D50), and `selfhost/` is gone
 
 `selfhost/` was allowed to exist for one reason: to keep a hosted platform description from disturbing local
