@@ -134,10 +134,13 @@ after(() => {
   });
 
   test('a token is never echoed back in an error message', async () => {
-    const scm = new GitScm({ token: 'ghp_Sup3rS3cretTokenValue', host: 'github.com' });
+    // `github.invalid` is reserved by RFC 2606 and cannot resolve, so this exercises the credential-bearing URL
+    // without reaching a real forge -- and it does not squat the publishing org with a made-up repository,
+    // which is exactly what my own D49 gate caught this file doing on the first CI run. A gate that fires on
+    // the change that introduced it is a gate that works.
+    const scm = new GitScm({ token: 'ghp_Sup3rS3cretTokenValue', host: 'github.invalid' });
     try {
-      // A real remote that does not exist, with a real credential attached: the assertion is about the text.
-      await scm.readRepositoryFile({ repo: 'fractalsynapse/definitely-not-a-real-repo-xyz', ref: 'main', path: 'compose.yaml' });
+      await scm.readRepositoryFile({ repo: 'acme/does-not-exist', ref: 'main', path: 'compose.yaml' });
       assert.fail('expected a read failure');
     } catch (error) {
       const message = (error as Error).message;
