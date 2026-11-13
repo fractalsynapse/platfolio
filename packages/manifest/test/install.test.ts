@@ -31,6 +31,36 @@ test('the generated workflow is valid YAML with the expected shape', () => {
   assert.ok(doc.jobs.managed['timeout-minutes'] >= 5, 'must have a timeout');
 });
 
+/**
+ * D47: no committed file may name a deployment.
+ *
+ * The renderer used to write the control-plane origin into every fork's workflow, so a template carried the
+ * host of whoever published it and a stranger's install pointed at someone else's platfolio. Nothing here
+ * noticed when that changed -- an earlier version of this file passed with the literal still in place, which is
+ * exactly the kind of green worth being suspicious of. These assertions are the reason it cannot come back.
+ */
+test('the rendered workflow reads PLATFOLIO_URL from repository configuration and commits no host (D47)', () => {
+  const out = renderInstallPullRequest(manifest('packages/manifest/test/fixtures/web-app-manifest.yaml'), OPTS);
+  const wf = out.files[WORKFLOW_PATH]!;
+  const doc = yamlParse(wf) as Record<string, any>;
+  const withs = doc.jobs.managed.steps.find((s: any) => s.with?.platfolio_url !== undefined)?.with ?? {};
+
+  assert.match(String(withs.platfolio_url), /vars\.PLATFOLIO_URL/, 'platfolio_url must come from a repository variable');
+  const host = new URL(OPTS.platfolioUrl).host;
+  assert.ok(!wf.includes(host), `the workflow commits the control-plane host ${host} -- an environment endpoint is configuration, not source`);
+  assert.ok(!Object.values(out.files).some((f) => f.includes(host)), `a committed install file names ${host}`);
+
+  const guard = doc.jobs.managed.steps.find((s: any) => /PLATFOLIO_URL is unset/.test(String(s.run ?? '')));
+  assert.ok(guard, 'a missing variable must fail with a step that names it, not inside the action as an empty URL');
+  assert.match(String(guard.env?.PLATFOLIO_URL ?? ''), /vars\.PLATFOLIO_URL/);
+
+  // The rendered documentation is PLATFOLIO.md in the tenant repository -- named by the installer, not by us.
+  const readme = out.files['PLATFOLIO.md'] ?? '';
+  assert.ok(readme.length > 0, `PLATFOLIO.md missing from the rendered files: ${JSON.stringify(Object.keys(out.files))}`);
+  assert.match(readme, /PLATFOLIO_URL/, 'the rendered README must tell the owner what to set');
+  assert.ok(!readme.includes(host), `PLATFOLIO.md names ${host} -- instruction belongs in the install PR body, not in a committed file`);
+});
+
 test('permissions stay exactly the minimal set', () => {
   const out = renderInstallPullRequest(manifest('packages/manifest/test/fixtures/web-app-manifest.yaml'), OPTS);
   const doc = yamlParse(out.files[WORKFLOW_PATH]!) as Record<string, any>;

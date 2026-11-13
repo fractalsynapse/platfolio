@@ -5,6 +5,27 @@ change; entries describe merged intent, not aspirations.
 
 "## [Unreleased]
 
+#### The install renderer was the real source of the hardcoded host
+
+D47 started as "the workflow file names a generated Railway hostname", but the file every tenant fork commits
+is **rendered** -- `packages/manifest/src/render-install.ts` wrote `platfolio_url: <the origin platfolio was
+reached at>` straight into the install PR's workflow and its `PLATFOLIO.md`. So the mistake was not in one
+repository's config; it was in the *mechanism that provisions every repository's config*. A template whose
+workflow names someone else's deployment is a template nobody else can install.
+
+- The rendered workflow now emits **`platfolio_url: ${{ vars.PLATFOLIO_URL }}`** plus a guard step that fails by
+  naming the variable, because "empty URL inside the action" is a worse first message for a self-hosting
+  stranger than "set PLATFOLIO_URL".
+- The rendered `PLATFOLIO.md` **instructs** (set this variable to the origin given with your install request)
+  rather than declaring. The origin itself travels in the install PR's body, which is ephemeral by nature.
+- New assertion `commits no host (D47)` checks the variable form, the absence of the host from **every**
+  rendered file, the guard step's existence, and that `PLATFOLIO.md` teaches without naming.
+- **Worth stating plainly: nothing caught the original change.** An earlier run of this suite passed with the
+  literal still being written -- 16 green tests that checked permissions, pins and inputs but never the one line
+  that decides whether a fork is portable. The falsification here (restore the literal, watch it fail, restore,
+  watch it pass) exists because a test that never went red is not yet evidence.
+
+
 ### Changed — an environment's endpoints are configuration, not committed source (D47)
 
 Tracked files declared **generated Railway hostnames** in two shapes: the managed workflow pointed installs at
