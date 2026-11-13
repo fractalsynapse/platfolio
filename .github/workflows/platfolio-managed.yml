@@ -36,6 +36,17 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Check the control-plane endpoint is configured
+        env:
+          PLATFOLIO_URL: ${{ vars.PLATFOLIO_URL }}
+        run: |
+          if [ -z "$PLATFOLIO_URL" ]; then
+            echo "::error::repository variable PLATFOLIO_URL is unset. Point it at your platfolio control plane,"
+            echo "::error::for example https://api.example.com -- see docs/MAINTAINING.md."
+            exit 1
+          fi
+          echo "dispatching to the platfolio control plane configured for this repository"
+
       - name: Apply desired state with this repository's own credentials
         id: apply
         uses: fractalsynapse/platfolio/.github/actions/platfolio-managed@d40412fd727f4af1405afdc7898ffcf753ae37b7
@@ -50,7 +61,13 @@ jobs:
           dispatch_id: ${{ inputs.dispatch_id }}
           nonce: ${{ inputs.nonce }}
           plan_hash: ${{ inputs.plan_hash }}
-          platfolio_url: https://status-production-54d3.up.railway.app
+          # D47: an endpoint that belongs to a running environment is environment configuration, so it is a
+          # repository variable and not a committed literal. This line has carried a generated
+          # `{service}-{environment}-{hash}.up.railway.app` hostname before -- instance-specific, different
+          # per deployment, and not something a tenant can be pointed at. The guard step below turns an
+          # unset variable into a clear message instead of a fetch against an empty URL.
+          platfolio_url: ${{ vars.PLATFOLIO_URL }}
+          platfolio_url: https://api.platfolio.dev
 
       - name: Report the outcome for platfolio to verify by read-back
         if: always()

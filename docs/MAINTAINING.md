@@ -7,6 +7,21 @@ The workflow below is the one this repository already uses. It is carried over d
 only substantive change from the starter's policy is scope: this is now an application project, and
 `docs/MAINTAINING.md` no longer describes an instruction package.
 
+## Setting the control-plane endpoint (D47)
+
+Two places ask where the control plane lives, and neither has a default any more:
+
+- **`.github/workflows/platfolio-managed.yml`** reads `vars.PLATFOLIO_URL`. Set it per repository under
+  Settings → Secrets and variables → Actions → Variables, value like `https://api.example.com`. A guard step
+  fails the run naming that variable when it is unset, because an empty URL failing inside the action is a worse
+  first error than a missing-configuration message.
+- **`scripts/open-install-pr.ts`** takes `--url=` or `PLATFOLIO_URL`. No default: a committed one points every
+  install PR at whoever wrote it.
+
+`pnpm run check` rejects a generated Railway hostname anywhere in tracked files (`checkCommittedEndpoints`), so
+the endpoint cannot return as source. Synthetic sentinels and the provider's `.up.railway.app` suffix logic are
+allowed on purpose: the rule is about naming a deployment, not about the platform's vocabulary.
+
 ## Change workflow
 
 - Track changes in an issue with **observable acceptance**. Read-only analysis or a documentation

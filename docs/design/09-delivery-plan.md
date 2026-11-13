@@ -116,7 +116,7 @@ E14 lands as part of M1 step 1, since "it started" is not evidence that a profil
 > "step 6" was the CI gate around generated IaC, and the deployment step is now closed too.
 > `RailwayInfraProvider.applyPlan` deployed platfolio's own pinned public image
 > (`ghcr.io/fractalsynapse/platfolio-status-api:staging` + digest) into the development workspace:
-> instance `live`, `https://status-production-54d3.up.railway.app` serving HTTPS with a Let's Encrypt
+> instance `live`, `https://<generated-railway-host>` serving HTTPS with a Let's Encrypt
 > certificate, `/version` reporting the deployed commit and the provider contract, and a second `applyPlan`
 > that changed nothing — idempotency demonstrated on a real registry-backed service rather than the
 > double. Certificate state came from reading `syncStatus` back, not from hostname inference. Sequence,
