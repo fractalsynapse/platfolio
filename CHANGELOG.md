@@ -5,6 +5,34 @@ change; entries describe merged intent, not aspirations.
 
 "## [Unreleased]
 
+### Fixed — the install tool verified the action pin in the *tenant's* repository
+
+`open-install-pr.ts` refuses to install unless the commit it is about to pin actually carries
+`.github/actions/platfolio-managed/action.yml`. It asked GitHub for that path **in the tenant repository** --
+so the check was "does the customer's repository contain platfolio's action file", which no tenant's will. It
+therefore refused every real install, advising the operator to "land the action on the repository default
+branch" of a repository that ships no actions, while passing on platfolio's own repository: the single case the
+tool had ever been run against. Found by doing the thing it was written for -- opening an install PR at a fresh
+tenant repository (#172's cutover).
+
+- The pin check and the rendered workflow now read one `ACTION_REPO` constant (overridable by
+  `PLATFOLIO_ACTION_REPO`), so they cannot drift to different repositories.
+- **Two stale claims in the same file were retired.** It said the managed action "is not implemented yet, so an
+  install PR merged today would produce a workflow that cannot run" -- true when written, false for months, and
+  still the stated reason for `--draft`. The dry run now reports the pin as *verified*, which is what the check
+  above actually establishes.
+
+### Found — the install path cannot yet serve a stranger
+
+The same dry run showed `platform : selfhost -> platfolio-control-plane@0.4.0` while targeting an unrelated
+tenant repository: `--platform` defaults to this repository's own `selfhost/` directory and the manifest is read
+from the **local filesystem**, never from the tenant repo being installed into. It also requires a generated
+`compose.prod.yaml` next to it, so a platform with no published, digest-pinned image cannot be installed at all.
+Both are properties of the runbook script, not the API, and they are the reason the first end-to-end install
+through `api.platfolio.dev` is being run against a platform whose image we control. Recorded rather than
+quietly worked around.
+
+
 #### The install renderer was the real source of the hardcoded host
 
 D47 started as "the workflow file names a generated Railway hostname", but the file every tenant fork commits

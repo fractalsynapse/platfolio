@@ -6,9 +6,10 @@
  * names it would create, and the body it would post. `--apply` is required to touch anything, because this is
  * the one moment platfolio writes to a tenant repository and a mistaken run should not be undoable by force.
  *
- * The PR is opened as a draft when `--draft` is passed. That flag exists for today's honest reason: the
- * workflow this renderer emits pins the managed action by commit SHA, and that action is not implemented yet,
- * so an install PR merged right now would produce a workflow that cannot run.
+ * The PR is opened as a draft when `--draft` is passed. That claim used to read "the managed action is not
+ * implemented yet, so an install PR merged today would produce a workflow that cannot run" -- true when the
+ * flag was added, and left in the file long after it stopped being true. The reason now is ordinary: an
+ * install PR writes into a tenant repository, so a human should read it before it lands.
  */
 import { readFileSync, existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -19,6 +20,13 @@ import {
   revokeInstallationAccessToken,
 } from '../packages/contracts/src/index.ts';
 import { ACTION_PATH, applyInventory, parseCompose, parseInventory, renderInstallPullRequest } from '../packages/manifest/src/index.ts';
+
+/**
+ * The repository the managed action ships from. One constant, because the pin check and the rendered workflow
+ * must agree on it: verifying the pin against the tenant repository -- what this script did first -- asks the
+ * customer's repository to contain platfolio's action file, and no tenant ever will.
+ */
+const ACTION_REPO = process.env.PLATFOLIO_ACTION_REPO ?? 'fractalsynapse/platfolio';
 
 const args = process.argv.slice(2).filter((a) => a !== '--');
 const flag = (name: string, fallback?: string): string | undefined => {
@@ -69,25 +77,36 @@ const actionSha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' 
 
 /** Does the pinned commit actually carry the action? Fails the run before a workflow can be opened against a
  * commit that GitHub will resolve to nothing. */
-function refHasAction(repo: string, sha: string): boolean {
+/**
+ * Does the pinned commit actually carry the action? Fails the run before a workflow can be opened against a
+ * commit that GitHub will resolve to nothing.
+ *
+ * Verified against `ACTION_REPO`, never the tenant. The first version passed the *tenant* repository here, so
+ * the check asked "does the customer's repository contain platfolio's action file" -- which no tenant ever
+ * will. It refused every real install (found by running it against a fresh tenant repo, where it told me to
+ * "land the action on the repository default branch" of a repository that ships no actions at all) while
+ * passing on platfolio's own repository, the only case it had ever been used for. A check that is right
+ * exactly where it is never exercised is not a check.
+ */
+function refHasAction(sha: string): boolean {
   try {
-    execFileSync('gh', ['api', `repos/${repo}/contents/${ACTION_PATH}/action.yml?ref=${sha}`, '--jq', '.name'], { stdio: 'ignore' });
+    execFileSync('gh', ['api', `repos/${ACTION_REPO}/contents/${ACTION_PATH}/action.yml?ref=${sha}`, '--jq', '.name'], { stdio: 'ignore' });
     return true;
   } catch {
     return false;
   }
 }
-if (!refHasAction(repo, actionSha)) {
-  console.error(`  refusing to pin ${actionSha.slice(0, 12)}: that commit does not contain ${ACTION_PATH}/action.yml.`);
-  console.error('  the workflow would fail at "Set up job" with a missing-action error. Land the action on the');
-  console.error('  repository default branch first (the pin must name a commit that has it), then re-run.');
+if (!refHasAction(actionSha)) {
+  console.error(`  refusing to pin ${actionSha.slice(0, 12)}: ${ACTION_REPO}@${actionSha.slice(0, 12)} does not contain ${ACTION_PATH}/action.yml.`);
+  console.error('  the tenant workflow would fail at "Set up job" with a missing-action error. Publish the action');
+  console.error('  commit to the platfolio repository first -- the pin must name a commit that carries it.');
   process.exit(1);
 }
 
 const workspaceId = flag('workspace', process.env.RAILWAY_WORKSPACE_ID ?? '82ba4aff-61f3-4b19-b863-8b650ebb66b2')!;
 const installed = renderInstallPullRequest(manifest, {
   workspaceId,
-  actionRepo: 'fractalsynapse/platfolio',
+  actionRepo: ACTION_REPO,
   actionSha,
   // D47: no default control-plane host. A committed default silently points every install this tool opens at
 // whoever wrote it first -- which is exactly how a generated Railway hostname reached a workflow file.
@@ -108,7 +127,7 @@ for (const [path, content] of Object.entries(installed.files).sort(([a], [b]) =>
 console.log(`  secrets   : ${installed.secrets.map((s) => `${s.service}/${s.name}`).join(', ') || 'none'} (names only)`);
 console.log(`  perms     : ${JSON.stringify(installed.permissions)}`);
 console.log(`  envs      : ${environments.join(', ')}`);
-console.log(`  action pin: ${installed.actionPin.name}@${installed.actionPin.ref.slice(0, 12)}  (the managed action is not implemented yet, so this pin is unresolvable today)`);
+console.log(`  action pin: ${installed.actionPin.name}@${installed.actionPin.ref.slice(0, 12)}  (verified to carry ${ACTION_PATH}/action.yml above)`);
 
 if (!apply) {
   console.log('\n  DRY RUN -- nothing was written. Re-run with --apply to open the pull request.');
