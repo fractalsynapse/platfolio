@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs';
 import { createKernel, disposeKernel } from '@platfolio/kernel';
 import { EndpointKeySource, IdentityConfigSchema } from '@platfolio/contracts';
 import { ROUTE_MANIFEST } from './routes.ts';
@@ -85,7 +84,7 @@ export function configFromEnv(env: NodeJS.ProcessEnv): BootConfig {
                   driver: 'github-app' as const,
                   appId: Number(env.PLATFOLIO_GITHUB_APP_ID),
                   installationId: Number(env.PLATFOLIO_GITHUB_INSTALLATION_ID),
-                  ...(githubPrivateKey(env) === undefined ? {} : { privateKeyPem: githubPrivateKey(env)! }),
+                  ...(env.PLATFOLIO_GITHUB_PRIVATE_KEY === undefined ? {} : { privateKeyPem: env.PLATFOLIO_GITHUB_PRIVATE_KEY }),
                 },
               }),
   };
@@ -167,17 +166,3 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     });
 }
 
-/**
- * The app signing key, read here at the composition root and nowhere else.
- *
- * Contents via PLATFOLIO_GITHUB_PRIVATE_KEY, or a mounted path via PLATFOLIO_GITHUB_PRIVATE_KEY_PATH -- the
- * two shapes deployments actually offer. The value is never logged and never returned by an endpoint; in the
- * manifest the key appears only as a secret NAME (D4), which is why the composition root, not the compose
- * file, is where a value is ever touched.
- */
-function githubPrivateKey(env: NodeJS.ProcessEnv): string | undefined {
-  if (env.PLATFOLIO_GITHUB_PRIVATE_KEY !== undefined) return env.PLATFOLIO_GITHUB_PRIVATE_KEY;
-  const path = env.PLATFOLIO_GITHUB_PRIVATE_KEY_PATH;
-  if (path === undefined) return undefined;
-  return readFileSync(path, 'utf8');
-}

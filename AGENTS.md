@@ -23,6 +23,7 @@ selections it has already made are recorded, not improvised:
 | Change, review, check and release policy | [docs/MAINTAINING.md](docs/MAINTAINING.md) |
 | Project-specific procedures | [.agents/skills/README.md](.agents/skills/README.md) |
 | Control-plane API design (the validation mechanism itself) | [apps/control-plane/openapi.yaml](apps/control-plane/openapi.yaml) — spec first, then the handler |
+| Every environment variable: credential?, environments, where the value lives | [environment.yaml](environment.yaml) — the central registry (D52), enforced by `pnpm run environment:registry` |
 
 Status: foundation poured, interfaces first (D40, [16](docs/design/16-foundation-build-order.md)). Slices 1
 and 2 of that plan are delivered (389 tests): `apps/control-plane` boots on the vendored runtime with
@@ -148,6 +149,7 @@ The layout is therefore explicit, and a new file goes where its **kind** goes:
 | `db/` | Forward-only migrations and Postgres init scripts | Readiness comes from the migrations ledger |
 | `platform-templates`, `platforms/`, `apps/status-api`, `api/`, `samples/`, `selfhost/`, root `docker-compose.yml` | **gone** (Nov 2026): see CHANGELOG | A directory with one member that duplicates another app's file was the bug; a second API that duplicates the first is the same bug with an endpoint surface |
 | `examples/` | Third-party reference clones (Cordis at its tag, a scaffold). Gitignored | Reference material is not project source |
+| `environment.yaml` (repository root) | The central environment registry: every variable, whether it is a credential, where it is deployed (D52) | A name is not a custody claim. `PLATFOLIO_DB_URL` looks like a URL and carries a password |
 | *nowhere tracked* | A generated provider hostname (D47) | An environment's endpoints are configuration: `vars.PLATFOLIO_URL`, or `--url=` when opening an install PR |
 
 If a change would create a second copy of a fact -- a digest, a service definition, a schema, a permission

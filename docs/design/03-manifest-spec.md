@@ -35,8 +35,9 @@ release pinning), it lives under `x-platfolio`.
 3. **One vocabulary for two renderings.** Field names mirror Railway IaC (`source`, `build`, `start`,
    `healthcheck`, `preDeployCommand`, `replicas`, `env`, `domains`, `volumeMounts`, `postgres()`)
    so the renderer is a mapping, not a translation, and compose stays structurally equivalent.
-4. **Archetypes carry defaults** so a real manifest is short, and so an entire class of platform
-   can be validated by one fixture.
+4. **`kind` and `mode` carry defaults and rules** (D51), so a real manifest stays short and an entire class of
+   platform can be validated by one fixture. There is no archetype field: the labels mixed an inbound-direction
+   rule, a sharing declaration, and service counts copied from our own examples -- counts are not architecture.
 5. **Versioned and self-describing** — the renderer refuses a manifest major it does not know.
 
 ## Schema (normative sketch)
@@ -49,7 +50,8 @@ metadata:
   version: 0.9.2                # semver of the PLATFORM RELEASE, not of the manifest
   title: ArcNexus
   summary: Multi-agent architecture studio
-  archetype: full-stack-web     # api-service | full-stack-web
+  kind: web                     # web | worker -- does anything accept connections? (D51)
+  mode: development             # development | hosted -- is staging real here, or is this operated?
   repository: https://github.com/acme/arcnexus
   architectures: [amd64, arm64] # build targets; self-hosted runners honour this
   changelog: CHANGELOG.md#L0-9-2
@@ -127,21 +129,27 @@ spec:
     resourceCostHint: { minGB: 2.5, maxGB: 12 }   # internal margin visibility, not a price
 ```
 
-### Archetype defaults
+### Kind and mode defaults
 
-| Archetype | Injected defaults |
-| --- | --- |
-| `api-service` (TreeDX) | one service, no public static asset handling, required `healthcheck`, `domains` limited to api/host subdomains, no frontend redirect rules, mandatory `apiAuth` block (OIDC bearer or platform-native key) |
-| `full-stack-web` (ArcNexus) | two+ services, session/cookie origin rules derived from `domains`, CSRF-safe same-site defaults, CSP report endpoint, `/health` conventions, static asset service optional |
+| Declared | Defaults injected | Rules that follow |
+| --- | --- | --- |
+| `kind: web` | ingress, TLS termination, a health path on the reachable service | at least one service must name `domains` -- a web platform nobody can reach is a worker with a lie in its metadata |
+| `kind: worker` | no ingress, scale by concurrency | any service publishing a host is refused: inbound was never decided |
+| `mode: development` | staging environment on, `compose.dev.yaml` as the local layer | staging must be enabled -- a platform someone changes needs somewhere to put a change |
+| `mode: hosted` | production only, no dev overlay | staging or preview is refused -- an operated copy costs money and returns no signal |
 
-An archetype is a defaults module plus a validation rule set — not a separate format.
+Being a **team service is not a kind.** That is `spec.provides` (D34): the shared identity provider is
+`kind: web` in `mode: hosted` publishing an `identity` capability others bind to. Keeping it as an archetype is
+what let two unrelated facts -- shape and sharing -- hide in one field, and the defaults module plus rules that
+the old labels carried are now stated above, per declaration.
 
-### Archetypes and volume retention
+### Kind, mode and volume retention
 
-`archetype` gates validation, so a new value has to carry a rule or it is just a label: `worker` is refused
-if any service publishes a host (nothing connects inbound), `shared-service` requires one (an unreachable
-team service cannot be bound to). Both were added for the template set; `api-service` and `full-stack-web`
-keep their existing rules.
+A declared value only earns a rule if the rule is about architecture. The retired archetypes failed that test:
+`api-service` capped the service count at two and `full-stack-web` required at least two -- numbers that
+described TreeDX and ArcNexus, our own examples, and would have refused a tenant's legitimate third worker
+while accepting a badly-shaped two-service mess. What remains refuses a worker that publishes a host, an
+unreachable web platform, a developed platform with no staging, and an operated platform with staging on.
 
 `resources.volumes` entries accept `retention: instance | survive` — `survive` keeps the disk when the
 instance is torn down, so a later service can mount the same state. The **mount** is the identity used
@@ -322,8 +330,8 @@ conflict check. A manifest that cannot be rendered is not mergeable.
 ## Adding a platform (D9)
 
 Adding TreeDX or any future platform is a **data PR** into `templates/<name>/<version>/` containing
-the manifest, archetype overrides, an example `.env.example` (names only), a fixture used by CI, and
-generated docs. No control-plane code change. If a new platform requires a new field, that is a
+the manifest, `kind` and `mode`, the variable NAMES it needs (the authoritative list is the project's
+`environment.yaml` registry, not a `.env.example` -- D52), a fixture used by CI, and generated docs.
 schema change and gets its own `apiVersion` review.
 
 ## Worked examples to write next

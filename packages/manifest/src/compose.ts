@@ -249,33 +249,11 @@ export function parseCompose(texts: string | string[]): ParsedCompose {
     kind: 'Platform',
     metadata: {
       name: meta.name, version: meta.version, title: meta.title, summary: meta.summary,
-      kind: meta.kind ?? (() => {
-        // `archetype` as authored input is retired (D51), but a document still carrying one is a maintenance
-        // item we can name exactly rather than a schema failure that reads like corruption. The legacy label
-        // maps to kind+mode; `shared-service` becomes a web platform in hosted mode, because sharing lives in
-        // `provides`, not in a shape.
-        const legacy = typeof meta.archetype === 'string' ? meta.archetype : undefined;
-        if (legacy === undefined) return 'web';
-        issues.push({
-          path: 'x-platfolio.metadata.archetype',
-          code: 'legacy-archetype',
-          message: `archetype: ${legacy} is retired (D51); declare kind and mode -- web|worker crossed with development|hosted. Interpreted as kind=${legacy === 'worker' ? 'worker' : 'web'}, mode=${legacy === 'shared-service' ? 'hosted' : 'development'}`,
-        });
-        return legacy === 'worker' ? 'worker' : 'web';
-      })(),
-        // Recorded so the validator knows the shape was translated rather than declared (D51): the kind and
-        // mode rules bind documents that speak the new vocabulary, and a legacy document gets the warning
-        // naming what to write instead -- nothing more.
-        legacyShape: typeof meta.archetype === 'string' ? true : undefined,
-        mode: meta.mode ?? (() => {
-        // A document that never declared a mode is read from what it actually asks for, not from the schema
-        // default: `development` implies staging, and every pre-D51 example (including ours and the tests) has
-        // staging switched off, so defaulting the new field would have converted a vocabulary change into a
-        // wall of refusals about a rule those documents never opted into.
-        const envs = isRec(xp.environments) ? xp.environments : {};
-        const staging = isRec(envs.staging) && envs.staging.enabled === true;
-        return staging ? 'development' : 'hosted';
-      })(),
+      kind: meta.kind,
+      // No inferred mode and no archetype fallback: pre-release software does not carry migration
+      // shims, and a mode that silently became 'hosted' because staging was off would have hidden an
+      // environment the author meant to have (D51).
+      mode: meta.mode ?? 'development',
       ...(typeof meta.repository === 'string' ? { repository: meta.repository } : {}),
       ...(typeof meta.license === 'string' ? { license: meta.license } : {}),
     },

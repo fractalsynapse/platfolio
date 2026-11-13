@@ -216,10 +216,6 @@ export function validateManifest(unknown: unknown): Issue[] {
   // "a shared service should stay at 1-2": those described our own example manifests, not the platform, and
   // would have refused a tenant's legitimate third worker while accepting a badly-shaped two-service mess.
   const publicCount = services.filter(([, s]) => s.domains.length > 0).length;
-  // The D51 rules bind documents that declared the new vocabulary. A legacy `archetype` document already
-  // carries a `legacy-archetype` warning naming what to write; refusing it with rules it never opted into would
-  // make the migration an outage rather than an invitation.
-  if (m.metadata.legacyShape !== true) {
   if (m.metadata.kind === 'worker') {
     // The distinction is inbound direction, and it is the whole reason the kind exists: a worker that publishes
     // a host is either mislabelled or about to be reachable without anyone deciding it.
@@ -243,7 +239,6 @@ export function validateManifest(unknown: unknown): Issue[] {
     // Sharing is a declaration (`spec.provides`, D34), not a shape -- which is why `shared-service` stopped
     // being a kind. But an offering has to be reachable to be consumed.
     issues.push({ path: 'spec.provides', code: 'provides-requires-web', message: `a platform offering the capability "${m.spec.provides.name}" must be reachable by other platforms, so it is kind: web -- this one is kind: worker` });
-  }
   }
 
   // 7. Identity clients must name real services, and hosted realms need domains to derive redirects.

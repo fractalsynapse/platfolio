@@ -69,7 +69,7 @@ export class ScmService extends Service<ScmConfig> {
       // the reason both services state their missing piece is that operators debug under time pressure.
       if (config.appId === undefined) throw new Error('scm driver "github-app" requires an app id (PLATFOLIO_GITHUB_APP_ID)');
       if (config.installationId === undefined) throw new Error('scm driver "github-app" requires an installation id (PLATFOLIO_GITHUB_INSTALLATION_ID)');
-      if (config.privateKeyPem === undefined) throw new Error('scm driver "github-app" requires the app private key (PLATFOLIO_GITHUB_PRIVATE_KEY_PEM or _PATH)');
+      if (config.privateKeyPem === undefined) throw new Error('scm driver "github-app" requires the app private key (PLATFOLIO_GITHUB_PRIVATE_KEY)');
       this.appId = config.appId;
       this.installationId = config.installationId;
       this.privateKeyPem = config.privateKeyPem;
