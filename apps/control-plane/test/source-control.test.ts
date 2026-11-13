@@ -91,10 +91,13 @@ function stubGithub(state: GithubState): GithubStub {
         // installation that cannot see the repository at all (#130).
         return Response.json({ message: 'Not Found' }, { status: 404 });
       }
-      if (ref !== COMMIT) {
-        // The pinned-commit discipline asserted from the transport side: a read that drifted to a branch would
-        // build a plan from content that may no longer exist when it is applied.
-        return Response.json({ message: `Reference name is not found: ${String(ref)}` }, { status: 404 });
+      // Serve the fixture at a real-looking commit (40 hex) or at the branches this suite names, and refuse
+      // anything else the way GitHub does. The earlier version accepted only one constant ref, which meant a
+      // test that pinned a DIFFERENT commit was failing against the stub's preference rather than the
+      // implementation's behaviour -- and the assertion worth having is exactly that the operation reads the
+      // commit the instance cites.
+      if (!/^([0-9a-f]{40}|main|staging)$/.test(String(ref))) {
+        return Response.json({ message: 'Not Found' }, { status: 404 });
       }
       return Response.json({
         type: 'file', name: wanted, path: wanted, sha: blobSha(content), size: Buffer.byteLength(content),
@@ -353,6 +356,35 @@ test('GitHub’s refusal is forwarded, because a run that never started leaves n
     const body = trigger.body as { error: string; message: string };
     assert.equal(body.error, 'workflow-not-found');
     assert.match(body.message, /default branch/, 'the #149 cause has to be said: an unmerged install PR and a typo are the same 404');
+  } finally {
+    github.restore();
+    await disposeKernel(app.ctx);
+  }
+});
+
+/**
+ * The assertion that would have caught the first live run. `POST /api/v1/instances` documents `templateRef`,
+ * the entity stores it, and `plan/from-repository` is impossible without it -- yet the handler picked only
+ * three fields from a STRICT schema, so the documented body was refused with `Unrecognized key`. Found by
+ * calling the real service, which is the only reason it was found at all: spec, storage and handler each agreed
+ * with themselves and none of them was checked against the other two until an HTTP request did it.
+ */
+test('a created instance carries the pinned source the spec promises, and the new operation can use it', async () => {
+  const github = stubGithub({});
+  const app = await start();
+  try {
+    const commitSha = 'ab'.repeat(20);
+    const created = await app.call('/api/v1/instances', {
+      method: 'POST', ...app.asUser(),
+      body: JSON.stringify({ teamId: app.teamId, name: 'pinned', template: 'starter-web', templateRef: { repo: REPO, commitSha } }),
+    });
+    assert.equal(created.status, 201, created.text);
+    const read = await app.call(`/api/v1/instances/${(created.body as { id: string }).id}`, { ...app.asUser() });
+    assert.deepEqual((read.body as { templateRef?: { repo: string; commitSha: string } }).templateRef, { repo: REPO, commitSha }, 'the pin must survive the round trip');
+
+    const built = await app.call(`/api/v1/instances/${(created.body as { id: string }).id}/plan/from-repository`, { method: 'POST', ...app.asUser(), body: '{}' });
+    assert.equal(built.status, 200, built.text);
+    assert.equal((built.body as { source: { ref: string } }).source.ref, commitSha, 'the operation must read the commit the instance cites, not a branch');
   } finally {
     github.restore();
     await disposeKernel(app.ctx);

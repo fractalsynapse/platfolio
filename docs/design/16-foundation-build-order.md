@@ -31,7 +31,7 @@ token from Keycloak returns something true.
   (contract + commit), and `GET /api/v1/whoami` echoing verified token claims — the smallest surface that
   proves verification works rather than accepting strings.
 - Compose: postgres, keycloak (seeded realm `platfolio`, dev clients, one import file under
-  `selfhost/identity/` so the realm is declarative, not clicking), control-plane. Seed two demo
+  `.platfolio/identity/` so the realm is declarative, not clicking), control-plane. That realm plan was dropped for a seeded one (#168) when Keycloak 26.8.2's import format refused role assignments in every shape tried. Seed two demo
   users and a device-flow client so the CLI path is testable on day one.
 - Verification, not parsing: JWKS pinned to the configured issuer; `iss`, `aud`, `exp`/`nbf`, and a
   required `sub`. **A token that merely decodes is not authenticated** — that distinction is the whole point

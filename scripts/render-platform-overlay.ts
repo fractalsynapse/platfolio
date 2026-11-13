@@ -1,5 +1,5 @@
 /**
- * Regenerate (or check) the pinned image in selfhost/compose.prod.yaml from the registry (#146, D29).
+ * Regenerate (or check) the pinned image in compose.prod.yaml from the registry (#146, D29).
  *
  * The overlay is the one file in the repository whose correct content is a fact about a build server. Every
  * other pin here is authored; this one has to be *looked up*, which is why it drifted twice: a hand-typed
@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const IMAGE = 'fractalsynapse/platfolio-control-plane';
-const file = path.resolve(import.meta.dirname, '../selfhost/compose.prod.yaml');
+const file = path.resolve(import.meta.dirname, '../compose.prod.yaml');
 
 async function registryDigest(tag: string): Promise<string> {
   const auth = await fetch(`https://ghcr.io/token?scope=repository:${IMAGE}:pull`).then((r) => r.json()) as { token?: string };
@@ -57,7 +57,7 @@ console.log(`  registry   ${IMAGE}:${tag}@${actual.slice(0, 22)}…  (read from 
 if (mode === 'check') {
   if (pinned.tag !== tag || pinned.digest !== actual) {
     console.error(`\n  DRIFT: the overlay pins bytes the registry is not serving for :${tag}.`);
-    console.error(`  Run: npx -y tsx scripts/render-selfhost-overlay.ts   (then commit the change with the release)`);
+    console.error(`  Run: npx -y tsx scripts/render-platform-overlay.ts   (then commit the change with the release)`);
     process.exit(1);
   }
   console.log('  overlay matches the registry');

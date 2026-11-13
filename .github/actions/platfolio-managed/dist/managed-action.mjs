@@ -25456,6 +25456,13 @@ var AppManifestSchema = external_exports.object({
   setup_on_update: external_exports.boolean().optional()
 }).strict();
 
+// packages/contracts/src/scm-conformance.ts
+var REPO = "acme/widget";
+var FILE_PATH = "compose.yaml";
+var CONTENT = "services:\n  web:\n    image: nginx:alpine\n";
+var LARGE_CONTENT = "x\n".repeat(7e4);
+var FIXTURE_FILE = { path: FILE_PATH, content: CONTENT, repo: REPO, ref: "main", largePath: "huge.yaml", largeContent: LARGE_CONTENT, largeSize: Buffer.byteLength(LARGE_CONTENT) };
+
 // packages/contracts/src/railway-transport.ts
 var RAILWAY_ENDPOINT = "https://backboard.railway.com/graphql/v2";
 var HttpRailwayTransport = class {

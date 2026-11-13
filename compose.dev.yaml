@@ -1,0 +1,157 @@
+# platfolio's own development topology -- an OVERLAY on `compose.yaml`, the same platform description a tenant
+# gets. It used to be a separate `docker-compose.yml`, and that separation was the reason platfolio's hosting
+# architecture differed from the templates': the templates had one compose file at the root, and platfolio had a
+# special directory plus a second, unrelated local stack. D50 ends that.
+#
+#   docker compose -f compose.yaml -f compose.dev.yaml up -d          # the whole platform, locally
+#   docker compose -f compose.yaml -f compose.dev.yaml ps
+#
+# What lives here and nowhere else: the local database container, Mailpit, loopback credentials, source mounts,
+# `start-dev`, and published ports. The platform file keeps the hosting semantics (domains, references,
+# secrets-by-name, resources) so `pnpm run platform:plan` reads exactly what a tenant's plan would read.
+#
+# `!reset` is Compose's own merge control (docker compose >= 2.24). Where the platform file says something that
+# must NOT survive locally -- a hosted hostname, a production start command -- the overlay resets it explicitly
+# rather than hoping an override lands in the right key.
+
+services:
+  # The database the platform file declares as a managed RESOURCE (`x-platfolio.resources.database`, name
+  # `main`). Locally it is a container, because that is what a development machine has: same name as the
+  # resource, so `references` in the platform file resolve to this service without any rewriting.
+  main:
+    image: postgres:17.11
+    environment:
+      POSTGRES_PASSWORD: platfolio-dev-only
+      POSTGRES_DB: platfolio
+    ports:
+      # Published for local tooling: `db:migrate`, the store conformance suite, the smoke scripts, and the
+      # lifecycle smoke, which reads Postgres directly. Dev-only credentials, and the reason this file is a
+      # development topology and not a template.
+      - '5432:5432'
+    volumes:
+      # Creates the `platfolio` and `keycloak` schemas on first init, so neither service owns the other's
+      # namespace. Keycloak 26 will not create a schema it is told to use (#198) -- this is where it comes from.
+      - ./db/postgres-init:/docker-entrypoint-initdb.d:ro
+      - platfolio-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d platfolio']
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  # The control plane, run from source instead of from the pinned image the platform file describes.
+  api:
+    image: node:22.22.1-slim
+    # Not built locally: the platform file's `build:` would produce an image this service does not use.
+    build: !reset null
+    working_dir: /workspace
+    command: ['node', '--import', 'tsx', 'apps/control-plane/src/index.ts']
+    environment:
+      PORT: '8080'
+      HOST: '0.0.0.0'
+      # The issuer must match byte-for-byte what the token carries -- exact match is D4's cross-tenant rule,
+      # so this is a value an operator reads, not a default that may drift.
+      PLATFOLIO_IDENTITY_ISSUER: http://localhost:8081/realms/platfolio
+      PLATFOLIO_IDENTITY_AUDIENCE: platfolio-api
+      PLATFOLIO_IDENTITY_JWKS_URI: http://identity:8080/realms/platfolio/protocol/openid-connect/certs
+      PLATFOLIO_DB_URL: postgresql://postgres:platfolio-dev-only@main:5432/platfolio
+      PLATFOLIO_DB_SCHEMA: platfolio
+      # Migrate-on-boot is a local convenience. Production runs `pnpm run db:migrate` as a separate step,
+      # because replicas boot concurrently and two of them issuing the same DDL is an outage.
+      PLATFOLIO_DB_MIGRATE: 'true'
+      PLATFOLIO_VERSION: 0.0.0-local
+      PLATFOLIO_COMMIT: "0000000000000000000000000000000000000000"
+      # Quoted on purpose: an unquoted all-digit scalar is read as a *number*, which then failed the pattern
+      # for a commit SHA -- the fourth YAML-scalar defect in this project, and the reason the compose file is
+      # where it bit.
+      PLATFOLIO_BUILD_TIME: '2026-11-11T00:00:00.000Z'
+      PLATFOLIO_RECONCILE_INTERVAL_MS: '5000'
+      # Email (D46): the real client against a real SMTP server, no stub in sight. startTls is off ONLY here,
+      # because this is loopback to a dev sink; the same line in a production manifest would leak credentials
+      # to anyone on the path.
+      PLATFOLIO_EMAIL_DRIVER: smtp
+      PLATFOLIO_EMAIL_FROM: platfolio@localhost
+      PLATFOLIO_SMTP_HOST: mailpit
+      PLATFOLIO_SMTP_PORT: '1025'
+      PLATFOLIO_SMTP_STARTTLS: 'off'
+      PLATFOLIO_MAILPIT_URL: http://mailpit:8025
+      # Source control locally: the git driver, reading our own repository over HTTPS with the ambient CLI
+      # token. Chosen over `github-app` because a development machine has no app installation to invent, and
+      # because it exercises the second driver rather than only the one production uses.
+      PLATFOLIO_SCM_DRIVER: git
+      PLATFOLIO_GIT_HOST: github.com
+      PLATFOLIO_GIT_TRANSPORT: https
+      # Forwarded from the host, and the reason is that the driver deliberately runs git with
+      # `credential.helper=` disabled: ambient helpers are how a service works on a laptop and then fails in a
+      # container, so the token is passed explicitly instead of discovered. Start the stack with
+      #   PLATFOLIO_GIT_TOKEN=$(gh auth token) docker compose -f compose.yaml -f compose.dev.yaml up -d
+      # and an unset token is not an error -- it is the driver's own message about which remote it could not
+      # read and why.
+      PLATFOLIO_GIT_TOKEN: ${PLATFOLIO_GIT_TOKEN:-}
+    ports:
+      - '8082:8080'
+    volumes:
+      - .:/workspace
+    depends_on:
+      main:
+        condition: service_healthy
+      identity:
+        condition: service_started
+      mailpit:
+        condition: service_started
+
+  identity:
+    # `start-dev`, on the SAME Postgres instance as the control plane and in its own schema: the topology the
+    # maintainer asked for (one container, one backup) without two owners in one namespace.
+    #
+    # The realm is created by `pnpm run identity:seed` -- an idempotent Admin-API script -- rather than
+    # `--import-realm`. Keycloak 26.8.2's import format rejected role assignments in every shape tried
+    # (clientRoles on a client, federated on a user, realm-level clientMappings), and a file the platform
+    # boots is worse than a script that works. Recorded as #168 rather than hidden.
+    # The entrypoint is inherited from the platform file; only the sub-command differs locally.
+    command: ['start-dev']
+    environment:
+      KC_DB: postgres
+      # Locally the whole JDBC URL, because there is no provider to assemble components from: the platform
+      # file's `references` (KC_DB_URL_HOST and friends) are a Railway-configuration concern, not a Compose one.
+      KC_DB_URL: jdbc:postgresql://main:5432/platfolio
+      KC_DB_USERNAME: postgres
+      KC_DB_PASSWORD: platfolio-dev-only
+      KC_DB_SCHEMA: keycloak
+      KC_BOOTSTRAP_ADMIN_USERNAME: platfolio-admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: platfolio-dev-only
+      KC_HTTP_PORT: '8080'
+      KC_HOSTNAME_STRICT: 'false'
+      # The platform file pins this to the hosted name; locally it must not exist, or Keycloak advertises
+      # `https://auth.platfolio.dev` while serving on localhost.
+      KC_HOSTNAME: !reset null
+      KC_HEALTH_ENABLED: !reset null
+      KC_PROXY_HEADERS: !reset null
+    ports:
+      - '8081:8080'
+    depends_on:
+      main:
+        condition: service_healthy
+
+  # Mailpit (D46): an SMTP sink AND a mailbox that tests can read. Everything platfolio sends in development
+  # lands here, and `email:smoke` asserts on it through Mailpit's HTTP API -- "the invitation was sent to that
+  # address with this link" becomes a checked fact rather than a log line somebody eyeballs. UI :8025.
+  mailpit:
+    image: axllent/mailpit:v1.24.0
+    environment:
+      # Development only: a local sink that accepts any credentials, so the SMTP client's auth path gets
+      # exercised without a real relay. A production transport never sets these.
+      MP_SMTP_AUTH_ACCEPT_ANY: '1'
+      MP_SMTP_AUTH_ALLOW_INSECURE: '1'
+      MP_MAX_MESSAGES: '5000'
+    ports:
+      - '8025:8025'
+      - '1025:1025'
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+
+volumes:
+  platfolio-pgdata:

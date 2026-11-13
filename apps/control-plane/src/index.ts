@@ -16,6 +16,11 @@ export interface BootConfig {
   /** Absent unless PLATFOLIO_EMAIL_DRIVER names one. There is no default: an unconfigured control plane has
    *  no sender at all, rather than one that mails people under an identity no operator chose. */
   email?: import('@platfolio/kernel').EmailConfigInput;
+  /**
+   * Source control (D22, git driver per D50). Absent means the kernel's `none` driver: the repository
+   * operations answer 503 `source-control-not-configured` rather than inventing a plan.
+   */
+  scm?: import('@platfolio/kernel').ScmConfigInput;
 }
 
 /** Fail closed on missing identity config: a control plane that starts without knowing its issuer is an open door with a logo on it. */
@@ -49,20 +54,40 @@ export function configFromEnv(env: NodeJS.ProcessEnv): BootConfig {
           ...(env.PLATFOLIO_MAILPIT_URL === undefined ? {} : { baseUrl: env.PLATFOLIO_MAILPIT_URL }),
         },
       }),
-      // Source control (D22). Installed only when the app credentials exist; otherwise `ctx.scm` is the
-      // `none` driver and the two repository operations answer 503 rather than pretending to have read a
-      // tenant's platform. Same rule as email: a capability that may be absent is a value, never a hole in
-      // the route table -- and a hole there is how "not configured" becomes a 404 on a real endpoint.
-      ...(env.PLATFOLIO_GITHUB_APP_ID === undefined || env.PLATFOLIO_GITHUB_INSTALLATION_ID === undefined
-        ? {}
-        : {
+      // Source control (D22, git driver added by D50's maintainer point). `ctx.scm` is always installed; with
+      // nothing configured it is the `none` driver and the two repository operations answer 503 rather than
+      // pretending to have read a tenant's platform. Same rule as email: a capability that may be absent is a
+      // value, never a hole in the route table -- and a hole there is how "not configured" becomes a 404 on a
+      // real endpoint.
+      //
+      // PLATFOLIO_SCM_DRIVER states the choice; when it is unset, app credentials mean `github-app` and
+      // anything else means none. The inference exists only because github-app was the sole driver until git
+      // arrived. An explicit `git` is never overridden by the presence of app credentials: GitHub is a wrapper
+      // over git, so the portable transport is the one an operator should be able to ask for directly.
+      ...(env.PLATFOLIO_SCM_DRIVER === 'git'
+        ? {
             scm: {
-              driver: 'github-app' as const,
-              appId: Number(env.PLATFOLIO_GITHUB_APP_ID),
-              installationId: Number(env.PLATFOLIO_GITHUB_INSTALLATION_ID),
-              ...(githubPrivateKey(env) === undefined ? {} : { privateKeyPem: githubPrivateKey(env)! }),
+              driver: 'git' as const,
+              ...(env.PLATFOLIO_GIT_HOST === undefined ? {} : { host: env.PLATFOLIO_GIT_HOST }),
+              ...(env.PLATFOLIO_GIT_TRANSPORT === undefined ? {} : { transport: env.PLATFOLIO_GIT_TRANSPORT as 'https' | 'ssh' }),
+              // A blank is treated as absent: `PLATFOLIO_GIT_TOKEN=${PLATFOLIO_GIT_TOKEN:-}` in a Compose file
+              // yields an empty string, and forwarding that into a `min(8)` schema would fail startup with a
+              // zod error instead of the driver's own, useful "no token was supplied" message.
+              ...(env.PLATFOLIO_GIT_TOKEN?.trim() ? { gitToken: env.PLATFOLIO_GIT_TOKEN!.trim() } : {}),
             },
-          }),
+          }
+        : env.PLATFOLIO_SCM_DRIVER === 'none'
+          ? { scm: { driver: 'none' as const } }
+          : env.PLATFOLIO_GITHUB_APP_ID === undefined || env.PLATFOLIO_GITHUB_INSTALLATION_ID === undefined
+            ? {}
+            : {
+                scm: {
+                  driver: 'github-app' as const,
+                  appId: Number(env.PLATFOLIO_GITHUB_APP_ID),
+                  installationId: Number(env.PLATFOLIO_GITHUB_INSTALLATION_ID),
+                  ...(githubPrivateKey(env) === undefined ? {} : { privateKeyPem: githubPrivateKey(env)! }),
+                },
+              }),
   };
 }
 
@@ -94,6 +119,11 @@ export async function boot(config: BootConfig, fetchImpl: typeof fetch = fetch) 
     identity,
     store: storeConfig,
     ...(config.email === undefined ? {} : { email: config.email }),
+    // The driver choice `configFromEnv` computes must actually reach the kernel. It did not: `email` was
+    // forwarded and `scm` was not, so a correctly configured git or github-app driver never existed at runtime
+    // and the operations answered 503. Found by running them against a live control plane, not by reading the
+    // code -- which is the argument for running things.
+    ...(config.scm === undefined ? {} : { scm: config.scm }),
     server: { host: config.host, port: config.port },
     extensions: buildCapabilities({ build: config.build }),
     requiredServices: ['identity', 'server', 'store', 'extensions'],

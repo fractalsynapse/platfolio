@@ -236,14 +236,29 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
           actionFor('createInstance', 'instance.create');
           const parsed = bodyOf<{ teamId?: unknown; name?: unknown; template?: unknown }>(request);
           if (parsed.ok === false) return badRequest(parsed.error);
-          const input = InstanceSchema.pick({ teamId: true, name: true, template: true }).safeParse(parsed.value ?? {});
+                    // `templateRef` belongs here: the spec declares it, the entity stores it, and
+          // POST …/plan/from-repository cannot work without it. `pick()` on a STRICT schema keeps the strictness,
+          // so leaving a documented field out made the handler reject the very body the contract describes --
+          // found by running the operation against a live control plane, not by reading the code. The fix is to
+          // pick the fields the request has, and the test below is the assertion that keeps them in step.
+          const input = InstanceSchema.pick({ teamId: true, name: true, template: true, templateRef: true }).safeParse(parsed.value ?? {});
           if (!input.success) return badRequest(input.error.issues.map((i) => `${i.path.join('.') || '<root>'} ${i.message}`).join('; '));
           // Membership is checked against the team named in the body, which resolveScope cannot read from
           // params. Passing it explicitly keeps the decision in one place: the caller may act for that team or
           // get the same 404 as if the team did not exist.
           const resolved = await resolveScope(context, request, params, 'instance.create', input.data.teamId);
           if (resolved.ok === false) return resolved.response;
-          const created = await context.store.createInstance(input.data);
+          // Built field by field rather than handed over wholesale: the store's `NewInstance` declares
+          // `templateRef?: {…}` while a parsed strict schema yields `{…} | undefined`, and under
+          // exactOptionalPropertyTypes those are different things. Passing an explicit `templateRef: undefined`
+          // is a type error the compiler catches; passing a whole object that merely CONTAINS one is how the
+          // distinction would have been lost.
+          const created = await context.store.createInstance({
+            teamId: input.data.teamId,
+            name: input.data.name,
+            template: input.data.template,
+            ...(input.data.templateRef === undefined ? {} : { templateRef: input.data.templateRef }),
+          });
           if (created.ok === false) return { status: 400, body: { error: created.code, message: reasonOf(created) } };
           await context.store.appendAudit({ actorKind: 'user', actorRef: resolved.scope.claims.subject, action: 'instance.create', target: created.value.id, detail: { template: created.value.template, teamId: created.value.teamId } });
           // A 201 records intent. Nothing about provisioning is claimed, because nothing was verified
@@ -323,7 +338,8 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
       scoped('POST', '/api/v1/instances/{instanceId}/plan/from-repository', 'registerPlanFromRepository', 'instance.plan.write', async (scope, request, params) => {
         // #172's middle, and the reason the spec was written before this function existed: until now the only
         // way to record a plan was for a human to hold a checkout and run a script that read their own
-        // filesystem (`open-install-pr.ts --platform selfhost`). That default is still in the tool, which is
+        // filesystem (`open-install-pr.ts --platform .`, which was `--platform selfhost` until D50 moved the
+        // platform files to the root). That default is still in the tool, which is
         // exactly how a dry run against an unrelated tenant repository reported platfolio's own platform.
         const id = params.instanceId ?? '';
         const found = await scope.context.store.getInstance(id);

@@ -9,6 +9,13 @@
 # No secret is read at build time and none is baked in: a platfolio container that could hold a tenant
 # credential would defeat the custody model.
 FROM node:22-bookworm-slim
+
+# git is a RUNTIME dependency of the source-control seam, not a build nicety: the `git` driver (D50) shells out
+# to the binary. Without it the driver fails with ENOENT inside a container, which is exactly what happened on
+# the first live run -- and the discovery came from calling the endpoint, not from reading the Dockerfile. A
+# capability the configuration advertises has to be something the artifact can perform.
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 ENV PNPM_HOME=/app/.pnpm-home NODE_ENV=production PORT=8080 HOST=0.0.0.0
 RUN corepack enable

@@ -209,8 +209,17 @@ export function parseCompose(texts: string | string[]): ParsedCompose {
       ...(() => {
         const command = svc.command;
         if (typeof command === 'string') return command.length > 0 ? { start: command } : {};
-        if (!Array.isArray(command)) return {};
-        const parts = command.map(String);
+        if (!Array.isArray(command) && !Array.isArray(svc.entrypoint) && typeof svc.entrypoint !== 'string') return {};
+        // Entrypoint and command are composed into ONE provider start command, and the reason is a semantics
+        // clash measured on 2026-11-13 by running the same description twice: Docker appends `command` to the
+        // image's ENTRYPOINT, while Railway's `startCommand` REPLACES both and is run as a shell. Writing the
+        // full path as the command worked on Railway and produced `Unknown option: '/opt/keycloak/bin/kc.sh'`
+        // locally; writing the bare argument worked locally and produced an instant exit with no logs there.
+        // Stating both parts is the only form that means the same thing in each runtime, which is what D50's
+        // "one specification" actually requires -- it is not about file locations, it is about the semantics
+        // surviving the move.
+        const parts = [...(Array.isArray(svc.entrypoint) ? svc.entrypoint : typeof svc.entrypoint === 'string' ? [svc.entrypoint] : []),
+          ...(Array.isArray(command) ? command : typeof command === 'string' ? [command] : [])].map(String);
         if (parts.length === 0) return {};
         return { start: parts.map((p) => (/\s/.test(p) ? `"${p.replace(/"/g, '\"')}"` : p)).join(' ') };
       })(),

@@ -5,6 +5,7 @@ export * from './attestation.ts';
 export * from './credential-broker.ts';
 export * from './secret-delivery.ts';
 export * from './scm-github.ts';
+export * from './git-scm.ts';
 export * from './memory-scm.ts';
 export * from './scm-conformance.ts';
 export * from './railway-transport.ts';

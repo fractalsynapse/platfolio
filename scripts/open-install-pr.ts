@@ -50,7 +50,7 @@ const repo = flag('repo', 'fractalsynapse/platfolio')!;
 const defaultBranch = execFileSync('gh', ['api', `repos/${repo}`, '--jq', '.default_branch'], { encoding: 'utf8' }).trim();
 const base = flag('branch', defaultBranch || 'main')!;
 if (base !== defaultBranch) console.log(`  warning: base ${base} is not the default branch (${defaultBranch}) -- the workflow will not be dispatchable there`);
-const platformDir = flag('platform', 'selfhost')!;
+const platformDir = flag('platform', '.')!;
 const apply = has('apply');
 
 const docs = ['compose.yaml', 'compose.prod.yaml'].filter((f) => existsSync(resolve(platformDir, f))).map((f) => readFileSync(resolve(platformDir, f), 'utf8'));

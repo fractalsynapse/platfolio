@@ -10,7 +10,7 @@ name: platfolio-control-plane
 services:
   api:
     build:
-      context: ../../
+      context: .
       dockerfile: apps/control-plane/Dockerfile
     expose: ["8080"]
     environment:
@@ -23,7 +23,7 @@ services:
       # or a literal this script overrides with what it measured. Anything else is a placeholder that looks
       # configured.
       PLATFOLIO_IDENTITY_AUDIENCE: platfolio-api
-      # Issuer and JWKS are set by scripts/selfhost-deploy.ts from the host the provider actually granted,
+      # Issuer and JWKS are set by scripts/platform-deploy.ts from the host the provider actually granted,
       # because asserting them before DNS lands would bake in a URL that serves nothing (E27). They are listed
       # here so the inventory and the plan agree about which names this service needs.
       PLATFOLIO_IDENTITY_ISSUER: https://auth.platfolio.dev/realms/platfolio
@@ -64,7 +64,7 @@ services:
         # Names, never values (D4). The GitHub App's id, installation and signing key are what the two
         # repository operations need (#172's middle); they live as variables in the tenant's own Railway
         # project, which is the same custody shape as KEYCLOAK_ADMIN. Declaring them here also means
-        # `selfhost-deploy --apply` FAILS until they exist -- the composition says out loud what the
+        # `platform-deploy --apply` FAILS until they exist -- the composition says out loud what the
         # service requires instead of discovering the gap at the first API call.
         - { name: PLATFOLIO_GITHUB_APP_ID, source: shared-variable }
         - { name: PLATFOLIO_GITHUB_INSTALLATION_ID, source: shared-variable }
@@ -85,7 +85,12 @@ services:
     # an entrypoint, so a bare `start` is "command not found" -- an instant exit with zero log lines, which is
     # how this failure looked like a mysterious deployment error for a whole debugging pass. #198's own lesson:
     # the message a platform gives is part of the platform.
-    command: ['/opt/keycloak/bin/kc.sh', 'start']
+    # Both halves, stated. `command` alone would be correct for Docker (the image's ENTRYPOINT is kc.sh) and
+    # wrong for Railway, whose start command replaces the entrypoint and runs in a shell -- which is exactly how
+    # the service once exited instantly with zero log lines. Declaring `entrypoint` here makes ONE description
+    # mean the same process on both runtimes (D50), and the renderer composes them into the provider's form.
+    entrypoint: ['/opt/keycloak/bin/kc.sh']
+    command: ['start']
     expose: ["8080"]
     environment:
       KC_DB: postgres
