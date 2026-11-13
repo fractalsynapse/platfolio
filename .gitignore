@@ -45,3 +45,6 @@ probe.ts
 # config, npm/pnpm caches). Never a source directory; committed once by accident while
 # debugging the self-host image build.
 .tmp/
+
+# Local history archive (git bundle). Not project source; see MAINTAINING.
+.archive/

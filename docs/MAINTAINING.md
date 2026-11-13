@@ -30,6 +30,27 @@ workflows from the default branch only (#149).
 `open-install-pr.ts` still renders and opens the PR itself and still defaults `--platform .`. That
 remaining local-filesystem logic is the next thing to move behind an operation, not a design decision.
 
+## Repository history: where the line actually starts
+
+`origin/staging`'s oldest commit is `d4a2dc8` (Merge of PR #214) **with no parents**: the staging line was
+recreated from a working-tree snapshot on 2026-11-13, so the ~270 commits before it -- every merge from PR #99
+to #213 -- are not ancestors of staging today. `origin/main` still carries the pre-snapshot line (167 commits
+back to 2026-10-23), and GitHub retains `refs/pull/<N>/head` for each merged PR, which is where an individual
+commit can still be fetched from.
+
+Two consequences that matter in practice:
+
+- **`git log` on staging is not the project's history.** The narrative lives in `CHANGELOG.md` and the decision
+  register, which is why both are written as they are -- they are the durable record, not a convenience.
+- **Do not judge "is this branch merged?" by `merge-base --is-ancestor`.** It answers "no" for work that was
+  merged before the snapshot, and it answered "no" for branches whose content is plainly in staging's tree. The
+  reliable signals are the merged-PR record (`gh pr list --state merged --head <branch>`) and the tree itself.
+
+Before pruning the stale local branches, every ref (145 of them, 340 commits) was bundled to
+`.archive/platfolio-all-refs-<date>.bundle`, gitignored because a bundle is not project source. To recover a
+line from it: `git bundle verify` it, then `git bundle unbundle .archive/<file>.bundle` and read the printed
+refs, or fetch the PR head directly: `gh pr view <N> --json headRefOid`.
+
 ## Releases and credentials are operations, not console work
 
 A platform's build reports its own artifact; nobody types a digest, and nobody types a credential:
