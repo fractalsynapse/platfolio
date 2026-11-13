@@ -233,7 +233,7 @@ const GENERATED_HOST = /\b[a-z0-9]+-[a-z0-9]+-[0-9a-f]{6,}\.up\.railway\.app\b|\
  */
 const REAL_PROJECTS = new Set(['platfolio', 'platfolio-starter-web', 'platfolio-starter-worker', 'platfolio-shared-identity']);
 const PUBLISHED_IMAGES = new Set(['platfolio-control-plane', 'platfolio-status-api']);
-const EXECUTABLE_PATH = /^(apps|packages|scripts|selfhost|templates|db|\.github)\//;
+const EXECUTABLE_PATH = /^(apps|packages|scripts|templates|db|\.github)\//;
 const ORG_REF = /fractalsynapse\/([A-Za-z0-9._-]+)/g;
 
 async function checkCommittedProjects(): Promise<string[]> {

@@ -121,16 +121,18 @@ test('a Compose document reaches the same plan the manifest format does', () => 
 
 test('platfolio can describe and plan its own deployment (step 7, #172)', () => {
   const root = path.resolve('.');
-  const dir = path.join(root, 'selfhost');
+  // The platform files sit at the repository root now (D50): platfolio is described the way a
+  // tenant is, which is the point -- this test reads the same paths the deploy tool reads.
+  const dir = root;
   if (!fs.existsSync(path.join(dir, 'compose.yaml'))) {
-    assert.fail('selfhost/compose.yaml is the reference case for D29; it must stay in the tree');
+    assert.fail('compose.yaml is the reference case for D29; it must stay in the tree');
   }
   const base = fs.readFileSync(path.join(dir, 'compose.yaml'), 'utf8');
   const overlay = fs.readFileSync(path.join(dir, 'compose.prod.yaml'), 'utf8');
   const parsed = parseCompose([base, overlay]);
   // This used to assert the OPPOSITE -- "the tree cannot describe a deployable self-host" -- because the
   // overlay pinned a digest belonging to a deleted service and had no image of its own. #172 changed that:
-  // the pin is now read from the registry by scripts/render-selfhost-overlay.ts, so the composition renders.
+  // the pin is now read from the registry by scripts/render-platform-overlay.ts, so the composition renders.
   // The assertion is inverted rather than deleted, and the history is here because the previous state was a
   // real finding, not a mistake to erase.
   assert.deepEqual(parsed.issues.map((x) => x.code), [], JSON.stringify(parsed.issues.map((x) => x.code)));
@@ -141,6 +143,9 @@ test('platfolio can describe and plan its own deployment (step 7, #172)', () => 
   const services = Object.keys(parsed.manifest.spec.services).sort();
   assert.deepEqual(services, ['api', 'identity'], 'the control plane and its identity provider, and no more');
 
+  // 'selfhost' here is the INSTANCE id, which the provider turns into the Railway project name
+  // `platfolio-selfhost` (measured, and the live project carries that name). It is not a path: renaming it
+  // would look for a different project rather than move a directory.
   const plan = buildPlan(parsed.manifest, { instanceId: 'selfhost', teamId: 'platfolio' });
   const production = plan.environments.find((e) => e.name === 'production');
   assert.ok(production, 'the composition enables production');
@@ -225,4 +230,42 @@ test('mergeVolumes collapses a declaration and a mount that describe the same di
   const onlyMount = mergeVolumes({ volumes: [] }, [{ name: 'scratch', service: 'queue', mountPath: '/tmp/scratch' }]);
   assert.equal(onlyMount.length, 1);
   assert.equal(onlyMount[0]!.retention, undefined, 'undeclared means the default, and the default is deletion with the instance');
+});
+
+/**
+ * Docker appends `command` to the image ENTRYPOINT. Railway's `startCommand` replaces both and runs in a
+ * shell. Measured on 2026-11-13 by running one description on each: the full path in `command` worked on
+ * Railway and exited instantly locally; the bare argument worked locally and produced `Unknown option:
+ * '/opt/keycloak/bin/kc.sh'`. Composing both halves is the only form with one meaning in two runtimes,
+ * which is what "the same specification for all four platforms" (D50) has to mean to be true.
+ */
+test('entrypoint and command compose into one provider start command, in the order a shell would run them', () => {
+  const compose = [
+    'name: composed',
+    'services:',
+    '  app:',
+    '    image: example/app:1.0.0@sha256:' + DIGEST_PIN,  // a real-shaped digest: #84 refuses a placeholder, and it correctly refused this fixture
+    "    entrypoint: ['/usr/local/bin/app']",
+    "    command: ['serve', '--config', '/etc/app.conf']",
+    '    expose: ["8080"]',
+    '    x-platfolio: { public: true, domains: [app.example.com] }',
+    'x-platfolio:',
+    '  metadata: { name: composed, version: 1.0.0, title: Composed, summary: s }',
+    '  environments:',
+    '    production: { enabled: true, branch: main }',
+    '    staging: { enabled: false }',
+    '    preview: { enabled: false }',
+    '  release: { registryImage: example/app, tagPattern: "v*" }',
+  ].join('\n');
+  const parsed = parseCompose(compose);
+  assert.ok(parsed.manifest, JSON.stringify(parsed.issues));
+  const service = buildPlan(parsed.manifest!, { instanceId: 'i', teamId: 't' }).environments[0]!.services[0]!;
+  assert.equal(service.command, '/usr/local/bin/app serve --config /etc/app.conf');
+
+  // Entrypoint with no command is still a start command: Docker would run the entrypoint alone, and the
+  // provider needs the same process spelled out.
+  const entryOnly = compose.replace("    command: ['serve', '--config', '/etc/app.conf']\n", '');
+  const parsed2 = parseCompose(entryOnly);
+  assert.ok(parsed2.manifest, JSON.stringify(parsed2.issues));
+  assert.equal(buildPlan(parsed2.manifest!, { instanceId: 'i', teamId: 't' }).environments[0]!.services[0]!.command, '/usr/local/bin/app');
 });

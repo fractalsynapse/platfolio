@@ -1,6 +1,7 @@
 import { Context, Service } from 'cordis';
 import { z } from 'zod';
 import {
+  GitScm,
   dispatchWorkflowRun,
   readRepositoryFile,
   type RepositoryFile,
@@ -22,11 +23,19 @@ import {
  * applying the same discipline to platfolio's own grant is what makes holding it defensible.
  */
 export const ScmConfigSchema = z.object({
-  driver: z.enum(['none', 'github-app']).default('none'),
+  // 'git' reads commits from any forge (D22 extended by the maintainer's point: GitHub and GitLab are both
+  // wrappers over git). It cannot dispatch a pipeline, because that concept does not exist in git -- so a
+  // deployment that chooses 'git' gets reads and an explicit refusal for runs, not a silent half-capability.
+  driver: z.enum(['none', 'github-app', 'git']).default('none'),
   appId: z.number().int().positive().optional(),
   /** PEM contents, not a path -- reading the file is the composition root's job, so this stays the value. */
   privateKeyPem: z.string().min(32).optional(),
   installationId: z.number().int().positive().optional(),
+  /** git driver */
+  host: z.string().min(1).default('github.com'),
+  transport: z.enum(['https', 'ssh']).default('https'),
+  /** HTTPS token for the git driver, read from PLATFOLIO_GIT_TOKEN by the composition root. Never logged. */
+  gitToken: z.string().min(8).optional(),
 }).strict();
 export type ScmConfig = z.infer<typeof ScmConfigSchema>;
 export type ScmConfigInput = z.input<typeof ScmConfigSchema>;
@@ -50,6 +59,7 @@ export class ScmService extends Service<ScmConfig> {
   private readonly appId?: number;
   private readonly privateKeyPem?: string;
   private readonly installationId?: number;
+  private git?: GitScm;
 
   constructor(ctx: Context, config: ScmConfig) {
     super(ctx, 'scm');
@@ -64,24 +74,36 @@ export class ScmService extends Service<ScmConfig> {
       this.installationId = config.installationId;
       this.privateKeyPem = config.privateKeyPem;
       this.configured = true;
+    } else if (config.driver === 'git') {
+      // The git driver needs no app id and no installation, but it does need to know which forge to talk to,
+      // and whether it has any business authenticating at all. Ambient credentials are deliberately NOT a
+      // silent fallback: a service that works on a laptop because the developer's git helper had a token, and
+      // then fails in a container, is the failure mode this project keeps meeting. `tokenSupplied` says which
+      // case the deployment is in, and the driver's error text repeats it.
+      this.git = new GitScm({ host: config.host, transport: config.transport, ...(config.gitToken === undefined ? {} : { token: config.gitToken }) });
+      this.configured = true;
     } else {
       this.configured = false;
     }
   }
 
   /** What an operator needs to see to fix a misconfiguration. Never the key, never a token. */
-  describe(): { driver: ScmConfig['driver']; configured: boolean } {
-    return { driver: this.driver, configured: this.configured };
+  describe(): { driver: ScmConfig['driver']; configured: boolean; git?: { host: string; transport: string; tokenSupplied: boolean } } {
+    return { driver: this.driver, configured: this.configured, ...(this.git === undefined ? {} : { git: this.git.describe() }) };
   }
 
   /** One file at one ref. `RepositoryReadError` propagates with its kind intact -- callers map it, never re-derive it. */
   async readFile(input: { repo: string; ref: string; path: string }): Promise<RepositoryFile> {
     if (!this.configured) throw new ScmNotConfiguredError(`read ${input.repo}@${input.ref}:${input.path}`);
+    if (this.git !== undefined) return this.git.readRepositoryFile(input);
     return readRepositoryFile({ appId: this.appId!, privateKeyPem: this.privateKeyPem!, installationId: this.installationId!, ...input });
   }
 
   async dispatchWorkflow(input: { repo: string; workflow: string; ref: string; inputs: Record<string, string> }): Promise<WorkflowDispatchResult> {
     if (!this.configured) throw new ScmNotConfiguredError(`dispatch ${input.workflow} in ${input.repo}`);
+    // No guard needed for 'git' here: GitScm refuses in its own words (ForgeOperationUnsupportedError), which
+    // is the honest version of a half-capable driver. The kernel does not re-state what the driver already said.
+    if (this.git !== undefined) return this.git.dispatchWorkflow({ ...input, appId: 0, privateKeyPem: '', installationId: 0 });
     return dispatchWorkflowRun({ appId: this.appId!, privateKeyPem: this.privateKeyPem!, installationId: this.installationId!, ...input });
   }
 }

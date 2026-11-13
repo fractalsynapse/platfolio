@@ -44,8 +44,8 @@ const credentials: RailwayCredentialSource = {
 };
 
 function loadManifest(): NonNullable<ReturnType<typeof parseCompose>['manifest']> {
-  const base = fs.readFileSync(path.join(root, 'selfhost/compose.yaml'), 'utf8');
-  const overlay = fs.readFileSync(path.join(root, 'selfhost/compose.prod.yaml'), 'utf8');
+  const base = fs.readFileSync(path.join(root, 'compose.yaml'), 'utf8');
+  const overlay = fs.readFileSync(path.join(root, 'compose.prod.yaml'), 'utf8');
   const parsed = parseCompose([base, overlay]);
   if (parsed.issues.length > 0) {
     console.error('  the renderer refused our own composition:');

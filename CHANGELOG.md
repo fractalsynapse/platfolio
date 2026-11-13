@@ -5,6 +5,51 @@ change; entries describe merged intent, not aspirations.
 
 "## [Unreleased]
 
+### Changed — platfolio is described exactly like a tenant (D50), and `selfhost/` is gone
+
+`selfhost/` was allowed to exist for one reason: to keep a hosted platform description from disturbing local
+development. That reason outlived its validity. The cost was architectural — platfolio's own deployment used a
+set of paths no tenant repository has, `open-install-pr.ts` defaulted `--platform selfhost` (which is how a dry
+run against an unrelated tenant reported platfolio's own platform), and the templates' shape was never the shape
+we actually ran. The project's first tenant is meant to be platfolio itself (09), and a tenant described
+differently is not that tenant.
+
+**Moved, with the same contents and the same semantics:**
+
+| Before | After |
+| --- | --- |
+| `selfhost/compose.yaml` | `compose.yaml` (root) — build context `../../` → `.` |
+| `selfhost/compose.prod.yaml` | `compose.prod.yaml` |
+| `selfhost/.platfolio/environment.yaml` | `.platfolio/environment.yaml` |
+| `docker-compose.yml` (root, an unrelated local stack) | `compose.dev.yaml` — now an **overlay** on the platform description |
+| `scripts/selfhost-deploy.ts`, `render-selfhost-overlay.ts` | `platform-deploy.ts`, `render-platform-overlay.ts` |
+| `pnpm run selfhost:plan / apply / overlay / overlay:check` | `pnpm run platform:…` |
+| `open-install-pr.ts --platform selfhost` | `--platform .` |
+
+The four platforms — the three templates and platfolio — now have **the same architecture**: `compose.yaml` +
+`compose.prod.yaml` + `.platfolio/`. Development is a layer on top (`-f compose.yaml -f compose.dev.yaml`),
+which is also the first time the overlay semantics the tenant guides describe have been exercised on our own
+service: the dev file resets `KC_HOSTNAME`, `KC_HEALTH_ENABLED` and `KC_PROXY_HEADERS` with `!reset` rather than
+leaving hosted values in the local topology, and adds the database container under the resource's own name
+(`main`), so the platform file's `references` resolve without rewriting.
+
+Recorded rather than smoothed over:
+
+- **I typed `postgres:17.11@sha256:8s` into the dev file** — a garbage digest that `docker compose config`
+  accepted syntactically. Caught by reading my own output before running it. A tag is correct there: the dev
+  overlay is never deployed, and #84's pin rule is about what platfolio ships.
+- **`instanceId: 'selfhost'` stays**, because it is not a path — the provider derives the Railway project name
+  `platfolio-selfhost` from it, and that is the live project. Explained at the call site so the next cleanup
+  does not "fix" it and start looking for a different project.
+- The instance id and the directory name being the same string was itself part of the confusion. D50 breaks the
+  coincidence; the comment records which one is load-bearing.
+- `templates/README.md` was rewritten after finding it documented `platforms/` — a directory deleted earlier
+  today — and listed `templates/` twice with contradictory meanings. That is what stale docs are for.
+
+**Verified, not assumed:** `docker compose -f compose.yaml -f compose.dev.yaml config` resolves (reset keys gone,
+commands and localhost env correct), the dev stack runs from the overlay, the smoke suites pass against it, and
+`platform:plan` builds the same hosted plan it did before the move.
+
 ### Changed — testing happens on real projects, and the throwaway tenant is gone (D49)
 
 The maintainer's rule, written into [AGENTS.md](AGENTS.md) and recorded as **D49**: every test that exercises a
@@ -467,7 +512,7 @@ written rather than what it means is a weaker gate than it looks.
   `PLATFOLIO_DB_URL` was set; with no database configured the plugin never ran and boot died with
   `required capability "store" is not present` -- true, and useless, because the cause was a missing line of
   configuration, not a missing plugin. The in-memory double is now selected explicitly and announced with a
-  warning ("this is development, not a deployment"), which is what [selfhost/compose.yaml](selfhost/compose.yaml)
+  warning ("this is development, not a deployment"), which is what [selfhost/compose.yaml](compose.yaml)
   and the docs already claimed happened.
 - **The image was missing two runtime directories.** `api/control-plane.openapi.yaml` is read at request time to
   validate responses, and `db/migrations` to migrate; neither was copied, so a built container 500'd with ENOENT

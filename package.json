@@ -36,10 +36,10 @@
     "lifecycle:smoke": "tsx scripts/smoke-lifecycle.ts",
     "email:smoke": "tsx scripts/email-smoke.ts",
     "invitations:smoke": "tsx scripts/smoke-invitations.ts",
-    "selfhost:plan": "tsx scripts/selfhost-deploy.ts",
-    "selfhost:apply": "tsx scripts/selfhost-deploy.ts --apply --strip-domains",
-    "selfhost:overlay": "tsx scripts/render-selfhost-overlay.ts",
-    "selfhost:overlay:check": "tsx scripts/render-selfhost-overlay.ts --check"
+    "platform:plan": "tsx scripts/platform-deploy.ts",
+    "platform:apply": "tsx scripts/platform-deploy.ts --apply --strip-domains",
+    "platform:overlay": "tsx scripts/render-platform-overlay.ts",
+    "platform:overlay:check": "tsx scripts/render-platform-overlay.ts --check"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

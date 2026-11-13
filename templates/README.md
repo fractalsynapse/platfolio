@@ -22,15 +22,19 @@ declaring obligations, and the smallest possible source.
    every template here, so an unparseable or unhostable scaffold fails CI rather than a tenant's first
    deployment.
 
-## Where this differs from the other template directories
+## Where these live, and what each one is for
 
-Three similar-looking paths, three different jobs — worth stating because they will be confused otherwise:
+Three names in this repository look interchangeable and are not — worth stating, because the fourth was a
+special case that made platfolio's own hosting architecture differ from the templates' (D50) and has been
+removed, and because a directory that no longer exists was described here for a whole release:
 
 | Path | Is | Changes when |
 | --- | --- | --- |
-| `templates/` | **source code a team forks**, published into repositories by `pnpm run templates:publish` | the scaffold stops being a good starting point |
-| `templates/` | **reference platform manifests** shipped with platfolio's catalog (D28), used as test fixtures | the manifest format changes |
-| `selfhost/` | **platfolio hosting itself** — a deployment description, not something a tenant forks | the control plane's own topology changes |
+| `templates/` | **the three reference platforms and the source a team forks**: `starter-web` (web/API), `starter-worker` (background worker), `shared-identity` (shared service), published into their own repositories by `pnpm run templates:publish` | the scaffold stops being a good starting point, or the manifest format changes — `packages/manifest/test/templates.test.ts` parses, validates and plans every one of them, so an unhostable scaffold fails CI rather than a tenant's first deployment |
+| root `compose.yaml`, `compose.prod.yaml`, `.platfolio/` | **platfolio hosting itself** — the same three kinds of file a tenant repository has, in the same place (D50) | the control plane's own topology changes; `pnpm run platform:plan` is how you find out before a provider call does |
+| `.agents/skills/` | agent procedures, inherited from the starter scaffold and left identical to their source | almost never, and never by editing them here |
+| ~~`platforms/`, `platform-templates/`, `samples/`, `selfhost/`~~ | **deleted** (Nov 2026) — see the CHANGELOG | a catalog that duplicated `templates/`, fixtures that lived outside the test tree, and a special-case hosting description |
 
-Only the first leaves this repository as source. The catalog (second) is generic on purpose and contains no
-platform identities; the third is deliberately excluded from it.
+The templates are also the test targets (D49): what platfolio hosts is what platfolio is tested against, plus
+itself. That is why there is no `platforms/` catalog any more — a second copy of the same three manifests, kept
+in step by hand, was the bug.

@@ -323,7 +323,8 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
       scoped('POST', '/api/v1/instances/{instanceId}/plan/from-repository', 'registerPlanFromRepository', 'instance.plan.write', async (scope, request, params) => {
         // #172's middle, and the reason the spec was written before this function existed: until now the only
         // way to record a plan was for a human to hold a checkout and run a script that read their own
-        // filesystem (`open-install-pr.ts --platform selfhost`). That default is still in the tool, which is
+        // filesystem (`open-install-pr.ts --platform .`, which was `--platform selfhost` until D50 moved the
+        // platform files to the root). That default is still in the tool, which is
         // exactly how a dry run against an unrelated tenant repository reported platfolio's own platform.
         const id = params.instanceId ?? '';
         const found = await scope.context.store.getInstance(id);

@@ -18,7 +18,7 @@ POST /api/v1/instances/{id}/dispatches/{dispatchId}/trigger   # GitHub runs the 
 
 Both require `ctx.scm`, which requires three variables in the deployment's own provider project:
 `PLATFOLIO_GITHUB_APP_ID`, `PLATFOLIO_GITHUB_INSTALLATION_ID`, `PLATFOLIO_GITHUB_PRIVATE_KEY`. The composition
-declares them by name (D4), so `selfhost:apply` fails until they are set -- and an unset platfolio answers
+declares them by name (D4), so `platform:apply` fails until they are set -- and an unset platfolio answers
 **503 source-control-not-configured** rather than inventing an empty plan.
 
 Failures worth knowing by their codes: `repository-not-installed` (403) means the App installation cannot see
@@ -27,7 +27,7 @@ the path or ref is wrong; `manifest-invalid` (400) quotes the renderer, usually 
 `workflow-not-found` (502 via the trigger) means the install PR was never merged, because GitHub enumerates
 workflows from the default branch only (#149).
 
-`open-install-pr.ts` still renders and opens the PR itself and still defaults `--platform selfhost`. That
+`open-install-pr.ts` still renders and opens the PR itself and still defaults `--platform .`. That
 remaining local-filesystem logic is the next thing to move behind an operation, not a design decision.
 
 ## Setting the control-plane endpoint (D47)

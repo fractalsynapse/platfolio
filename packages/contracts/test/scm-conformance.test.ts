@@ -67,6 +67,9 @@ function githubAdapter(): ScmUnderTests & { calls: Call[] } {
 
   return {
     label: 'github',
+    // GitHub reports the identical 404 for a missing path and an unresolvable ref, and omits `content`
+    // past 1 MiB. Declaring both is what stops the suite demanding a distinction the transport does not make.
+    capabilities: { workflowDispatch: true, inlineSizeLimit: true, refVersusPath: false },
     calls,
     async read(input) {
       return readRepositoryFile({ ...CREDS, repo: input.repo, ref: input.ref, path: input.path, fetch: fetchImpl });
@@ -104,6 +107,10 @@ function memoryAdapter(): ScmUnderTests {
   };
   return {
     label: 'memory',
+    // The double models GitHub's observed behaviour, so it declares GitHub's limits -- including the one it CANNOT
+    // reproduce: a real Contents call gives no ref-versus-path signal, while the double has it because its
+    // author wrote the two cases separately. That asymmetry is stated rather than hidden.
+    capabilities: { workflowDispatch: true, inlineSizeLimit: true, refVersusPath: true },
     async read(input) {
       return new MemoryScm(base).readRepositoryFile({ ...CREDS, repo: input.repo, ref: input.ref, path: input.path });
     },
