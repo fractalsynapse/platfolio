@@ -74,13 +74,6 @@ export const ManifestSchema = z.object({
      * rather than taste.
      */
     kind: z.enum(['web', 'worker']),
-    /**
-     * Set by the Compose translator when a document still declares the retired `archetype` (D51). The kind and
-     * mode rules do not bind such a document: the labels it chose were never the facts those rules read, so
-     * retro-applying them would convert a vocabulary migration into a wall of refusals against documents that
-     * predate it. They get `legacy-archetype` -- a warning naming what to write instead -- and nothing else.
-     */
-    legacyShape: z.boolean().optional(),
     mode: z.enum(['development', 'hosted']).default('development'),
     repository: z.string().url().optional(),
     license: z.string().min(1).default('Apache-2.0'),

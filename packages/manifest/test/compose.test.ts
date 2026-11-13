@@ -36,10 +36,10 @@ services:
     image: postgres:16
     x-platfolio: { managed: postgres }
 x-platfolio:
-  metadata: { name: demo, version: 1.0.0, title: Demo, summary: A demo platform }
+  metadata: { name: demo, version: 1.0.0, title: Demo, summary: A demo platform, kind: web, mode: development }
   environments:
     production: { enabled: true, branch: main }
-    staging: { enabled: false }
+    staging: { enabled: true, branch: staging }
     preview: { enabled: false }
   release: { registryImage: ghcr.io/acme/demo, tagPattern: "v*" }
 `;
@@ -257,7 +257,7 @@ test('entrypoint and command compose into one provider start command, in the ord
     '    expose: ["8080"]',
     '    x-platfolio: { public: true, domains: [app.example.com] }',
     'x-platfolio:',
-    '  metadata: { name: composed, version: 1.0.0, title: Composed, summary: s }',
+    '  metadata: { name: composed, version: 1.0.0, title: Composed, summary: s, kind: web, mode: hosted }',
     '  environments:',
     '    production: { enabled: true, branch: main }',
     '    staging: { enabled: false }',

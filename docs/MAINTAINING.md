@@ -30,6 +30,37 @@ workflows from the default branch only (#149).
 `open-install-pr.ts` still renders and opens the PR itself and still defaults `--platform .`. That
 remaining local-filesystem logic is the next thing to move behind an operation, not a design decision.
 
+## The environment registry (D52)
+
+`environment.yaml` at the repository root is the authoritative list of every variable platfolio reads or
+deploys:
+
+```yaml
+  - name: PLATFOLIO_GITHUB_PRIVATE_KEY
+    secret: true                       # a custody claim, not a guess
+    appliesTo: [staging, production]
+    deployedTo: railway:shared-variable
+    note: "..."
+```
+
+`pnpm run environment:registry` (inside `pnpm run check`, so inside `verify`) fails on:
+
+- a variable referenced in configuration and **not declared** -- including the ones that look harmless but carry
+  credentials, which is why `DATABASE_URL` and `PLATFOLIO_DB_URL` are marked secret;
+- a declaration **nothing references** any more, because a registry that accretes memorials stops being trusted;
+- a secret with a **literal value** in a production-bearing file (D4: commit the name, let the provider hold the
+  value). A development overlay may hold a stand-in, and the rule is structural rather than a whitelist of
+  friendly strings: any URL userinfo must be dev-shaped, because a whitelist is how a leak gets blessed;
+- a secret whose `deployedTo` names no location that could hold it.
+
+Regenerating the skeleton (`tsx scripts/check-environment-registry.ts --emit`) is safe only because the
+judgement calls live in that script's `HUMAN` table, not in the file: hand-edit the output and the next
+`--emit` silently loses it.
+
+Scope is deliberate. Prose, fixtures and spikes are excluded -- an early pass scanned TypeScript for YAML keys
+and filled the registry with the provider's deployment-status vocabulary (`PENDING`, `NEEDS_APPROVAL`). A
+registry that invents variables nobody can set is worse than none, because people stop reading it.
+
 ## Setting the control-plane endpoint (D47)
 
 Two places ask where the control plane lives, and neither has a default any more:

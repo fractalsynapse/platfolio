@@ -36,7 +36,9 @@ const PINNED_COMPOSE = [
   '      public: true',
   '      domains: [web.example.com]',
   'x-platfolio:',
-  '  metadata: { name: widget, version: 1.0.0, title: Widget, summary: A tenant platform }',
+  // kind and mode are required (D51) -- and this fixture failing was the schema doing its job: the API
+  // reported the refusal rather than building a plan from a document that never said what it was.
+  '  metadata: { name: widget, version: 1.0.0, title: Widget, summary: A tenant platform, kind: web, mode: hosted }',
   // All three environments are required by the schema, and `release` is what makes a first-party image
   // resolvable. A fixture that omits them is not a tenant document -- which the API told me, loudly, by
   // refusing to build a plan from it.

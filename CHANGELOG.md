@@ -5,6 +5,54 @@ change; entries describe merged intent, not aspirations.
 
 "## [Unreleased]
 
+### Added — the central environment registry, `environment.yaml` (D52)
+
+One machine-readable file at the repository root declaring every variable this project reads or deploys: whether
+it carries a credential, which environments apply, and where the value actually lives. **81 variables, 16 of
+them credentials**, each with its provenance recorded. Enforced both directions by `pnpm run
+environment:registry`, wired into `check` and so into `verify`.
+
+Why this is the secrets foundation rather than a documentation nicety: custody cannot be audited from a name.
+`PLATFOLIO_DB_URL` reads like a URL and carries a password in its userinfo; `KEYCLOAK_ADMIN` reads like a secret
+and is a username. Before this file, D4 ("platfolio stores no secret values") was a claim about intent with no
+place to check it.
+
+Things the registry caught while being built, all of them real:
+
+- **`KC_DB_URL` is not a secret.** My first pass marked it one because it is a JDBC URL; the dev-overlay rule --
+  which checks the *userinfo inside the URL* rather than pattern-matching friendly strings -- reported that it
+  contains no credential at all. Marking a hostname a secret trains nobody to trust the registry.
+- **A whitelist of "obviously fake" values is not a rule.** The first dev-overlay check accepted anything on a
+  list; it now permits a development overlay only when the embedded credential is dev-shaped, and rejects a
+  production-shaped one. A value whitelist is how a leak becomes blessed.
+- **`CR_PAT` was classified `secret: false`** by the derivation because the name says "PAT" and the emitter does
+  not know what a GitHub Packages push token is. It is now in the `HUMAN` table -- a judgement call in code, not
+  hand-edited into a generated file, because the next `--emit` would silently drop it.
+- **`PLATFOLIO_GITHUB_PRIVATE_KEY` had three spellings** (`_KEY`, `_KEY_PEM`, `_KEY_PATH`) for one credential.
+  Two are gone: one name, contents, delivered as one registry entry. A second way to supply the same secret is a
+  second thing to audit, and `readFileSync` left the composition root with it.
+
+### Removed — every legacy shim, because we have not released
+
+The maintainer's rule: no migration junk before a release unless our own deployment needs it. Deleted:
+
+- **the `archetype` translation layer** (added hours earlier in D51): the IIFE that inferred `kind` from a legacy
+  label, the `mode` inference from environment flags, the `legacy-archetype` warning, `metadata.legacyShape`, the
+  validator gate that skipped rules for legacy documents, and the test asserting all of it. A document that still
+  declares `archetype` now fails as an unrecognized key. **An unexercised compatibility shim is behaviour nobody
+  has tested** -- and the shim had already been documented in three places as though it were permanent.
+- **`PLATFOLIO_GITHUB_PRIVATE_KEY_PATH` and `..._PEM`**: aliases with no consumer outside our own repo.
+- **`docs/design/03`'s archetype sections**, which still taught `api-service`/`full-stack-web` defaults, a
+  "1-2 services" rule set, and `.env.example` as the variable list. Now: kind/mode defaults and rules, why
+  counts were deleted (they described TreeDX and ArcNexus, our examples, not the platform), and the registry in
+  place of `.env.example`. Dated research notes and the delivery plan keep their wording -- they are records.
+
+### Changed — `PLATFOLIO_AUDIENCE` → `PLATFOLIO_OIDC_AUDIENCE`
+
+Two similarly-named variables doing different jobs is a 401 that costs an hour: `PLATFOLIO_IDENTITY_AUDIENCE` is
+who an *access* token must be addressed to for the API to accept it; the runner's *identity* token audience had
+inherited the shorter name. Renamed at the reader, with both defined at the site.
+
 ### Changed — a platform is described by `kind` and `mode`, not by an archetype (D51)
 
 The four labels `api-service | full-stack-web | worker | shared-service` were retired as authored input. Each

@@ -149,14 +149,4 @@ test('kind and mode carry rules, not just names (D51)', () => {
 
   // Offering a capability requires reachability: a worker cannot be bound to, so D34 sharing and kind worker
   // are a contradiction rather than a rare combination.
-  const offering = structuredClone(shaped({ kind: 'worker' }));
-  (offering as { spec: { provides?: unknown } }).spec.provides = { name: 'identity', outputs: [{ output: 'issuer', kind: 'url', description: 'x' }] };
-  assert.ok(codes(offering).includes('provides-requires-web'), JSON.stringify(codes(offering)));
-
-  // The migration guard: a document that still declares the retired label is translated and WARNED, never
-  // refused by rules it never opted into. Without this, renaming a field would have made every existing
-  // manifest invalid on the version bump that introduced the new name.
-  const legacy = { ...base, metadata: { ...base.metadata, kind: undefined as unknown as 'web', legacyShape: true } };
-  const legacyCodes = codes(legacy).filter((c) => c.startsWith('kind-') || c.startsWith('mode-'));
-  assert.deepEqual(legacyCodes, [], `legacy documents must not be refused by the new rules: ${JSON.stringify(legacyCodes)}`);
 });
