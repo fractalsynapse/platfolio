@@ -69,6 +69,11 @@ services:
         - { name: PLATFOLIO_GITHUB_APP_ID, source: shared-variable }
         - { name: PLATFOLIO_GITHUB_INSTALLATION_ID, source: shared-variable }
         - { name: PLATFOLIO_GITHUB_PRIVATE_KEY, source: shared-variable }
+      # `public: true` is what makes a service reachable and its domains actionable; it was here and my D50
+      # secrets edit swallowed it along with the line it replaced, which dropped api.platfolio.dev out of the
+      # plan silently -- two services, one database, and only one hostname. The renderer did not complain,
+      # because nothing is malformed about a private service that names a domain: it is simply not hosted.
+      public: true
       # The user's direction is that platfolio lives at platfolio.dev. Declared here, and #172 measures whether
       # it actually resolves rather than asserting it: E27 measured that a host whose zone we cannot edit sticks
       # at `applying` forever with no certificate -- which looks like progress and is not. platfolio.dev's zone

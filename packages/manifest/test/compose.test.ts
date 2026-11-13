@@ -169,7 +169,14 @@ test('platfolio can describe and plan its own deployment (step 7, #172)', () => 
   // uses, and each selects its own schema so neither can move the other's migrations.
   assert.deepEqual(production.databases.map((d) => `${d.name}:${d.kind}`), ['main:postgres']);
   for (const [service, variable] of [['api', 'PLATFOLIO_DB_URL'], ['identity', 'KC_DB_URL_HOST'], ['identity', 'KC_DB_PASSWORD']] as const) {
-    const refs = byName.get(service)?.references ?? [];
+    // The hostname rule that made this assertion necessary: during D50 an edit to the composition silently
+  // removed `public: true` from the api service, and the plan quietly dropped api.platfolio.dev -- a valid
+  // plan with one fewer reachable service, and nothing in the suite noticed. Both of platfolio's own hosts
+  // must appear, because losing one is indistinguishable from never having wanted it.
+  const hosted = (plan.environments[0]?.domains ?? []).map((d) => d.host).sort();
+  assert.deepEqual(hosted, ['api.platfolio.dev', 'auth.platfolio.dev'], `platfolio's own plan must expose both hosts, got ${JSON.stringify(hosted)}`);
+
+  const refs = byName.get(service)?.references ?? [];
     assert.ok(refs.some((r) => r.variable === variable && r.database === 'main'), `${service} is not wired to the shared database`);
     // #198, asserted rather than commented: a driver that needs components gets components, each naming a
     // SOURCE variable on the database service, and nothing is handed a postgres:// URL it cannot parse.
