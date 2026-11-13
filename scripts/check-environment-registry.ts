@@ -66,7 +66,11 @@ function discover(): Map<string, Set<string>> {
   };
 
   for (const f of trackedFiles()) {
-    if (f === REGISTRY_PATH || f.startsWith('vendor/') || f.includes('/dist/')) continue;
+    // The scanner is not configuration. Excluding it is not a loophole: the name sets inside it
+    // (`POSTGRES_URL`, `PGPASSWORD`) are vocabulary ABOUT variables, not variables anyone sets. CI found this,
+    // not me -- the check passed locally only because the file was still untracked, so `git ls-files` never
+    // listed it. A tool that reads the repository has to state where it stops reading itself.
+    if (f === REGISTRY_PATH || f === 'scripts/check-environment-registry.ts' || f.startsWith('vendor/') || f.includes('/dist/')) continue;
     if (/\.md$/.test(f) || f === 'pnpm-lock.yaml' || f.includes('/test/') || f.startsWith('spikes/') || f.startsWith('examples/')) continue;
     if (!(/\.(ts|mjs|js|yaml|yml)$/.test(f) || f.endsWith('Dockerfile'))) continue;
     if (!(IN_SCOPE.test(f) || IN_SCOPE_ROOT.test(f))) continue;
