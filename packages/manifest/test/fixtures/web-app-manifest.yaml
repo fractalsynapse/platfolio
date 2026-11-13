@@ -6,7 +6,7 @@ metadata:
   title: ExampleWebApp
   summary: Knowledge management service that unifies a collection of Git repositories into an AI context generation machine.
   archetype: api-service
-  repository: https://github.com/fractalsynapse/example-web-app
+  repository: https://github.com/platfolio-fixtures/example-web-app
   license: Apache-2.0
   architectures: [amd64, arm64]
 spec:
@@ -31,7 +31,7 @@ spec:
       - { name: index-cache, service: worker, mountPath: /var/cache/example-web-app, sizeGB: 20 }
   services:
     api:
-      image: ghcr.io/fractalsynapse/example-web-app-api:1.4.0
+      image: ghcr.io/platfolio-fixtures/example-web-app-api:1.4.0
       digest: sha256:1111111111111111111111111111111111111111111111111111111111111111
       port: 8080
       healthPath: /healthz
@@ -49,7 +49,7 @@ spec:
       domains: [api.example.com]
       public: true
     worker:
-      image: ghcr.io/fractalsynapse/example-web-app-worker:1.4.0
+      image: ghcr.io/platfolio-fixtures/example-web-app-worker:1.4.0
       digest: sha256:2222222222222222222222222222222222222222222222222222222222222222
       port: 9090
       healthPath: /ready
