@@ -89,7 +89,9 @@ const installed = renderInstallPullRequest(manifest, {
   workspaceId,
   actionRepo: 'fractalsynapse/platfolio',
   actionSha,
-  platfolioUrl: flag('url', 'https://status-production-54d3.up.railway.app')!,
+  // D47: no default control-plane host. A committed default silently points every install this tool opens at
+// whoever wrote it first -- which is exactly how a generated Railway hostname reached a workflow file.
+platfolioUrl: requireControlPlaneUrl(),
 });
 
 const environments = ['production', ...(manifest.spec.environments.staging.enabled ? ['staging'] : [])];
@@ -178,4 +180,18 @@ try {
 } finally {
   await revokeInstallationAccessToken({ token: minted.token });
   console.log('  installation token revoked');
+}
+
+/**
+ * `--url=` or `PLATFOLIO_URL`, and nothing else. The message names both, because whoever runs this is usually
+ * self-hosting and needs "where do I point it", not "argument missing".
+ */
+function requireControlPlaneUrl(): string {
+  const url = flag('url') ?? process.env.PLATFOLIO_URL?.trim();
+  if (!url) {
+    console.error('open-install-pr: no control-plane URL. Pass --url=https://api.<your-domain> or set PLATFOLIO_URL.');
+    console.error('  There is deliberately no default: a committed one makes every install PR point at the author\'s deployment.');
+    process.exit(1);
+  }
+  return url;
 }

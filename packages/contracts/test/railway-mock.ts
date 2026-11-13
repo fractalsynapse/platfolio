@@ -486,8 +486,8 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
                       dnsRecords: [{
                         fqdn: domain, hostlabel: label, zone,
                         recordType: 'DNS_RECORD_TYPE_CNAME',
-                        requiredValue: '1ggsepht.up.railway.app',
-                        ...(verified ? { currentValue: '1ggsepht.up.railway.app' } : {}),
+                        requiredValue: 'verify-target.up.railway.app',
+                        ...(verified ? { currentValue: 'verify-target.up.railway.app' } : {}),
                         status: verified ? 'DNS_RECORD_STATUS_PROPAGATED' : 'DNS_RECORD_STATUS_REQUIRES_UPDATE',
                         purpose: 'DNS_RECORD_PURPOSE_TRAFFIC_ROUTE',
                       }],

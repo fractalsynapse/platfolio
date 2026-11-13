@@ -5,6 +5,37 @@ change; entries describe merged intent, not aspirations.
 
 "## [Unreleased]
 
+### Changed — an environment's endpoints are configuration, not committed source (D47)
+
+Tracked files declared **generated Railway hostnames** in two shapes: the managed workflow pointed installs at
+`{service}-{environment}-{hash}.up.railway.app`, and a bare routing hash had been copied out of a measured API
+response into a test fixture and three research notes. A hostname of that shape identifies **one deployment** --
+it changes when the service moves, and it is not something a tenant can be told to rely on -- so it cannot be
+how a repository says where its control plane is.
+
+- `.github/workflows/platfolio-managed.yml` reads **`vars.PLATFOLIO_URL`**, behind a guard step that names the
+  variable when it is unset (an empty URL failing inside the action is a worse first message).
+- `scripts/open-install-pr.ts` has **no default URL**: `--url=` or `PLATFOLIO_URL`, and an error saying both. A
+  committed default points every install PR at whoever wrote it -- which is how the first one got there.
+- **`checkCommittedEndpoints`** in `check-project.ts` fails on `{service}-{env}-{hash}.up.railway.app` and bare
+  `{hash}.up.railway.app` in any tracked file. Falsified both ways: injecting the real host into the workflow
+  gives exit 1; appending a bare-hash host to a doc line gives exit 1; removing them returns 0. Synthetic
+  sentinels (`verify-target.up.railway.app`) and the provider's `.up.railway.app` **suffix** logic stay allowed
+  on purpose -- the rule names a deployment, not the platform's vocabulary.
+- Fixtures and research notes keep their structure with the host replaced by `<generated-railway-host>`. None of
+  those findings depended on the specific random string, and the live value is one provider read away anyway.
+  CHANGELOG entries and dated delivery notes were redacted the same way, not rewritten: history stays honest
+  about what happened without carrying an address.
+- Recorded as **D47** with a layout row in AGENTS and an operator section in [docs/MAINTAINING.md](docs/MAINTAINING.md).
+
+**Two of my own mistakes, both in the making of this change.** My first "falsification" of the new gate was
+worthless: the injection string had 12 spaces where the file has 10, so nothing was injected, exit was 0, and I
+nearly recorded a passing test that had never run -- asserting the anchor before mutating is what makes
+falsification mean anything. Then restoring a doc with `git checkout` discarded my own uncommitted redactions in
+that same file and brought the hostname back, which the gate correctly reported. The tool that caught it was
+written ten minutes earlier.
+
+
 ### Added — reference outputs you can trust (#198)
 
 - **`references[].output` is now verified instead of hoped for.** The mechanism already existed — it names
@@ -1148,7 +1179,7 @@ is the dashboard's.
 
 - **M1 step 6 closed: platfolio's own stack deployed by the provider and serving publicly.**
   `applyPlan` with `ghcr.io/fractalsynapse/platfolio-status-api:staging` + resolved digest produced a
-  `live` instance at `status-production-54d3.up.railway.app`, HTTPS with a Let's Encrypt certificate,
+  `live` instance at `<generated-railway-host>`, HTTPS with a Let's Encrypt certificate,
   `/version` reporting the deployed commit and the provider contract, and a re-apply that changed nothing.
   The certificate state came from reading `syncStatus` back, not from hostname inference. Sequence and the
   two pull-verification mistakes I made getting there are in

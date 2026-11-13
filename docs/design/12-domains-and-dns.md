@@ -72,7 +72,7 @@ Per hostname, one row, always with the value they must set and what we currently
 | State | Shown | Cause and next action |
 | --- | --- | --- |
 | `checking` | "Waiting for DNS" | published but not yet visible to the provider; TTL-sized patience, "check now" |
-| `record-missing` | expected value, observed empty | publish the CNAME `probe → 1ggsepht.up.railway.app` in zone `fractalsynapse.com` |
+| `record-missing` | expected value, observed empty | publish the CNAME `probe → <generated-railway-host>` in zone `fractalsynapse.com` |
 | `record-wrong` | expected vs observed | both values shown; the common cause is pointing at the service hostname instead of the routing host |
 | `ownership-pending` | TXT not seen | publish `_railway-verify.<label>` TXT; some issuers need it, some do not |
 | `issuing` | "Certificate in progress", elapsed | no action; do not re-publish |

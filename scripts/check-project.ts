@@ -204,6 +204,41 @@ async function checkCredentialHygiene(): Promise<string[]> {
   return findings;
 }
 
+/**
+ * D47: a running environment's endpoints are configuration, not source.
+ *
+ * Two shapes of Railway-generated hostname are caught: `{service}-{environment}-{hash}` and the bare `{hash}`
+ * routing target. Both were committed here -- the first as a workflow's control-plane URL, the second copied
+ * out of a measured API response into a test fixture and a research note. Neither is usable by a tenant, and a
+ * repository carrying one cannot be pointed at another platfolio without editing files.
+ *
+ * Synthetic sentinels (`verify-target.up.railway.app`) and the provider's own `.up.railway.app` SUFFIX
+ * logic are not caught on purpose: the suffix is vocabulary and the sentinels are ours. The rule targets a
+ * deployment's identity, not the platform's naming scheme.
+ */
+const GENERATED_HOST = /\b[a-z0-9]+-[a-z0-9]+-[0-9a-f]{6,}\.up\.railway\.app\b|\b[a-z0-9]{8}\.up\.railway\.app\b/;
+
+async function checkCommittedEndpoints(): Promise<string[]> {
+  const findings: string[] = [];
+  const out = spawnSync('git', ['ls-files'], { cwd: ROOT, encoding: 'utf8' });
+  if (out.status !== 0) return ['git ls-files failed; cannot verify committed endpoints'];
+  for (const f of out.stdout.split('\n').filter(Boolean)) {
+    if (f.startsWith('vendor/') || /\.(png|jpg|gif|woff2?|lock)$/i.test(f)) continue;
+    let text: string;
+    try {
+      text = await fs.readFile(path.join(ROOT, f), 'utf8');
+    } catch {
+      continue;
+    }
+    if (!text.includes('up.railway.app')) continue;
+    for (const [i, line] of text.split('\n').entries()) {
+      const hit = line.match(GENERATED_HOST);
+      if (hit) findings.push(`${f}:${String(i + 1)} commits a generated Railway hostname (${hit[0]}) -- an endpoint belonging to a running environment is configuration: a repository variable or an operator-supplied URL (D47)`);
+    }
+  }
+  return findings;
+}
+
 async function checkWorkflows(): Promise<string[]> {
   const problems: string[] = [];
   const dir = path.join(ROOT, '.github', 'workflows');
@@ -316,12 +351,14 @@ const docProblems = await checkDocuments(files);
 const { skills, problems: skillProblems } = await checkSkills();
 const workflowProblems = await checkWorkflows();
 const hygieneProblems = await checkCredentialHygiene();
+const endpointProblems = await checkCommittedEndpoints();
 const actionProblems = await checkActionManifests();
 
-const all = [...docProblems, ...skillProblems, ...workflowProblems, ...actionProblems, ...hygieneProblems];
+const all = [...docProblems, ...skillProblems, ...workflowProblems, ...actionProblems, ...hygieneProblems, ...endpointProblems];
 say(`skills checked: ${skills.length} (${skills.map((s) => s.name).join(', ')})`);
 say(`workflows linted: ${workflowProblems.length === 0 ? 'clean' : `${workflowProblems.length} problem(s)`}`);
 say(`action manifests checked: ${actionProblems.length === 0 ? 'clean' : `${actionProblems.length} problem(s)`}`);
+say(`committed endpoints: ${endpointProblems.length === 0 ? 'no generated hostnames in tracked files' : `${endpointProblems.length} problem(s)`}`);
 
 if (all.length) {
   console.error(`\n${all.length} problem(s):`);

@@ -10,7 +10,7 @@ mechanism*, not that a real platform boots — stated so the difference survives
 plan: production services=api+worker db=app-db buckets=1 volumes=1
 40s verified=false  services=[api:live, worker:live]
     failures=[secret-unavailable@environments.production.services.api.secrets.APP_API_SIGNING_KEY]
-    domains=[["api-production-3c177.up.railway.app","issued"]]
+    domains=[["<generated-railway-host>","issued"]]
     notes=[database-provisioning-started, volume-mount-unobservable, bucket-region-ignored]
 41s readState: api live, worker live, app-db live
 ```
