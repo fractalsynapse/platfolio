@@ -81,6 +81,13 @@ services:
       PLATFOLIO_SCM_DRIVER: git
       PLATFOLIO_GIT_HOST: github.com
       PLATFOLIO_GIT_TRANSPORT: https
+      # Forwarded from the host, and the reason is that the driver deliberately runs git with
+      # `credential.helper=` disabled: ambient helpers are how a service works on a laptop and then fails in a
+      # container, so the token is passed explicitly instead of discovered. Start the stack with
+      #   PLATFOLIO_GIT_TOKEN=$(gh auth token) docker compose -f compose.yaml -f compose.dev.yaml up -d
+      # and an unset token is not an error -- it is the driver's own message about which remote it could not
+      # read and why.
+      PLATFOLIO_GIT_TOKEN: ${PLATFOLIO_GIT_TOKEN:-}
     ports:
       - '8082:8080'
     volumes:

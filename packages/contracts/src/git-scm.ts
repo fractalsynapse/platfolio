@@ -49,6 +49,18 @@ export interface GitScmConfig {
   timeoutMs?: number;
 }
 
+/**
+ * The git binary is not present. This is a packaging fact about the deployment, not a fact about the
+ * repository, and it must never be dressed up as one: the first version classified it as a fetch failure, which
+ * told an operator to go check credentials on a container that simply had no git.
+ */
+export class GitUnavailableError extends Error {
+  constructor(binary: string) {
+    super(`git is not available to this process: the "${binary}" binary was not found (ENOENT). The git driver shells out to it -- install it in the image (apps/control-plane/Dockerfile does) or select the github-app driver instead.`);
+    this.name = 'GitUnavailableError';
+  }
+}
+
 /** A forge-level operation asked of a driver that speaks only git. */
 export class ForgeOperationUnsupportedError extends Error {
   readonly code = 'forge-operation-unsupported';
@@ -163,6 +175,9 @@ export class GitScm {
 
   private fetchFailure(error: Error, request: Pick<RepositoryFileRequest, 'repo' | 'ref'>, remote: string): RepositoryReadError {
     const text = this.mask(error.message);
+    // The classification order matters: ENOENT means the transport itself is missing, and reaching the
+    // repository-wording matches below would turn "no git binary" into "check your credentials".
+    if (/ENOENT/.test(text) || (error as { code?: string }).code === 'ENOENT') throw new GitUnavailableError(this.config.gitPath);
     if (/couldn't find remote ref|not our ref|reference is not a tree|^$/.test(text)) {
       return new RepositoryReadError({ kind: 'ref-not-found', detail: `${request.repo} has no ref "${request.ref}" (${this.mask(remote)})` }, 404);
     }
@@ -191,7 +206,12 @@ export class GitScm {
     try {
       return execFileSync(this.config.gitPath, args, { cwd, encoding: 'utf8', timeout: this.config.timeoutMs, stdio: ['ignore', 'pipe', 'pipe'] }).toString();
     } catch (error) {
-      const e = error as { message?: string; stderr?: string; stdout?: string };
+      const e = error as { code?: string; message?: string; stderr?: string };
+      if (e.code === 'ENOENT') {
+        throw new GitUnavailableError(this.config.gitPath);
+      }
+      if (false) {
+      }
       throw new Error(this.mask(`${e.message ?? 'git failed'}\n${e.stderr ?? ''}`));
     }
   }

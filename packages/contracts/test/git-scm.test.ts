@@ -158,3 +158,16 @@ test('the git driver reads a real GitHub repository over HTTPS', { skip: process
   assert.match(file.content.slice(0, 200), /^openapi:/, file.content.slice(0, 80));
   assert.equal(file.sha, blobSha(file.content), 'the live forge and git\'s own computation must agree');
 });
+
+test('a missing git binary is reported as the dependency it is, not as a repository problem', async () => {
+  const scm = new GitScm({ gitPath: 'platfolio-git-binary-that-does-not-exist' });
+  await assert.rejects(
+    () => scm.readRepositoryFile({ repo: 'file:///tmp/whatever', ref: 'main', path: 'compose.yaml' }),
+    (error: unknown) => {
+      const message = (error as Error).message;
+      assert.match(message, /git is not available|ENOENT/i, message);
+      assert.ok(!/does not exist, or it needs credentials/.test(message), `the failure was dressed up as a permissions problem: ${message.slice(0, 160)}`);
+      return true;
+    },
+  );
+});
