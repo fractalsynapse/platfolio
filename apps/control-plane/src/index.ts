@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { createKernel, disposeKernel } from '@platfolio/kernel';
 import { EndpointKeySource, IdentityConfigSchema } from '@platfolio/contracts';
 import { ROUTE_MANIFEST } from './routes.ts';
@@ -48,6 +49,20 @@ export function configFromEnv(env: NodeJS.ProcessEnv): BootConfig {
           ...(env.PLATFOLIO_MAILPIT_URL === undefined ? {} : { baseUrl: env.PLATFOLIO_MAILPIT_URL }),
         },
       }),
+      // Source control (D22). Installed only when the app credentials exist; otherwise `ctx.scm` is the
+      // `none` driver and the two repository operations answer 503 rather than pretending to have read a
+      // tenant's platform. Same rule as email: a capability that may be absent is a value, never a hole in
+      // the route table -- and a hole there is how "not configured" becomes a 404 on a real endpoint.
+      ...(env.PLATFOLIO_GITHUB_APP_ID === undefined || env.PLATFOLIO_GITHUB_INSTALLATION_ID === undefined
+        ? {}
+        : {
+            scm: {
+              driver: 'github-app' as const,
+              appId: Number(env.PLATFOLIO_GITHUB_APP_ID),
+              installationId: Number(env.PLATFOLIO_GITHUB_INSTALLATION_ID),
+              ...(githubPrivateKey(env) === undefined ? {} : { privateKeyPem: githubPrivateKey(env)! }),
+            },
+          }),
   };
 }
 
@@ -120,4 +135,19 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       process.stderr.write(`control-plane: cannot start: ${(error as Error).message}\n`);
       process.exit(1);
     });
+}
+
+/**
+ * The app signing key, read here at the composition root and nowhere else.
+ *
+ * Contents via PLATFOLIO_GITHUB_PRIVATE_KEY, or a mounted path via PLATFOLIO_GITHUB_PRIVATE_KEY_PATH -- the
+ * two shapes deployments actually offer. The value is never logged and never returned by an endpoint; in the
+ * manifest the key appears only as a secret NAME (D4), which is why the composition root, not the compose
+ * file, is where a value is ever touched.
+ */
+function githubPrivateKey(env: NodeJS.ProcessEnv): string | undefined {
+  if (env.PLATFOLIO_GITHUB_PRIVATE_KEY !== undefined) return env.PLATFOLIO_GITHUB_PRIVATE_KEY;
+  const path = env.PLATFOLIO_GITHUB_PRIVATE_KEY_PATH;
+  if (path === undefined) return undefined;
+  return readFileSync(path, 'utf8');
 }

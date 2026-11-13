@@ -3,6 +3,9 @@ import {
   AttestationSchema, checkBindingPolicy, CONTRACT_NAME, CONTRACT_VERSION, DispatchIntentSchema, InstanceSchema,
   reasonOf, decide, checkInvitationAcceptance, bindingImpact, normaliseName, rollupState, type BindingRecord, type CapabilityOffer, type PolicyAction, type VerifiedClaims,
 } from '@platfolio/contracts';
+import { RepositoryReadError } from '@platfolio/contracts';
+import { ScmNotConfiguredError } from '@platfolio/kernel';
+import { buildPlan, parseCompose } from '@platfolio/manifest';
 import type { ExtensionDescriptor, KernelContext, Request, Response_, RouteDefinition } from '@platfolio/kernel';
 import { badRequest, bearerToken, notFound, send, unauthorized } from './respond.ts';
 
@@ -202,7 +205,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
 
   const instances: ExtensionDescriptor = {
     id: 'instances',
-    requires: ['store', 'identity'],
+    requires: ['store', 'identity', 'scm'],
     routes: [
       {
         method: 'GET', path: '/api/v1/instances', operationId: 'listInstances',
@@ -317,12 +320,102 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
         await scope.context.store.appendAudit({ actorKind: 'user', actorRef: scope.personId, action: 'plan.register', target: params.instanceId ?? '', detail: { planHash: hash.slice(0, 12) } });
         return send('putPlan', 200, { instanceId: params.instanceId ?? '', planHash: hash });
       }),
+      scoped('POST', '/api/v1/instances/{instanceId}/plan/from-repository', 'registerPlanFromRepository', 'instance.plan.write', async (scope, request, params) => {
+        // #172's middle, and the reason the spec was written before this function existed: until now the only
+        // way to record a plan was for a human to hold a checkout and run a script that read their own
+        // filesystem (`open-install-pr.ts --platform selfhost`). That default is still in the tool, which is
+        // exactly how a dry run against an unrelated tenant repository reported platfolio's own platform.
+        const id = params.instanceId ?? '';
+        const found = await scope.context.store.getInstance(id);
+        if (found.ok === false) return notFound('instance', id);
+        const instance = found.value;
+        const pinned = instance.templateRef;
+        if (!pinned) {
+          return {
+            status: 400,
+            body: {
+              error: 'no-pinned-source',
+              message: `instance "${id}" cites no templateRef {repo, commitSha}; platfolio builds plans only from a pinned commit (D29) -- a branch name would let a plan be built from content that no longer exists by the time it is applied`,
+            },
+          };
+        }
+        const body = bodyOf<{ path?: string; overlayPath?: string }>(request);
+        if (body.ok === false) return badRequest(body.error);
+        const mainPath = body.value?.path ?? 'compose.yaml';
+        const overlayPath = body.value?.overlayPath ?? 'compose.prod.yaml';
+
+        const files: { path: string; blobSha: string; size: number }[] = [];
+        const docs: string[] = [];
+        try {
+          const main = await scope.context.scm.readFile({ repo: pinned.repo, ref: pinned.commitSha, path: mainPath });
+          docs.push(main.content);
+          files.push({ path: main.path, blobSha: main.sha, size: main.size });
+          // A missing overlay is a legitimate state: every service may already carry its own digest. Any
+          // OTHER read failure is not, and propagates -- "it is not there" and "we could not read it" send an
+          // operator to different places, which is the whole lesson of #130.
+          try {
+            const overlay = await scope.context.scm.readFile({ repo: pinned.repo, ref: pinned.commitSha, path: overlayPath });
+            docs.push(overlay.content);
+            files.push({ path: overlay.path, blobSha: overlay.sha, size: overlay.size });
+          } catch (error) {
+            if (!(error instanceof RepositoryReadError) || error.failure.kind !== 'not-found') throw error;
+          }
+        } catch (error) {
+          if (error instanceof ScmNotConfiguredError) return { status: 503, body: { error: error.code, message: error.message } };
+          if (error instanceof RepositoryReadError) {
+            const detail = error.failure.detail.slice(0, 400);
+            if (error.failure.kind === 'forbidden') return { status: 403, body: { error: 'repository-not-installed', message: detail } };
+            if (error.failure.kind === 'not-a-file' || error.failure.kind === 'too-large') return { status: 400, body: { error: `manifest-${error.failure.kind}`, message: detail } };
+            return { status: 400, body: { error: 'source-unreadable', message: detail } };
+          }
+          return { status: 400, body: { error: 'source-unreadable', message: (error as Error).message.slice(0, 400) } };
+        }
+
+        const parsed = parseCompose(docs);
+        if (!parsed.manifest) {
+          return {
+            status: 400,
+            body: {
+              error: 'manifest-invalid',
+              // Quoted from the renderer rather than paraphrased: it already names the service and the reason
+              // (#84's unpinned refusal is the one an operator most needs to read unchanged), and a second
+              // voice between a tenant and that reason is how a message becomes a guess.
+              message: parsed.issues.map((issue) => `${issue.path}: ${issue.message}`).join('; ').slice(0, 500),
+            },
+          };
+        }
+
+        const plan = buildPlan(parsed.manifest, { instanceId: id, teamId: instance.teamId });
+        // One hash, one home. `plan.planHash` is handed to the store exactly as PUT …/plan demands a caller
+        // supply it; re-deriving a digest in the API is the bug that made every honest attestation fail 400.
+        const stored = await scope.context.store.putPlan(id, plan, plan.planHash);
+        if (stored.ok === false) return { status: 400, body: { error: stored.code, message: reasonOf(stored) } };
+        await scope.context.store.updateInstanceState(id, 'pending', { desiredPlanHash: plan.planHash });
+        await scope.context.store.appendAudit({
+          actorKind: 'user', actorRef: scope.personId, action: 'plan.register', target: id,
+          // `detail` is a record, not a sentence: an audit row that must be read by eye is a log line wearing a
+          // schema. Values are names and digest prefixes only -- never a token, never a key.
+          detail: { repo: pinned.repo, commit: pinned.commitSha.slice(0, 12), files: files.map((f) => f.path).join(', ') },
+        });
+        const warnings = parsed.issues.map((issue) => ({ code: 'compose-issue', message: `${issue.path}: ${issue.message}` }));
+        return send('registerPlanFromRepository', 200, {
+          instanceId: id,
+          planHash: plan.planHash,
+          source: { repo: pinned.repo, ref: pinned.commitSha, files },
+          summary: {
+            services: plan.environments.reduce((n, e) => n + e.services.length, 0),
+            databases: plan.environments.reduce((n, e) => n + e.databases.length, 0),
+            environments: plan.environments.map((e) => e.name),
+          },
+          ...(warnings.length ? { warnings } : {}),
+        });
+      }),
     ],
   };
 
   const dispatches: ExtensionDescriptor = {
     id: 'dispatches',
-    requires: ['store', 'identity'],
+    requires: ['store', 'identity', 'scm'],
     routes: [
       scoped('POST', '/api/v1/instances/{instanceId}/dispatches', 'createDispatch', 'instance.dispatch', async (scope, request, params) => {
         const instanceId = params.instanceId ?? '';
@@ -358,6 +451,70 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
         // action it records -- which the authorization filter caught the first time it ran.
         await scope.context.store.appendAudit({ actorKind: 'user', actorRef: scope.personId, action: 'dispatch.create', target: instanceId, detail: { dispatchId: created.value.id, action, environment } });
         return send('createDispatch', 201, { intent });
+      }),
+      scoped('POST', '/api/v1/instances/{instanceId}/dispatches/{dispatchId}/trigger', 'triggerDispatch', 'instance.dispatch', async (scope, request, params) => {
+        // The other half of the middle. Recording a dispatch states platfolio's INTENT; nothing happens until
+        // the tenant's own workflow runs, because only the tenant's credentials may touch the tenant's provider
+        // account (D24). This is the call that asks GitHub for that run.
+        const id = params.instanceId ?? '';
+        const dispatchId = params.dispatchId ?? '';
+        const dispatch = await scope.context.store.getDispatch(dispatchId);
+        if (dispatch.ok === false) return notFound('dispatch', dispatchId);
+        if (dispatch.value.instanceId !== id) return notFound('dispatch', dispatchId);
+        if (dispatch.value.consumedAt !== null) {
+          return {
+            status: 409,
+            body: {
+              error: 'dispatch-consumed',
+              message: `dispatch ${dispatchId} was already fetched by a runner at ${dispatch.value.consumedAt}; triggering again would send a second runner to fetch a plan that is gone`,
+            },
+          };
+        }
+        if (new Date(dispatch.value.expiresAt).getTime() < Date.now()) {
+          return { status: 409, body: { error: 'dispatch-expired', message: `dispatch ${dispatchId} expired at ${dispatch.value.expiresAt}` } };
+        }
+        const body = bodyOf<{ ref?: string; workflow?: string }>(request);
+        if (body.ok === false) return badRequest(body.error);
+        const ref = body.value?.ref;
+        if (!ref) return badRequest("a trigger needs the branch or tag GitHub should run on; the plan's commit travels as an input, not as the ref");
+        const workflow = body.value?.workflow ?? 'platfolio-managed.yml';
+
+        const instance = await scope.context.store.getInstance(id);
+        if (instance.ok === false) return notFound('instance', id);
+        const pinned = instance.value.templateRef;
+        if (!pinned) {
+          return { status: 400, body: { error: 'no-pinned-source', message: `instance "${id}" cites no templateRef {repo, commitSha}, so platfolio does not know which repository owns its workflow` } };
+        }
+        if (scope.context.scm.configured === false) {
+          return { status: 503, body: { error: 'source-control-not-configured', message: 'platfolio has no GitHub App installation configured, so it cannot ask the tenant repository to run' } };
+        }
+
+        // The six inputs are exactly the ones the rendered workflow declares as required. A seventh (the nonce
+        // is deliberately NOT written to audit below) is how the runner authenticates its plan fetch; it is a
+        // secret handed to the tenant's own environment, which is the only place it can be used.
+        const result = await scope.context.scm.dispatchWorkflow({
+          repo: pinned.repo,
+          workflow,
+          ref,
+          inputs: {
+            action: dispatch.value.action,
+            environment: dispatch.value.environment,
+            instance_id: id,
+            dispatch_id: dispatchId,
+            nonce: dispatch.value.nonce,
+            plan_hash: dispatch.value.planHash,
+          },
+        });
+        if (result.kind !== 'requested') {
+          // The provider's own words, forwarded. A refused dispatch is otherwise undebuggable: the runner never
+          // started, so there are no run logs to read, and the only evidence is this response.
+          return { status: 502, body: { error: result.kind, message: ('detail' in result ? result.detail : 'source control refused the dispatch').slice(0, 500) } };
+        }
+        await scope.context.store.appendAudit({
+          actorKind: 'user', actorRef: scope.personId, action: 'dispatch.trigger', target: id,
+          detail: { repo: pinned.repo, ref, workflow, dispatchId, planHash: dispatch.value.planHash },
+        });
+        return send('triggerDispatch', 202, { instanceId: id, dispatchId, repo: pinned.repo, ref, workflow, state: 'requested' });
       }),
       {
         method: 'GET', path: '/api/v1/instances/{instanceId}/dispatches/{dispatchId}', operationId: 'getDispatchPlan',

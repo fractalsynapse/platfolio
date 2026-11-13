@@ -10,6 +10,7 @@
   "dependencies": {
     "@platfolio/api-contract": "workspace:*",
     "@platfolio/contracts": "workspace:*",
-    "@platfolio/kernel": "workspace:*"
+    "@platfolio/kernel": "workspace:*",
+    "@platfolio/manifest": "workspace:*"
   }
 }

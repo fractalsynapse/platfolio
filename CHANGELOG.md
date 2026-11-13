@@ -5,6 +5,99 @@ change; entries describe merged intent, not aspirations.
 
 "## [Unreleased]
 
+### Added — the missing middle is now an API operation, not a shell step (D48)
+
+Two operations, designed in [apps/control-plane/openapi.yaml](apps/control-plane/openapi.yaml) before their
+handlers existed, taking the surface from 30 to **32**:
+
+- **`POST /api/v1/instances/{id}/plan/from-repository`** (`registerPlanFromRepository`) reads
+  `compose.yaml` (plus `compose.prod.yaml`, if present) from the commit the instance already cites, parses it
+  with the same manifest package the CLI and tests use, builds the plan, and records it. It cites the blob SHA
+  GitHub reported for every file that contributed, so an operator can confirm the plan came from the bytes they
+  pushed. Refusals keep their source: an unpinned first-party image comes back quoting the renderer (#84), a
+  repository outside the installation's selection is **403** and a missing path is **400** -- #130's two
+  failures, finally distinguishable at the boundary.
+- **`POST /api/v1/instances/{id}/dispatches/{dispatchId}/trigger`** (`triggerDispatch`) asks GitHub to run the
+  tenant's own workflow with the six inputs the rendered workflow requires, forwarding the provider's refusal
+  because a run that never started leaves no logs anywhere else. A dispatch a runner already fetched cannot be
+  triggered: that would send a second runner to collect a plan that is gone.
+
+`ctx.scm` is a kernel service with `driver: 'none'` as its default; the composition root reads
+`PLATFOLIO_GITHUB_APP_ID`, `PLATFOLIO_GITHUB_INSTALLATION_ID` and the key (contents or a mounted path), and the
+manifest now *declares* those three by name so `selfhost-deploy --apply` refuses until they exist.
+
+**What the design-first order bought, in print.** Between writing the spec and writing the handlers,
+`api:check` reported both operations as *"the spec describes an endpoint that does not exist"* -- the direction
+that only works if both are checked. Then:
+
+- The renderer **refused my own test fixture** twice: first for omitting `environments.staging` and `preview`
+  (the schema requires all three), then for a digest of `a`.repeat(64) -- #84's placeholder check, doing exactly
+  its job on a test that wanted a shortcut. The fixture complied; the rule was not bent.
+- The stub's first version matched the query string inside `URL.pathname`, which never contains it, so every
+  contents read fell through to "unmodelled call" and the API answered 400. A transport stub can be wrong in a
+  way that looks like an application bug; this one announced itself.
+- `ctx.scm` failed with *`cannot get property "scm" without inject`* in three tests, because `requires` was
+  added to the instances descriptor and not the dispatches one. Cordis's declaration discipline caught an
+  omission that would otherwise have surfaced as a 500 on a real deployment.
+- One assertion message went into `detail` as a template string, and the audit schema is a **record** --
+  refusing it is correct: an audit row that must be read by eye is a log line wearing a schema. The nonce is
+  asserted *absent* from audit, since it is the runner's single-use credential.
+
+**Not yet done, stated rather than implied:** `open-install-pr.ts` still renders and opens the install PR
+itself, still defaults `--platform selfhost`, and still reads a local filesystem. It is now a *client* of the
+seam this change added, not the only way to reach a repository, but the D48 deprecation of its logic is open
+work. Nothing deployed uses these operations yet -- the deployed control plane has no app credentials
+configured, so today it would answer **503**, which is the honest answer rather than a hidden one.
+
+**380 tests (9 new at the HTTP boundary), 0 skipped; `api:check` 32 operations both directions; contracts
+baseline unchanged (no public TS surface moved); graphql, lockfile, docs, bundle and compose gates green.**
+
+### Added — platfolio can read a tenant's repository and ask GitHub to run it (the middle of #172)
+
+The control plane has always known how to turn a Compose document into an `InfraPlan`, and the runner has always
+known how to apply one. What was missing was the step in between: platfolio could not obtain the document from a
+repository it does not own, so "the tenant installed platfolio" reached "platfolio dispatched something" only
+through a maintainer's shell, reading the maintainer's filesystem (`open-install-pr.ts --platform selfhost`).
+Three operations close that, on the existing source-control seam rather than beside it:
+
+- **`readRepositoryFile`** — one file, at a pinned ref, over the Contents API. It distinguishes the two 404s
+  GitHub refuses to distinguish by making the second call (`repositoryVisible`): missing path versus an
+  installation that cannot see the repository at all, which is #130's actual failure and was previously a
+  guess. It refuses a directory listing, a submodule, and a file past GitHub's inline cutoff rather than
+  deploying half a document. Blob SHA is GitHub's own (`sha1("blob <n>\0…")`), so a plan can cite the identity
+  of exactly the content read.
+- **`dispatchWorkflowRun`** — asks GitHub to run the tenant's managed workflow, with #149's measured property
+  modelled: GitHub enumerates workflows from the DEFAULT branch only, so an unmerged install PR and a typo
+  return the identical 404, and the message says both causes instead of picking one.
+- Both mint a **per-operation installation token with the narrowest permissions that work** and revoke it in a
+  `finally` -- D24's least-privilege rule applied to platfolio's own credentials, not only the tenant's.
+
+**`MemoryScm`, `scm-conformance.ts`, and one suite run against both** (seam rule 3). Four things the suite caught
+while it was being written, each of which was a bug in the implementation:
+
+1. `constructor(readonly …)` parameter properties -- `erasableSyntaxOnly` refuses them, because these files run
+   through Node's type stripping and nothing would have emitted the assignments.
+2. **Token minting ignored the injected transport.** Reads were mocked, mints were not, so the "unit" test
+   signed a fabricated app id and POSTed it to the real `api.github.com`. Any seam whose helpers can reach the
+   network needs the transport threaded through *every* call, or its tests are partly live whether or not
+   anyone intended that.
+3. Revocation was asserted against the wrong URL. GitHub deletes a token at `DELETE /installation/token` (the
+   token removes itself), not at the mint endpoint; the double's stub had invented the latter.
+4. **A failure was being swallowed invisibly:** `revoke…().catch(() => undefined)` meant a broken revoke left no
+   trace. It is now caught *with stated reasoning* -- the token is scoped and expires within the hour regardless,
+   so residual exposure is bounded by construction -- and the lifecycle test is where an endpoint change shows
+   up. Silent is not the same as safe.
+
+One limitation recorded rather than papered over: GitHub answers the **same 404 with the same body** for a
+missing path and for a ref that does not resolve. An earlier draft matched GitHub wording for "bad ref" that we
+have never actually observed and would have reported a distinction the transport does not make. The suite now
+only demands that the failed ref is **named in the message**, accepts either classification, and the code says
+plainly that the regex is a guess about wording, not evidence.
+
+Contracts: **additive → MINOR** (74 lines, nothing removed or tightened). 371 tests, 0 skipped; api:check 30
+operations (unchanged -- no HTTP surface yet); docs gate green. This is the first of two changes: the seam now
+exists, the next exposes it as OpenAPI-validated operations.
+
 ### Fixed — the install tool verified the action pin in the *tenant's* repository
 
 `open-install-pr.ts` refuses to install unless the commit it is about to pin actually carries

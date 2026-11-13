@@ -60,8 +60,15 @@ services:
       # secret has no value, so a phantom name would block the very deploy this file is meant to describe.
       # Add the entry back the moment a relay is configured -- with `driver: smtp`, the provider will require
       # the name to exist, and that is the point of declaring it rather than inlining a value (D4).
-      secrets: []
-      public: true
+      secrets:
+        # Names, never values (D4). The GitHub App's id, installation and signing key are what the two
+        # repository operations need (#172's middle); they live as variables in the tenant's own Railway
+        # project, which is the same custody shape as KEYCLOAK_ADMIN. Declaring them here also means
+        # `selfhost-deploy --apply` FAILS until they exist -- the composition says out loud what the
+        # service requires instead of discovering the gap at the first API call.
+        - { name: PLATFOLIO_GITHUB_APP_ID, source: shared-variable }
+        - { name: PLATFOLIO_GITHUB_INSTALLATION_ID, source: shared-variable }
+        - { name: PLATFOLIO_GITHUB_PRIVATE_KEY, source: shared-variable }
       # The user's direction is that platfolio lives at platfolio.dev. Declared here, and #172 measures whether
       # it actually resolves rather than asserting it: E27 measured that a host whose zone we cannot edit sticks
       # at `applying` forever with no certificate -- which looks like progress and is not. platfolio.dev's zone

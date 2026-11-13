@@ -7,3 +7,4 @@ export { requireServices } from './startup.ts';
 export { StoreService, StoreConfigSchema } from './store.ts';
 export { ExtensionService, type ExtensionDescriptor, type KernelContext, type BootResult } from './extension.ts';
 export { EmailConfigSchema, EmailService, type EmailConfig, type EmailConfigInput } from './email.ts';
+export { ScmConfigSchema, ScmService, ScmNotConfiguredError, type ScmConfig, type ScmConfigInput } from './scm.ts';

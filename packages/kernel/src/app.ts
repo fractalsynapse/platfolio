@@ -6,6 +6,7 @@ import { requireServices } from './startup.ts';
 import { ServerService, ServerConfigSchema } from './server.ts';
 import { EmailService, EmailConfigSchema } from './email.ts';
 import { StoreService, StoreConfigSchema } from './store.ts';
+import { ScmService, ScmConfigSchema } from './scm.ts';
 import { ExtensionService, type ExtensionDescriptor } from './extension.ts';
 import { InfraService, ProviderConfigSchema } from './infra-provider.ts';
 import type { IdentityConfig, Jwk, VariablePort, RedactionSinks } from '@platfolio/contracts';
@@ -13,6 +14,8 @@ import type { IdentityConfig, Jwk, VariablePort, RedactionSinks } from '@platfol
 export interface KernelOptions {
   /** Email transport selection (D46). Absent means no email capability is installed at all. */
   email?: import('./email.ts').EmailConfigInput;
+  /** Source control (D22): where platfolio reads a tenant's declared platform and asks for a run. */
+  scm?: import('./scm.ts').ScmConfigInput;
   provider?: 'fake' | 'railway';
   contract?: string;
   custody?: 'managed' | 'strict';
@@ -102,6 +105,11 @@ async function install(ctx: Context, options: KernelOptions): Promise<Context> {
   // missing relay became a 404 on a real endpoint. A capability that may be absent is a value ('none'), never
   // a hole in the route table.
   await ctx.plugin(EmailService, EmailConfigSchema.parse(options.email ?? { driver: 'none' }));
+
+  // Installed unconditionally for the same reason email is: an extension that declares `scm` and finds
+  // it absent loses its routes, turning "platfolio was not given GitHub credentials" into a 404 on a
+  // real endpoint. `driver: 'none'` answers not-configured, which is a message an operator can act on.
+  await ctx.plugin(ScmService, ScmConfigSchema.parse(options.scm ?? { driver: 'none' }));
 
   if (options.server) {
     await ctx.plugin(ServerService, ServerConfigSchema.parse({ ...options.server }));
