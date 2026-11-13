@@ -23,6 +23,9 @@ export const PolicyActionSchema = z.enum([
   'instance.read',
   'instance.create',
   'instance.plan.write',
+  'instance.artifact.write',
+  'instance.secret.write',
+  'instance.secret.read',
   'instance.dispatch',
   'instance.destroy',
   'capability.publish',
@@ -46,6 +49,16 @@ export const POLICY: Record<PolicyAction, TeamRole> = {
   'instance.read': 'member',
   'instance.create': 'member',
   'instance.plan.write': 'member',
+  // A release artifact is what a build says it published (D54). Members develop the platform, so members
+  // report it -- and a false report is caught downstream rather than here: the plan hash moves, and a runner
+  // attesting against a plan it never fetched is refused. Reporting a build is normal work, not an escalation.
+  'instance.artifact.write': 'member',
+  // Writing a credential into a running service is an owner decision, by D43's reasoning one layer down: a
+  // member can deploy, but a member must not be able to substitute the value a service runs with.
+  'instance.secret.write': 'owner',
+  // Presence is not the value. A member needs it to tell "install incomplete" from "install working", and
+  // seeing that grants nothing.
+  'instance.secret.read': 'member',
   'instance.dispatch': 'member',
   // D43: destroying the managed service is an owner decision. Deliberately the only destructive verb here --
   // a repository or a workflow is never destroyed by platfolio (D36).

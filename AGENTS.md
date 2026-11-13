@@ -26,7 +26,7 @@ selections it has already made are recorded, not improvised:
 | Every environment variable: credential?, environments, where the value lives | [environment.yaml](environment.yaml) — the central registry (D52), enforced by `pnpm run environment:registry` |
 
 Status: foundation poured, interfaces first (D40, [16](docs/design/16-foundation-build-order.md)). Slices 1
-and 2 of that plan are delivered (389 tests): `apps/control-plane` boots on the vendored runtime with
+and 2 of that plan are delivered (393 tests): `apps/control-plane` boots on the vendored runtime with
 Keycloak-verified bearer auth, persistent records (`Store` as a capability with a Postgres implementation and
 an in-memory double under one conformance suite, gated in CI against a live database), a controller
 that turns accepted attestations into stored state, and capability bindings that make shared services
@@ -65,9 +65,11 @@ guard and to the audit trail. The seam now has two drivers, which is what proved
 `github-app` (Contents API + workflow dispatch) and **`git`** (`GitScm`: reads at any ref over HTTPS/SSH, any
 forge; refuses to dispatch, because that is not a git concept). `PLATFOLIO_SCM_DRIVER` selects one. Measured end
 to end against the real forge -- `plan/from-repository` on `fractalsynapse/platfolio` returned the same blob
-SHAs `git hash-object` computes locally. `open-install-pr.ts` still carries install-rendering logic and still defaults to
-`--platform .` -- which, after D50 moved the platform files to the root, is at least the same directory a tenant uses;
-moving that rendering behind an operation is recorded as remaining work.
+SHAs `git hash-object` computes locally. Three more operations came after them, for the same reason: `POST …/artifacts` (a release reports its digest
+instead of committing one -- D54, which closed #217 and removed `compose.prod.yaml` as a requirement for a
+fork), `PUT …/secrets/{name}` (deliver a credential through to the tenant's provider and keep nothing -- D53),
+and `GET …/secrets` (presence: set / missing / unverifiable, never the value). `open-install-pr.ts` still
+renders the install PR itself; that remaining logic is #213.
 
 What is still **not** delivered, stated because the earlier version of this paragraph was the first thing an
 agent read and it had gone stale: no Stripe integration, no CLI or web UI, and no tenant on either service.
@@ -89,6 +91,13 @@ than accepting a placeholder (#84), and `platform-deploy.ts --dry-run` is how yo
 call does. A service that finished is not a service that runs: `live` requires something active behind the deployment, and an exited one reads `stopped` with the provider's own word kept as `rawStatus` (#202 follow-up). Do not describe planned behavior as delivered, and prefer the evidence
 tier a claim actually holds: measured, tested, or designed-and-unexercised. Provider-specific claims need a
 live check, and CI substitutes for none of them.
+Secrets are **delivered, never held** (D53): `PUT …/secrets/{name}` writes through to the provider and keeps
+nothing, `GET …/secrets` answers `set | missing | unverifiable` -- and `unverifiable` is a real answer, because
+presence is a question about the provider, not about our database. A success response is 204 with no body, the
+value appears in no read-back and no audit row, and `platfolio-held` custody stays forbidden (D4). The
+development overlay is a separate layer with its own gate (D50/D51): `docker compose -f compose.yaml
+-f compose.dev.yaml up`, never a second platform description.
+
 Run `pnpm run verify` for the whole gate set. The skills under
 `.agents/skills/` inherited from the starter package stay identical to their source; project
 guidance is added beside them, never by editing them.

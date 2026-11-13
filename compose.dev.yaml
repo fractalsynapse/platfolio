@@ -155,3 +155,10 @@ services:
 
 volumes:
   platfolio-pgdata:
+
+x-platfolio:
+  # Declared, not assumed: these containers exist because a laptop has to provide what a provider
+  # would provision (the database) or replace entirely (an SMTP sink). `platform:plan` never reads
+  # this file, so nothing here can reach a deployment -- and check-project.ts fails the build if an
+  # overlay adds a service without naming it here (D50).
+  devOnlyServices: [main, mailpit]

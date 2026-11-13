@@ -30,6 +30,35 @@ workflows from the default branch only (#149).
 `open-install-pr.ts` still renders and opens the PR itself and still defaults `--platform .`. That
 remaining local-filesystem logic is the next thing to move behind an operation, not a design decision.
 
+## Releases and credentials are operations, not console work
+
+A platform's build reports its own artifact; nobody types a digest, and nobody types a credential:
+
+```
+POST /api/v1/instances/{id}/artifacts       { service, image, digest }   -> 201   (D54)
+PUT  /api/v1/instances/{id}/secrets/{NAME}  { service, environment, value } -> 204 (D53)
+GET  /api/v1/instances/{id}/secrets?environment=production&service=api    -> presence (D53)
+```
+
+Three things an operator should expect from these:
+
+- **A build with no artifact is a pipeline that has not run.** `platform:plan` / `plan/from-repository` refuses
+  with the service named and the operation to call. It is not a schema error and will not be reported as one.
+  Third-party images (`image:` without `build:`) still require a digest in the document -- nobody's pipeline
+  compiles them, so there is nothing to report.
+- **A secret read cannot return a secret.** `GET …/secrets` answers `set | missing | unverifiable`. The provider
+  redacts values on read (measured: `{ value: null }` even moments after a write), so presence is the strongest
+  available claim; `unverifiable` is returned rather than `missing` when the instance has not been applied,
+  because "absent" about a project we never touched is a guess.
+- **Platfolio's own credentials go through the same door.** `PLATFOLIO_GITHUB_APP_ID`,
+  `PLATFOLIO_GITHUB_INSTALLATION_ID` and `PLATFOLIO_GITHUB_PRIVATE_KEY` are declared *by name* in
+  `compose.yaml` and delivered via `PUT …/secrets/{name}` into our own Railway project -- the composition
+  refuses to apply while they are absent, which is the design working, not a blocker to route around.
+
+`environment.yaml` is the authoritative list of variable names and their custody class (D52); `pnpm run
+environment:registry` fails if code reads a variable the registry does not declare, or the registry declares
+one nothing reads.
+
 ## The environment registry (D52)
 
 `environment.yaml` at the repository root is the authoritative list of every variable platfolio reads or

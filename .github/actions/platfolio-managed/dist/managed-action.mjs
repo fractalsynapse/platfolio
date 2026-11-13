@@ -25074,7 +25074,11 @@ var OPERATIONS = [
   "validatePlan",
   "applyPlan",
   "readState",
-  "deleteInstance"
+  "deleteInstance",
+  // Secret delivery (D53) and its presence read. Both are advertised, so a driver that lacks one is
+  // discoverable from `describe()` instead of failing at the first attempt.
+  "putSecretValue",
+  "secretPresence"
 ];
 var HostSchema = external_exports.string().min(1).refine((host) => /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i.test(host), {
   message: "host must be a lowercase FQDN without scheme, port or wildcard"
@@ -25569,6 +25573,65 @@ var MintingRailwayCredentials = class {
   }
 };
 
+// packages/contracts/src/managed-action.ts
+function parseDispatchIntent(source) {
+  return DispatchIntentSchema.parse(source);
+}
+function staleIntent(input2) {
+  const fetched = normalizeHash(input2.fetchedPlanHash);
+  if (fetched === input2.intent.planHash) return void 0;
+  return AttestationSchema.parse({
+    dispatchId: input2.intent.dispatchId,
+    nonce: input2.intent.nonce,
+    // The hash the caller asked for, because this attestation is about the dispatch that was refused.
+    planHash: input2.intent.planHash,
+    instanceId: input2.intent.instanceId,
+    environment: input2.intent.environment,
+    action: input2.intent.action,
+    result: "failed",
+    // Both halves in the message: one hash alone lets a reader guess which side moved.
+    errorCode: `stale-plan-hash:requested-${input2.intent.planHash.slice(0, 12)}-found-${fetched.slice(0, 12)}`.slice(0, 120),
+    resources: [],
+    release: input2.release,
+    durationMs: 0,
+    finishedAt: input2.finishedAt
+  });
+}
+function attestationFromApply(input2) {
+  const { intent, result } = input2;
+  const toResourceStatus = (status) => status === "live" ? "live" : status === "failed" || status === "crashed" ? "failed" : "deploying";
+  const resources = result.services.map((s) => ({
+    kind: "service",
+    name: s.name,
+    externalId: s.externalId ?? s.name,
+    status: toResourceStatus(s.status)
+  }));
+  const landed = resources.some((r) => r.status === "live");
+  const outcome = result.failures.length === 0 ? resources.length > 0 ? "ok" : "noop" : landed ? "partial" : "failed";
+  const first = result.failures[0];
+  const errorCode = outcome === "partial" || outcome === "failed" ? `${first?.code ?? "apply-failed"}@${first?.step ?? "unknown"}`.slice(0, 120) : void 0;
+  return AttestationSchema.parse({
+    dispatchId: intent.dispatchId,
+    nonce: intent.nonce,
+    planHash: normalizeHash(input2.appliedPlanHash),
+    instanceId: intent.instanceId,
+    environment: intent.environment,
+    action: intent.action,
+    result: outcome,
+    ...errorCode ? { errorCode } : {},
+    resources,
+    release: input2.release,
+    durationMs: Math.max(0, Math.trunc(input2.durationMs)),
+    finishedAt: input2.finishedAt
+  });
+}
+function normalizeHash(digest) {
+  return digest.replace(/^sha256:/, "").slice(0, 64).toLowerCase();
+}
+function redactCredentialShaped(text) {
+  return text.replace(/(?:gh[pousr]_|github_pat_)[A-Za-z0-9]{8,}/g, "[redacted-token]").replace(/Bearer\s+[A-Za-z0-9._-]{8,}/g, "Bearer [redacted]").replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\\s\\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, "[redacted-key]").replace(/([?&](?:access_token|token|password)=)[^&\\s]+/gi, "$1[redacted]");
+}
+
 // packages/contracts/src/railway-provider.ts
 var MARKER = "platfolio:plan=";
 var STATUS_MAP = {
@@ -25628,7 +25691,11 @@ var RailwayInfraProvider = class {
     return {
       provider: "railway",
       contract: this.contract,
-      operations: ["describe", "validatePlan", "applyPlan", "readState", "deleteInstance"],
+      // Derived from the shared OPERATIONS constant: a hand-copied list here is how a driver ends up claiming
+      // (or denying) a verb it does or does not implement, out of step with the contract.
+      // Copied, not passed through: the advertised set is mutable in the contract type while
+      // OPERATIONS is a readonly tuple, and a driver must not be able to mutate the shared list.
+      operations: [...OPERATIONS],
       // What is actually supported. Ceilings and databases/buckets are absent from this list on purpose.
       features: ["service-domains", "custom-domains", "literal-configuration", "preserve-secret-references", "per-environment-tokens", "deploy-waiting", "environment-cloning"]
     };
@@ -25913,6 +25980,57 @@ var RailwayInfraProvider = class {
    */
   projectName(plan) {
     return `platfolio-${plan.instanceId}`.toLowerCase().replace(/[^a-z0-9._-]+/g, "-");
+  }
+  /**
+   * Deliver one secret value (D53). Written with `skipDeploys: true`, because a credential arriving is not a
+   * decision to redeploy -- that coupling has woken services for no reason before. `verified` is a name
+   * presence check, never a value read: the provider redacts values on read, so the strongest claim available
+   * is "the variable now exists", which is also the only claim worth making.
+   */
+  async putSecretValue(input2) {
+    if (typeof input2.value !== "string" || input2.value.length === 0) {
+      return { ok: false, code: "invalid-value", reason: "a secret value must be a non-empty string; an empty value is a deletion the tenant did not ask for" };
+    }
+    const project = await this.findProject(this.projectName({ instanceId: input2.instanceId }));
+    if (!project) return { ok: false, code: "not-found", reason: `no provider project for instance "${input2.instanceId}" -- it has never been applied` };
+    const workspace = await this.credentials.workspace();
+    const envList = await this.environments(project.id, workspace);
+    const env = envList.find((e) => e.name === input2.environment);
+    if (!env) return { ok: false, code: "not-found", reason: `environment "${input2.environment}" does not exist in this instance -- create it by applying a plan that enables it` };
+    const services = await this.listServices(project.id, workspace);
+    const svc = services.find((s) => s.name === input2.service);
+    if (!svc) return { ok: false, code: "not-found", reason: `no service "${input2.service}" in project ${project.name}; services are named by the platform description` };
+    const token = await this.credentials.forEnvironment(project.id, env.name);
+    try {
+      await this.upsertVariable(project.id, env.id, svc.id, input2.name, input2.value, token);
+    } catch (error62) {
+      return { ok: false, code: "provider-refused", reason: redactCredentialShaped(String(error62.message)).slice(0, 240) };
+    }
+    const present = (await this.configVariableNames(project.id, env.id, svc.id).catch(() => [])).includes(input2.name);
+    return { ok: true, verified: present };
+  }
+  async secretPresence(input2) {
+    const out = {};
+    const project = await this.findProject(this.projectName({ instanceId: input2.instanceId }));
+    if (!project) {
+      for (const n of input2.names) out[n] = "unverifiable";
+      return out;
+    }
+    const workspace = await this.credentials.workspace();
+    const env = (await this.environments(project.id, workspace)).find((e) => e.name === input2.environment);
+    const svc = env ? (await this.listServices(project.id, workspace)).find((s) => s.name === input2.service) : void 0;
+    if (!env || !svc) {
+      for (const n of input2.names) out[n] = "unverifiable";
+      return out;
+    }
+    const names = await this.configVariableNames(project.id, env.id, svc.id).catch(() => void 0);
+    if (names === void 0) {
+      for (const n of input2.names) out[n] = "unverifiable";
+      return out;
+    }
+    const set2 = new Set(names);
+    for (const n of input2.names) out[n] = set2.has(n) ? "set" : "missing";
+    return out;
   }
   async findProject(name) {
     const credential = await this.credentials.workspace();
@@ -26695,65 +26813,6 @@ var RunStateSchema = external_exports.enum(["queued", "in-progress", "success", 
 // packages/contracts/src/github-writes.ts
 var Repo2 = external_exports.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/, "owner/repo");
 
-// packages/contracts/src/managed-action.ts
-function parseDispatchIntent(source) {
-  return DispatchIntentSchema.parse(source);
-}
-function staleIntent(input2) {
-  const fetched = normalizeHash(input2.fetchedPlanHash);
-  if (fetched === input2.intent.planHash) return void 0;
-  return AttestationSchema.parse({
-    dispatchId: input2.intent.dispatchId,
-    nonce: input2.intent.nonce,
-    // The hash the caller asked for, because this attestation is about the dispatch that was refused.
-    planHash: input2.intent.planHash,
-    instanceId: input2.intent.instanceId,
-    environment: input2.intent.environment,
-    action: input2.intent.action,
-    result: "failed",
-    // Both halves in the message: one hash alone lets a reader guess which side moved.
-    errorCode: `stale-plan-hash:requested-${input2.intent.planHash.slice(0, 12)}-found-${fetched.slice(0, 12)}`.slice(0, 120),
-    resources: [],
-    release: input2.release,
-    durationMs: 0,
-    finishedAt: input2.finishedAt
-  });
-}
-function attestationFromApply(input2) {
-  const { intent, result } = input2;
-  const toResourceStatus = (status) => status === "live" ? "live" : status === "failed" || status === "crashed" ? "failed" : "deploying";
-  const resources = result.services.map((s) => ({
-    kind: "service",
-    name: s.name,
-    externalId: s.externalId ?? s.name,
-    status: toResourceStatus(s.status)
-  }));
-  const landed = resources.some((r) => r.status === "live");
-  const outcome = result.failures.length === 0 ? resources.length > 0 ? "ok" : "noop" : landed ? "partial" : "failed";
-  const first = result.failures[0];
-  const errorCode = outcome === "partial" || outcome === "failed" ? `${first?.code ?? "apply-failed"}@${first?.step ?? "unknown"}`.slice(0, 120) : void 0;
-  return AttestationSchema.parse({
-    dispatchId: intent.dispatchId,
-    nonce: intent.nonce,
-    planHash: normalizeHash(input2.appliedPlanHash),
-    instanceId: intent.instanceId,
-    environment: intent.environment,
-    action: intent.action,
-    result: outcome,
-    ...errorCode ? { errorCode } : {},
-    resources,
-    release: input2.release,
-    durationMs: Math.max(0, Math.trunc(input2.durationMs)),
-    finishedAt: input2.finishedAt
-  });
-}
-function normalizeHash(digest) {
-  return digest.replace(/^sha256:/, "").slice(0, 64).toLowerCase();
-}
-function redactCredentialShaped(text) {
-  return text.replace(/(?:gh[pousr]_|github_pat_)[A-Za-z0-9]{8,}/g, "[redacted-token]").replace(/Bearer\s+[A-Za-z0-9._-]{8,}/g, "Bearer [redacted]").replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\\s\\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, "[redacted-key]").replace(/([?&](?:access_token|token|password)=)[^&\\s]+/gi, "$1[redacted]");
-}
-
 // packages/contracts/src/identity.ts
 var JwkSchema = external_exports.object({
   kty: external_exports.string().min(1),
@@ -26851,6 +26910,20 @@ var ProviderConnectionSchema = external_exports.object({
   projectExternalId: external_exports.string().max(120).optional(),
   secrets: external_exports.array(SecretNameSchema).default([]),
   connectedAt: external_exports.string().min(1)
+}).strict();
+var ArtifactRecordSchema = external_exports.object({
+  instanceId: external_exports.string().min(1),
+  /** The compose service name the image belongs to, e.g. `web`. */
+  service: external_exports.string().min(1).max(60),
+  /** Repository without the tag or digest, e.g. `ghcr.io/acme/widget`. */
+  image: external_exports.string().min(3),
+  digest: external_exports.string().regex(/^sha256:[0-9a-f]{64}$/),
+  /** Commit the artifact was built from -- the identity a plan can be re-derived against. */
+  sourceRef: external_exports.string().regex(/^[0-9a-f]{40}$/).optional(),
+  version: external_exports.string().min(1).optional(),
+  reportedAt: external_exports.string().min(1),
+  /** Who reported it. A verified runner identity is #159; today the actor is a person or a dispatch. */
+  reportedBy: external_exports.string().min(1)
 }).strict();
 var DispatchRecordSchema = external_exports.object({
   id: external_exports.string().min(1),
@@ -26992,6 +27065,9 @@ var PolicyActionSchema = external_exports.enum([
   "instance.read",
   "instance.create",
   "instance.plan.write",
+  "instance.artifact.write",
+  "instance.secret.write",
+  "instance.secret.read",
   "instance.dispatch",
   "instance.destroy",
   "capability.publish",

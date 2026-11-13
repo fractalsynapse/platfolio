@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { SecretPresence } from './secret-writer.ts';
 
 /**
  * The `infra.provider` capability: everything platfolio needs from an infrastructure provider, and
@@ -23,6 +24,10 @@ export const OPERATIONS = [
   'applyPlan',
   'readState',
   'deleteInstance',
+  // Secret delivery (D53) and its presence read. Both are advertised, so a driver that lacks one is
+  // discoverable from `describe()` instead of failing at the first attempt.
+  'putSecretValue',
+  'secretPresence',
 ] as const;
 
 export type Operation = (typeof OPERATIONS)[number];
@@ -268,7 +273,28 @@ export interface InfraProvider {
   applyPlan(plan: InfraPlan): Promise<ApplyResult>;
   readState(instanceId: string): Promise<StateSnapshot>;
   deleteInstance(instanceId: string): Promise<DeleteResult>;
+  /**
+   * Deliver one secret value into the tenant's own provider environment (D53). The value is a pass-through:
+   * it is written and forgotten, never stored by platfolio, never echoed back, never logged. This is D34's
+   * `client_secret` rule ("relay once, keep nothing") promoted to the product's secret path, and it is what
+   * lets platfolio configure its OWN deployment through the same interface a tenant uses.
+   *
+   * Optional on the interface because a provider that cannot write configuration must say so through
+   * `describe().operations` rather than pretend; the API answers 501 when the verb is absent.
+   */
+  putSecretValue?(input: { instanceId: string; environment: string; service: string; name: string; value: string }): Promise<SecretWriteResult>;
+  /**
+   * Presence only -- never the value. The provider itself redacts secret values on read (measured for
+   * Railway: `{ value: null }` even moments after a write), which is why presence is the only honest read.
+   */
+  secretPresence?(input: { instanceId: string; environment: string; service: string; names: string[] }): Promise<Record<string, SecretPresence>>;
 }
+
+export type SecretWriteResult = { ok: true; verified: boolean } | { ok: false; code: string; reason: string };
+// `SecretPresence` is imported, not re-declared: 'set' | 'missing' | 'unverifiable' already has one home in
+// secret-writer.ts, and a second definition of the same three states is how two modules start disagreeing
+// about what "we could not check" means.
+export type { SecretPresence };
 
 /**
  * Minimal semver range support for `"^1.0.0"`, `">=1.0.0 <2"`, `"1.x"` and `"*"`, enough for the

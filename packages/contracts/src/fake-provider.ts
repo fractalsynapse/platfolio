@@ -1,4 +1,4 @@
-import { OPERATIONS, planIssues, type CapabilityInfo, type ApplyResult, type DeleteResult, type InfraPlan, type InfraProvider, type Issue, type StateSnapshot } from './infra.ts';
+import { OPERATIONS, planIssues, type CapabilityInfo, type ApplyResult, type DeleteResult, type InfraPlan, type InfraProvider, type SecretPresence, type SecretWriteResult, type Issue, type StateSnapshot } from './infra.ts';
 import { samplePlan } from './conformance.ts';
 
 export interface FakeOptions {
@@ -18,6 +18,7 @@ export interface FakeOptions {
  * read-back verification, and honest orphan reporting.
  */
 export class FakeInfraProvider implements InfraProvider {
+  private readonly secretNames = new Set<string>();
   private readonly instances = new Map<string, { plan: InfraPlan; services: StateSnapshot['services']; domains: StateSnapshot['domains']; applied: string[] }>();
   private readonly opts: Required<Pick<FakeOptions, 'contract' | 'name'>> & FakeOptions;
 
@@ -100,6 +101,27 @@ export class FakeInfraProvider implements InfraProvider {
   async readState(instanceId: string): Promise<StateSnapshot> {
     if (!this.instances.has(instanceId)) throw new Error(`unknown instance ${instanceId}`);
     return this.readStateSync(instanceId);
+  }
+
+  /**
+   * Presence recorded, value discarded immediately (D53). The double CANNOT store a secret, which is the point:
+   * a test implementation that kept values would let the contract be satisfied by an implementation that
+   * violates it.
+   */
+  async putSecretValue(input: { instanceId: string; environment: string; service: string; name: string; value: string }): Promise<SecretWriteResult> {
+    if (!this.instances.has(input.instanceId)) return { ok: false, code: 'not-found', reason: `unknown instance ${input.instanceId}` };
+    if (input.value.length === 0) return { ok: false, code: 'invalid-value', reason: 'a secret value must be a non-empty string' };
+    this.secretNames.add(`${input.instanceId}/${input.environment}/${input.service}/${input.name}`);
+    return { ok: true, verified: true };
+  }
+
+  async secretPresence(input: { instanceId: string; environment: string; service: string; names: string[] }): Promise<Record<string, SecretPresence>> {
+    const out: Record<string, SecretPresence> = {};
+    for (const name of input.names) {
+      if (!this.instances.has(input.instanceId)) { out[name] = 'unverifiable'; continue; }
+      out[name] = this.secretNames.has(`${input.instanceId}/${input.environment}/${input.service}/${name}`) ? 'set' : 'missing';
+    }
+    return out;
   }
 
   async deleteInstance(instanceId: string): Promise<DeleteResult> {

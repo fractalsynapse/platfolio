@@ -1,7 +1,8 @@
+import { z } from 'zod';
 import { Pool } from 'pg';
 import {
-  AttestationRecordSchema, AuditEntrySchema, BindingRecordSchema, CapabilityOfferSchema, CapabilityShareSchema, DispatchRecordSchema, IdentitySchema, PersonSchema, TeamMemberSchema, InstanceEnvironmentStateSchema, InstanceSchema, InvitationSchema, ProviderConnectionSchema, RepoConnectionSchema, TeamSchema, newId,
-  type AttestationRecord, type AuditEntry, type BindingRecord, type CapabilityOffer, type NewBinding, type NewCapabilityOffer, type NewCapabilityShare, type DispatchRecord, type Instance, type InstanceEnvironmentState, type Invitation, type NewInvitation, type ProviderConnection, type RepoConnection, type Store, type StoreError, type NewInstance, type StoreResult, type Team, type Person, type TeamMember,
+  ArtifactRecordSchema, AttestationRecordSchema, AuditEntrySchema, BindingRecordSchema, CapabilityOfferSchema, CapabilityShareSchema, DispatchRecordSchema, IdentitySchema, PersonSchema, TeamMemberSchema, InstanceEnvironmentStateSchema, InstanceSchema, InvitationSchema, ProviderConnectionSchema, RepoConnectionSchema, TeamSchema, newId,
+  type ArtifactRecord, type AttestationRecord, type AuditEntry, type BindingRecord, type CapabilityOffer, type NewBinding, type NewCapabilityOffer, type NewCapabilityShare, type DispatchRecord, type Instance, type InstanceEnvironmentState, type Invitation, type NewInvitation, type ProviderConnection, type RepoConnection, type Store, type StoreError, type NewInstance, type StoreResult, type Team, type Person, type TeamMember,
 } from './persistence.ts';
 import { reasonOf } from './persistence.ts';
 import { normaliseEmail, normaliseName } from './persistence.ts';
@@ -726,6 +727,44 @@ export class PostgresStore implements Store {
       throw error;
     }
     return ok({ instanceId, planHash });
+  }
+
+  async putArtifact(artifact: Omit<ArtifactRecord, 'reportedAt'> & { reportedAt?: string }) {
+    const parsed = ArtifactRecordSchema.safeParse({ ...artifact, reportedAt: artifact.reportedAt ?? new Date().toISOString() });
+    if (!parsed.success) {
+      // Schema-level refusal with the field named, because a digest that is not `sha256:<64 hex>` is the exact
+      // class of mistake #84 was written about -- better caught at the door than at the provider.
+      // z.prettifyError rather than hand-walking `issues`: the union has variants whose `path` shape differs,
+      // and hand-rolling that traversal bought a type error where a one-line helper was already correct.
+      return err({ code: 'conflict', reason: `artifact is not well-formed: ${z.prettifyError(parsed.error)}` });
+    }
+    try {
+      await this.pool.query(
+        `INSERT INTO ${this.q('release_artifacts')} (instance_id, service, image, digest, source_ref, version, reported_at, reported_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+         ON CONFLICT (instance_id, service) DO UPDATE
+           SET image = EXCLUDED.image, digest = EXCLUDED.digest, source_ref = EXCLUDED.source_ref,
+               version = EXCLUDED.version, reported_at = EXCLUDED.reported_at, reported_by = EXCLUDED.reported_by`,
+        [parsed.data.instanceId, parsed.data.service, parsed.data.image, parsed.data.digest,
+          parsed.data.sourceRef ?? null, parsed.data.version ?? null, parsed.data.reportedAt, parsed.data.reportedBy]);
+    } catch (error) {
+      if ((error as { code?: string }).code === '23503') return err({ code: 'not-found', what: 'instance', id: artifact.instanceId });
+      throw error;
+    }
+    return ok(parsed.data);
+  }
+
+  async listArtifacts(instanceId: string): Promise<ArtifactRecord[]> {
+    const rows = await this.pool.query(
+      `SELECT instance_id, service, image, digest, source_ref, version, reported_at, reported_by
+         FROM ${this.q('release_artifacts')} WHERE instance_id = $1 ORDER BY reported_at DESC`, [instanceId]);
+    return (rows.rows as Record<string, unknown>[]).map((r) => ({
+      instanceId: String(r.instance_id), service: String(r.service), image: String(r.image), digest: String(r.digest),
+      ...(r.source_ref === null || r.source_ref === undefined ? {} : { sourceRef: String(r.source_ref) }),
+      ...(r.version === null || r.version === undefined ? {} : { version: String(r.version) }),
+      reportedAt: r.reported_at instanceof Date ? r.reported_at.toISOString() : String(r.reported_at),
+      reportedBy: String(r.reported_by),
+    }));
   }
 
   async getPlan(instanceId: string) {

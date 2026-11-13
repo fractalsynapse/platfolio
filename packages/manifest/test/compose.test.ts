@@ -49,8 +49,13 @@ const overlay = (name = 'web', image = 'ghcr.io/acme/demo') =>
 
 const codes = (docs: string[]) => parseCompose(docs).issues.map((i) => i.code);
 
-test('the authored file alone refuses: no pinned image, no hosted plan', () => {
-  assert.deepEqual(codes([BASE]), ['compose-image-unpinned']);
+test('the authored file alone refuses, and now says which half is missing (D54)', () => {
+  // The label changed from `compose-image-unpinned` to `no-artifact` for a BUILT service, because the two cases
+  // need different answers: an upstream image with no digest is a document defect, while a build with no
+  // reported artifact means "run your pipeline once". Same refusal, sharper reason -- the assertion moved
+  // because the message improved, not because the rule weakened.
+  assert.deepEqual(codes([BASE]), ['no-artifact']);
+  assert.match(parseCompose([BASE]).issues[0]!.message, /publish one/, 'the reason must name the action');
 });
 
 test('the generated overlay supplies the pin and the merge is clean', () => {

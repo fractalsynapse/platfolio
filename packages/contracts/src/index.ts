@@ -59,6 +59,7 @@ export {
 export {
   STORE_CONTRACT,
   STORE_CONTRACT_VERSION,
+  ArtifactRecordSchema,
   AttestationRecordSchema,
   AuditEntrySchema,
   DispatchRecordSchema,
@@ -70,6 +71,7 @@ export {
   TeamSchema,
   newId,
   reasonOf,
+  type ArtifactRecord,
   type AttestationRecord,
   type AuditEntry,
   type DispatchRecord,

@@ -236,6 +236,95 @@ const PUBLISHED_IMAGES = new Set(['platfolio-control-plane', 'platfolio-status-a
 const EXECUTABLE_PATH = /^(apps|packages|scripts|templates|db|\.github)\//;
 const ORG_REF = /fractalsynapse\/([A-Za-z0-9._-]+)/g;
 
+/**
+ * The development overlay must not drift from the platform description it overlays (D50).
+ *
+ * The maintainer's objection was fair: `compose.yaml` and `compose.dev.yaml` look like the same thing written
+ * twice, and two files that describe one platform are exactly the pattern that has hurt this project before.
+ * The distinction we settled on is that the dev file answers a question the platform file deliberately does
+ * not: *what runs on a laptop*. It adds containers for things a provider provisions (the database, Mailpit),
+ * published ports, loopback credentials and source mounts -- none of which ever reaches a plan, because
+ * `platform:plan` reads `compose.yaml` + `compose.prod.yaml` only.
+ *
+ * So the gate enforces the pairing rather than deleting one half:
+ *
+ *  1. every service in the platform description must appear in the dev overlay, or local `up` silently runs
+ *     half the platform and tells you it is whole;
+ *  2. every service the overlay ADDS must be declared in the overlay's own `x-platfolio.devOnlyServices` list,
+ *     so an extra container is a stated decision and not an accident a future reader inherits;
+ *  3. the overlay must not declare domains or secrets the platform file does not -- a dev file that invents a
+ *     hostname or a secret name is a second source of truth about what the platform needs.
+ *
+ * An overlay that does not exist is fine: `mode: hosted` platforms (shared-identity) are operated, not
+ * developed, and D51 says so explicitly.
+ */
+async function checkDevOverlayPairing(): Promise<string[]> {
+  type Doc = Record<string, unknown>;
+  const readDoc = async (file: string): Promise<Doc | null> => {
+    try {
+      return parseYaml(await fs.readFile(file, 'utf8')) as Doc;
+    } catch {
+      return null;
+    }
+  };
+  const exists = async (file: string): Promise<boolean> => {
+    try {
+      await fs.access(file);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const findings: string[] = [];
+  const pairs: [string, string][] = [
+    ['compose.yaml', 'compose.dev.yaml'],
+    ['templates/starter-web/compose.yaml', 'templates/starter-web/compose.dev.yaml'],
+    ['templates/starter-worker/compose.yaml', 'templates/starter-worker/compose.dev.yaml'],
+    ['templates/shared-identity/compose.yaml', 'templates/shared-identity/compose.dev.yaml'],
+  ];
+  for (const [platformRel, devRel] of pairs) {
+    const platformPath = path.join(ROOT, platformRel);
+    const devPath = path.join(ROOT, devRel);
+    if (!(await exists(platformPath)) || !(await exists(devPath))) continue;
+    const pDoc = await readDoc(platformPath);
+    const dDoc = await readDoc(devPath);
+    if (!pDoc || !dDoc) { findings.push(`${platformRel} or ${devRel} does not parse`); continue; }
+    const services = (doc: Doc): string[] => Object.keys(((doc.services ?? {}) as Record<string, unknown>));
+    const xOf = (doc: Doc, name: string): Record<string, unknown> => {
+      const svc = ((doc.services ?? {}) as Record<string, Record<string, unknown>>)[name] ?? {};
+      return (svc['x-platfolio'] ?? {}) as Record<string, unknown>;
+    };
+    const declared = (((dDoc['x-platfolio'] ?? {}) as Record<string, unknown>).devOnlyServices ?? []) as unknown[];
+    const devOnly = declared.map(String);
+    const pServices = services(pDoc);
+    for (const s of services(dDoc)) {
+      if (!pServices.includes(s) && !devOnly.includes(s)) {
+        findings.push(`${devRel}: extra service "${s}" is not declared in x-platfolio.devOnlyServices -- an undeclared container is a fact about the platform nobody wrote down (D50)`);
+      }
+    }
+    for (const name of pServices) {
+      const svc = ((dDoc.services ?? {}) as Record<string, unknown>)[name];
+      if (svc === undefined) findings.push(`${devRel}: platform service "${name}" has no dev entry -- local up would run without it while the plan expects it (D50)`);
+    }
+    for (const name of services(dDoc)) {
+      const dx = xOf(dDoc, name);
+      const px = xOf(pDoc, name);
+      const dDomains = Array.isArray(dx.domains) ? dx.domains.length : 0;
+      const pDomains = Array.isArray(px.domains) ? px.domains.length : 0;
+      if (dDomains > 0 && pDomains === 0) {
+        findings.push(`${devRel}: service "${name}" declares dev domains absent from ${platformRel} -- a hostname invented in a dev file is never issued and never deployed, and it hides the real requirement`);
+      }
+      const dSecrets = Array.isArray(dx.secrets) ? dx.secrets.length : 0;
+      const pSecrets = Array.isArray(px.secrets) ? px.secrets.length : 0;
+      if (dSecrets > 0 && pSecrets === 0) {
+        findings.push(`${devRel}: service "${name}" declares secrets absent from ${platformRel} -- the platform description is where a required credential belongs (D4)`);
+      }
+    }
+  }
+  return findings;
+}
+
 async function checkCommittedProjects(): Promise<string[]> {
   const findings: string[] = [];
   const out = spawnSync('git', ['ls-files'], { cwd: ROOT, encoding: 'utf8' });
@@ -396,14 +485,16 @@ const workflowProblems = await checkWorkflows();
 const hygieneProblems = await checkCredentialHygiene();
 const endpointProblems = await checkCommittedEndpoints();
 const projectProblems = await checkCommittedProjects();
+const overlayProblems = await checkDevOverlayPairing();
 const actionProblems = await checkActionManifests();
 
-const all = [...docProblems, ...skillProblems, ...workflowProblems, ...actionProblems, ...hygieneProblems, ...endpointProblems, ...projectProblems];
+const all = [...docProblems, ...skillProblems, ...workflowProblems, ...actionProblems, ...hygieneProblems, ...endpointProblems, ...projectProblems, ...overlayProblems];
 say(`skills checked: ${skills.length} (${skills.map((s) => s.name).join(', ')})`);
 say(`workflows linted: ${workflowProblems.length === 0 ? 'clean' : `${workflowProblems.length} problem(s)`}`);
 say(`action manifests checked: ${actionProblems.length === 0 ? 'clean' : `${actionProblems.length} problem(s)`}`);
 say(`committed endpoints: ${endpointProblems.length === 0 ? 'no generated hostnames in tracked files' : `${endpointProblems.length} problem(s)`}`);
 say(`test targets (D49): ${projectProblems.length === 0 ? 'only the real projects are named in code' : `${projectProblems.length} problem(s)`}`);
+say(`dev overlays (D50): ${overlayProblems.length === 0 ? 'every platform service has a dev entry; extras are declared' : `${overlayProblems.length} problem(s)`}`);
 
 if (all.length) {
   console.error(`\n${all.length} problem(s):`);

@@ -392,3 +392,196 @@ test('a created instance carries the pinned source the spec promises, and the ne
     await disposeKernel(app.ctx);
   }
 });
+
+/**
+ * D54: the release pipeline reports its digest instead of committing one, and the renderer accepts the
+ * consequences -- a platform described by `build:` alone becomes installable once a build has run, with no
+ * `compose.prod.yaml` in the repository at all. This is the end of #217.
+ */
+const BUILD_ONLY = [
+  'name: fork',
+  'services:',
+  '  web:',
+  '    build: { context: . }',
+  '    expose: ["8080"]',
+  '    healthcheck:',
+  `      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]`,
+  '    x-platfolio:',
+  '      public: true',
+  '      domains: [fork.example.com]',
+  '      secrets: [{ name: APP_SECRET, source: shared-variable }]',
+  'x-platfolio:',
+  '  metadata: { name: fork, version: 1.0.0, title: Fork, summary: A tenant platform, kind: web, mode: hosted }',
+  '  environments:',
+  '    production: { enabled: true, branch: main }',
+  '    staging: { enabled: false }',
+  '    preview: { enabled: false }',
+  '  release: { registryImage: ghcr.io/acme/fork, tagPattern: "v*" }',
+  '',
+].join('\n');
+
+const REAL_DIGEST = `sha256:${'c5'.repeat(32)}`;
+
+async function forkInstance(app: Awaited<ReturnType<typeof start>>) {
+  const created = await app.call('/api/v1/instances', {
+    method: 'POST', ...app.asUser(),
+    body: JSON.stringify({
+      teamId: app.teamId, name: 'fork', template: 'starter-web',
+      templateRef: { repo: REPO, commitSha: 'ab'.repeat(20) },
+    }),
+  });
+  const id = (created.body as { id?: string }).id;
+  assert.ok(id, created.text);
+  return id!;
+}
+
+test('a build-only platform refuses until a release is reported, and names the pipeline as the fix', async () => {
+  const github = stubGithub({ files: { 'compose.yaml': BUILD_ONLY } });
+  const app = await start();
+  try {
+    const id = await forkInstance(app);
+    const refused = await app.call(`/api/v1/instances/${id}/plan/from-repository`, { method: 'POST', ...app.asUser(), body: '{}' });
+    assert.equal(refused.status, 400, refused.text);
+    const message = (refused.body as { message: string }).message;
+    // Not "invalid document": the true cause is a pipeline that has not run, and the message has to say so.
+    assert.match(message, /publish one/, message);
+    assert.match(message, /artifacts/, 'the message must name the operation that fixes it');
+    assert.match(message, /web/, 'and the service that is missing an artifact');
+  } finally {
+    github.restore();
+    await disposeKernel(app.ctx);
+  }
+});
+
+test('reporting the artifact makes the same platform installable with no pin file in the repository (D54)', async () => {
+  const github = stubGithub({ files: { 'compose.yaml': BUILD_ONLY } });  // deliberately no compose.prod.yaml
+  const app = await start();
+  try {
+    const id = await forkInstance(app);
+    const bad = await app.call(`/api/v1/instances/${id}/artifacts`, {
+      method: 'POST', ...app.asUser(), body: JSON.stringify({ service: 'web', image: 'ghcr.io/acme/fork', digest: 'latest' }),
+    });
+    assert.equal(bad.status, 400, 'a tag is not a digest');
+    assert.match((bad.body as { message: string }).message, /digest/, JSON.stringify(bad.body));
+
+    const reported = await app.call(`/api/v1/instances/${id}/artifacts`, {
+      method: 'POST', ...app.asUser(), body: JSON.stringify({ service: 'web', image: 'ghcr.io/acme/fork', digest: REAL_DIGEST, sourceRef: 'ab'.repeat(20) }),
+    });
+    assert.equal(reported.status, 201, reported.text);
+    const record = reported.body as { digest: string; reportedAt: string; service: string };
+    assert.equal(record.digest, REAL_DIGEST);
+    assert.ok(record.reportedAt.length > 0);
+
+    const built = await app.call(`/api/v1/instances/${id}/plan/from-repository`, { method: 'POST', ...app.asUser(), body: '{}' });
+    assert.equal(built.status, 200, built.text);
+    const body = built.body as { source: { files: { path: string }[] }; summary: { services: number }; planHash: string };
+    assert.deepEqual(body.source.files.map((f) => f.path), ['compose.yaml'], 'the plan came from ONE file -- no generated overlay exists in this repository');
+    assert.equal(body.summary.services, 1);
+    assert.match(body.planHash, /^[0-9a-f]{64}$/);
+
+    // A second release replaces the first: the plan must move, because a stale artifact is the same failure in
+    // a new place, and "newest report wins" is what makes the record mean "what is live".
+    const newer = `sha256:${'d9'.repeat(32)}`;
+    await app.call(`/api/v1/instances/${id}/artifacts`, {
+      method: 'POST', ...app.asUser(), body: JSON.stringify({ service: 'web', image: 'ghcr.io/acme/fork', digest: newer }),
+    });
+    const rebuilt = await app.call(`/api/v1/instances/${id}/plan/from-repository`, { method: 'POST', ...app.asUser(), body: '{}' });
+    assert.equal(rebuilt.status, 200, rebuilt.text);
+    assert.notEqual((rebuilt.body as { planHash: string }).planHash, body.planHash, 'a new artifact must produce a new plan hash');
+
+    const audit = await app.ctx.store.recentAudit(60);
+    const row = audit.find((r) => r.action === 'artifact.report');
+    assert.ok(row, 'the report was not audited');
+    assert.equal(JSON.stringify(row!.detail).includes('APP_SECRET'), false, 'unrelated names must not appear in an artifact row');
+  } finally {
+    github.restore();
+    await disposeKernel(app.ctx);
+  }
+});
+
+test('secrets are delivered and read back as presence; the value never comes out again (D53)', async () => {
+  const github = stubGithub({ files: { 'compose.yaml': BUILD_ONLY } });
+  const app = await start();
+  try {
+    const id = await forkInstance(app);
+    await app.call(`/api/v1/instances/${id}/artifacts`, {
+      method: 'POST', ...app.asUser(), body: JSON.stringify({ service: 'web', image: 'ghcr.io/acme/fork', digest: REAL_DIGEST }),
+    });
+    const built = await app.call(`/api/v1/instances/${id}/plan/from-repository`, { method: 'POST', ...app.asUser(), body: '{}' });
+    assert.equal(built.status, 200, built.text);
+
+    // Before anything is applied, presence is `unverifiable`, NOT `missing`. The provider has no such instance,
+    // and answering "the credential is absent" would be platfolio inventing a fact about a project it has not
+    // touched -- the same class of overclaim as reporting a certificate as issued because a hostname exists.
+    const neverApplied = await app.call(`/api/v1/instances/${id}/secrets?environment=production&service=web`, { ...app.asUser() });
+    assert.equal(neverApplied.status, 200, neverApplied.text);
+    assert.deepEqual((neverApplied.body as { presence: { state: string }[] }).presence.map((x) => x.state), ['unverifiable'],
+      'presence is a provider question; an unapplied instance cannot be asked');
+
+    // Apply the plan through the provider, as the controller would, so the instance exists in the driver.
+    const registered = await app.ctx.store.getPlan(id);
+    assert.ok(registered.ok, 'the plan was not registered');
+    const applied = await app.ctx.infra.applyPlan(registered.value.plan as Parameters<typeof app.ctx.infra.applyPlan>[0]);
+    assert.equal(applied.verified, true, JSON.stringify(applied.failures));
+
+    const before = await app.call(`/api/v1/instances/${id}/secrets?environment=production&service=web`, { ...app.asUser() });
+    assert.equal(before.status, 200, before.text);
+    const presenceBefore = (before.body as { presence: { name: string; state: string }[] }).presence;
+    // Now the question is answerable, and the answer is `missing`: the plan declares the name, nobody filled it.
+    assert.deepEqual(presenceBefore, [{ name: 'APP_SECRET', state: 'missing' }], 'the plan declares the name; nothing is filled yet');
+
+    // A second principal at member role, granted through the store rather than assumed: the 403 must come from
+    // the policy table meeting a real membership, not from a token nobody can resolve.
+    const member = must(await app.ctx.store.resolvePerson({ issuer: fixture.issuer, subject: 'member-subject' }), 'member person');
+    must(await app.ctx.store.putTeamMember({ teamId: app.teamId, personId: member.person.id, role: 'member' }), 'putTeamMember');
+    const asMember = { headers: { authorization: `Bearer ${signToken(fixture, { subject: 'member-subject', scope: 'platfolio.user' })}`, 'content-type': 'application/json' } };
+
+    const secret = 's3cr3t-value-that-must-not-come-back-out';
+    const wrongRole = await app.call(`/api/v1/instances/${id}/secrets/APP_SECRET`, {
+      method: 'PUT', ...asMember, body: JSON.stringify({ service: 'web', environment: 'production', value: secret }),
+    });
+    assert.equal(wrongRole.status, 403, wrongRole.text);
+
+    const put = await app.call(`/api/v1/instances/${id}/secrets/APP_SECRET`, {
+      method: 'PUT', ...app.asUser(), body: JSON.stringify({ service: 'web', environment: 'production', value: secret }),
+    });
+    assert.equal(put.status, 204, put.text);
+    assert.equal(put.text, '', '204 must carry no body: an echo of a credential is the leak');
+
+    const after = await app.call(`/api/v1/instances/${id}/secrets?environment=production&service=web`, { ...app.asUser() });
+    assert.equal(after.status, 200, after.text);
+    assert.deepEqual((after.body as { presence: { state: string }[] }).presence.map((p) => p.state), ['set']);
+    assert.equal(JSON.stringify(after.body).includes(secret), false, 'the delivered value appeared in a read-back');
+    assert.equal(JSON.stringify(put.body ?? '').includes(secret), false);
+
+    const audit = await app.ctx.store.recentAudit(60);
+    const row = audit.find((r) => r.action === 'secret.deliver');
+    assert.ok(row, 'delivery was not audited');
+    assert.equal(JSON.stringify(row!.detail).includes(secret), false, 'the audit trail is a leak surface like any other (D4)');
+    assert.deepEqual(Object.keys(row!.detail ?? {}).sort(), ['environment', 'name', 'service']);
+  } finally {
+    github.restore();
+    await disposeKernel(app.ctx);
+  }
+});
+
+test('a member cannot deliver a credential, and an empty write is refused rather than treated as deletion', async () => {
+  const github = stubGithub({ files: { 'compose.yaml': BUILD_ONLY } });
+  const app = await start();
+  try {
+    const id = await forkInstance(app);
+    const empty = await app.call(`/api/v1/instances/${id}/secrets/APP_SECRET`, {
+      method: 'PUT', ...app.asUser(), body: JSON.stringify({ service: 'web', environment: 'production', value: '' }),
+    });
+    assert.equal(empty.status, 400, empty.text);
+    assert.match((empty.body as { message: string }).message, /no delete verb/i, empty.text);
+
+    const lower = await app.call(`/api/v1/instances/${id}/secrets/app_secret`, {
+      method: 'PUT', ...app.asUser(), body: JSON.stringify({ service: 'web', environment: 'production', value: 'x' }),
+    });
+    assert.equal(lower.status, 400, 'a variable name is uppercase by convention and a lowercase one is a typo waiting to shadow');
+  } finally {
+    github.restore();
+    await disposeKernel(app.ctx);
+  }
+});

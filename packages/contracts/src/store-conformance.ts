@@ -632,6 +632,51 @@ const expectErr = (result: { ok: boolean; value?: unknown } & Partial<StoreError
     return two.length === 2 ? { status: 'pass', detail: '2 of 4 returned' } : { status: 'fail', detail: `limit ignored: ${String(two.length)}` };
   });
 
+  await add('a release artifact is recorded and read back identically (D54)', async () => {
+    const { store, instance } = await seed();
+    const digest = `sha256:${'a1'.repeat(32)}`;
+    const put = await store.putArtifact({ instanceId: instance.id, service: 'web', image: 'ghcr.io/acme/widget', digest, reportedBy: 'conformance' });
+    if (!put.ok) return { status: 'fail', detail: reasonOf(put) };
+    const listed = await store.listArtifacts(instance.id);
+    const hit = listed.find((a) => a.service === 'web');
+    return hit?.digest === digest && hit.image === 'ghcr.io/acme/widget'
+      ? { status: 'pass', detail: 'one artifact, read back' }
+      : { status: 'fail', detail: JSON.stringify(listed) };
+  });
+
+  await add('the newest report per service replaces the previous one (a release record is not a history)', async () => {
+    const { store, instance } = await seed();
+    const first = `sha256:${'b2'.repeat(32)}`;
+    const second = `sha256:${'c3'.repeat(32)}`;
+    await store.putArtifact({ instanceId: instance.id, service: 'web', image: 'ghcr.io/acme/widget', digest: first, reportedBy: 'ci' });
+    await store.putArtifact({ instanceId: instance.id, service: 'web', image: 'ghcr.io/acme/widget', digest: second, reportedBy: 'ci' });
+    const web = (await store.listArtifacts(instance.id)).filter((a) => a.service === 'web');
+    return web.length === 1 && web[0]?.digest === second
+      ? { status: 'pass', detail: 'replaced, not appended' }
+      : { status: 'fail', detail: `expected one current artifact, got ${JSON.stringify(web)}` };
+  });
+
+  await add('a tag is refused where a digest belongs (#84 carried into the store, both drivers)', async () => {
+    const { store, instance } = await seed();
+    // Four shapes that must all be refused: a mutable tag, two wrong digests by length/charset, and a wrong
+    // algorithm. The memory driver used to accept every one of them, which is the asymmetry this case exists
+    // to keep from coming back.
+    for (const bad of ['latest', `sha256:${'z'.repeat(64)}`, `sha512:${'a'.repeat(64)}`, `sha256:${'a'.repeat(63)}`]) {
+      const put = await store.putArtifact({ instanceId: instance.id, service: 'web', image: 'ghcr.io/acme/widget', digest: bad, reportedBy: 'conformance' });
+      if (put.ok) return { status: 'fail', detail: `accepted digest "${bad.slice(0, 20)}..."` };
+    }
+    return { status: 'pass', detail: 'all four malformed digests refused' };
+  });
+
+  await add('an artifact cannot name an instance that does not exist', async () => {
+    const store = await fresh();
+    const put = await store.putArtifact({ instanceId: 'inst-nope', service: 'web', image: 'ghcr.io/acme/widget', digest: `sha256:${'d4'.repeat(32)}`, reportedBy: 'conformance' });
+    return put.ok === false && put.code === 'not-found'
+      ? { status: 'pass', detail: 'the instance link is enforced, not decorative' }
+      : { status: 'fail', detail: JSON.stringify(put) };
+  });
+
+
   await add('close() makes the store unusable rather than silently empty', async () => {
     const { store } = await seed();
     await store.close();

@@ -124,6 +124,14 @@ export class StoreService extends Service<z.infer<typeof StoreConfigSchema>> {
   static noteFailure(error: StoreError): string {
     return error.code === 'not-found' ? `${error.what} ${error.id} not found` : error.reason;
   }
+
+  /**
+   * Release artifacts (D54) are forwarded rather than re-implemented: the capability layer must not reach
+   * past this facade, and a store that answers differently per driver is how a conformance suite earns its
+   * place. Both drivers implement the same two methods and the shared suite runs against both.
+   */
+  putArtifact(artifact: Parameters<Store['putArtifact']>[0]) { return this.inner.putArtifact(artifact); }
+  listArtifacts(instanceId: string) { return this.inner.listArtifacts(instanceId); }
 }
 
 export type { StoreResult };
