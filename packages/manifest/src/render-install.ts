@@ -108,6 +108,20 @@ export function renderInstallPullRequest(m: Manifest, opts: InstallOptions): Ins
     `      name: ${EXPR.environment}`,
     '    steps:',
     '      - uses: actions/checkout@v7',
+
+    // A missing variable fails HERE, naming itself, rather than inside the action as a fetch to an empty
+    // URL. This is the step that makes the D47 choice usable by someone who has never read a design doc.
+    '      - name: Check the platfolio control-plane endpoint is configured',
+        '        env:',
+          '          PLATFOLIO_URL: ${{ vars.PLATFOLIO_URL }}',
+        '        run: |',
+          '          if [ -z "$PLATFOLIO_URL" ]; then',
+            '            echo "::error::repository variable PLATFOLIO_URL is unset -- set it to the platfolio control-plane origin given with your install request,"',
+            '            echo "::error::for example https://api.example.com. See README.md, managed by platfolio."',
+            '            exit 1',
+            '          fi',
+            '          echo "reporting to the platfolio control plane configured for this repository"',
+
     '',
     "      - name: Apply desired state with this repository's own credentials",
     '        id: apply',
@@ -131,7 +145,10 @@ export function renderInstallPullRequest(m: Manifest, opts: InstallOptions): Ins
     `          dispatch_id: ${EXPR.dispatch}`,
     `          nonce: ${EXPR.nonce}`,
     `          plan_hash: ${EXPR.planHash}`,
-    `          platfolio_url: ${opts.platfolioUrl}`,
+    // D47: the control-plane origin is NOT written into the file every fork commits. It is a repository
+    // variable the owner sets once -- which is also what keeps a template usable by a stranger: a workflow
+    // that names someone else's deployment is a template nobody else can install.
+    '          platfolio_url: ${{ vars.PLATFOLIO_URL }}',
     '',
     '      - name: Report the outcome for platfolio to verify by read-back',
     '        if: always()',
@@ -143,6 +160,14 @@ export function renderInstallPullRequest(m: Manifest, opts: InstallOptions): Ins
 
   const secretLines = requiredSecrets(m).map((s) => `- \`${s.name}\` (service \`${s.service}\`; resolved by \`${s.source}\`)`);
   const doc = [
+    // Instruction, not declaration. The origin platfolio was reached at belongs in the install PR's body,
+    // which is ephemeral; putting it in a committed README is the same D47 mistake wearing prose.
+    '## Before the first run',
+    '',
+    'Set one repository variable: **`PLATFOLIO_URL`**, the platfolio control-plane origin you were given with',
+    'this install request (Settings → Secrets and variables → Actions → Variables). The workflow says that',
+    'name in its failure message if it is missing, and nothing committed here names a deployment.',
+    '',
     `# ${m.metadata.title} — managed by platfolio`,
     '',
     `Platform \`${m.metadata.name}\` \`${m.metadata.version}\` (\`${m.metadata.archetype}\`).`,
