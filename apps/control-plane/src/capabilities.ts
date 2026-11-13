@@ -8,7 +8,6 @@ import { ScmNotConfiguredError } from '@platfolio/kernel';
 import { buildPlan, parseCompose } from '@platfolio/manifest';
 import type { ExtensionDescriptor, KernelContext, Request, Response_, RouteDefinition } from '@platfolio/kernel';
 import { ArtifactRecordSchema } from '@platfolio/contracts';
-import { z } from 'zod';
 import { badRequest, bearerToken, notFound, send, unauthorized } from './respond.ts';
 
 /**
@@ -465,7 +464,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
             status: 400,
             // Field-level, because the realistic mistake is a CI variable holding a tag rather than a digest,
             // and "invalid request" without a path sends the operator to the spec instead of to their pipeline.
-            body: { error: 'invalid-artifact', message: z.prettifyError(parsed.error) },
+            body: { error: 'invalid-artifact', message: parsed.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join('; ') },
           };
         }
         const stored = await scope.context.store.putArtifact({ ...parsed.data, instanceId: id, reportedBy: scope.personId });

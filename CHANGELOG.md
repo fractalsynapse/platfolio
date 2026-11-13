@@ -81,6 +81,24 @@ the gate doing its job on its author.
 393 tests, 392 pass, 1 explicitly skipped (the live forge check, gated on `PLATFOLIO_LIVE_GIT=1`); 35
 operations checked in both directions; both store drivers run the same suite, now including artifacts.
 
+### Fixed — an undeclared dependency that only the production build could see
+
+`capabilities.ts` needed a zod error formatter, so I wrote `import { z } from 'zod'`. Every local gate went
+green: `tsx` resolves zod from the hoisted workspace root, where it is present because some other package
+declares it. The control-plane image installs each app's **declared** dependencies, and there the import is
+`ERR_MODULE_NOT_FOUND` at startup -- before the fail-closed check could print its own refusal.
+
+CI's "Build the control-plane image" job caught it, on the step that runs the built container with no identity
+config and asserts it refuses to start. That assertion is the cheapest thing in this repository, and it is the
+only one that tests the artifact a tenant actually receives rather than the source I edited.
+
+The file's existing style was already correct -- `input.error.issues.map(...)` needs no zod import, because the
+schema's error type carries the issues. Fixed by deleting the import and matching the neighbours.
+
+**Rule recorded:** when a check can be run against the built artifact, running it against source does not
+establish the claim. AGENTS.md already said this ("fake-only tests do not establish that wiring works"); this
+is the cost of reading past it.
+
 ### Added — the central environment registry, `environment.yaml` (D52)
 
 One machine-readable file at the repository root declaring every variable this project reads or deploys: whether
