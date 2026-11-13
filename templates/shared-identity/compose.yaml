@@ -29,7 +29,11 @@ x-platfolio:
     version: 0.1.0
     title: Shared Identity (Keycloak)
     summary: One OIDC issuer for a team's web, worker and shared services, with realms as the tenant unit.
-    archetype: shared-service
+    # D51: the kind is web (it accepts connections); the mode is hosted, because nobody develops
+    # Keycloak here -- it pulls a published image and a database template and runs production. The shared part
+    # is the `provides` block below, which was always a declaration rather than a shape.
+    kind: web
+    mode: hosted
     license: Apache-2.0
   requires:
     platfolio: ">=0.4.0 <1"

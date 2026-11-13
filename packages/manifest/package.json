@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Platform Manifest: schema, archetype defaults, validation and renderers (Compose, Railway IaC).",
+  "description": "Platform Manifest: schema, kind/mode rules, validation and renderers (Compose, Railway IaC).",
   "license": "Apache-2.0",
   "main": "./src/index.ts",
   "exports": { ".": "./src/index.ts" },

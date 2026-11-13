@@ -105,34 +105,58 @@ test('resource ceilings are reported, not silently dropped', () => {
   assert.ok((out.files['.railway/railway.ts'] ?? '').includes('NOT expressible in Railway IaC'), 'limits must be recorded in the file');
 });
 
-test('the new archetypes carry rules, not just names', () => {
+test('kind and mode carry rules, not just names (D51)', () => {
   // Mutating a shipped template rather than hand-writing YAML: the fixture stays valid as the schema evolves,
   // so a failing assertion means the rule broke and not that my fixture drifted.
   const base = parse(read('packages/manifest/test/fixtures/web-app-manifest.yaml')).manifest!;
-  const withArchetype = (archetype: 'worker' | 'shared-service'): typeof base => ({ ...base, metadata: { ...base.metadata, archetype } });
+  const shaped = (over: Partial<typeof base.metadata>): typeof base =>
+    ({ ...base, metadata: { ...base.metadata, ...over } });
+  const codes = (m: typeof base) => validateManifest(m).map((i) => i.code);
 
-  // The web template's api service is externally reachable, so calling it a worker must be refused.
-  const worker = validateManifest(withArchetype('worker'));
-  assert.ok(worker.some((i) => i.code === 'archetype-worker'), JSON.stringify(worker.map((i) => i.code)));
+  // A web template's service takes inbound connections, so calling the platform a worker must be refused --
+  // this is the whole distinction, and the one rule the old `archetype` labels actually encoded.
+  assert.ok(codes(shaped({ kind: 'worker' })).includes('kind-worker-exposed'), JSON.stringify(codes(shaped({ kind: 'worker' }))));
 
-  // example-full-stack has no public inbound? it does (app). Use it for the shared-service contract instead:
-  // a shared service with nothing reachable is unbindable, so the rule must say so.
+  // Clear every host and the web kind must complain: nothing reachable means nothing a user can reach, and a
+  // deployment that reports live while no one can connect is the failure this replaces a silent pass with.
   const quiet = structuredClone(base);
   for (const name of Object.keys(quiet.spec.services)) quiet.spec.services[name] = { ...quiet.spec.services[name]!, domains: [] };
-  // (An earlier version computed `validateManifest(withArchetype('shared-service'))` and never
-  // asserted on it. Asserting on it would have been wrong, not merely unused: the web template HAS a
-  // reachable service, so the shared-service rule is supposed to stay quiet. The real cases for that
-  // rule are below, on fixtures whose hosts are cleared -- `quiet` feeds one of them.)
-  // proves only that my fixture was wrong.
-  const cleared = structuredClone(base);
-  for (const name of Object.keys(cleared.spec.services)) cleared.spec.services[name] = { ...cleared.spec.services[name]!, domains: [] };
-  assert.deepEqual(validateManifest({ ...cleared, metadata: { ...cleared.metadata, archetype: 'full-stack-web' } })
-    .filter((i) => i.code === 'archetype-full-stack').map((i) => i.code), ['archetype-full-stack'], 'the cleared fixture must still be a valid shape apart from exposure');
-  assert.ok(validateManifest({ ...cleared, metadata: { ...cleared.metadata, archetype: 'shared-service' } })
-    .some((i) => i.code === 'archetype-shared-service'), 'no public service means nothing can bind to it');
-  // ...and once something is reachable, the same shape passes.
-  const exposed = structuredClone(quiet);
-  exposed.spec.services.api = { ...exposed.spec.services.api!, domains: ['id.example.com'] };
-  assert.ok(!validateManifest({ ...exposed, metadata: { ...exposed.metadata, archetype: 'shared-service' } }).some((i) => i.code === 'archetype-shared-service'),
-    'a shared service that exposes something is valid');
+  assert.ok(codes(quiet).includes('kind-web-unreachable'), JSON.stringify(codes(quiet)));
+
+  // Put a host back and the same document passes. Without this the assertion above would only prove the rule
+  // fires, not that it stops -- the difference between a check and a complaint.
+  quiet.spec.services.api = { ...quiet.spec.services.api!, domains: ['app.example.com'] };
+  assert.ok(!codes(quiet).includes('kind-web-unreachable'), JSON.stringify(codes(quiet)));
+
+  // mode drives the environment set, which is what the old labels left implicit. Three cases: the mismatch in
+  // each direction, and the matching pair as a control -- without it the two refusals could be a rule that
+  // simply always fires.
+  const withStaging = (enabled: boolean) => ({
+    ...base,
+    spec: {
+      ...base.spec,
+      environments: { ...base.spec.environments, staging: enabled
+        ? { enabled: true, branch: 'staging' } as typeof base.spec.environments.staging
+        : { enabled: false } as typeof base.spec.environments.staging },
+    },
+  });
+  assert.ok(codes({ ...withStaging(false), metadata: { ...base.metadata, mode: 'development' } }).includes('mode-development-staging'),
+    'a developed platform with no staging has nowhere to put a change');
+  assert.ok(codes({ ...withStaging(true), metadata: { ...base.metadata, mode: 'hosted' } }).includes('mode-hosted-extra-env'),
+    'an operated platform with staging pays for a copy nobody is changing');
+  assert.ok(!codes({ ...withStaging(false), metadata: { ...base.metadata, mode: 'hosted' } }).some((c) => c.startsWith('mode-')),
+    'and the matching pair must be quiet: otherwise the two refusals above prove nothing');
+
+  // Offering a capability requires reachability: a worker cannot be bound to, so D34 sharing and kind worker
+  // are a contradiction rather than a rare combination.
+  const offering = structuredClone(shaped({ kind: 'worker' }));
+  (offering as { spec: { provides?: unknown } }).spec.provides = { name: 'identity', outputs: [{ output: 'issuer', kind: 'url', description: 'x' }] };
+  assert.ok(codes(offering).includes('provides-requires-web'), JSON.stringify(codes(offering)));
+
+  // The migration guard: a document that still declares the retired label is translated and WARNED, never
+  // refused by rules it never opted into. Without this, renaming a field would have made every existing
+  // manifest invalid on the version bump that introduced the new name.
+  const legacy = { ...base, metadata: { ...base.metadata, kind: undefined as unknown as 'web', legacyShape: true } };
+  const legacyCodes = codes(legacy).filter((c) => c.startsWith('kind-') || c.startsWith('mode-'));
+  assert.deepEqual(legacyCodes, [], `legacy documents must not be refused by the new rules: ${JSON.stringify(legacyCodes)}`);
 });

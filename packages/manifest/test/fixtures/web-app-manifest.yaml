@@ -5,7 +5,8 @@ metadata:
   version: 1.4.0
   title: ExampleWebApp
   summary: Knowledge management service that unifies a collection of Git repositories into an AI context generation machine.
-  archetype: api-service
+  kind: web
+  mode: development
   repository: https://github.com/platfolio-fixtures/example-web-app
   license: Apache-2.0
   architectures: [amd64, arm64]

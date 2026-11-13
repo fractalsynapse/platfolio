@@ -57,10 +57,31 @@ export const ManifestSchema = z.object({
     version: Version,
     title: z.string().min(1),
     summary: z.string().min(1),
-    // `worker` and `shared-service` were added for the template set: a scalable backend with no inbound
-    // traffic is a different shape from an API, and the identity provider every team application trusts is a
-    // third. Each carries its own validation rules in validate.ts -- an enum value with no rule is a label.
-    archetype: z.enum(['api-service', 'full-stack-web', 'worker', 'shared-service']),
+    /**
+     * The platform is one of two things (D51): a `web` service that accepts connections, or a `worker` that
+     * does not. Everything the old four-value `archetype` conflated splits out of this pair:
+     *
+     * - `mode` says whether the platform is developed (`development`: staging beside production, a local
+     *   overlay, commits flowing) or merely operated (`hosted`: production only -- an upstream container plus a
+     *   database pulled by an existing template, which is exactly what `shared-identity` is).
+     * - being a team service is NOT a kind. It is `spec.provides`, modelled since D34: a shared identity
+     *   provider is a web platform in hosted mode that offers a capability, not a fourth shape.
+     *
+     * `archetype` is gone as authored input. The old labels carried rules that were really counts -- "an
+     * api-service has at most 2 services", "full-stack-web needs at least 2" -- which described our own example
+     * manifests and would have refused a tenant's legitimate third worker. What survives is about direction
+     * (who accepts connections) and lifecycle (which environments exist), because those are architecture
+     * rather than taste.
+     */
+    kind: z.enum(['web', 'worker']),
+    /**
+     * Set by the Compose translator when a document still declares the retired `archetype` (D51). The kind and
+     * mode rules do not bind such a document: the labels it chose were never the facts those rules read, so
+     * retro-applying them would convert a vocabulary migration into a wall of refusals against documents that
+     * predate it. They get `legacy-archetype` -- a warning naming what to write instead -- and nothing else.
+     */
+    legacyShape: z.boolean().optional(),
+    mode: z.enum(['development', 'hosted']).default('development'),
     repository: z.string().url().optional(),
     license: z.string().min(1).default('Apache-2.0'),
     architectures: z.array(z.enum(['amd64', 'arm64'])).default(['amd64', 'arm64']),
