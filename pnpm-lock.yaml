@@ -196,6 +196,9 @@ importers:
       '@platfolio/kernel':
         specifier: workspace:*
         version: link:../../packages/kernel
+      '@platfolio/manifest':
+        specifier: workspace:*
+        version: link:../../packages/manifest
 
   packages/api-contract:
     dependencies:

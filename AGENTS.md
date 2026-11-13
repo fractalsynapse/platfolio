@@ -25,7 +25,7 @@ selections it has already made are recorded, not improvised:
 | Control-plane API design (the validation mechanism itself) | [apps/control-plane/openapi.yaml](apps/control-plane/openapi.yaml) — spec first, then the handler |
 
 Status: foundation poured, interfaces first (D40, [16](docs/design/16-foundation-build-order.md)). Slices 1
-and 2 of that plan are delivered (366 tests): `apps/control-plane` boots on the vendored runtime with
+and 2 of that plan are delivered (380 tests): `apps/control-plane` boots on the vendored runtime with
 Keycloak-verified bearer auth, persistent records (`Store` as a capability with a Postgres implementation and
 an in-memory double under one conformance suite, gated in CI against a live database), a controller
 that turns accepted attestations into stored state, and capability bindings that make shared services
@@ -56,6 +56,12 @@ contract says so rather than pretending. `email:smoke` proves the hand-written S
 server, and CI runs it. Invitations are built on it (#186): an owner invites by address, the invited
 person claims it against the address their IdP asserts -- no token in the link, so a forwarded email grants
 nothing.
+
+Platfolio's operations are **API operations** (D48): a state change or a provider action that exists only in a
+script is a gap, not a design -- `POST /api/v1/instances/{id}/plan/from-repository` and `…/dispatches/{id}/trigger`
+exist because reading a tenant's repository from a maintainer's shell was invisible to `api:check`, to the scope
+guard and to the audit trail. `open-install-pr.ts` still carries install-rendering logic and still defaults to
+`--platform selfhost`; that is recorded as remaining work.
 
 What is still **not** delivered, stated because the earlier version of this paragraph was the first thing an
 agent read and it had gone stale: no Stripe integration, no CLI or web UI, and no tenant on either service.

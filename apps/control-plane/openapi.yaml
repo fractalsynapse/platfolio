@@ -596,6 +596,231 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
+  /api/v1/instances/{instanceId}/plan/from-repository:
+    parameters:
+      - name: instanceId
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+    post:
+      operationId: registerPlanFromRepository
+      summary: Build and record the desired state from the tenant's own repository
+      description: |
+        The missing middle (#172). Until now the plan arrived already built, which meant a human holding a
+        checkout: `open-install-pr.ts --platform <local directory>` read the MAINTAINER's filesystem and the
+        tenant's repository was never consulted. This operation makes platfolio do the reading itself --
+        `compose.yaml` (plus the pinned overlay, if the platform has one) fetched from the commit the instance
+        already cites, parsed with the same manifest package the CLI and the tests use, and registered exactly
+        as `PUT …/plan` would.
+
+        What is deliberately NOT here:
+
+        - **No re-derived digest.** `buildPlan` computes `planHash`, and the recorded value is the one a runner
+          must satisfy. The API re-hashing a plan would recreate the bug that made every honest attestation
+          fail with 400 -- two implementations of a truth that has one home.
+        - **No floating refs.** The read is against `templateRef.commitSha`, the pinned identity the instance
+          carries (D29/D30, law 3). A branch name would let a plan be built from content that no longer exists
+          by the time it is applied.
+        - **No unpinned first-party images.** The manifest renderer refuses them (#84) and this operation
+          propagates that refusal as a 400 quoting the renderer, rather than deploying a moving tag and
+          reporting success.
+
+        The response names the blob SHA GitHub reported for each file, so an operator can confirm the plan was
+        built from the bytes they think they pushed.
+      security:
+        - bearerJwt: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                path:
+                  type: string
+                  description: Manifest location within the repository. Default `compose.yaml`.
+                  default: compose.yaml
+                overlayPath:
+                  type: string
+                  description: >-
+                    The pinned production overlay. Default `compose.prod.yaml`. Absent is allowed only when
+                    every service in `path` already carries a digest; otherwise the refusal says which service
+                    is unpinned.
+                  default: compose.prod.yaml
+      responses:
+        '200':
+          description: The plan is recorded; a runner may now be asked to satisfy this digest.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [instanceId, planHash, source, summary]
+                properties:
+                  instanceId: { type: string, minLength: 1 }
+                  planHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+                  source:
+                    type: object
+                    additionalProperties: false
+                    required: [repo, ref, files]
+                    properties:
+                      repo: { type: string, minLength: 3 }
+                      ref: { type: string, pattern: '^[0-9a-f]{40}$' }
+                      files:
+                        type: array
+                        minItems: 1
+                        description: Every file that contributed to the plan, with GitHub's blob identity.
+                        items:
+                          type: object
+                          additionalProperties: false
+                          required: [path, blobSha]
+                          properties:
+                            path: { type: string, minLength: 1 }
+                            blobSha: { type: string, pattern: '^[0-9a-f]{40}$' }
+                            size: { type: integer, minimum: 0 }
+                  summary:
+                    type: object
+                    additionalProperties: false
+                    required: [services, environments]
+                    properties:
+                      services: { type: integer, minimum: 0 }
+                      databases: { type: integer, minimum: 0 }
+                      environments:
+                        type: array
+                        items: { type: string, minLength: 1 }
+                  warnings:
+                    type: array
+                    description: >-
+                      Non-fatal truths the caller must see -- an unpinned public image, a reference the provider
+                      could not verify. Never used to soften a failure into a pass.
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [code, message]
+                      properties:
+                        code: { type: string, minLength: 1 }
+                        message: { type: string, minLength: 1 }
+        '400':
+          description: >-
+            The instance cites no commit, or the documents it names cannot become a plan: unpinned first-party
+            image, invalid manifest, unreadable Compose. The message quotes the reason the renderer gave.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: >-
+            The platfolio GitHub App installation cannot see the repository (#130) -- distinct from a missing
+            path on purpose, because the fix is a different action entirely.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          description: >-
+            Source control is not configured for this platfolio deployment. Reported rather than emulated: an
+            empty plan would claim a platform that nobody described.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+
+  /api/v1/instances/{instanceId}/dispatches/{dispatchId}/trigger:
+    parameters:
+      - name: instanceId
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+      - name: dispatchId
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+    post:
+      operationId: triggerDispatch
+      summary: Ask the tenant's own repository to run the work platfolio just decided
+      description: |
+        The other half of the middle. Creating a dispatch records platfolio's INTENT; nothing happens until the
+        tenant's workflow runs, because the tenant's credentials are the only ones that may touch the tenant's
+        provider account (D24). This call asks GitHub to run it.
+
+        Two measured properties shape it:
+
+        - GitHub enumerates workflows from the DEFAULT branch only (#149), so an install PR that was never
+          merged and a misspelled workflow name are the identical 404. The message says both, because guessing
+          which one wasted a whole debugging pass the first time.
+        - A dispatch is single-use: `GET …/dispatches/{id}` consumes it and a second read answers 409. So a
+          trigger after consumption is refused here too -- re-dispatching would leave a runner fetching a plan
+          that no longer exists.
+      security:
+        - bearerJwt: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [ref]
+              properties:
+                ref:
+                  type: string
+                  minLength: 1
+                  description: >-
+                    Branch or tag GitHub should run on. Not the plan's commit: a workflow run belongs to a
+                    branch, and the digest it must satisfy travels as an input.
+                workflow:
+                  type: string
+                  description: Workflow file name. Default `platfolio-managed.yml`.
+                  default: platfolio-managed.yml
+      responses:
+        '202':
+          description: >-
+            GitHub accepted the request. Acceptance is not completion: the outcome arrives later as an
+            attestation, which platfolio verifies against the provider before it believes anything.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [instanceId, dispatchId, repo, ref, workflow, state]
+                properties:
+                  instanceId: { type: string, minLength: 1 }
+                  dispatchId: { type: string, minLength: 1 }
+                  repo: { type: string, minLength: 3 }
+                  ref: { type: string, minLength: 1 }
+                  workflow: { type: string, minLength: 1 }
+                  state: { type: string, const: requested }
+        '400':
+          description: The instance cites no repository, or the dispatch's plan has no digest to pass along.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: Unknown instance or dispatch, or a dispatch belonging to a different team.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: The dispatch was already consumed by a runner fetch, or is not in a triggerable state.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '502':
+          description: >-
+            GitHub refused the run. The provider's own words are passed through, redacted: an operator debugging
+            a refused dispatch needs the reason, not a status code.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '503':
+          description: Source control is not configured for this platfolio deployment.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
   /api/v1/instances/{instanceId}/dispatches:
     parameters:
       - name: instanceId

@@ -5,6 +5,53 @@ change; entries describe merged intent, not aspirations.
 
 "## [Unreleased]
 
+### Added — the missing middle is now an API operation, not a shell step (D48)
+
+Two operations, designed in [apps/control-plane/openapi.yaml](apps/control-plane/openapi.yaml) before their
+handlers existed, taking the surface from 30 to **32**:
+
+- **`POST /api/v1/instances/{id}/plan/from-repository`** (`registerPlanFromRepository`) reads
+  `compose.yaml` (plus `compose.prod.yaml`, if present) from the commit the instance already cites, parses it
+  with the same manifest package the CLI and tests use, builds the plan, and records it. It cites the blob SHA
+  GitHub reported for every file that contributed, so an operator can confirm the plan came from the bytes they
+  pushed. Refusals keep their source: an unpinned first-party image comes back quoting the renderer (#84), a
+  repository outside the installation's selection is **403** and a missing path is **400** -- #130's two
+  failures, finally distinguishable at the boundary.
+- **`POST /api/v1/instances/{id}/dispatches/{dispatchId}/trigger`** (`triggerDispatch`) asks GitHub to run the
+  tenant's own workflow with the six inputs the rendered workflow requires, forwarding the provider's refusal
+  because a run that never started leaves no logs anywhere else. A dispatch a runner already fetched cannot be
+  triggered: that would send a second runner to collect a plan that is gone.
+
+`ctx.scm` is a kernel service with `driver: 'none'` as its default; the composition root reads
+`PLATFOLIO_GITHUB_APP_ID`, `PLATFOLIO_GITHUB_INSTALLATION_ID` and the key (contents or a mounted path), and the
+manifest now *declares* those three by name so `selfhost-deploy --apply` refuses until they exist.
+
+**What the design-first order bought, in print.** Between writing the spec and writing the handlers,
+`api:check` reported both operations as *"the spec describes an endpoint that does not exist"* -- the direction
+that only works if both are checked. Then:
+
+- The renderer **refused my own test fixture** twice: first for omitting `environments.staging` and `preview`
+  (the schema requires all three), then for a digest of `a`.repeat(64) -- #84's placeholder check, doing exactly
+  its job on a test that wanted a shortcut. The fixture complied; the rule was not bent.
+- The stub's first version matched the query string inside `URL.pathname`, which never contains it, so every
+  contents read fell through to "unmodelled call" and the API answered 400. A transport stub can be wrong in a
+  way that looks like an application bug; this one announced itself.
+- `ctx.scm` failed with *`cannot get property "scm" without inject`* in three tests, because `requires` was
+  added to the instances descriptor and not the dispatches one. Cordis's declaration discipline caught an
+  omission that would otherwise have surfaced as a 500 on a real deployment.
+- One assertion message went into `detail` as a template string, and the audit schema is a **record** --
+  refusing it is correct: an audit row that must be read by eye is a log line wearing a schema. The nonce is
+  asserted *absent* from audit, since it is the runner's single-use credential.
+
+**Not yet done, stated rather than implied:** `open-install-pr.ts` still renders and opens the install PR
+itself, still defaults `--platform selfhost`, and still reads a local filesystem. It is now a *client* of the
+seam this change added, not the only way to reach a repository, but the D48 deprecation of its logic is open
+work. Nothing deployed uses these operations yet -- the deployed control plane has no app credentials
+configured, so today it would answer **503**, which is the honest answer rather than a hidden one.
+
+**380 tests (9 new at the HTTP boundary), 0 skipped; `api:check` 32 operations both directions; contracts
+baseline unchanged (no public TS surface moved); graphql, lockfile, docs, bundle and compose gates green.**
+
 ### Added — platfolio can read a tenant's repository and ask GitHub to run it (the middle of #172)
 
 The control plane has always known how to turn a Compose document into an `InfraPlan`, and the runner has always

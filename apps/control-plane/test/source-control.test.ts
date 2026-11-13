@@ -1,0 +1,360 @@
+import assert from 'node:assert/strict';
+import { generateKeyPairSync } from 'node:crypto';
+import { test } from 'node:test';
+import { createKernel, disposeKernel, type KernelContext } from '@platfolio/kernel';
+import { buildCapabilities } from '../src/capabilities.ts';
+import { buildPlan, parseCompose } from '@platfolio/manifest';
+import { blobSha, createIdentityFixture, defaultIdentityConfig, reasonOf, signToken, type StoreResult } from '@platfolio/contracts';
+
+/**
+ * The two operations that put platfolio in touch with a tenant's repository (#172's middle): building a plan
+ * from the tenant's own committed Compose, and asking GitHub to run the dispatch.
+ *
+ * GitHub is stubbed at the transport, which is what the seam's threaded `fetch` makes possible -- and what the
+ * conformance suite caught it forking when the mint call ignored it. Nothing here contacts the network.
+ */
+
+const fixture = createIdentityFixture();
+const scoped = () => signToken(fixture, { scope: 'platfolio.user' });
+const build = { version: '9.9.9', commit: 'abcdef0123456789abcdef0123456789abcdef01', buildTime: '2026-11-12T00:00:00Z' };
+const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048, privateKeyEncoding: { type: 'pkcs8', format: 'pem' }, publicKeyEncoding: { type: 'spki', format: 'pem' } });
+
+const REPO = 'acme/widget';
+const COMMIT = 'cccccccccccccccccccccccccccccccccccccccc';
+
+// A real-looking digest. `a`.repeat(64) was refused by the renderer's own placeholder check (#84) -- which is
+// exactly the rule that exists to stop a stale or invented pin reaching a provider, so the fixture complies
+// rather than the rule being bent.
+const DIGEST = 'b1a2c3d4e5f60718293a4b5c6d7e8f901234567890abcdef1234567890abcdef';
+const PINNED_COMPOSE = [
+  'name: widget',
+  'services:',
+  '  web:',
+  `    image: nginx:alpine@sha256:${DIGEST}`,
+  '    expose: ["8080"]',
+  '    x-platfolio:',
+  '      public: true',
+  '      domains: [web.example.com]',
+  'x-platfolio:',
+  '  metadata: { name: widget, version: 1.0.0, title: Widget, summary: A tenant platform }',
+  // All three environments are required by the schema, and `release` is what makes a first-party image
+  // resolvable. A fixture that omits them is not a tenant document -- which the API told me, loudly, by
+  // refusing to build a plan from it.
+  '  environments:',
+  '    production: { enabled: true, branch: main }',
+  '    staging: { enabled: false }',
+  '    preview: { enabled: false }',
+  '  release: { registryImage: ghcr.io/acme/widget, tagPattern: "v*" }',
+  '',
+].join('\n');
+
+// The same platform without a digest: what a tenant pushes before their image is published.
+const UNPINNED_COMPOSE = PINNED_COMPOSE.replace(`    image: nginx:alpine@sha256:${DIGEST}`, '    build: { context: . }');
+
+interface GithubState {
+  files?: Record<string, string>;
+  /** The installation cannot see the repository at all: GitHub's indistinguishable 404 pair (#130). */
+  repoVisible?: boolean;
+  dispatchStatus?: number;
+  dispatchMessage?: string;
+}
+
+interface GithubStub {
+  // `body: string | undefined` rather than `body?: string`: under exactOptionalPropertyTypes
+  // recording a GET as `body: undefined` must be assignable.
+  calls: { method: string; url: string; body: string | undefined }[];
+  restore(): void;
+}
+
+function stubGithub(state: GithubState): GithubStub {
+  const real = globalThis.fetch;
+  const calls: { method: string; url: string; body: string | undefined }[] = [];
+  const files = state.files ?? { 'compose.yaml': PINNED_COMPOSE };
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input);
+    if (!url.startsWith('https://api.github.com/')) return real(input as string | URL, init);
+    const method = (init?.method ?? 'GET').toUpperCase();
+    const body = typeof init?.body === 'string' ? init.body : undefined;
+    calls.push({ method, url, body });
+    const path = new URL(url).pathname;
+    if (path.includes('/access_tokens') && method === 'POST') {
+      return Response.json({ token: 'ghs_stub', expires_at: '2026-11-12T13:00:00Z', repository_selection: 'selected' });
+    }
+    if (path === '/installation/token' && method === 'DELETE') return new Response(null, { status: 204 });
+    const contents = path.match(/^\/repos\/[^/]+\/[^/]+\/contents\/(.+)$/);
+    if (contents) {
+      const wanted = decodeURIComponent(contents[1]!);
+      const ref = new URL(url).searchParams.get('ref');
+      const content = files[wanted];
+      if (content === undefined) {
+        // GitHub's 404 for a missing path; the repository probe below is what separates it from an
+        // installation that cannot see the repository at all (#130).
+        return Response.json({ message: 'Not Found' }, { status: 404 });
+      }
+      if (ref !== COMMIT) {
+        // The pinned-commit discipline asserted from the transport side: a read that drifted to a branch would
+        // build a plan from content that may no longer exist when it is applied.
+        return Response.json({ message: `Reference name is not found: ${String(ref)}` }, { status: 404 });
+      }
+      return Response.json({
+        type: 'file', name: wanted, path: wanted, sha: blobSha(content), size: Buffer.byteLength(content),
+        content: Buffer.from(content, 'utf8').toString('base64'), encoding: 'base64',
+      });
+    }
+    if (/^\/repos\/[^/]+\/[^/]+$/.test(path)) {
+      return state.repoVisible === false
+        ? Response.json({ message: 'Not Found' }, { status: 404 })
+        : Response.json({ full_name: REPO, default_branch: 'main' });
+    }
+    if (path.endsWith('/dispatches') && method === 'POST') {
+      if (state.dispatchStatus && state.dispatchStatus !== 204) {
+        return Response.json({ message: state.dispatchMessage ?? 'Not Found' }, { status: state.dispatchStatus });
+      }
+      return new Response(null, { status: 204 });
+    }
+    throw new Error(`stub github transport received an unmodelled call: ${method} ${path}`);
+  }) as typeof globalThis.fetch;
+  return { calls, restore: () => { globalThis.fetch = real; } };
+}
+
+function must<T>(result: StoreResult<T>, label: string): T {
+  if (result.ok) return result.value;
+  throw new Error(`${label} refused: ${reasonOf(result)}`);
+}
+
+async function start(options: { scmConfigured?: boolean } = {}) {
+  process.env.PLATFOLIO_RECONCILE_INTERVAL_MS = '120';
+  const ctx: KernelContext = await createKernel({
+    provider: 'fake',
+    custody: 'strict',
+    identity: defaultIdentityConfig(fixture),
+    identityKeys: [fixture.jwk],
+    store: { driver: 'memory' },
+    server: { port: 0 },
+    ...(options.scmConfigured === false
+      ? { scm: { driver: 'none' as const } }
+      : { scm: { driver: 'github-app' as const, appId: 1, installationId: 2, privateKeyPem: privateKey } }),
+    extensions: buildCapabilities({ build }),
+    requiredServices: ['identity', 'server', 'store', 'extensions', 'scm'],
+  });
+  const base = () => `http://127.0.0.1:${String(ctx.server.address.port)}`;
+  const call = async (p: string, init: RequestInit = {}) => {
+    const response = await fetch(base() + p, init);
+    const text = await response.text();
+    let body: unknown;
+    try { body = JSON.parse(text) as unknown; } catch { body = text; }
+    return { status: response.status, body, text };
+  };
+  const token = scoped();
+  const asUser = () => ({ headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' } });
+  const teamId = must(await ctx.store.createTeam({ name: `t-${Math.random().toString(36).slice(2, 8)}` }), 'createTeam').id;
+  const person = must(await ctx.store.resolvePerson({ issuer: fixture.issuer, subject: 'user-conformance' }), 'resolvePerson');
+  must(await ctx.store.putTeamMember({ teamId, personId: person.person.id, role: 'owner' }), 'putTeamMember');
+  const instance = must(await ctx.store.createInstance({ teamId, name: 'widget', template: 'starter-web', templateRef: { repo: REPO, commitSha: COMMIT } }), 'createInstance');
+  return { ctx, call, asUser, token, teamId, instanceId: instance.id };
+}
+
+const fromRepo = (id: string) => `/api/v1/instances/${id}/plan/from-repository`;
+
+test('a plan is built from the tenant repository and recorded with the digest buildPlan computed', async () => {
+  const github = stubGithub({});
+  const app = await start();
+  try {
+    const response = await app.call(fromRepo(app.instanceId), { method: 'POST', ...app.asUser(), body: '{}' });
+    assert.equal(response.status, 200, response.text);
+    const body = response.body as { instanceId: string; planHash: string; source: { repo: string; ref: string; files: { path: string; blobSha: string }[] }; summary: { services: number; environments: string[] } };
+    assert.equal(body.instanceId, app.instanceId);
+    assert.equal(body.source.repo, REPO);
+    assert.equal(body.source.ref, COMMIT, 'the read must be against the pinned commit, not a branch (D29)');
+    assert.deepEqual(body.source.files.map((f) => f.path), ['compose.yaml'], 'the missing overlay is allowed and not reported as read');
+    assert.equal(body.source.files[0]!.blobSha, blobSha(PINNED_COMPOSE), 'the blob identity must be the one GitHub reported for the bytes used');
+
+    // The digest has ONE home. Recomputed here from the same text, it must agree with what the service stored:
+    // an API that re-derived hashes is the bug that made every honest attestation fail with 400.
+    const parsed = parseCompose(PINNED_COMPOSE);
+    assert.ok(parsed.manifest, JSON.stringify(parsed.issues));
+    const expected = buildPlan(parsed.manifest!, { instanceId: app.instanceId, teamId: app.teamId });
+    assert.equal(body.planHash, expected.planHash);
+    assert.equal(body.summary.services, expected.environments.reduce((n, e) => n + e.services.length, 0));
+    assert.deepEqual(body.summary.environments, ['production']);
+
+    const stored = await app.ctx.store.getPlan(app.instanceId);
+    assert.ok(stored.ok, 'the plan was not recorded');
+    const after = await app.ctx.store.getInstance(app.instanceId);
+    assert.equal(after.ok && after.value.desiredPlanHash, body.planHash, 'pending, with the new digest as the desired state');
+
+    // Reads mint a token, use it, and revoke it. The mint/revocation pair is asserted because a leak of the
+    // first kind and a leak of the second look identical from the outside.
+    const minted = github.calls.filter((c) => c.url.includes('/access_tokens') && c.method === 'POST');
+    const revoked = github.calls.filter((c) => c.url === 'https://api.github.com/installation/token' && c.method === 'DELETE');
+    assert.ok(minted.length >= 1, 'no installation token was minted');
+    assert.equal(revoked.length, minted.length, `minted ${String(minted.length)}, revoked ${String(revoked.length)}`);
+  } finally {
+    github.restore();
+    await disposeKernel(app.ctx);
+  }
+});
+
+test('an unpinned first-party image is refused with the renderer’s own reason, not a paraphrase', async () => {
+  const github = stubGithub({ files: { 'compose.yaml': UNPINNED_COMPOSE } });
+  const app = await start();
+  try {
+    const response = await app.call(fromRepo(app.instanceId), { method: 'POST', ...app.asUser(), body: '{}' });
+    assert.equal(response.status, 400, response.text);
+    const body = response.body as { error: string; message: string };
+    assert.equal(body.error, 'manifest-invalid');
+    // #84's refusal mentions the service and why. The API quoting it means one voice owns the truth.
+    assert.match(body.message, /web/, body.message);
+    assert.ok(/pin|digest|image/i.test(body.message), body.message);
+    const stored = await app.ctx.store.getPlan(app.instanceId);
+    assert.equal(stored.ok, false, 'a refused manifest must not leave a plan registered');
+  } finally {
+    github.restore();
+    await disposeKernel(app.ctx);
+  }
+});
+
+test('a repository the installation cannot see is 403, distinguishable from a missing path', async () => {
+  const github = stubGithub({ repoVisible: false, files: {} });
+  const app = await start();
+  try {
+    const response = await app.call(fromRepo(app.instanceId), { method: 'POST', ...app.asUser(), body: '{}' });
+    assert.equal(response.status, 403, response.text);
+    const body = response.body as { error: string; message: string };
+    assert.equal(body.error, 'repository-not-installed');
+    assert.match(body.message, /installation/, body.message);
+    assert.match(body.message, /#130/, 'the message should lead the operator to the limit that explains it');
+  } finally {
+    github.restore();
+    await disposeKernel(app.ctx);
+  }
+});
+
+test('a missing compose.yaml is 400 source-unreadable, a different answer from an invisible repository', async () => {
+  const github = stubGithub({ files: {}, repoVisible: true });
+  const app = await start();
+  try {
+    const response = await app.call(fromRepo(app.instanceId), { method: 'POST', ...app.asUser(), body: '{}' });
+    assert.equal(response.status, 400, response.text);
+    const body = response.body as { error: string; message: string };
+    assert.equal(body.error, 'source-unreadable');
+    assert.match(body.message, /compose\.yaml/, body.message);
+  } finally {
+    github.restore();
+    await disposeKernel(app.ctx);
+  }
+});
+
+test('without source control configured the answer is 503, not an empty plan', async () => {
+  const app = await start({ scmConfigured: false });
+  try {
+    const response = await app.call(fromRepo(app.instanceId), { method: 'POST', ...app.asUser(), body: '{}' });
+    assert.equal(response.status, 503, response.text);
+    assert.equal((response.body as { error: string }).error, 'source-control-not-configured');
+  } finally {
+    await disposeKernel(app.ctx);
+  }
+});
+
+test('an instance that cites no commit cannot have a plan built, and says so', async () => {
+  const github = stubGithub({});
+  const app = await start();
+  try {
+    const loose = must(await app.ctx.store.createInstance({ teamId: app.teamId, name: 'floaty', template: 'starter-web' }), 'createInstance unref');
+    const response = await app.call(fromRepo(loose.id), { method: 'POST', ...app.asUser(), body: '{}' });
+    assert.equal(response.status, 400, response.text);
+    assert.equal((response.body as { error: string }).error, 'no-pinned-source');
+  } finally {
+    github.restore();
+    await disposeKernel(app.ctx);
+  }
+});
+
+test('triggering asks GitHub to run the tenant workflow, carrying all six inputs the workflow requires', async () => {
+  const github = stubGithub({});
+  const app = await start();
+  try {
+    const built = await app.call(fromRepo(app.instanceId), { method: 'POST', ...app.asUser(), body: '{}' });
+    assert.equal(built.status, 200, built.text);
+    const dispatched = await app.call(`/api/v1/instances/${app.instanceId}/dispatches`, {
+      method: 'POST', ...app.asUser(), body: JSON.stringify({ action: 'apply', environment: 'production' }),
+    });
+    assert.equal(dispatched.status, 201, dispatched.text);
+    const intent = (dispatched.body as { intent: { dispatchId: string; nonce: string; planHash: string } }).intent;
+
+    const before = github.calls.length;
+    const trigger = await app.call(`/api/v1/instances/${app.instanceId}/dispatches/${intent.dispatchId}/trigger`, {
+      method: 'POST', ...app.asUser(), body: JSON.stringify({ ref: 'main' }),
+    });
+    assert.equal(trigger.status, 202, trigger.text);
+    const body = trigger.body as { state: string; repo: string; ref: string; workflow: string };
+    assert.deepEqual([body.state, body.repo, body.ref, body.workflow], ['requested', REPO, 'main', 'platfolio-managed.yml']);
+
+    const sent = github.calls.slice(before).find((c) => c.url.endsWith('/dispatches'));
+    assert.ok(sent, 'no dispatch call reached GitHub');
+    const payload = JSON.parse(sent.body ?? '{}') as { ref: string; inputs: Record<string, string> };
+    assert.equal(payload.ref, 'main');
+    // Exactly the six inputs the rendered workflow declares required. A seventh name here would be a workflow
+    // that fails at "Set up job" with a missing input, and none of these belongs in audit (the nonce does).
+    assert.deepEqual(Object.keys(payload.inputs).sort(), ['action', 'dispatch_id', 'environment', 'instance_id', 'nonce', 'plan_hash']);
+    assert.equal(payload.inputs.plan_hash, intent.planHash);
+    assert.equal(payload.inputs.dispatch_id, intent.dispatchId);
+    assert.equal(payload.inputs.nonce, intent.nonce);
+
+    // The store exposes `recentAudit(limit)` with no per-instance filter, so the test filters -- and the
+    // limit is generous because other operations in this test wrote rows first.
+    const audit = await app.ctx.store.recentAudit(50);
+    const row = audit.find((r) => r.action === 'dispatch.trigger' && r.target === app.instanceId);
+    assert.ok(row, 'the trigger was not audited');
+    assert.equal(JSON.stringify(row!.detail).includes(intent.nonce), false, 'the single-use nonce must not be copied into the audit trail');
+  } finally {
+    github.restore();
+    await disposeKernel(app.ctx);
+  }
+});
+
+test('a dispatch already fetched by a runner cannot be triggered again', async () => {
+  const github = stubGithub({});
+  const app = await start();
+  try {
+    await app.call(fromRepo(app.instanceId), { method: 'POST', ...app.asUser(), body: '{}' });
+    const dispatched = await app.call(`/api/v1/instances/${app.instanceId}/dispatches`, {
+      method: 'POST', ...app.asUser(), body: JSON.stringify({ action: 'apply', environment: 'production' }),
+    });
+    const id = (dispatched.body as { intent: { dispatchId: string } }).intent.dispatchId;
+    // A runner fetch consumes the nonce: the same read twice is a replay, not a retry.
+    const fetched = await app.call(`/api/v1/instances/${app.instanceId}/dispatches/${id}`);
+    assert.equal(fetched.status, 200, fetched.text);
+
+    const trigger = await app.call(`/api/v1/instances/${app.instanceId}/dispatches/${id}/trigger`, {
+      method: 'POST', ...app.asUser(), body: JSON.stringify({ ref: 'main' }),
+    });
+    assert.equal(trigger.status, 409, trigger.text);
+    assert.equal((trigger.body as { error: string }).error, 'dispatch-consumed');
+  } finally {
+    github.restore();
+    await disposeKernel(app.ctx);
+  }
+});
+
+test('GitHub’s refusal is forwarded, because a run that never started leaves no logs behind', async () => {
+  const github = stubGithub({ dispatchStatus: 404, dispatchMessage: 'Not Found' });
+  const app = await start();
+  try {
+    await app.call(fromRepo(app.instanceId), { method: 'POST', ...app.asUser(), body: '{}' });
+    const dispatched = await app.call(`/api/v1/instances/${app.instanceId}/dispatches`, {
+      method: 'POST', ...app.asUser(), body: JSON.stringify({ action: 'apply', environment: 'production' }),
+    });
+    const id = (dispatched.body as { intent: { dispatchId: string } }).intent.dispatchId;
+    const trigger = await app.call(`/api/v1/instances/${app.instanceId}/dispatches/${id}/trigger`, {
+      method: 'POST', ...app.asUser(), body: JSON.stringify({ ref: 'main' }),
+    });
+    assert.equal(trigger.status, 502, trigger.text);
+    const body = trigger.body as { error: string; message: string };
+    assert.equal(body.error, 'workflow-not-found');
+    assert.match(body.message, /default branch/, 'the #149 cause has to be said: an unmerged install PR and a typo are the same 404');
+  } finally {
+    github.restore();
+    await disposeKernel(app.ctx);
+  }
+});
