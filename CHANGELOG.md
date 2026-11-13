@@ -5,6 +5,100 @@ change; entries describe merged intent, not aspirations.
 
 "## [Unreleased]
 
+### Added — releases are reported, secrets are delivered, and the templates need one file less
+
+Three API operations (32 → 35, spec written before the handlers), one store record, and two provider verbs:
+
+| Operation | What it replaces |
+| --- | --- |
+| `POST /api/v1/instances/{id}/artifacts` | `compose.prod.yaml` as a required file, and with it the whole stale-pin class of bug (#217 closed) |
+| `PUT /api/v1/instances/{id}/secrets/{name}` | a maintainer typing credentials into a provider console — including for platfolio's own deployment (D53) |
+| `GET /api/v1/instances/{id}/secrets` | `grep`ing a provider UI to find out whether an install is finished |
+
+**D54, the release artifact.** A service declared with `build:` is compiled by the platform's own pipeline, so
+its digest arrives by report: newest-per-service replaces the previous one, a malformed digest is refused at the
+store, and a platform that has never reported one is refused with the **pipeline named** — `publish one (POST
+…/artifacts) and the plan resolves` — not "invalid document". Third-party images still require a committed
+digest, because nobody's pipeline produces them. D30 law 1 is untouched: platfolio deploys on the report and
+then proves the provider's own state, and the plan hash derived from the artifact is what an attestation must
+match, so a stale report **moves the hash** instead of deploying quietly.
+
+**D53, delivery not custody.** `putSecretValue` writes through to the provider and keeps nothing;
+`secretPresence` answers `set | missing | unverifiable`. The success response is **204 with no body**, and the
+value is asserted absent from the read-back *and* from the audit row — the audit trail is a leak surface like
+any other. Writing a credential is owner-only; reading presence is not.
+
+**Presence has three states, and the test proves it.** Before anything is applied, presence is
+`unverifiable` — the provider has no such instance. Two states would have let platfolio answer "the credential
+is missing" about a project it never touched, which is the same overclaim as calling a certificate issued
+because a hostname exists.
+
+**Provider verbs come from one list.** `RailwayInfraProvider.describe().operations` was a hand-copied array;
+it now derives from the shared `OPERATIONS` constant (`[...OPERATIONS]`, copied so a driver cannot mutate the
+shared tuple). The old list was accurate; it was just free to drift, and drift there is silent.
+
+### Fixed — the memory store accepted digests the Postgres store refused
+
+Found while writing the shared suite, and the reason the suite exists: `putArtifact` on the double validated
+nothing, so `digest: 'latest'` passed there and would have failed against Postgres. Validation now happens in
+both drivers, four malformed shapes are refused (`latest`, a wrong alphabet, a wrong algorithm, a short hex
+string), and the artifact cases run against both through `store-conformance`.
+
+### Changed — `check-contracts` can now tell a widening from a removal
+
+Forced by an embarrassment worth keeping in the log: I ran `--update --ack-breaking="additive…"`, the tool
+answered `2 line(s) removed -> MAJOR`, and both statements were defensible while neither was useful. What had
+actually happened is that `OPERATIONS` grew two members, so the *same declaration* was re-emitted with a larger
+body — line-diffing counts that as a removal. The classifier now splits the two and reports them separately:
+
+```
+BREAKING accepted: 0 removed, 2 widened -> derived bump MAJOR. Reason: …
+```
+
+Requiring an ack for a widening is deliberate. A widened output union breaks anyone switching exhaustively even
+though nothing was withdrawn, and "minor, nobody was harmed" would be a claim about other people's code that the
+diff cannot support.
+
+### Added — the dev-overlay pairing gate (D50, and the answer to "isn't this duplication?")
+
+The objection was fair: `compose.yaml` and `compose.dev.yaml` look like the same thing written twice. The
+distinction the files actually carry is that the dev overlay answers a question the platform description
+deliberately does not: **what runs on a laptop** — containers for what a provider would provision, published
+ports, loopback credentials. `platform:plan` never reads it.
+
+So the pairing is enforced rather than trusted. `check-project.ts` now fails when:
+
+- a platform service has **no dev entry** — local `up` would run half the platform and call it whole;
+- the overlay **adds** a service not declared in its own `x-platfolio.devOnlyServices` — an undeclared container
+  is a fact about the platform nobody wrote down;
+- the overlay invents **domains or secrets** the platform file does not declare — a hostname that will never be
+  issued, or a credential requirement that exists in only one place.
+
+Falsified by renaming `api` → `apii` in the dev file: two problems (missing dev entry, undeclared extra), exit
+1. Restored: exit 0. The very first run caught three undeclared `db`/`mailpit` containers I had added, which is
+the gate doing its job on its author.
+
+393 tests, 392 pass, 1 explicitly skipped (the live forge check, gated on `PLATFOLIO_LIVE_GIT=1`); 35
+operations checked in both directions; both store drivers run the same suite, now including artifacts.
+
+### Fixed — an undeclared dependency that only the production build could see
+
+`capabilities.ts` needed a zod error formatter, so I wrote `import { z } from 'zod'`. Every local gate went
+green: `tsx` resolves zod from the hoisted workspace root, where it is present because some other package
+declares it. The control-plane image installs each app's **declared** dependencies, and there the import is
+`ERR_MODULE_NOT_FOUND` at startup -- before the fail-closed check could print its own refusal.
+
+CI's "Build the control-plane image" job caught it, on the step that runs the built container with no identity
+config and asserts it refuses to start. That assertion is the cheapest thing in this repository, and it is the
+only one that tests the artifact a tenant actually receives rather than the source I edited.
+
+The file's existing style was already correct -- `input.error.issues.map(...)` needs no zod import, because the
+schema's error type carries the issues. Fixed by deleting the import and matching the neighbours.
+
+**Rule recorded:** when a check can be run against the built artifact, running it against source does not
+establish the claim. AGENTS.md already said this ("fake-only tests do not establish that wiring works"); this
+is the cost of reading past it.
+
 ### Added — the central environment registry, `environment.yaml` (D52)
 
 One machine-readable file at the repository root declaring every variable this project reads or deploys: whether

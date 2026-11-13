@@ -1,12 +1,13 @@
 import {
-  InfraPlanSchema, planIssues,
+  InfraPlanSchema, OPERATIONS, planIssues,
   CONTRACT_VERSION,
   type ApplyResult, type CapabilityInfo, type DeleteResult, type InfraPlan, type InfraProvider,
-  type Issue, type ServicePlan, type StateSnapshot,
+  type Issue, type SecretPresence, type SecretWriteResult, type ServicePlan, type StateSnapshot,
 } from './infra.ts';
 import {
   HttpRailwayTransport, type RailwayCredential, type RailwayCredentialSource, type RailwayTransport,
 } from './railway-transport.ts';
+import { redactCredentialShaped } from './managed-action.ts';
 
 /**
  * Railway provider, contract 1.0.0.
@@ -144,7 +145,11 @@ export class RailwayInfraProvider implements InfraProvider {
     return {
       provider: 'railway',
       contract: this.contract,
-      operations: ['describe', 'validatePlan', 'applyPlan', 'readState', 'deleteInstance'],
+      // Derived from the shared OPERATIONS constant: a hand-copied list here is how a driver ends up claiming
+      // (or denying) a verb it does or does not implement, out of step with the contract.
+      // Copied, not passed through: the advertised set is mutable in the contract type while
+      // OPERATIONS is a readonly tuple, and a driver must not be able to mutate the shared list.
+      operations: [...OPERATIONS],
       // What is actually supported. Ceilings and databases/buckets are absent from this list on purpose.
       features: ['service-domains', 'custom-domains', 'literal-configuration', 'preserve-secret-references', 'per-environment-tokens', 'deploy-waiting', 'environment-cloning'],
     };
@@ -524,6 +529,61 @@ export class RailwayInfraProvider implements InfraProvider {
    */
   private projectName(plan: { instanceId: string }): string {
     return `platfolio-${plan.instanceId}`.toLowerCase().replace(/[^a-z0-9._-]+/g, '-');
+  }
+
+  /**
+   * Deliver one secret value (D53). Written with `skipDeploys: true`, because a credential arriving is not a
+   * decision to redeploy -- that coupling has woken services for no reason before. `verified` is a name
+   * presence check, never a value read: the provider redacts values on read, so the strongest claim available
+   * is "the variable now exists", which is also the only claim worth making.
+   */
+  async putSecretValue(input: { instanceId: string; environment: string; service: string; name: string; value: string }): Promise<SecretWriteResult> {
+    if (typeof input.value !== 'string' || input.value.length === 0) {
+      return { ok: false, code: 'invalid-value', reason: 'a secret value must be a non-empty string; an empty value is a deletion the tenant did not ask for' };
+    }
+    const project = await this.findProject(this.projectName({ instanceId: input.instanceId }));
+    if (!project) return { ok: false, code: 'not-found', reason: `no provider project for instance "${input.instanceId}" -- it has never been applied` };
+    const workspace = await this.credentials.workspace();
+    const envList = await this.environments(project.id, workspace);
+    const env = envList.find((e) => e.name === input.environment);
+    if (!env) return { ok: false, code: 'not-found', reason: `environment "${input.environment}" does not exist in this instance -- create it by applying a plan that enables it` };
+    const services = await this.listServices(project.id, workspace);
+    const svc = services.find((s) => s.name === input.service);
+    if (!svc) return { ok: false, code: 'not-found', reason: `no service "${input.service}" in project ${project.name}; services are named by the platform description` };
+    const token = await this.credentials.forEnvironment(project.id, env.name);
+    try {
+      await this.upsertVariable(project.id, env.id, svc.id, input.name, input.value, token);
+    } catch (error) {
+      // The provider's words, redacted: a rejected write is worth reading, and a credential must never be in it.
+      return { ok: false, code: 'provider-refused', reason: redactCredentialShaped(String((error as Error).message)).slice(0, 240) };
+    }
+    const present = (await this.configVariableNames(project.id, env.id, svc.id).catch(() => [] as string[])).includes(input.name);
+    // verified: false is reported honestly -- the write succeeded but presence could not be read back.
+    return { ok: true, verified: present };
+  }
+
+  async secretPresence(input: { instanceId: string; environment: string; service: string; names: string[] }): Promise<Record<string, SecretPresence>> {
+    const out: Record<string, SecretPresence> = {};
+    const project = await this.findProject(this.projectName({ instanceId: input.instanceId }));
+    if (!project) {
+      for (const n of input.names) out[n] = 'unverifiable';
+      return out;
+    }
+    const workspace = await this.credentials.workspace();
+    const env = (await this.environments(project.id, workspace)).find((e) => e.name === input.environment);
+    const svc = env ? (await this.listServices(project.id, workspace)).find((s) => s.name === input.service) : undefined;
+    if (!env || !svc) {
+      for (const n of input.names) out[n] = 'unverifiable';
+      return out;
+    }
+    const names = await this.configVariableNames(project.id, env.id, svc.id).catch(() => undefined);
+    if (names === undefined) {
+      for (const n of input.names) out[n] = 'unverifiable';
+      return out;
+    }
+    const set = new Set(names);
+    for (const n of input.names) out[n] = set.has(n) ? 'set' : 'missing';
+    return out;
   }
 
   private async findProject(name: string): Promise<ProjectNode | null> {

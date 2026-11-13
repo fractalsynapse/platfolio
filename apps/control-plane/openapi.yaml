@@ -821,6 +821,238 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
         '401':
           $ref: '#/components/responses/Unauthenticated'
+  /api/v1/instances/{instanceId}/artifacts:
+    parameters:
+      - name: instanceId
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+    post:
+      operationId: reportArtifact
+      summary: Report what the platform's own build published
+      description: |
+        The release pipeline's one required interaction with platfolio (D54), and the reason a fork needs no
+        pin file. A service declared with `build:` is compiled by the tenant, and its digest is a fact about the
+        registry rather than about source control -- so it is reported here instead of committed, which is the
+        difference between a value that goes stale silently and one that every build re-asserts.
+
+        `plan/from-repository` reads these records to fill in the digest. A platform that has never reported one
+        is refused with the service named, because the true cause is a pipeline that has not run, not a
+        malformed document.
+
+        Deliberately NOT checked here: whether the digest exists in the registry. platfolio holds no tenant
+        registry credentials, and today's 404 becomes tomorrow's 403. The artifact becomes load-bearing where
+        the contract already has verification: the plan hash a runner must attest against is derived from it,
+        and D30 law 1 means platfolio deploys trusting the report and then proves the result from the
+        provider's own state.
+      security:
+        - bearerJwt: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [service, image, digest]
+              properties:
+                service:
+                  type: string
+                  minLength: 1
+                  maxLength: 60
+                  description: The compose service name this artifact belongs to.
+                image:
+                  type: string
+                  minLength: 3
+                  maxLength: 300
+                  description: Repository without tag or digest, e.g. `ghcr.io/acme/widget`.
+                digest:
+                  type: string
+                  pattern: '^sha256:[0-9a-f]{64}$'
+                  description: The immutable identity. A tag is not accepted, because a tag is a thing that moves.
+                sourceRef:
+                  type: string
+                  pattern: '^[0-9a-f]{40}$'
+                  description: Commit the artifact was built from, when the builder knows it.
+                version:
+                  type: string
+                  minLength: 1
+                  maxLength: 80
+      responses:
+        '201':
+          description: Recorded. The newest report per (instance, service) replaces the previous one.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [instanceId, service, image, digest, reportedAt]
+                properties:
+                  instanceId: { type: string, minLength: 1 }
+                  service: { type: string, minLength: 1 }
+                  image: { type: string, minLength: 3 }
+                  digest: { type: string, pattern: '^sha256:[0-9a-f]{64}$' }
+                  reportedAt: { type: string, minLength: 1 }
+        '400':
+          description: A digest that is not `sha256:` plus 64 hex, an unknown shape, or a body that is not an object.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/instances/{instanceId}/secrets:
+    parameters:
+      - name: instanceId
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+    get:
+      operationId: listSecretPresence
+      summary: Which declared credentials are filled in -- presence, never value
+      description: |
+        Presence is the only claim platfolio can honestly make about a secret (D4, D53). The provider redacts
+        secret values on read -- measured, `{ value: null }` even moments after a write -- so "the variable
+        exists" is the strongest available statement, and also the one an operator needs: the difference between
+        "this install is incomplete" and "this install works".
+
+        The names are not free-floating. They come from the registered plan's own `secrets` declarations, so this
+        endpoint cannot be used to probe a tenant's environment for variables the platform never asked for.
+      security:
+        - bearerJwt: []
+      parameters:
+        - name: environment
+          in: query
+          required: true
+          schema: { type: string, minLength: 1 }
+        - name: service
+          in: query
+          required: true
+          schema: { type: string, minLength: 1 }
+      responses:
+        '200':
+          description: One entry per declared secret name for that service and environment.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [instanceId, environment, service, presence]
+                properties:
+                  instanceId: { type: string, minLength: 1 }
+                  environment: { type: string, minLength: 1 }
+                  service: { type: string, minLength: 1 }
+                  presence:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [name, state]
+                      properties:
+                        name: { type: string, minLength: 1 }
+                        state: { type: string, enum: [set, missing, unverifiable] }
+        '400':
+          description: No plan registered for this instance, or the environment/service is not in it.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '501':
+          description: The selected provider cannot read presence. Said so, rather than answered as `missing`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/instances/{instanceId}/secrets/{name}:
+    parameters:
+      - name: instanceId
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+      - name: name
+        in: path
+        required: true
+        schema: { type: string, minLength: 1, maxLength: 120 }
+    put:
+      operationId: putSecret
+      summary: Deliver one credential into the tenant's own provider environment
+      description: |
+        Write-through, not custody (D53). The value crosses this request and goes to the provider: platfolio does
+        not store it, does not echo it, does not log it, and cannot read it back -- which is why the success
+        response is 204 with no body, and why confirmation is presence asked for separately by name.
+
+        Owner-only. A member may deploy a platform; substituting the credential a service runs with is a
+        different kind of act, and D43's reasoning applies one layer down.
+
+        `platfolio-held` custody -- platfolio storing the value and serving it at boot -- stays forbidden by D4.
+        This path is the alternative to it, not a version of it.
+
+        204 means the provider accepted the write. `verified` is deliberately absent: inviting a retry loop
+        against a provider that redacts values would make the API encourage polling for something that cannot be
+        observed.
+      security:
+        - bearerJwt: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [service, environment, value]
+              properties:
+                service:
+                  type: string
+                  minLength: 1
+                  maxLength: 60
+                environment:
+                  type: string
+                  minLength: 1
+                  maxLength: 60
+                value:
+                  type: string
+                  minLength: 1
+                  maxLength: 8192
+                  description: The credential. Never returned by any endpoint; never written to the audit record.
+      responses:
+        '204':
+          description: Delivered to the provider. No body, because there is nothing platfolio is allowed to say back.
+        '400':
+          description: An empty value, or a name that is not a variable name.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          description: The caller is not an owner of this team.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: Unknown instance, or an environment/service that does not exist in the tenant's project.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '501':
+          description: The selected provider cannot deliver secrets.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '502':
+          description: The provider refused. Its words are forwarded, redacted -- the only evidence available.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
   /api/v1/instances/{instanceId}/dispatches:
     parameters:
       - name: instanceId

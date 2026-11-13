@@ -73,6 +73,26 @@ export class InfraService extends Service<z.infer<typeof ProviderConfigSchema>> 
   applyPlan(plan: InfraPlan) { return this.selected.applyPlan(plan); }
   readState(instanceId: string) { return this.selected.readState(instanceId); }
   deleteInstance(instanceId: string) { return this.selected.deleteInstance(instanceId); }
+    // Forwarded, and the absence is reported: whether a driver implements these is answerable from
+    // describe().operations, so a handler that assumes the fake provider can do what Railway can is a bug
+    // in the handler. The error names the provider rather than the verb, because that is what an operator
+    // can act on.
+    putSecretValue(input: { instanceId: string; environment: string; service: string; name: string; value: string }) {
+      const fn = this.selected.putSecretValue;
+      if (typeof fn !== 'function') {
+        throw new Error(`provider "${this.selected.describe().provider}" cannot deliver secrets: it does not implement putSecretValue`);
+      }
+      return fn.call(this.selected, input);
+    }
+    secretPresence(input: { instanceId: string; environment: string; service: string; names: string[] }) {
+      const fn = this.selected.secretPresence;
+      if (typeof fn !== 'function') {
+        throw new Error(`provider "${this.selected.describe().provider}" cannot read secret presence: it does not implement secretPresence`);
+      }
+      return fn.call(this.selected, input);
+    }
+    /** Lets a handler answer 501 with a reason instead of attempting a call it knows will throw. */
+    get canDeliverSecrets(): boolean { return typeof this.selected.putSecretValue === 'function'; }
 }
 
 declare module 'cordis' {

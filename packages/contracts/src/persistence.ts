@@ -106,6 +106,33 @@ export const ProviderConnectionSchema = z.object({
 }).strict();
 export type ProviderConnection = z.infer<typeof ProviderConnectionSchema>;
 
+/**
+ * A release artifact (D54): what the platform's own build says it published, reported BEFORE a deploy.
+ *
+ * This is the replacement for a committed digest. `compose.prod.yaml` put a fact about the registry into a
+ * repository, so it could -- and did -- go stale, and every fork needed CI that wrote files back to itself. A
+ * release is not a fact about source control; it is a fact about what was built. So the builder reports it and
+ * `plan/from-repository` reads it back.
+ *
+ * Note the difference from `AttestationSchema.release`: that block records what a DEPLOY observed, after the
+ * fact, and cannot exist before an image's first deploy. This record exists precisely to break that cycle.
+ */
+export const ArtifactRecordSchema = z.object({
+  instanceId: z.string().min(1),
+  /** The compose service name the image belongs to, e.g. `web`. */
+  service: z.string().min(1).max(60),
+  /** Repository without the tag or digest, e.g. `ghcr.io/acme/widget`. */
+  image: z.string().min(3),
+  digest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+  /** Commit the artifact was built from -- the identity a plan can be re-derived against. */
+  sourceRef: z.string().regex(/^[0-9a-f]{40}$/).optional(),
+  version: z.string().min(1).optional(),
+  reportedAt: z.string().min(1),
+  /** Who reported it. A verified runner identity is #159; today the actor is a person or a dispatch. */
+  reportedBy: z.string().min(1),
+}).strict();
+export type ArtifactRecord = z.infer<typeof ArtifactRecordSchema>;
+
 export const DispatchRecordSchema = z.object({
   id: z.string().min(1),
   instanceId: z.string().min(1),
@@ -455,6 +482,11 @@ export interface Store {
    */
   putPlan(instanceId: string, plan: unknown, planHash: string): Promise<StoreResult<{ instanceId: string; planHash: string }>>;
   getPlan(instanceId: string): Promise<StoreResult<{ instanceId: string; planHash: string; plan: unknown }>>;
+
+  /** Record what a release published. The newest report per (instance, service) is the one that counts. */
+  putArtifact(artifact: Omit<ArtifactRecord, 'reportedAt'> & { reportedAt?: string }): Promise<StoreResult<ArtifactRecord>>;
+  /** Every service's current artifact for an instance, newest first per service. */
+  listArtifacts(instanceId: string): Promise<ArtifactRecord[]>;
 
   // ---------- invitations (D44) ----------
   /** Create a pending invitation. The team must exist; the address need not belong to anyone yet. */

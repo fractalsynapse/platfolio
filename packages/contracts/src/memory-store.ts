@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import type { Attestation } from './attestation.ts';
 import { AttestationRecordSchema, AuditEntrySchema, BindingRecordSchema, CapabilityOfferSchema, CapabilityShareSchema, IdentitySchema, PersonSchema, TeamMemberSchema, DispatchRecordSchema, InstanceEnvironmentStateSchema, InstanceSchema, InvitationSchema, ProviderConnectionSchema, RepoConnectionSchema, TeamSchema, newId,
-  type AttestationRecord, type AuditEntry, type BindingRecord, type CapabilityOffer, type CapabilityShare, type NewBinding, type NewCapabilityOffer, type NewCapabilityShare, type DispatchRecord, type Instance, type InstanceEnvironmentState, type Invitation, type NewInvitation, type ProviderConnection, type RepoConnection, type Store, type StoreError, type NewInstance, type StoreResult, type Team, type TeamMember, type Identity, type Person } from './persistence.ts';
+  ArtifactRecordSchema,
+  type ArtifactRecord, type AttestationRecord, type AuditEntry, type BindingRecord, type CapabilityOffer, type CapabilityShare, type NewBinding, type NewCapabilityOffer, type NewCapabilityShare, type DispatchRecord, type Instance, type InstanceEnvironmentState, type Invitation, type NewInvitation, type ProviderConnection, type RepoConnection, type Store, type StoreError, type NewInstance, type StoreResult, type Team, type TeamMember, type Identity, type Person } from './persistence.ts';
 import { reasonOf } from './persistence.ts';
 import { normaliseEmail, normaliseName } from './persistence.ts';
 import { checkAttestationPolicy } from './dispatch-policy.ts';
@@ -40,6 +41,8 @@ export class MemoryStore implements Store {
   private readonly invitations = new Map<string, Invitation>();
   private readonly envStates = new Map<string, InstanceEnvironmentState>();
   private readonly plans = new Map<string, { instanceId: string; planHash: string; plan: unknown }>();
+  /** One current artifact per `<instanceId>/<service>` (D54) -- newest report wins. */
+  private readonly artifacts = new Map<string, ArtifactRecord>();
   private readonly persons = new Map<string, Person>();
   private readonly identities = new Map<string, Identity>();
   private readonly members = new Map<string, TeamMember>();
@@ -425,6 +428,34 @@ export class MemoryStore implements Store {
     this.plans.set(instanceId, record);
     return ok(copy(record));
   }
+  async putArtifact(artifact: Omit<ArtifactRecord, 'reportedAt'> & { reportedAt?: string }) {
+    if (this.closed) return this.refuse('putArtifact');
+    if (!this.instances.has(artifact.instanceId)) return err({ code: 'not-found', what: 'instance', id: artifact.instanceId });
+    // Validated here as well as in the Postgres driver. Without it the double accepts a tag where the real
+    // store refuses one, the shared suite passes, and the next time it runs against Postgres it fails --
+    // which is the asymmetry the rule of two exists to remove.
+    const checked = ArtifactRecordSchema.safeParse({ ...artifact, reportedAt: artifact.reportedAt ?? this.clock() });
+    if (!checked.success) return err({ code: 'conflict', reason: `artifact is not well-formed: ${z.prettifyError(checked.error)}` });
+    const record: ArtifactRecord = {
+      instanceId: artifact.instanceId,
+      service: artifact.service,
+      image: artifact.image,
+      digest: artifact.digest,
+      ...(artifact.sourceRef === undefined ? {} : { sourceRef: artifact.sourceRef }),
+      ...(artifact.version === undefined ? {} : { version: artifact.version }),
+      reportedAt: artifact.reportedAt ?? this.clock(),
+      reportedBy: artifact.reportedBy,
+    };
+    // Replaced, not appended: a release record answers "what is live now", and a plan derived from an old
+    // digest would deploy an image the tenant believes was superseded.
+    this.artifacts.set(`${record.instanceId}/${record.service}`, record);
+    return ok(copy(record));
+  }
+
+  async listArtifacts(instanceId: string): Promise<ArtifactRecord[]> {
+    return [...this.artifacts.values()].filter((a) => a.instanceId === instanceId).map(copy);
+  }
+
   async getPlan(instanceId: string) {
     const found = this.plans.get(instanceId);
     return found ? ok(copy(found)) : err({ code: 'not-found', what: 'plan', id: instanceId });

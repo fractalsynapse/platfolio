@@ -16,7 +16,10 @@ declaring obligations, and the smallest possible source.
 
 1. Copy a directory, rename it, change `metadata` and the service.
 2. Keep `/healthz` — it is the one contract between the container and the platform.
-3. Do not add a custom domain to the spec. An unverifiable host never fails; it waits forever for DNS that
+3. Publish an image and report it. A `build:` service takes its digest from
+   `POST /api/v1/instances/{id}/artifacts` (D54), which is why no fork needs a `compose.prod.yaml`, a registry
+   lookup script, or CI that writes files back into itself. Commit a digest for a third-party `image:` instead.
+ An unverifiable host never fails; it waits forever for DNS that
    will not arrive, which reads as a stuck deploy and is not one.
 4. Run `pnpm run test` — `packages/manifest/test/templates.test.ts` parses, validates, and builds a plan for
    every template here, so an unparseable or unhostable scaffold fails CI rather than a tenant's first

@@ -7,6 +7,7 @@ import { RepositoryReadError } from '@platfolio/contracts';
 import { ScmNotConfiguredError } from '@platfolio/kernel';
 import { buildPlan, parseCompose } from '@platfolio/manifest';
 import type { ExtensionDescriptor, KernelContext, Request, Response_, RouteDefinition } from '@platfolio/kernel';
+import { ArtifactRecordSchema } from '@platfolio/contracts';
 import { badRequest, bearerToken, notFound, send, unauthorized } from './respond.ts';
 
 /**
@@ -128,6 +129,21 @@ function scoped(method: string, path: string, operationId: string, action: Polic
       return handler(resolved.scope, request, params);
     },
   };
+}
+
+/**
+ * The secret names a registered plan declares for one service in one environment, or `undefined` when that
+ * service/environment pair is not in the plan at all. Written against the plan's own shape because the plan is
+ * the record -- re-reading the tenant's compose file here would put a second source of truth about what a
+ * service needs, and the two would disagree the first time a plan was registered from a different commit.
+ */
+function secretNamesInPlan(plan: unknown, environment: string, service: string): string[] | undefined {
+  const p = plan as { environments?: { name: string; services?: { name: string; secrets?: { name: string }[] }[] }[] };
+  const env = (p.environments ?? []).find((e) => e.name === environment);
+  if (!env) return undefined;
+  const svc = (env.services ?? []).find((s) => s.name === service);
+  if (!svc) return undefined;
+  return (svc.secrets ?? []).map((s) => s.name);
 }
 
 export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
@@ -387,7 +403,12 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
           return { status: 400, body: { error: 'source-unreadable', message: (error as Error).message.slice(0, 400) } };
         }
 
-        const parsed = parseCompose(docs);
+        // Release artifacts resolve the digest for any service the platform builds, so a fork needs no
+        // compose.prod.yaml at all: the builder reports the image and the plan reads it back (D54). Third-party
+        // services still require a committed digest, because nobody's pipeline compiles them.
+        const artifacts = await scope.context.store.listArtifacts(id);
+        const byService = new Map(artifacts.map((a) => [a.service, `${a.image}@${a.digest}` as const]));
+        const parsed = parseCompose(docs, { resolveArtifact: (service) => byService.get(service) });
         if (!parsed.manifest) {
           return {
             status: 400,
@@ -424,6 +445,38 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
             environments: plan.environments.map((e) => e.name),
           },
           ...(warnings.length ? { warnings } : {}),
+        });
+      }),
+      scoped('POST', '/api/v1/instances/{instanceId}/artifacts', 'reportArtifact', 'instance.artifact.write', async (scope, request, params) => {
+        // D54: the release pipeline's one required interaction. The digest is not committed to source control,
+        // so it cannot go stale the way a generated pin file did, and nothing here checks that the digest
+        // exists in a registry either -- platfolio holds no tenant registry credentials. What makes the report
+        // load-bearing is downstream: the plan hash a runner must attest against is derived from it, and D30
+        // law 1 means platfolio deploys on trust and then proves the result from the provider's own state.
+        const id = params.instanceId ?? '';
+        const found = await scope.context.store.getInstance(id);
+        if (found.ok === false) return notFound('instance', id);
+        const body = bodyOf<{ service?: string; image?: string; digest?: string; sourceRef?: string; version?: string }>(request);
+        if (body.ok === false) return badRequest(body.error);
+        const parsed = ArtifactRecordSchema.omit({ instanceId: true, reportedAt: true, reportedBy: true }).safeParse(body.value ?? {});
+        if (!parsed.success) {
+          return {
+            status: 400,
+            // Field-level, because the realistic mistake is a CI variable holding a tag rather than a digest,
+            // and "invalid request" without a path sends the operator to the spec instead of to their pipeline.
+            body: { error: 'invalid-artifact', message: parsed.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join('; ') },
+          };
+        }
+        const stored = await scope.context.store.putArtifact({ ...parsed.data, instanceId: id, reportedBy: scope.personId });
+        if (stored.ok === false) return { status: 400, body: { error: stored.code, message: reasonOf(stored) } };
+        const record = stored.value;
+        await scope.context.store.appendAudit({
+          actorKind: 'user', actorRef: scope.personId, action: 'artifact.report', target: id,
+          // A digest is an identity, not a credential, so it is recorded -- truncated only to keep rows tight.
+          detail: { service: record.service, image: record.image, digest: record.digest.slice(0, 19) },
+        });
+        return send('reportArtifact', 201, {
+          instanceId: record.instanceId, service: record.service, image: record.image, digest: record.digest, reportedAt: record.reportedAt,
         });
       }),
     ],
@@ -938,7 +991,88 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
     ],
   };
 
-  return [core, instances, dispatches, audit, teams, bindings, invitations, controller];
+  /**
+   * Secret delivery and presence (D53). Separate from `instances` because the authority differs: writing a
+   * credential is an owner decision while reading presence is what any member needs to finish an install, and
+   * one capability per authority is how the policy table stays reviewable.
+   */
+  const secrets: ExtensionDescriptor = {
+    id: 'secrets',
+    requires: ['store', 'identity', 'infra'],
+    routes: [
+      scoped('PUT', '/api/v1/instances/{instanceId}/secrets/{name}', 'putSecret', 'instance.secret.write', async (scope, request, params) => {
+        // Write-through: the value is handed to the provider and kept nowhere. There is no assignment to a
+        // local variable that survives this function, no audit field that could carry it, and the success
+        // response is 204 with no body -- an echo would be the leak.
+        const id = params.instanceId ?? '';
+        const name = params.name ?? '';
+        if (!/^[A-Z][A-Z0-9_]{1,119}$/.test(name)) {
+          return { status: 400, body: { error: 'invalid-secret-name', message: `"${name.slice(0, 40)}" is not an environment variable name: uppercase letters, digits and underscores, starting with a letter` } };
+        }
+        const found = await scope.context.store.getInstance(id);
+        if (found.ok === false) return notFound('instance', id);
+        const body = bodyOf<{ service?: string; environment?: string; value?: string }>(request);
+        if (body.ok === false) return badRequest(body.error);
+        const service = body.value?.service;
+        const environment = body.value?.environment;
+        const value = body.value?.value;
+        if (!service || !environment) return badRequest('body must carry service and environment: a credential has to name where it goes');
+        if (typeof value !== 'string' || value.length === 0) {
+          // An empty value is a deletion the tenant did not ask for. Refusing beats implementing a semantic the
+          // contract does not have (there is no DELETE …/secrets/{name} yet, and revoking a credential is not
+          // the same act as overwriting it).
+          return badRequest('value must be a non-empty string; platfolio has no delete verb for secrets yet, and an empty write is not one');
+        }
+        if (scope.context.infra.canDeliverSecrets === false) {
+          return { status: 501, body: { error: 'provider-cannot-deliver', message: `the selected provider (${scope.context.infra.describe().provider}) cannot deliver secrets; the value stays the tenant's to set in their own provider project` } };
+        }
+        const delivered = await scope.context.infra.putSecretValue({ instanceId: id, environment, service, name, value });
+        if (delivered.ok === false) {
+          if (delivered.code === 'not-found') return notFound(delivered.reason.includes('environment') ? 'environment' : 'service', id);
+          if (delivered.code === 'invalid-value') return badRequest(delivered.reason);
+          return { status: 502, body: { error: delivered.code, message: delivered.reason } };
+        }
+        await scope.context.store.appendAudit({
+          actorKind: 'user', actorRef: scope.personId, action: 'secret.deliver', target: id,
+          // Names and destinations only. The value is never a candidate for an audit row, and `verified` is not
+          // claimed here because presence is read separately, by name, through GET …/secrets.
+          detail: { name, service, environment },
+        });
+        return { status: 204, body: undefined };
+      }),
+      scoped('GET', '/api/v1/instances/{instanceId}/secrets', 'listSecretPresence', 'instance.secret.read', async (scope, request, params) => {
+        const id = params.instanceId ?? '';
+        const environment = request.query.get('environment') ?? '';
+        const service = request.query.get('service') ?? '';
+        if (!environment || !service) return badRequest('both environment and service are required: presence is per deployed service, not per tenant');
+        const found = await scope.context.store.getInstance(id);
+        if (found.ok === false) return notFound('instance', id);
+        const planResult = await scope.context.store.getPlan(id);
+        if (planResult.ok === false) {
+          // The names come from the registered plan, so this endpoint cannot be used to enumerate a tenant's
+          // provider environment for variables platfolio never asked about.
+          return { status: 400, body: { error: 'no-plan', message: `no plan is registered for "${id}", so platfolio does not know which secret names this service declares -- record the plan (from-repository or PUT …/plan) first` } };
+        }
+        const names = secretNamesInPlan(planResult.value.plan, environment, service);
+        if (names === undefined) {
+          return { status: 400, body: { error: 'unknown-service', message: `the registered plan has no service "${service}" in environment "${environment}"` } };
+        }
+        if (names.length === 0) return send('listSecretPresence', 200, { instanceId: id, environment, service, presence: [] });
+        if (scope.context.infra.canDeliverSecrets === false) {
+          // 501 rather than a table of `missing`: "we cannot check" and "it is not there" are different facts,
+          // and collapsing them is how an operator rebuilds something that was already correct.
+          return { status: 501, body: { error: 'provider-cannot-read-presence', message: `the selected provider (${scope.context.infra.describe().provider}) cannot read secret presence` } };
+        }
+        const presence = await scope.context.infra.secretPresence({ instanceId: id, environment, service, names });
+        return send('listSecretPresence', 200, {
+          instanceId: id, environment, service,
+          presence: names.map((n) => ({ name: n, state: presence[n] ?? 'unverifiable' })),
+        });
+      }),
+    ],
+  };
+
+  return [core, instances, dispatches, audit, teams, bindings, invitations, secrets, controller];
 }
 
 export type { VerifiedClaims };

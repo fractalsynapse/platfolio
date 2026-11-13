@@ -19,6 +19,22 @@ export interface ComposeIssue { path: string; code: string; message: string }
 
 export interface ParsedCompose { manifest?: Manifest; issues: ComposeIssue[] }
 
+/**
+ * How a first-party image gets its digest (D54).
+ *
+ * A service with `build:` is compiled by the platform's own pipeline, and for those the committed document
+ * need not carry the digest. A digest in source control is a fact about a registry that can go stale -- which
+ * is what #84 and two stale pins were about, and what forced every fork to inherit CI that writes files back
+ * into itself (#217). Instead the builder reports the artifact and this resolver hands it to the parse.
+ *
+ * A service without `build:` is third-party (Keycloak, nginx): nobody in the tenant's pipeline compiles it, so
+ * there is nothing to report and the document must pin the digest. That asymmetry is the whole rule, and why
+ * the resolver is keyed by service name and returns either a full `image@digest` or nothing.
+ */
+export interface ComposeOptions {
+  resolveArtifact?: (service: string) => string | undefined;
+}
+
 /** Compose service keys we map. Anything absent from both lists is reported as unknown, not ignored. */
 const SERVICE_ACCEPTED = ['image', 'build', 'command', 'entrypoint', 'working_dir', 'environment', 'expose', 'ports', 'healthcheck', 'volumes', 'depends_on', 'deploy', 'labels', 'networks', 'restart'];
 
@@ -120,7 +136,7 @@ function scanService(name: string, svc: Rec, issues: ComposeIssue[]): void {
 }
 
 /** Read a Compose document (or an ordered list of overlay documents, merged as Compose merges) into a manifest. */
-export function parseCompose(texts: string | string[]): ParsedCompose {
+export function parseCompose(texts: string | string[], options: ComposeOptions = {}): ParsedCompose {
   const issues: ComposeIssue[] = [];
   const list = Array.isArray(texts) ? texts : [texts];
   const docs: Rec[] = [];
@@ -181,14 +197,24 @@ export function parseCompose(texts: string | string[]): ParsedCompose {
       continue;
     }
 
-    const image = typeof svc.image === 'string' ? svc.image : undefined;
+    const isBuilt = svc.build !== undefined && svc.build !== null;
+    const committed = typeof svc.image === 'string' ? svc.image : undefined;
+    // A built service takes its artifact from the resolver when one exists. A committed digest is still
+    // honoured, because the CLI and the plan cache have no resolver; what changed is that the committed digest
+    // is no longer REQUIRED for a fork to be installable (D54).
+    const image = (isBuilt ? options.resolveArtifact?.(name) : undefined) ?? committed;
     if (!image) {
-      issues.push({ path: `services.${name}.image`, code: 'compose-image-unpinned', message: 'no image: the hosted model needs the prod overlay (compose.prod.yaml) to supply the release pipeline\'s pinned image' });
+      issues.push({ path: `services.${name}.image`, code: isBuilt ? 'no-artifact' : 'compose-image-unpinned',
+        message: isBuilt
+          // The actionable form of the rule: a build with no reported artifact is not a schema error, it is a
+          // pipeline that has not run yet. Say which, so the operator publishes rather than guesses.
+          ? `service "${name}" builds an image and none has been reported for it: publish one (POST /api/v1/instances/{instanceId}/artifacts) and the plan resolves. A digest is deliberately not committed to source control (D54)`
+          : 'no image: the hosted model needs either a reported artifact for a build, or a digest-pinned image for a third-party service' });
       continue;
     }
     const { image: repo, digest } = splitImage(image);
     if (!digest) {
-      issues.push({ path: `services.${name}.image`, code: 'compose-image-unpinned', message: `"${repo}" has no @sha256 digest; a tag is mutable and a plan that trusts one can be moved under a tenant (D16)` });
+      issues.push({ path: `services.${name}.image`, code: 'compose-image-unpinned', message: `"${repo}" has no @sha256 digest; a tag is mutable and a plan that trusts one can be moved under a tenant (D16)${isBuilt ? ' -- report the built artifact instead of pinning a tag by hand (D54)' : ''}` });
       continue;
     }
     const deploy = isRec(svc.deploy) ? svc.deploy as Rec : {};
