@@ -99,6 +99,37 @@ schema's error type carries the issues. Fixed by deleting the import and matchin
 establish the claim. AGENTS.md already said this ("fake-only tests do not establish that wiring works"); this
 is the cost of reading past it.
 
+### Fixed — a marker that promised a plan the provider never got (D55)
+
+`applyPlan` short-circuited whenever the project description carried the plan's hash, returning `noop: true,
+verified: true` after checking only that *every service in the project is live*. That question cannot see
+absence: a service never placed in an environment is not in the list it inspects, and an environment that was
+never created contributes no services at all.
+
+This was not hypothetical — it happened to us. An apply was interrupted between writing the marker (which E26
+requires to happen **before** the first mutation, so a failed retry does not redeploy the world) and creating
+the staging environment. Every subsequent apply reported success; staging did not exist.
+
+Now a matching marker earns a **coverage check** instead of a certificate: each declared environment must
+exist, each declared service must be placed in it, each declared domain must be bound. On any gap the apply
+resumes and says so — `marker-without-state`, with the missing things named — instead of answering quietly.
+
+Two host kinds, checked differently, because they are different claims:
+
+| Declared domain | Check | Why |
+| --- | --- | --- |
+| `api.platfolio.dev` (ours) | exact host must be bound in that environment | a custom hostname is our assertion; anything else is a broken install |
+| `api.up.railway.app` (provider-assigned) | the service has **some** domain bound in that environment | Railway names generated hosts itself; demanding the literal would report a correctly applied plan as unfinished forever — and a check with permanent false positives gets ignored |
+
+Three tests in `railway-idempotency.test.ts`, the first of which **failed against the shipped code before the
+fix** (reproduced, then repaired): an interrupted apply resumes and recreates the environment; a genuinely
+applied plan still short-circuits and mutates nothing; a missing domain binding is a coverage failure too.
+
+Things the new tests got wrong first, recorded because they are the interesting kind of wrong: the assertion
+looked for an operation named `environmentCreate` while the mock records `environmentCreate:workspace`; and the
+reduced-scope conformance plan declares hosts of the generated form, which made my first coverage check report
+a successfully applied plan as unfinished — caught by the suite rather than by me.
+
 ### Changed — the registry's environment field: three words, one spelling of everywhere
 
 `appliesTo` became **`environments`**, valued `development | staging | production`, or `all`. The old vocabulary had six words -- adding `ci`, `test`, `local` -- and in practice one meaning was spelled four different ways across 81 entries: `[development, staging, production]`, `[development, staging, production, test, local]`, `[staging, production, ci, test, local]`, `[test, local]`. A registry whose synonymous sets differ by spelling cannot be searched ("does this variable reach production?"), diffed, or trusted. That was the maintainer's objection, and it was right.
