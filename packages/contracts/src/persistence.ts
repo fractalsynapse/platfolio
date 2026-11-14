@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { AttestationSchema, type Attestation } from './attestation.ts';
+import { CONTRACT_VERSION } from './generated/contract-version.ts';
 
 /**
  * The control plane's records (`Store`), as a capability rather than a table layout (D15: the kernel is the
@@ -19,7 +20,20 @@ import { AttestationSchema, type Attestation } from './attestation.ts';
  */
 
 export const STORE_CONTRACT = 'control-plane.store';
-export const STORE_CONTRACT_VERSION = '1.0.0';
+/**
+ * The store seam reports the project's DERIVED contract version (D59) -- it is not independently versioned,
+ * so a surface change anywhere in this package moves it too.
+ *
+ * The `1.0.0` literal that used to sit here was stale by construction rather than merely duplicative: nothing
+ * bumped it when this package's emitted surface changed, so the conformance suite compared an implementation
+ * against a number that never moved while the contracts had gone to 2.0.0. A version that cannot move is not a
+ * compatibility claim, it is a fossil.
+ *
+ * Typed `string` deliberately, for the second reason D59 found: a literal type publishes a version INTO the
+ * emitted surface, so every future bump would classify as a removed declaration -- the gate flagging its own
+ * arithmetic as breaking.
+ */
+export const STORE_CONTRACT_VERSION: string = CONTRACT_VERSION;
 
 /** Names only. A `value` field is deliberately absent: adding one is a contract change, not a slip. */
 export const SecretNameSchema = z.object({

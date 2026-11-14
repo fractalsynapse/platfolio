@@ -353,6 +353,25 @@ Stated plainly, because the maintainer's objection deserves an answer rather tha
 with the core platform is what makes this drift possible**, and `templates:check` closes the detection gap, not
 the design one. Separating them is a real option and is recorded as a decision to take, not as work done.
 
+### Changed — the last two declared versions now derive too (D59 completed)
+
+`IDENTITY_CONTRACT_VERSION` and `STORE_CONTRACT_VERSION` were the remaining hand-authored version literals in
+the contracts package, both `1.0.0`. They are now `CONTRACT_VERSION` — the value derived from the public-surface
+baseline — so no version string in the codebase is typed by hand.
+
+Calling them "duplicates" would undersell it. They were **stale by construction**: nothing bumped them when the
+package surface changed, so `identity-conformance` was comparing an implementation against `1.0.0` while the
+contracts had already moved to 2.0.0 today. A version that cannot move is not a compatibility claim; it is a
+fossil, and it was being used as a gate.
+
+The derived bump is **MAJOR 2.0.0 → 3.0.0**, and correctly so: both were *literal types* (`= "1.0.0"`), which
+publishes a version into the emitted surface, so retiring them removes three surface lines. Same trap D59 found
+the first time, and the reason both are now typed `string` — future version moves will cause no surface churn at
+all, and the gate can never again flag its own arithmetic as breaking. No external implementer exists (no
+tenants), so this costs nothing today.
+
+`pnpm run contracts:check` now reports `4324 exported declarations, derived Version: 3.0.0`.
+
 ### Changed — one environment registry per platform. `.platfolio/` is gone (D58)
 
 Two files named `environment.yaml`, two schemas, one set of variables. The registry is now the only one, and the

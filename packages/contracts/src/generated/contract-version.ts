@@ -8,7 +8,7 @@
  * surface, so every version bump would classify as a REMOVED declaration and the drift gate would
  * demand a breaking ack for its own arithmetic.
  *
- * Derived from the baseline digest `5b1937f90ced284d`.
- * MAJOR 1.0.0 -> 2.0.0 (seeded from declared-version epoch 75c281cd; the baseline carried no Version: line; surface diff since: 4 removed, 6 widened, 1743 added, 0 reordered); acknowledged: D57+D59 together: the plan schema lost cloneFrom and the observational placement API (resolvePlacement, previewPlacement, placementCollisions, ServicePlacement) plus physicalServiceName's 3-argument form; the hand-authored CONTRACT_VERSION literal and its literal types left the surface so the version is derived. Names verified, nothing renamed -- removed.
+ * Derived from the baseline digest `448cfa1167a4e06d`.
+ * MAJOR 2.0.0 -> 3.0.0 (surface diff: 3 removed, 0 widened, 2 added, 0 reordered); acknowledged: D59 completes: the identity and store seam versions derive from the project contract version instead of declaring literals. Both were typed as literal types, which published a version INTO the emitted surface, so retiring them classifies as removed/widened -- and the literals were stale by construction: nothing bumped them when this package's surface changed, so conformance compared implementations against 1.0.0 while the contracts had moved to 2.0.0. No external implementer exists (no tenants), so this is the last bump of this class: both are typed 'string' now and future version moves cause no surface churn.
  */
-export const CONTRACT_VERSION: string = '2.0.0';
+export const CONTRACT_VERSION: string = '3.0.0';
