@@ -46,9 +46,9 @@ variables:
     note: "referenced by compose.dev.yaml"
   - name: KC_BOOTSTRAP_ADMIN_USERNAME
     secret: false
-    environments: [development]
-    deployedTo: local:compose-overlay
-    note: "referenced by compose.dev.yaml"
+    environments: all
+    deployedTo: host:shell
+    note: "referenced by compose.dev.yaml, templates/shared-identity/compose.yaml"
   - name: KC_CLIENT_SECRET
     secret: true
     environments: [development]
@@ -58,7 +58,7 @@ variables:
     secret: false
     environments: all
     deployedTo: railway:variable
-    note: "referenced by compose.dev.yaml, compose.yaml"
+    note: "referenced by compose.dev.yaml, compose.yaml, templates/shared-identity/compose.yaml"
   - name: KC_DB_PASSWORD
     secret: true
     environments: [development]
@@ -83,7 +83,7 @@ variables:
     secret: false
     environments: all
     deployedTo: railway:variable
-    note: "referenced by compose.dev.yaml, compose.yaml"
+    note: "referenced by compose.dev.yaml, compose.yaml, templates/shared-identity/compose.yaml"
   - name: KC_HOSTNAME
     secret: false
     environments: all
@@ -223,7 +223,7 @@ variables:
     secret: false
     environments: all
     deployedTo: railway:variable
-    note: "referenced by .platfolio/environment.yaml, apps/control-plane/src/index.ts, compose.dev.yaml, compose.yaml"
+    note: "referenced by apps/control-plane/src/index.ts, compose.dev.yaml, compose.yaml"
   - name: PLATFOLIO_DB_SCHEMA
     secret: false
     environments: all
@@ -232,7 +232,7 @@ variables:
   - name: PLATFOLIO_DB_URL
     secret: true
     environments: all
-    deployedTo: railway:variable
+    deployedTo: github:environment-secret
     note: "the same credential, delivered as a provider reference rather than a literal (OD13)"
   - name: PLATFOLIO_DEPLOY_BUDGET
     secret: false
@@ -253,12 +253,12 @@ variables:
     secret: false
     environments: all
     deployedTo: railway:variable
-    note: "referenced by .platfolio/environment.yaml, apps/control-plane/src/index.ts, compose.dev.yaml, compose.yaml"
+    note: "referenced by apps/control-plane/src/index.ts, compose.dev.yaml, compose.yaml"
   - name: PLATFOLIO_EMAIL_FROM
     secret: false
     environments: all
     deployedTo: railway:variable
-    note: "referenced by .platfolio/environment.yaml, apps/control-plane/src/index.ts, compose.dev.yaml, compose.yaml"
+    note: "referenced by apps/control-plane/src/index.ts, compose.dev.yaml, compose.yaml"
   - name: PLATFOLIO_EXPIRES_AT
     secret: false
     environments: [development]
@@ -298,17 +298,17 @@ variables:
     secret: false
     environments: all
     deployedTo: railway:variable
-    note: "referenced by .platfolio/environment.yaml, apps/control-plane/src/index.ts, compose.dev.yaml, compose.yaml"
+    note: "referenced by apps/control-plane/src/index.ts, compose.dev.yaml, compose.yaml"
   - name: PLATFOLIO_IDENTITY_ISSUER
     secret: false
     environments: all
     deployedTo: railway:variable
-    note: "referenced by .platfolio/environment.yaml, apps/control-plane/src/index.ts, compose.dev.yaml, compose.yaml"
+    note: "referenced by apps/control-plane/src/index.ts, compose.dev.yaml, compose.yaml"
   - name: PLATFOLIO_IDENTITY_JWKS_URI
     secret: false
     environments: all
     deployedTo: railway:variable
-    note: "referenced by .platfolio/environment.yaml, apps/control-plane/src/index.ts, compose.dev.yaml, compose.yaml"
+    note: "referenced by apps/control-plane/src/index.ts, compose.dev.yaml, compose.yaml"
   - name: PLATFOLIO_IDENTITY_REALM
     secret: false
     environments: [development]
@@ -327,13 +327,13 @@ variables:
   - name: PLATFOLIO_MAILPIT_URL
     secret: false
     environments: all
-    deployedTo: railway:variable
-    note: "referenced by .platfolio/environment.yaml, apps/control-plane/src/index.ts, compose.dev.yaml"
+    deployedTo: host:shell
+    note: "referenced by apps/control-plane/src/index.ts, compose.dev.yaml"
   - name: PLATFOLIO_RECONCILE_INTERVAL_MS
     secret: false
     environments: all
     deployedTo: railway:variable
-    note: "referenced by .platfolio/environment.yaml, apps/control-plane/src/capabilities.ts, compose.dev.yaml, compose.yaml"
+    note: "referenced by apps/control-plane/src/capabilities.ts, compose.dev.yaml, compose.yaml"
   - name: PLATFOLIO_SCM_DRIVER
     secret: false
     environments: all
@@ -342,33 +342,33 @@ variables:
   - name: PLATFOLIO_SMTP_HOST
     secret: false
     environments: all
-    deployedTo: railway:variable
-    note: "referenced by .platfolio/environment.yaml, apps/control-plane/src/index.ts, compose.dev.yaml"
+    deployedTo: host:shell
+    note: "referenced by apps/control-plane/src/index.ts, compose.dev.yaml"
   - name: PLATFOLIO_SMTP_PASSWORD
     secret: true
     environments: [staging, production]
-    deployedTo: railway:variable
-    note: "referenced by .platfolio/environment.yaml, apps/control-plane/src/index.ts"
+    deployedTo: host:shell
+    note: "referenced by apps/control-plane/src/index.ts"
   - name: PLATFOLIO_SMTP_PORT
     secret: false
     environments: all
-    deployedTo: railway:variable
-    note: "referenced by .platfolio/environment.yaml, apps/control-plane/src/index.ts, compose.dev.yaml"
+    deployedTo: host:shell
+    note: "referenced by apps/control-plane/src/index.ts, compose.dev.yaml"
   - name: PLATFOLIO_SMTP_SECURE
     secret: false
     environments: [staging, production]
-    deployedTo: railway:variable
-    note: "referenced by .platfolio/environment.yaml, apps/control-plane/src/index.ts"
+    deployedTo: host:shell
+    note: "referenced by apps/control-plane/src/index.ts"
   - name: PLATFOLIO_SMTP_STARTTLS
     secret: false
     environments: all
     deployedTo: railway:variable
-    note: "referenced by .platfolio/environment.yaml, apps/control-plane/src/index.ts, compose.dev.yaml, compose.yaml"
+    note: "referenced by apps/control-plane/src/index.ts, compose.dev.yaml, compose.yaml"
   - name: PLATFOLIO_SMTP_USER
     secret: false
     environments: [staging, production]
-    deployedTo: railway:variable
-    note: "referenced by .platfolio/environment.yaml, apps/control-plane/src/index.ts"
+    deployedTo: host:shell
+    note: "referenced by apps/control-plane/src/index.ts"
   - name: PLATFOLIO_TEAM_ID
     secret: false
     environments: [development]
@@ -382,8 +382,8 @@ variables:
   - name: PLATFOLIO_VERSION
     secret: false
     environments: all
-    deployedTo: railway:variable
-    note: "referenced by .platfolio/environment.yaml, apps/control-plane/src/index.ts, compose.dev.yaml"
+    deployedTo: host:shell
+    note: "referenced by apps/control-plane/src/index.ts, compose.dev.yaml"
   - name: POSTGRES_DB
     secret: false
     environments: all

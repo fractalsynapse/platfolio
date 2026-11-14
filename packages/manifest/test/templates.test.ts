@@ -49,7 +49,11 @@ test('starter-web: pinned overlay yields a public service plus provider-resolved
   const web = manifest!.spec.services.web!;
   assert.ok(web.domains.length > 0 || web.public, 'the point of this template is that it is reachable');
   assert.deepEqual(web.references, [{ variable: 'DATABASE_URL', database: 'app-db', output: 'DATABASE_URL' }], 'DATABASE_URL is wiring, not a tenant obligation');
-  assert.ok(web.secrets.some((s) => s.name === 'APP_SESSION_KEY'));
+  // starter-web's inventory used to declare APP_SESSION_KEY as a required secret, and this line asserted it --
+  // freezing a fiction in place. Nothing in the template reads that variable, and because applyInventory merges
+  // the inventory into the plan, the entry was a blocking credential obligation on every tenant who forks this.
+  // The name is gone from the inventory; the rule it violated is now asserted directly, at the end of this file.
+  assert.deepEqual(web.secrets.map((s) => s.name).sort(), [], 'the template declares no secret that its own code does not read');
   assert.deepEqual([manifest!.metadata.kind, manifest!.metadata.mode], ['web', 'development'], 'the web template is a developed web platform (D51)');
   // D51: starter-web is a starting point for CHANGE, so staging is enabled in the template itself
   
@@ -98,5 +102,85 @@ test('all three templates build a plan the provider accepts, and the worker keep
     }
     if (dir === 'starter-web') assert.deepEqual(env.databases, [{ name: 'app-db', kind: 'postgres' }], JSON.stringify(env.databases));
     assert.ok(!JSON.stringify(plan).includes(PIN.digest.slice(7, 20) + 'token'), 'plans carry coordinates, never secrets');
+  }
+});
+
+/**
+ * The rule the APP_SESSION_KEY assertion should have been enforcing.
+ *
+ * `.platfolio/environment.yaml` is not documentation: `applyInventory` merges it into the plan, so every entry
+ * becomes an obligation on each tenant who forks the template. An entry for a variable nothing reads is
+ * therefore not a harmless example -- `kind: secret, required: true` makes the deploy refuse to go healthy over
+ * a credential with no consumer, and a `kind: value` one puts a dead setting on the operator's panel.
+ *
+ * "Referenced" here means: named in the template's own source or in either of its Compose files. That is the
+ * narrowest honest reading, and it is the one the four orphan entries failed.
+ */
+
+/**
+ * True when the inventory entry's service is a THIRD-PARTY image (an `image:` with no `build:`).
+ *
+ * This is the boundary the first cut of the rule got wrong. For a service the tenant compiles, every obligation
+ * must be visible in that tenant's own source or compose -- which is exactly how four invented names
+ * (APP_SESSION_KEY, LOG_LEVEL, QUEUE_DRIVER, STATE_ENCRYPTION_KEY) were caught: nothing read them, so the
+ * inventory was imposing a credential obligation for a feature that does not exist. For a service nobody
+ * compiles, the consumer is the image's own documented configuration surface: Keycloak reads
+ * KC_BOOTSTRAP_ADMIN_PASSWORD and our repository contains no Keycloak source to grep. Demanding a local
+ * mention there would not verify anything -- it would only push people to write fake mentions -- so those
+ * entries are exempt, and the real evidence for them is upstream documentation, which is what
+ * docs/research/keycloak-realm-import-roles-2026-11-14.md exists to hold.
+ */
+function serviceIsThirdParty(dir: string, service: string): boolean {
+  const doc = parseYaml(fs.readFileSync(path.join(ROOT, dir, 'compose.yaml'), 'utf8')) as { services?: Record<string, Record<string, unknown>> };
+  const svc = doc.services?.[service];
+  if (!svc) return false;
+  return typeof svc.image === 'string' && svc.build === undefined;
+}
+
+function referencedInTemplate(dir: string, name: string): boolean {
+  const base = path.join(ROOT, dir);
+  const candidates: string[] = [];
+  for (const f of ['compose.yaml', 'compose.dev.yaml']) {
+    const p = path.join(base, f);
+    if (fs.existsSync(p)) candidates.push(p);
+  }
+  const srcDir = path.join(base, 'src');
+  if (fs.existsSync(srcDir)) {
+    for (const f of fs.readdirSync(srcDir, { recursive: true })) {
+      const p = path.join(srcDir, String(f));
+      if (fs.statSync(p).isFile() && /\.(mjs|js|ts|html)$/.test(p)) candidates.push(p);
+    }
+  }
+  return candidates.some((p) => fs.readFileSync(p, 'utf8').includes(name));
+}
+
+/** Entry names plus the service each one targets, from a template's own inventory. */
+function inventoryEntriesOf(dir: string): Array<{ name: string; service?: string }> {
+  const invPath = path.join(ROOT, dir, '.platfolio/environment.yaml');
+  if (!fs.existsSync(invPath)) return [];
+  return parseInventory(fs.readFileSync(invPath, 'utf8')).entries as Array<{ name: string; service?: string }>;
+}
+
+test('no template inventory declares a variable that template does not reference', () => {
+  for (const dir of ['starter-web', 'starter-worker', 'shared-identity']) {
+    const entries = inventoryEntriesOf(dir);
+    // A vacuity guard, because this rule nearly passed on a broken file: an inventory that fails to parse yields
+    // zero entries, and a loop over zero entries asserts nothing. The parse issues are surfaced by load() in the
+    // tests above, but this rule must not depend on another test to notice it stopped checking anything.
+    assert.ok(entries.length > 0, `templates/${dir}: no inventory entries parsed -- this rule would pass on nothing`);
+    for (const entry of entries) {
+      if (serviceIsThirdParty(dir, entry.service ?? '')) continue;
+      assert.ok(referencedInTemplate(dir, entry.name),
+        `templates/${dir}: inventory declares ${entry.name}, but no source or compose file in that template mentions it. applyInventory merges this file into the plan, so the declaration becomes a tenant-facing obligation for a variable that does nothing (D33, D52)`);
+    }
+  }
+});
+
+test('the inventory-vs-plan cross-check still runs on every template (D33)', () => {
+  for (const dir of ['starter-web', 'starter-worker', 'shared-identity']) {
+    const { manifest, issues } = load(dir, true);
+    assert.ok(manifest, `templates/${dir} must parse`);
+    const codes = issues.filter((i) => i.startsWith('inventory'));
+    assert.deepEqual(codes, [], `${dir}: ${JSON.stringify(issues)}`);
   }
 });

@@ -26,7 +26,7 @@ selections it has already made are recorded, not improvised:
 | Every environment variable: credential?, which environments (`development` / `staging` / `production` / `all`), where the value lives | [environment.yaml](environment.yaml) — the central registry (D52), enforced by `pnpm run environment:registry`: one definition per variable, one spelling of everywhere |
 
 Status: foundation poured, interfaces first (D40, [16](docs/design/16-foundation-build-order.md)). Slices 1
-and 2 of that plan are delivered (399 tests): `apps/control-plane` boots on the vendored runtime with
+and 2 of that plan are delivered (411 tests): `apps/control-plane` boots on the vendored runtime with
 Keycloak-verified bearer auth, persistent records (`Store` as a capability with a Postgres implementation and
 an in-memory double under one conformance suite, gated in CI against a live database), a controller
 that turns accepted attestations into stored state, and capability bindings that make shared services
@@ -150,7 +150,8 @@ The layout is therefore explicit, and a new file goes where its **kind** goes:
 | --- | --- | --- |
 | `templates/` | The three platform templates published to `fractalsynapse/platfolio-*` repositories | The only thing called a template is a template |
 | `packages/manifest/test/fixtures/` | Manifest fixtures the tests and [03](docs/design/03-manifest-spec.md) parse | Test input is not a catalog entry, and does not live at the top level. Fixtures are not projects (D49) |
-| `compose.yaml` + `compose.prod.yaml` + `.platfolio/` (repository root) | platfolio's own platform description, generated pin, environment inventory | **D50: one hosting specification for all four platforms.** The root is where a tenant's platform lives, so it is where ours lives too -- `selfhost/` was a special case and it made platfolio's architecture differ from the templates' |
+| `compose.yaml` + `compose.prod.yaml` (repository root) | platfolio's own platform description and generated pin | **D50: one hosting specification for all four platforms.** The root is where a tenant's platform lives, so it is where ours lives too -- `selfhost/` was a special case and it made platfolio's architecture differ from the templates' |
+| `.platfolio/environment.yaml` (ours, and each template's) | The **platform inventory** (D33): operator-facing obligations, wiring and defaults for the platform this repository describes | **This file is merged into the plan** by `applyInventory` -- it is an input, not documentation. Every name must be referenced by the thing that reads it (`templates.test.ts`), and names in our namespace must be declared in the registry |
 | `compose.dev.yaml` | the local development topology (database container, Mailpit, source mount, `start-dev`, published ports) as an **overlay** | Dev convenience is a separate layer, not a second definition of the platform. `docker compose -f compose.yaml -f compose.dev.yaml up` |
 | `apps/<name>/` | Source, Dockerfile, `package.json` -- the deployable artifact itself | Deployment *shape* does not live with the app |
 | `packages/contracts/` | Capability interfaces, DTO schemas, conformance suites, provider implementations | Framework-free; the only place a seam is defined |
@@ -161,7 +162,7 @@ The layout is therefore explicit, and a new file goes where its **kind** goes:
 | `db/` | Forward-only migrations and Postgres init scripts | Readiness comes from the migrations ledger |
 | `platform-templates`, `platforms/`, `apps/status-api`, `api/`, `samples/`, `selfhost/`, root `docker-compose.yml` | **gone** (Nov 2026): see CHANGELOG | A directory with one member that duplicates another app's file was the bug; a second API that duplicates the first is the same bug with an endpoint surface |
 | `examples/` | Third-party reference clones (Cordis at its tag, a scaffold). Gitignored | Reference material is not project source |
-| `environment.yaml` (repository root) | The central environment registry: every variable, whether it is a credential, where it is deployed (D52) | A name is not a custody claim. `PLATFOLIO_DB_URL` looks like a URL and carries a password |
+| `environment.yaml` (repository root) | The **central environment registry** (D52): every variable this project reads or deploys, whether it is a credential, which environments (`development` / `staging` / `production` / `all`), and where the value lives | A name is not a custody claim. `PLATFOLIO_DB_URL` looks like a URL and carries a password. Derived from code and composition -- **it does not read the inventory**, which used to feed it and had its own stale claims; the cross-check runs the other way now |
 | *nowhere tracked* | A generated provider hostname (D47) | An environment's endpoints are configuration: `vars.PLATFOLIO_URL`, or `--url=` when opening an install PR |
 
 If a change would create a second copy of a fact -- a digest, a service definition, a schema, a permission

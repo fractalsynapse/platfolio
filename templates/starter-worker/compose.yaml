@@ -40,3 +40,12 @@ x-platfolio:
     preview: { enabled: false }
   dns: { ownershipVerification: txt, apexPolicy: cname-flattening-only }
   lifecycle: { onSuspend: scale-to-zero, onEject: [compose, data-export], onDelete: { graceDays: 30, backupAgeOutDays: 90 } }
+
+# Declared here, not only in compose.dev.yaml: the service above mounts `job-state`, and Compose requires every
+# named volume to be declared in the document that uses it. With the declaration only in the overlay,
+# `docker compose -f compose.yaml config` failed outright -- "service "queue" refers to undefined volume
+# job-state" -- so a tenant who forked this template had a platform description that could not be read without
+# the development layer. The overlay still owns the LOCAL shape of these volumes; the platform file owns their
+# existence and their retention (x-platfolio.resources.volumes).
+volumes:
+  job-state:

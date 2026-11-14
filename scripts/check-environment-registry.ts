@@ -41,8 +41,25 @@ const EXTERNAL_PREFIXES = ['INPUT_', 'GITHUB_', 'ACTIONS_'];
 const OURS = /^(PLATFOLIO|RAILWAY|KEYCLOAK|KC_|MP_|MAILPIT|SESSION_|APP_|POSTGRES_|PGHOST|PGPORT|PGUSER|PGPASSWORD|PGDATABASE|PGDATA|LIVE_|CONTROL_PLANE_|DATABASE_URL$|CR_)|(_TOKEN|_KEY|_SECRET|_PASSWORD|_URL)$/;
 
 /** Where configuration lives: our code, our composition, our CI, our templates' own settings. */
-const IN_SCOPE = /^(apps\/|packages\/(contracts|kernel|manifest|api-contract)\/src\/|scripts\/|\.github\/|db\/|templates\/(starter-web|starter-worker|shared-identity)\/(compose\.dev\.yaml|src\/))/;
-const IN_SCOPE_ROOT = /^(compose\.yaml|compose\.prod\.yaml|compose\.dev\.yaml|\.platfolio\/|Dockerfile)/;
+const IN_SCOPE = /^(apps\/|packages\/(contracts|kernel|manifest|api-contract)\/src\/|scripts\/|\.github\/|db\/|templates\/(starter-web|starter-worker|shared-identity)\/(compose(\.dev)?\.yaml|src\/))/;
+/**
+ * Files at the repository root whose contents are configuration.
+ *
+ * `.platfolio/` used to be listed here, and is deliberately gone. That directory holds the PLATFORM INVENTORY
+ * (D33) -- a product artifact listing the obligations a platform declares for its operators, in its own schema
+ * (`kind`, `required`, `service`, `description`). The central registry (D52) answers a different question about
+ * the same names: is it a credential, which environments, where does the value live. Feeding one from the other
+ * meant the same fact was maintained twice AND the registry inherited the inventory's staleness: when the
+ * inventory still named SESSION_SIGNING_KEY and PUBLIC_ORIGIN (variables nothing reads), the registry treated
+ * them as referenced.
+ *
+ * The experiment that justified removing it: exclude `.platfolio/` from discovery and re-run -- 82 variables,
+ * all still referenced, no committed secret values, nothing lost. The inventory contributes zero facts the code
+ * and composition do not already give, so it was pure duplication.
+ *
+ * It is still validated, in the direction that matters: `checkInventoryAgreement` below.
+ */
+const IN_SCOPE_ROOT = /^(compose\.yaml|compose\.prod\.yaml|compose\.dev\.yaml|Dockerfile)/;
 
 /**
  * The three environments a platform can live in (D51), and the only words allowed in an entry's
@@ -162,7 +179,7 @@ const HUMAN: Record<string, Partial<Entry>> = {
 
 function guess(name: string, places: Set<string>): Entry {
   const hosts = [...places].map((h) => h.split(':')[0]!);
-  const composeOnly = hosts.every((h) => /^compose\.(prod\.)?yaml|^\.platfolio\//.test(h));
+  const composeOnly = hosts.every((h) => /^compose\.(prod\.)?yaml/.test(h));
   const devOnly = hosts.every((h) => /compose\.dev\.yaml|templates\/.*compose\.dev\.yaml/.test(h));
   const ci = hosts.some((h) => h.startsWith('.github/'));
   const scripts = hosts.some((h) => h.startsWith('scripts/'));
@@ -179,7 +196,7 @@ function guess(name: string, places: Set<string>): Entry {
   // Where the value lives is derived from the files that actually reference it, not from the shape of its
   // name. A prefix rule put RAILWAY_TOKEN in `railway:variable` when every workflow that reads it takes it from
   // a GitHub environment secret -- a registry whose only job is custody must not be right by guesswork.
-  const inComposition = hosts.some((h) => /^compose\.(prod\.)?yaml/.test(h) || h.startsWith('.platfolio/'));
+  const inComposition = hosts.some((h) => /^compose\.(prod\.)?yaml/.test(h));
   const sharedVariableDeclared = ['compose.yaml', 'compose.prod.yaml', 'templates/starter-web/compose.yaml', 'templates/shared-identity/compose.yaml']
     .some((f) => fs.existsSync(path.join(ROOT, f)) && fs.readFileSync(path.join(ROOT, f), 'utf8').includes(`{ name: ${name}, source: shared-variable }`));
   const inWorkflows = hosts.some((h) => h.startsWith('.github/'));
@@ -197,7 +214,7 @@ function guess(name: string, places: Set<string>): Entry {
   // development, code that ships inside a deployed service means provider environments, a template must work
   // everywhere, and a maintainer script or a CI job runs in development.
   const applies = new Set<string>();
-  if (hosts.some((h) => /^compose\.(yaml|prod\.yaml)$/.test(h) || h.startsWith('.platfolio/'))) { applies.add('production'); applies.add('staging'); }
+  if (hosts.some((h) => /^compose\.(yaml|prod\.yaml)$/.test(h))) { applies.add('production'); applies.add('staging'); }
   if (hosts.some((h) => /compose\.dev\.yaml/.test(h))) applies.add('development');
   if (hosts.some((h) => h.startsWith('scripts/') || h.startsWith('apps/managed-action/') || h.startsWith('.github/'))) applies.add('development');
   if (hosts.some((h) => h.startsWith('templates/'))) { applies.add('development'); applies.add('staging'); applies.add('production'); }
@@ -227,6 +244,66 @@ function migrateLegacy(value: unknown): string[] | 'all' | undefined {
   }
   if (mapped.size === 0) return ['development'];
   return mapped.size === ENVIRONMENTS.length ? 'all' : ENVIRONMENTS.filter((e) => mapped.has(e));
+}
+
+
+/**
+ * The platform inventories (D33) must agree with the central registry (D52), in the one direction that keeps
+ * both honest: every name a platform declares as an obligation must be a variable this project actually knows
+ * about, and neither file may claim differently about custody.
+ *
+ * The registry is the authority because it is derived from code and composition and re-checked in CI; the
+ * inventory is hand-authored operator-facing prose that has already been observed to go stale (it once named
+ * SESSION_SIGNING_KEY and PUBLIC_ORIGIN, which nothing reads, and asserted KEYCLOAK_ISSUER was optional when
+ * the control plane refuses to start without it). Letting the stale document feed the derived one inverted the
+ * only useful direction of trust.
+ */
+function inventoryFiles(): string[] {
+  return [
+    '.platfolio/environment.yaml',
+    'templates/starter-web/.platfolio/environment.yaml',
+    'templates/starter-worker/.platfolio/environment.yaml',
+    'templates/shared-identity/.platfolio/environment.yaml',
+  ].filter((rel) => fs.existsSync(path.join(ROOT, rel)));
+}
+
+function checkInventoryAgreement(declared: Map<string, Entry>): string[] {
+  const problems: string[] = [];
+  for (const rel of inventoryFiles()) {
+    let doc: unknown;
+    try {
+      doc = parseYaml(fs.readFileSync(path.join(ROOT, rel), 'utf8'));
+    } catch (error) {
+      problems.push(`${rel}: does not parse (${(error as Error).message.slice(0, 70)})`);
+      continue;
+    }
+    const entries = Array.isArray((doc as { entries?: unknown })?.entries)
+      ? (doc as { entries: Record<string, unknown>[] }).entries
+      : Array.isArray(doc) ? (doc as Record<string, unknown>[]) : [];
+    for (const entry of entries) {
+      const name = typeof entry.name === 'string' ? entry.name : '';
+      if (!name) continue;
+      // The registry tracks OUR variables (the OURS filter is what makes it a registry rather than a grep
+      // result). A template's own app settings -- UI_BRAND, WORKER_CONCURRENCY -- are the tenant's namespace and
+      // are checked instead by templates.test.ts, which asks the narrower and more useful question: does that
+      // template reference it. Flagging them here would be the gate claiming authority over names it never
+      // discovered, which is how checks get ignored.
+      if (!OURS.test(name)) continue;
+      const reg = declared.get(name);
+      if (!reg) {
+        problems.push(`${rel}: declares ${name} as an operator obligation, but the central registry does not know it -- either nothing references it (delete the claim) or the code needs it and the registry must be regenerated (D52 is the authority, D53's custody model depends on it)`);
+        continue;
+      }
+      const claimsSecret = entry.kind === 'secret' || entry.secret === true;
+      if (claimsSecret && reg.secret === false) {
+        problems.push(`${rel}: calls ${name} a secret while the registry records secret: false -- two custody claims about one variable is the disagreement a tenant would inherit (D4)`);
+      }
+      if (!claimsSecret && entry.kind === 'value' && reg.secret === true) {
+        problems.push(`${rel}: calls ${name} a plain value while the registry records it as a credential -- the inventory is operator-facing, so understating custody here is how a secret ends up typed into a ticket`);
+      }
+    }
+  }
+  return problems;
 }
 
 const found = discover();
@@ -285,6 +362,10 @@ if (process.argv.includes('--report')) {
 
 const problems: string[] = [...duplicateProblems];
 if (error) problems.push(`environment registry: ${error} -- the central registry is required at the repository root (D52)`);
+
+// The inventory-vs-registry cross-check, before the reference checks, because a disagreement between two
+// declarations of the same fact is the more confusing failure to be told about second.
+problems.push(...checkInventoryAgreement(declared));
 
 for (const [name, places] of found) {
   if (!declared.has(name)) {
