@@ -226,6 +226,7 @@ const HUMAN: Record<string, Partial<Entry>> = {
   // realm the operator is creating on the identity provider the platform already hosts.
   PLATFOLIO_IDENTITY_REALM: { secret: false, environments: ['development'], deployedTo: 'host:shell', note: 'which realm identity:seed targets; production realm is `platfolio`, staging is `platfolio-staging` (D56)' },
   CONTROL_PLANE_BASE: { environments: ['development'], note: 'which control plane a smoke script points at; never a deployment value' },
+  KC_REALM: { environments: ['development'], note: 'which realm a smoke or seed script targets -- the hosted Keycloak runs one instance with a realm per environment (D56), so this selects the environment under test; never a deployment value' },
   OIDC_CLIENT_SECRET: { note: 'template placeholder: a tenant app that keeps its own OIDC client secret' },
   STRIPE_WEBHOOK_SECRET: { note: 'template placeholder: a tenant app verifying Stripe webhooks itself' },
   KEYCLOAK_ADMIN_PASSWORD: { note: 'the bootstrap admin of the hosted identity service, declared by name in the composition' },

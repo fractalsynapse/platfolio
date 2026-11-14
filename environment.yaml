@@ -129,6 +129,12 @@ variables:
     environments: all
     deployedTo: railway:variable
     note: "referenced by compose.dev.yaml, compose.yaml"
+  - name: KC_REALM
+    kind: value
+    secret: false
+    environments: [development]
+    deployedTo: host:shell
+    note: "which realm a smoke or seed script targets -- the hosted Keycloak runs one instance with a realm per environment (D56), so this selects the environment under test; never a deployment value"
   - name: KC_USER_PASSWORD
     kind: secret
     secret: true
@@ -278,7 +284,7 @@ variables:
     secret: true
     environments: all
     deployedTo: github:environment-secret
-    note: "the platform resolves this from the environment's own database reference -- not typed by anyone (D33 wiring)"
+    note: "the same credential as DATABASE_URL, delivered as a provider reference rather than a literal (OD13); the platform resolves it from the environment's own database, so no one types it"
   - name: PLATFOLIO_DEPLOY_BUDGET
     kind: value
     secret: false
