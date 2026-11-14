@@ -89,11 +89,19 @@ export class GithubRepositoryWrites {
     // already removed `.platfolio/environment.yaml`, and GitHub rejects a null-sha entry for a path that is not
     // in the base tree. So "delete this retired path" is idempotent here -- re-publishing a repository that
     // already moved on is the normal case, not an error case.
+    //
+    // The base tree is read ONLY when there is something to retire. My first version read it unconditionally, and
+    // the writer's own tests caught it as `Cannot read properties of undefined (reading 'tree')` -- a 204 with no
+    // body parses to undefined, and an extra round trip on every install commit bought nothing.
     const deletions = (input.deletePaths ?? []).filter((path) => !input.files[path]).sort();
-    const baseTree = await this.call<{ tree: Array<{ path: string }> }>(`/repos/${input.repo}/git/trees/${baseSha}?recursive=1`);
-    const present = new Set((baseTree.tree ?? []).map((e) => e.path));
-    const applicableDeletions = deletions.filter((path) => present.has(path));
-    const alreadyGone = deletions.filter((path) => !present.has(path));
+    let applicableDeletions: string[] = [];
+    let alreadyGone: string[] = [];
+    if (deletions.length > 0) {
+      const baseTree = await this.call<{ tree?: Array<{ path: string }> } | undefined>(`/repos/${input.repo}/git/trees/${baseSha}?recursive=1`);
+      const present = new Set((baseTree?.tree ?? []).map((e) => e.path));
+      applicableDeletions = deletions.filter((path) => present.has(path));
+      alreadyGone = deletions.filter((path) => !present.has(path));
+    }
     const blobs = await Promise.all(paths.map(async (path) => {
       const content = input.files[path]!;
       if (content.includes('\u0000')) throw new Error(`github: refusing to commit a NUL byte in ${path}`);
