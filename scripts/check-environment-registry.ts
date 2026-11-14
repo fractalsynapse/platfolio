@@ -241,6 +241,13 @@ const HUMAN: Record<string, Partial<Entry>> = {
   PLATFOLIO_IDENTITY_REALM: { secret: false, environments: ['development'], deployedTo: 'host:shell', note: 'which realm identity:seed targets; production realm is `platfolio`, staging is `platfolio-staging` (D56)' },
   CONTROL_PLANE_BASE: { environments: ['development'], note: 'which control plane a smoke script points at; never a deployment value' },
   KC_REALM: { environments: ['development'], note: 'which realm a smoke or seed script targets -- the hosted Keycloak runs one instance with a realm per environment (D56), so this selects the environment under test; never a deployment value' },
+  // The cross-issuer check needs the PEER realm's own credentials (#248): platfolio runs one hosted Keycloak
+  // with a realm per environment, so a peer-realm token is the real cross-tenant shape. Two of these are
+  // credentials -- names in the registry, values never stored or logged (D4).
+  KC_PEER_REALM: { environments: ['development'], note: 'which realm supplies the foreign token for the cross-issuer check; unset means the check fails rather than skipping' },
+  KC_PEER_USER: { environments: ['development'], note: 'the peer-realm test identity, defaults to adrian' },
+  KC_PEER_CLIENT_SECRET: { secret: true, environments: ['development'], deployedTo: 'host:shell', note: 'the peer realm\'s client secret -- a credential, used only to mint the token that must be refused' },
+  KC_PEER_USER_PASSWORD: { secret: true, environments: ['development'], deployedTo: 'host:shell', note: 'the peer realm\'s user password -- same: minted against the peer, never sent to this realm\'s verifier' },
   OIDC_CLIENT_SECRET: { note: 'template placeholder: a tenant app that keeps its own OIDC client secret' },
   STRIPE_WEBHOOK_SECRET: { note: 'template placeholder: a tenant app verifying Stripe webhooks itself' },
   KEYCLOAK_ADMIN_PASSWORD: { note: 'the bootstrap admin of the hosted identity service, declared by name in the composition' },

@@ -353,6 +353,49 @@ Stated plainly, because the maintainer's objection deserves an answer rather tha
 with the core platform is what makes this drift possible**, and `templates:check` closes the detection gap, not
 the design one. Separating them is a real option and is recorded as a decision to take, not as work done.
 
+### Fixed — the identity smoke was forging a token that wasn't forged, and the cross-issuer proof moved off the master admin
+
+Two defects surfaced while working #248, and the first is the one that should worry us.
+
+**`a flipped signature is refused with 401` had been passing without testing anything.** The check flipped the
+*last character* of the compact JWT. An RS256 signature is 256 bytes, which is 342 base64url characters: the
+final character carries two significant bits and padding bits that decoders discard, so for many signatures
+changing it decodes to the **same bytes** -- the token remains genuinely valid. Measured on today's Keycloak:
+one mint produced a last-character flip that decoded differently (the API correctly answered `401`), another
+decoded identically, and the staging run reported `200` for what it called a forged token. Same code, opposite
+results, on nothing but luck. The check was neither reliably detecting a broken verifier nor reliably proving
+the verifier worked -- it was a coin flip in a security assertion.
+
+Now the forgery mutates a character in the **middle** of the signature segment, where every bit is significant,
+and it decodes both signatures first: if the bytes did not change, the check reports that it did not run rather
+than passing. Measured: production and staging each **11/11**, and six consecutive production runs all passed --
+with `401 unauthenticated:signature` naming the key id, in both realms.
+
+**The cross-issuer check no longer depends on an operator credential.** It used to mint a *master-realm admin*
+token as the foreign token. That was always a weak stand-in for the real invariant -- the threat is not an
+administrator's credential arriving at a tenant endpoint, it is **one tenant's credential arriving at another
+tenant's control plane** -- and it made a D4 proof depend on a credential we might not be able to obtain. So it
+now uses the **peer realm**: platfolio runs one hosted Keycloak with a realm per environment (D56), so
+`platfolio` and `platfolio-staging` are same-server, different-issuer, different-key-set neighbours, which is
+exactly the cross-tenant shape. Both directions are covered, refused as `unknown-key`, and the only thing needed
+is the peer realm's own client secret and user password. `KC_PEER_REALM` unset is a **failure, not a skip**.
+
+**Why #248 is not fully closed, and what that costs.** The reason the old check broke was that production's
+master-realm admin credential cannot be authenticated any more (`400 invalid_grant`). The 26.8 documentation is
+explicit that `KC_BOOTSTRAP_ADMIN_USERNAME/PASSWORD` create the admin *"only during the initial start of the
+Keycloak server when the master realm doesn't exist yet"* -- which means (a) my planned fix for #248 would not
+have worked, (b) the admin we used to have was created at first provisioning, and (c) recovery is
+`kc.sh bootstrap-admin user`, which requires **all Keycloak nodes stopped** and yields a *temporary* admin that
+must then be replaced and removed. Our `compose.yaml` currently declares `KEYCLOAK_ADMIN` /
+`KEYCLOAK_ADMIN_PASSWORD` -- the 25.x names, which 26.8 does not read at all.
+
+I deliberately did **not** change those names in the composition as part of this commit. Declaring the
+bootstrap pair makes the plan's custody claims honest and matters for every *new* hosted-identity deployment,
+but it cannot recover a realm that already exists -- and it does change what the next `--apply` demands of
+production (two newly required shared variables, reported missing until delivered). That belongs in one
+maintenance window with the admin recovery, which is an operator decision with downtime attached, not a
+drive-by edit in a session that has already damaged content once today.
+
 ### Measured — the production rename ran: every service in every environment now follows `{name}-{environment}`
 
 Executed through platfolio's own implementation (`platform-deploy --apply`, then `--redeploy` per the write-time
