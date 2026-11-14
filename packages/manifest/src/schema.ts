@@ -28,6 +28,20 @@ const Service = z.object({
   secrets: z.array(z.object({ name: Name, source: z.enum(['preserve', 'shared-variable', 'customer-held']) }).strict()).default([]),
   /** Which environments this service exists in (D23). Defaults from `ownership`. */
   environments: z.array(z.enum(['production', 'staging'])).optional(),
+
+  /**
+   * Values that differ PER ENVIRONMENT (D56). Keys are environment names this service is placed in; the inner
+   * map replaces entries of `env` for that environment only.
+   *
+   * This exists because a platform with a staging environment needs staging CONFIGURATION, not just a staging
+   * copy. platfolio's own deployment runs its staging control plane against a separate Keycloak realm on the
+   * same issuer host; before this field, `mode: development` bought a second environment whose values were
+   * identical to production's -- a second copy of the truth rather than a second environment.
+   *
+   * D4 applies exactly as it does to `env`: secret material is declared by NAME in `secrets`, never written as
+   * a literal in either map.
+   */
+  environmentValues: z.record(z.string(), z.record(z.string(), z.string())).default({}),
   /** `external` = an upstream image platfolio hosts but does not develop; production-only by default. */
   ownership: z.enum(['maintained', 'external']).default('maintained'),
   domains: z.array(z.string().min(1)).default([]),

@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import { InfraPlanSchema, planIssues } from '@platfolio/contracts';
 import { RailwayInfraProvider } from '@platfolio/contracts';
 import { RailwayMock } from '../../../packages/contracts/test/railway-mock.ts';
-import { buildPlan, parse } from '../src/index.ts';
+import { buildPlan, parse, validateManifest } from '../src/index.ts';
 
 // Tests run from the repository root (pnpm test); templates live there, not beside the package.
 const dir = path.resolve('packages/manifest/test/fixtures');
@@ -154,4 +154,76 @@ test('a manifest built plan carries the staging host and its production replica 
   assert.equal(new Set(hosts).size, 2, 'the two environments never claim one host');
   assert.ok(hosts.every((h) => typeof h === 'string' && h.length > 0), JSON.stringify(hosts));
   assert.deepEqual(staging.databases, prod.databases, 'a database is declared in both; the provider places it once and the duplicate receives it (measured live)');
+});
+
+/**
+ * D56: a staging environment needs staging CONFIGURATION, not merely a staging copy. Before per-environment
+ * values, `mode: development` bought a second environment whose values duplicated production's -- two
+ * environments, one truth, and the arrangement that quietly pointed our staging control plane at production's
+ * identity realm.
+ */
+test('per-environment overrides reach the plan for the environment they name, and only that one', () => {
+  const api = webApp.spec.services.api!;
+  const manifest = {
+    ...webApp,
+    spec: {
+      ...webApp.spec,
+      services: {
+        ...webApp.spec.services,
+        api: {
+          ...api,
+          environments: ['production', 'staging'],
+          environmentValues: { staging: { PLATFOLIO_IDENTITY_ISSUER: 'https://auth.example.com/realms/platfolio-staging' } },
+        },
+      },
+    },
+  } as typeof webApp;
+
+  const plan = buildPlan(manifest, { instanceId: 'inst-env', teamId: 'team-env', images: pinned(['api', 'worker']) });
+  const serviceIn = (name: string) => plan.environments.find((e) => e.name === name)!.services.find((s) => s.name === 'api')!;
+  const literal = (name: string, key: string) => serviceIn(name).env.find((e) => e.name === key)?.literal;
+
+  assert.equal(literal('staging', 'PLATFOLIO_IDENTITY_ISSUER'), 'https://auth.example.com/realms/platfolio-staging',
+    'the override is what staging gets');
+  assert.equal(literal('production', 'PLATFOLIO_IDENTITY_ISSUER'), api.env.PLATFOLIO_IDENTITY_ISSUER,
+    'production keeps the base value -- an override leaking into production is a downgrade wearing a feature');
+  assert.doesNotThrow(() => InfraPlanSchema.parse(plan));
+});
+
+test('an override that changes what a deployment runs changes the plan hash', () => {
+  const api = webApp.spec.services.api!;
+  const manifest = {
+    ...webApp,
+    spec: { ...webApp.spec, services: { ...webApp.spec.services, api: { ...api, environmentValues: { staging: { PLATFOLIO_DB_SCHEMA: 'platfolio_stage' } } } } },
+  } as typeof webApp;
+  const options = { instanceId: 'inst-hash', teamId: 'team-hash', images: pinned(['api', 'worker']) };
+  assert.notEqual(buildPlan(webApp, options).planHash, buildPlan(manifest, options).planHash,
+    'configuration is part of the version decision; a hash that ignored it would let a release be pinned to a lie');
+});
+
+test('validate refuses an override for an environment the service is not placed in, and a credential name in a value map', () => {
+  const api = webApp.spec.services.api!;
+  const bad = {
+    ...webApp,
+    spec: {
+      ...webApp.spec,
+      services: {
+        ...webApp.spec.services,
+        api: {
+          ...api,
+          environments: ['production'],
+          environmentValues: {
+            // Not placed in staging: dead configuration that reads like a decision.
+            staging: { PLATFOLIO_IDENTITY_ISSUER: 'https://auth.example.com/realms/ghost' },
+            // Credential-shaped NAMES belong in `secrets` whatever the value -- D4 grants no exception to the
+            // staging copy of a configuration map.
+            production: { STRIPE_WEBHOOK_SECRET: 'whsec_this_is_not_a_real_value' },
+          },
+        },
+      },
+    },
+  } as typeof webApp;
+  const codes = validateManifest(bad).map((i) => i.code);
+  assert.ok(codes.includes('environment-values-unplaced-environment'), JSON.stringify(codes));
+  assert.ok(codes.includes('environment-value-is-secret-name'), JSON.stringify(codes));
 });

@@ -211,6 +211,34 @@ export function validateManifest(unknown: unknown): Issue[] {
     }
   }
 
+  // 5e. Per-environment values (D56). An override naming an environment the service is not placed in is dead
+  // configuration -- worse than absent, because it reads like a decision and is never executed. And a
+  // credential-shaped NAME is refused whatever its value: "it is only the staging value" is how a committed
+  // secret gets past a review (D4).
+  {
+    const enabledHere = enabledEnvironments(m);
+    for (const [name, svc] of servicesOf(m)) {
+      const placed: string[] = serviceEnvironments(svc, enabledHere);
+      for (const [envName, overrides] of Object.entries(svc.environmentValues ?? {})) {
+        if (!placed.includes(envName)) {
+          issues.push({
+            path: `spec.services.${name}.environmentValues.${envName}`,
+            code: 'environment-values-unplaced-environment',
+            message: `overrides environment "${envName}" but the service is not deployed there (it is in: ${placed.join(', ') || 'none'}) -- dead configuration that reads like a decision`,
+          });
+        }
+        for (const [key, value] of Object.entries(overrides)) {
+          if (value.length === 0) {
+            issues.push({ path: `spec.services.${name}.environmentValues.${envName}.${key}`, code: 'environment-value-empty', message: `overrides "${key}" with an empty string in "${envName}" -- delete the entry to drop an inherited value, or give it a real one; an empty literal is how a service boots with a config it cannot see` });
+          }
+          if (/(SECRET|TOKEN|_KEY$|PASSWORD|CREDENTIAL)/.test(key)) {
+            issues.push({ path: `spec.services.${name}.environmentValues.${envName}.${key}`, code: 'environment-value-is-secret-name', message: `"${key}" is credential-shaped and belongs in the service's secrets list by NAME, not in a per-environment value map (D4)` });
+          }
+        }
+      }
+    }
+  }
+
   // 6. Platform kind and mode (D51). Rules are about direction and lifecycle, never service counts. The ones
   // being deleted here said "an api-service has at most 2 services", "full-stack-web needs at least 2",
   // "a shared service should stay at 1-2": those described our own example manifests, not the platform, and

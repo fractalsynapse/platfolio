@@ -99,6 +99,36 @@ schema's error type carries the issues. Fixed by deleting the import and matchin
 establish the claim. AGENTS.md already said this ("fake-only tests do not establish that wiring works"); this
 is the cost of reading past it.
 
+### Added — configuration is scoped per environment inside the platform description (D56)
+
+`x-platfolio.services.<name>.environmentValues.<env>.<NAME>`, composed by `buildPlan` into the effective
+environment map for that environment alone. Three refusals come with it: an override naming an environment the
+service is not placed in (`environment-values-unplaced-environment` -- dead configuration that reads like a
+decision), an empty override value (`environment-value-empty` -- delete the entry or mean it), and a
+**credential-shaped name** in a value map (`environment-value-is-secret-name` -- D4 has no exception for the
+staging copy of a value, so the NAME is refused whatever it holds).
+
+This closes a gap I flagged rather than hide, and it was the last structural duplication in the composition:
+`mode: development` promised a staging environment and delivered a copy, because the only difference between the
+environments was what the provider injected. platfolio's own staging control plane was therefore pointed at the
+production Keycloak realm.
+
+Resolved the way the maintainer directed: **one identity service, one domain, one certificate, two realms.** The
+staging api now deploys with `issuer = https://auth.platfolio.dev/realms/platfolio-staging` and the matching JWKS
+path, both declared in `compose.yaml`, and both differences move the plan hash -- configuration is part of the
+version decision, not a detail applied later.
+
+What was NOT duplicated, and why it matters: no second Keycloak. `identity` is `mode: hosted` (D51), so it does
+not earn a development environment; staging borrows the deployment and isolates by realm. A staging token is
+refused by production on issuer as well as audience, and the reverse holds -- which is the isolation the shared
+host was never asked to provide. The local stack's Keycloak container stays, and is a different thing: an offline
+test double (D49), not a deployed environment.
+
+Three tests in `build-plan.test.ts`: the override reaches only the environment it names, production keeps the
+base value, an override changes the plan hash, and both refusals fire. Verified against the real composition:
+`platform-deploy --dry-run` now prints `realms/platfolio` for production and `realms/platfolio-staging` for
+staging.
+
 ### Fixed — a marker that promised a plan the provider never got (D55)
 
 `applyPlan` short-circuited whenever the project description carried the plan's hash, returning `noop: true,

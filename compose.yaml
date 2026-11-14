@@ -81,6 +81,16 @@ services:
       domains: [api.platfolio.dev]
       # Developed here, so it runs in both environments (D51: mode development implies staging).
       environments: [production, staging]
+      # Staging is the same deployment against its OWN realm (D56). The issuer host is deliberately shared --
+      # one Keycloak, one database, one certificate, no second copy of a service that does not need a
+      # development instance -- but the realm is not shared, so a staging token can never be accepted by
+      # production or the reverse. Two names change here and they change together: the realm appears inside
+      # both the issuer and the JWKS path, and a value map is the honest place to say so.
+      environmentValues:
+        staging:
+          PLATFOLIO_IDENTITY_ISSUER: https://auth.platfolio.dev/realms/platfolio-staging
+          PLATFOLIO_IDENTITY_JWKS_URI: https://auth.platfolio.dev/realms/platfolio-staging/protocol/openid-connect/certs
+
 
   identity:
     # Upstream Keycloak, pinned by digest (D29/D30 law 3: a tag is a thing that moves). `ownership: external`

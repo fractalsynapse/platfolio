@@ -68,6 +68,29 @@ were bundled first to `.archive/platfolio-all-refs-20261113.bundle` (gitignored:
 source). Recover with `git bundle unbundle .archive/<file>.bundle`, or per-PR with
 `gh pr view <N> --json headRefOid` -- GitHub retains `refs/pull/<N>/head` for every merged PR.
 
+## Two realms, one Keycloak (D56)
+
+platfolio's production and staging control planes share the hosted identity service -- one container, one
+database, one certificate, `auth.platfolio.dev` -- and are separated by **realm**:
+
+| Environment | Realm | Seeded with |
+| --- | --- | --- |
+| production | `platfolio` | `pnpm run identity:seed` (default) |
+| staging | `platfolio-staging` | `pnpm run identity:seed --realm=platfolio-staging` |
+
+The issuer and JWKS URIs that express this are **per-environment values** in `compose.yaml`
+(`x-platfolio.services.api.environmentValues.staging`), so the difference is declared in the platform
+description and lands in the plan hash -- not patched in by a deploy script, and not silently identical.
+
+Deliberately **not** duplicated: a second Keycloak for staging. The identity provider does not need a
+development instance (`mode: hosted` says so, D51), so staging borrows the production deployment and gets its
+own realm, its own clients, its own users and its own credentials. What a staging token asserts is scoped to
+`platfolio-staging`, and production refuses it on audience *and* issuer -- the reverse holds too, which is the
+isolation the shared host does not have to provide.
+
+The local development stack keeps its own Keycloak container, and that is not a contradiction: it is the offline
+test double (D49), not a deployed environment.
+
 ## Releases and credentials are operations, not console work
 
 A platform's build reports its own artifact; nobody types a digest, and nobody types a credential:
