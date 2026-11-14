@@ -63,7 +63,7 @@ if (!composed.manifest) {
   console.error('  Compose did not parse:', JSON.stringify(composed.issues.map((i) => `${i.code}@${i.path}`)));
   process.exit(1);
 }
-const invPath = resolve(platformDir, '.platfolio/environment.yaml');
+const invPath = resolve(platformDir, 'environment.yaml');
 const entries = existsSync(invPath) ? parseInventory(readFileSync(invPath, 'utf8')).entries : [];
 const manifest = applyInventory(composed.manifest, entries);
 

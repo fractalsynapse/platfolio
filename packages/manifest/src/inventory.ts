@@ -75,6 +75,33 @@ function credentialShaped(name: string, value?: string): boolean {
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
 /**
+ * A registry row -> an inventory entry.
+ *
+ * `kind` is carried across unchanged, because it is the field that decides whether an operator is being asked
+ * for something: `value`/`secret` are obligations, `reference`/`output` are wiring the platform resolves. The
+ * registry-only fields (`secret`, `environments`, `deployedTo`, `note`) describe custody and are not part of
+ * what a plan needs, so they are dropped here rather than duplicated into a second concept.
+ */
+function fromRegistryRow(row: Record<string, unknown>): Record<string, unknown> {
+  const { kind = 'value', name, service, database, output, from, default: def, required, rotate, description, note } = row;
+  const out: Record<string, unknown> = { kind, name };
+  if (service !== undefined) out.service = service;
+  if (kind === 'value' && def !== undefined) out.default = def;
+  if (kind === 'secret') {
+    out.required = required ?? true;
+    if (rotate !== undefined) out.rotate = rotate;
+  }
+  if (kind === 'reference') {
+    if (database !== undefined) out.database = database;
+    if (output !== undefined) out.output = output;
+  }
+  if (kind === 'output' && from !== undefined) out.from = from;
+  const descriptionText = typeof description === 'string' ? description : typeof note === 'string' ? note : undefined;
+  if (descriptionText !== undefined) out.description = descriptionText;
+  return out;
+}
+
+/**
  * Parse `.platfolio/environment.yaml` (or an `x-platfolio.environment` array). Every entry that fails the
  * subset is refused by name rather than dropped -- a silently ignored obligation becomes a deploy that fails
  * somewhere else, three layers away, which is the failure this project keeps meeting.
@@ -87,7 +114,14 @@ export function parseInventory(source: string): ParsedInventory {
   } catch (error) {
     return { entries: [], issues: [{ path: '(document)', code: 'yaml-parse', message: (error as Error).message }] };
   }
-  const raw = Array.isArray(doc) ? doc : isRecord(doc) && Array.isArray(doc.entries) ? doc.entries : null;
+  // One file per platform, one schema: the platform registry (D52) carries both the custody facts and the
+  // obligations this parser used to read from a separate `.platfolio/environment.yaml` (D33). The two documents
+  // described the same variables in two shapes and drifted apart, so they were merged -- `variables:` is now the
+  // only accepted envelope here.
+  const raw = isRecord(doc) && Array.isArray(doc.variables)
+    ? (doc.variables as Record<string, unknown>[]).map(fromRegistryRow)
+    : Array.isArray(doc) ? doc
+      : null;
   if (!raw) {
     return { entries: [], issues: [{ path: '(document)', code: 'inventory-shape', message: 'an inventory is a list of entries, or an object with an entries list' }] };
   }
