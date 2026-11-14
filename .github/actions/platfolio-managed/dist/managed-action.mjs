@@ -26228,7 +26228,11 @@ var RailwayInfraProvider = class {
       // Returns Variable!, so a sub-selection is required -- the same class of validation-time rejection that
       // bit the marker write (E26) and is why the query is spelled out rather than sent bare.
       query: "mutation ($input: SharedVariableConfigureInput!) { sharedVariableConfigure(input: $input) { id } }",
-      variables: { input: { projectId, environmentId, name, enabledServiceIds: [serviceId] } }
+      // Both lists are NON_NULL in the captured schema -- `[String!]!` each -- so attaching means sending an
+      // empty `disabledServiceIds` alongside the enabled one. Omitting it is not a harmless abbreviation: the
+      // live API rejected the whole mutation with `Variable "$input" got invalid value`, and my own double
+      // agreed with the omission because its allowlist checked field NAMES and never requiredness.
+      variables: { input: { projectId, environmentId, name, enabledServiceIds: [serviceId], disabledServiceIds: [] } }
     });
   }
   /**
