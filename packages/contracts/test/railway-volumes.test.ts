@@ -9,11 +9,9 @@ const DIGEST = `sha256:${'d'.repeat(64)}`;
 function plan(mutate?: (p: InfraPlan) => void): InfraPlan {
   const p = samplePlan();
   for (const environment of p.environments) {
-    environment.cloneFrom = undefined;
     environment.buckets = [];
     for (const service of environment.services) { service.image = IMAGE; service.digest = DIGEST; }
   }
-  p.environments[1]!.cloneFrom = 'production';
   p.environments[1]!.domains = [];
   mutate?.(p);
   return p;
@@ -42,7 +40,7 @@ test('a template deploy that never surfaces is a timeout, not a missing resource
   const applied = await never.provider.applyPlan(p);
   const timeout = applied.failures.find((f) => f.code === 'database-provision-timeout');
   assert.ok(timeout, JSON.stringify(applied.failures.map((f) => f.code)));
-  assert.equal(timeout.step, 'databases.app-db');
+  assert.equal(timeout.step, 'databases.app-db@production', 'a database failure names the environment it timed out in -- with one database service per environment (D57) the same plan name can fail in one and not the other');
   assert.match(timeout.message, /accepted but surfaced no placed service/, 'slow is not the same as refused');
   assert.equal(never.mock.hiddenServiceCount(), 1, 'the service stayed hidden for the whole window');
   assert.equal(applied.verified, false);
@@ -151,6 +149,28 @@ test('deleteInstance removes volumes too, and reports any that survive', async (
   assert.equal(mock.volumes.length, 0, 'the volume is gone with the instance');
   assert.ok(deleted.removed.some((r) => r.startsWith('volume:')), JSON.stringify(deleted.removed));
   assert.deepEqual(deleted.orphans, [], JSON.stringify(deleted.orphans));
+});
+
+test('two environments declaring the same mount get two disks, not one shared one (D57)', async () => {
+  // The hibernate reuse above matches on mount path, which is only safe because a volume INSTANCE belongs to one
+  // environment (`VolumeInstance.environmentId` is NON_NULL in the captured schema). If that read ever widened
+  // to the project, staging's apply would "reuse" production's disk at `/var/cache/app` and re-attach it --
+  // silently sharing state between environments, which is the same failure the database had.
+  const { mock, provider } = harness();
+  const p = plan((x) => {
+    for (const environment of x.environments) {
+      environment.databases = [];
+      environment.volumes = [{ name: 'state-cache', service: 'api', mountPath: '/var/cache/app' }];
+    }
+  });
+  const applied = await provider.applyPlan(p);
+  assert.deepEqual(applied.failures.map((f) => f.code), [], JSON.stringify(applied.failures));
+  assert.equal(mock.volumes.length, 2, JSON.stringify(mock.volumes));
+  assert.equal((applied.notes ?? []).filter((n) => n.code === 'volume-reused').length, 0, 'no environment reused another one’s volume');
+  const production = [...mock.environments.values()].find((e) => e.name === 'production')!;
+  const staging = [...mock.environments.values()].find((e) => e.name === 'staging')!;
+  assert.equal(new Set(mock.volumes.map((v) => v.environmentId)).size, 2, 'one disk per environment');
+  assert.notEqual(mock.volumes.find((v) => v.environmentId === production.id)!.serviceId, mock.volumes.find((v) => v.environmentId === staging.id)!.serviceId, 'and each is attached to that environment’s own service');
 });
 
 const withVolume = (p: InfraPlan, retention?: 'instance' | 'survive'): InfraPlan => {

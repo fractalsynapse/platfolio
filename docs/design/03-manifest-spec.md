@@ -71,7 +71,7 @@ spec:
     requiredClaims: [sub, email, preferred_username]
   environments:
     production: { enabled: true,  branch: main }
-    staging:    { enabled: true,  branch: staging, cloneFrom: production }
+    staging:    { enabled: true,  branch: staging }
     preview:    { enabled: false }
   resources:
     database: { kind: postgres, name: arcnexus-db }       # Railway postgres() | compose service
@@ -215,12 +215,22 @@ production-only external service never demands its secrets be filled in a stagin
 no place for them. Whether `railway config plan` honours per-environment resource membership is E21 —
 the shape type-checks here, which is a weaker claim than "it deploys correctly".
 
-Staging is **a duplicate of production, created after the services exist** — measured in E25: Railway has
-no "add service to this environment" call, `environmentCreate(sourceEnvironmentId: …)` copies the services
-present at that moment, and a service added later is absent from the existing duplicate. `cloneFrom`
-therefore carries ordering and completeness meaning, not just "start from this config": a platform that
-grows a service must recreate the environment, and the provider refuses to pretend otherwise
-(`instance-missing-in-environment`). See [the record](../research/railway-token-and-sealing-2026-11-08.md).
+Each environment is **provisioned from its own declaration** — nothing is created as a copy of another
+environment, and the manifest has no field that would ask for one. The measured reason is in the decision
+register (D57): `environmentCreate(sourceEnvironmentId: …)` gives the new environment the source's *service
+ids*, so staging inherited production's database configuration and its api timed out on a DSN it did not own.
+A cloned database is not an isolated database.
+
+Because Railway service names are unique per project (`serviceCreate` refuses a name the project holds) and no
+mutation places an existing service into a further environment (`serviceInstanceUpdate` on an unplaced instance
+returns `true` and changes nothing — E25, and the captured schema has no `serviceInstanceCreate`), the provider
+derives a **physical** service name per environment from the declared one: the declared name when no project
+service holds it or when that service already runs in this environment, otherwise `<name>-<environment>`. So
+`production` keeps the names it was created with — `api`, `identity`, `main`, which is history, not a special
+case — and an environment added later gets `api-staging` and its own `main-staging`, created by the same
+template path production's database was. A plan that declares two names resolving to one service is refused
+(`service-name-collision`) rather than merged, and `platform-deploy --dry-run` prints the resolved names before
+anything is sent. See [the record](../research/railway-token-and-sealing-2026-11-08.md).
 
 The default is **`tenant-side`**, not `relay-sealed` — that ordering was reversed by E18, and the panel
 renders accordingly.
@@ -234,9 +244,10 @@ renders accordingly.
 
 Sealing has hard consequences the renderer and controller must honour, all from the provider's own
 documented behaviour: a sealed value **cannot be un-sealed**, is **not copied** when an environment or
-service is duplicated, is not provided by the CLI, and is not shown in environment-sync diffs. So the
-`cloneFrom` staging bootstrap must **expect** to arrive without these values, and the checklist turns
-red for exactly that reason — which is correct behaviour, not a bug. Rotation becomes
+service is duplicated, is not provided by the CLI, and is not shown in environment-sync diffs. So a newly
+provisioned environment arrives **expecting to have no values at all** — since D57 nothing is copied in from
+another environment, which turns the same checklist red for the same reason and now for every variable the
+tenant has not delivered (D53) — which is correct behaviour, not a bug. Rotation becomes
 "set a new value, verify, then revoke the old credential" with no read-back, and the UI must say so.
 
 `team-service` is **proposed, not valid** — it is the subject of

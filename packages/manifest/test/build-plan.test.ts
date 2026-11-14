@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
-import { InfraPlanSchema, planIssues } from '@platfolio/contracts';
+import { EnvironmentPlanSchema, InfraPlanSchema, planIssues } from '@platfolio/contracts';
 import { RailwayInfraProvider } from '@platfolio/contracts';
 import { RailwayMock } from '../../../packages/contracts/test/railway-mock.ts';
 import { buildPlan, parse, validateManifest } from '../src/index.ts';
@@ -37,14 +37,38 @@ test('a manifest becomes a plan the contract accepts', () => {
   assert.match(plan.planHash, /^[a-f0-9]{16,64}$/, 'planHash is a real digest, so re-applies are idempotent');
 });
 
-test('placement, replicas and staging duplication follow the environment model', () => {
+test('placement and replicas follow the environment model, and no environment is declared as a copy of another', () => {
   const plan = buildPlan(webApp, { instanceId: 'inst-a2', teamId: 'team-a2', images: pinned(['api', 'worker']) });
   const prod = plan.environments.find((e) => e.name === 'production')!;
   const staging = plan.environments.find((e) => e.name === 'staging')!;
   assert.equal(prod.services.length, 2, 'api and worker in production');
-  assert.equal(staging.cloneFrom, 'production', 'staging is a duplicate, not a parallel tree (E25)');
+  assert.equal(staging.services.length, 2, 'staging declares the services IT runs -- declared, not derived from production');
+  assert.equal('cloneFrom' in staging, false, 'a built plan carries no clone source (D57)');
+  // The assertion above alone is VACUOUS, and measuring it said so: re-emitting `cloneFrom` in the builder
+  // changed nothing, because zod strips a key the schema does not declare. So the load-bearing check is on the
+  // contract -- if the field comes back to the schema, a builder that emits it stops being a bug and becomes a
+  // mechanism, which is exactly how staging got production's database in the first place.
+  const environmentShape = (EnvironmentPlanSchema as unknown as { shape: Record<string, unknown> }).shape;
+  assert.equal('cloneFrom' in environmentShape, false, 'the environment schema has no clone source to emit or honour (D57)');
+  // And the consequence of stripping rather than rejecting is stated where it can be checked: an old plan
+  // document carrying `cloneFrom` parses to a plan that has none, so the provider cannot act on it.
+  const stale = InfraPlanSchema.safeParse({ ...plan, environments: [{ ...staging, cloneFrom: 'production' }, prod] });
+  assert.equal(stale.success, true, 'a pre-D57 document still parses');
+  assert.equal(stale.success && 'cloneFrom' in stale.data.environments[0]!, false, 'and arrives without the field');
   assert.equal(prod.services.find((s) => s.name === 'api')!.replicas, 2);
-  assert.equal(staging.services.find((s) => s.name === 'api')!.replicas, 1, 'a duplicate never inherits production replicas');
+  assert.equal(staging.services.find((s) => s.name === 'api')!.replicas, 1, 'staging never inherits production’s replica count (D23)');
+});
+
+test('planHash describes the plan the provider receives, not the builder’s intermediate object (D57)', () => {
+  // Why this belongs to a change that deleted a plan field: the hash is taken over the environments the builder
+  // assembled and is then handed to a provider that receives the PARSED plan. A field the schema does not
+  // declare -- `cloneFrom` until now, anything like it later -- would move the hash while changing nothing the
+  // provider can see, which is an idempotency marker that disagrees with its own plan.
+  const plan = buildPlan(webApp, { instanceId: 'inst-hash', teamId: 'team-hash', images: pinned(Object.keys(webApp.spec.services)) });
+  const recomputed = createHash('sha256')
+    .update(JSON.stringify({ platform: webApp.metadata.name, version: webApp.metadata.version, environments: plan.environments }))
+    .digest('hex');
+  assert.equal(plan.planHash, recomputed, 'the hash and the parsed plan agree -- an undeclarable field cannot ride in one and not the other');
 });
 
 test('resources carry over: database, bucket with region, volume in MB on its service', () => {
@@ -137,6 +161,21 @@ test('the whole chain composes: manifest -> plan -> provider wires the reference
   assert.ok(instanceKey, 'the app service has an instance in the environment');
   const wired = mock.instances.get(instanceKey!);
   assert.ok(wired?.variables.has('DATABASE_URL'), 'the reference reached the app service as a variable name');
+
+  // ...and the other environment got its OWN pair of them. This is the property the manifest->provider chain
+  // used to fail: staging declared the same names, the project could hold each name only once, and what staging
+  // actually received was production's database (D57).
+  const stagingDb = [...mock.services.values()].find((s) => s.name === 'app-db-staging');
+  assert.ok(stagingDb, 'staging’s database was provisioned as its own service');
+  assert.notEqual(stagingDb.id, dbServiceId.id, 'two environments, two databases');
+  const stagingApi = [...mock.services.values()].find((s) => s.name === 'api-staging');
+  assert.ok(stagingApi, 'staging’s app service is its own too');
+  assert.notEqual(stagingApi.id, apiId.id);
+  assert.deepEqual(
+    [...new Set(mock.writtenVariables.filter((w) => w.name === 'DATABASE_URL').map((w) => w.value))].sort(),
+    ['${{app-db-staging.DATABASE_URL}}', '${{app-db.DATABASE_URL}}'],
+    'each environment’s connection reference names the database it owns -- never the other one’s',
+  );
   // Names are asserted, never values: the wiring is provider-resolved by construction.
   // What must never appear is a RESOLVED credential. A verification token is different: it is a public DNS
   // value the tenant has to publish, surfaced deliberately in domain records (measured in the domain work).
@@ -153,7 +192,7 @@ test('a manifest built plan carries the staging host and its production replica 
   const hosts = [prod.domains[0]?.host, staging.domains[0]?.host];
   assert.equal(new Set(hosts).size, 2, 'the two environments never claim one host');
   assert.ok(hosts.every((h) => typeof h === 'string' && h.length > 0), JSON.stringify(hosts));
-  assert.deepEqual(staging.databases, prod.databases, 'a database is declared in both; the provider places it once and the duplicate receives it (measured live)');
+  assert.deepEqual(staging.databases, prod.databases, 'the same database is DECLARED in both environments, because each one gets its own service -- the provider provisions it per environment and never shares one (D57)');
 });
 
 /**

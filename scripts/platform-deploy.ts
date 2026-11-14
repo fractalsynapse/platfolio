@@ -25,7 +25,7 @@ import { validateManifest } from '../packages/manifest/src/validate.ts';
 import { buildPlan } from '../packages/manifest/src/build-plan.ts';
 import type { InfraPlan } from '../packages/contracts/src/infra.ts';
 import { secretWriteScope } from '../packages/contracts/src/infra.ts';
-import { RailwayInfraProvider } from '../packages/contracts/src/railway-provider.ts';
+import { previewPlacement, RailwayInfraProvider } from '../packages/contracts/src/railway-provider.ts';
 import type { RailwayCredential, RailwayCredentialSource } from '../packages/contracts/src/railway-transport.ts';
 
 const root = path.resolve(import.meta.dirname, '..');
@@ -65,12 +65,22 @@ function loadManifest(): NonNullable<ReturnType<typeof parseCompose>['manifest']
 
 function describePlan(plan: InfraPlan): void {
   console.log(`  plan: ${String(plan.environments.length)} environment(s), contract ${plan.contract}, provider ${plan.provider}`);
+  // The PHYSICAL names the provider will create (D57), from the same rule the provider applies -- so "which
+  // service will staging actually get" is answerable before a call is made rather than after an outage. Fed an
+  // empty project on purpose: asking the live project would make a dry run a read, and what it would add is only
+  // which environment got to a name first.
+  const placement = previewPlacement(plan);
   for (const e of plan.environments) {
-    console.log(`    env ${e.name}: databases=[${e.databases.map((d) => `${d.name}:${d.kind}`).join(', ') || 'none'}]`);
+    const physical = placement.get(e.name) ?? new Map<string, string>();
+    const name = (logical: string): string => {
+      const resolved = physical.get(logical) ?? logical;
+      return resolved === logical ? logical : `${logical} -> ${resolved}`;
+    };
+    console.log(`    env ${e.name}: databases=[${e.databases.map((d) => `${name(d.name)}:${d.kind}`).join(', ') || 'none'}]`);
     for (const s of e.services) {
       const env = s.env.map((x) => (x.literal === undefined ? `${x.name}=*declared-name*` : `${x.name}=${x.literal}`)).join(' ');
-      console.log(`      ${s.name}: ${s.image}@${s.digest.slice(7, 19)}… port ${String(s.port)} replicas ${String(s.replicas)}`);
-      console.log(`        refs=[${(s.references ?? []).map((r) => `${r.variable}<-${r.database}`).join(', ') || 'none'}]`);
+      console.log(`      ${name(s.name)}: ${s.image}@${s.digest.slice(7, 19)}… port ${String(s.port)} replicas ${String(s.replicas)}`);
+      console.log(`        refs=[${(s.references ?? []).map((r) => `${r.variable}<-${name(r.database)}`).join(', ') || 'none'}]`);
       console.log(`        env: ${env}`);
     }
     console.log(`      domains: ${e.domains.length > 0 ? e.domains.map((d) => `${d.host}->${d.service}:${String(d.port)}`).join(', ') : '(generated hosts only)'}`);

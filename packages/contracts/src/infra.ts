@@ -114,9 +114,21 @@ export const DomainPlanSchema = z.object({
   verificationName: NameSchema,
 });
 
+/**
+ * One environment of an instance, described completely: the provider provisions it from this declaration and
+ * from nothing else.
+ *
+ * This schema used to carry `cloneFrom`, which placed a second environment by duplicating a first one. That was
+ * wrong, and measured wrong on the live API: `environmentCreate` with a `sourceEnvironmentId` produced a staging
+ * whose `api` and `main` carried the SAME service ids as production's, and staging's api then failed its
+ * readiness check with `connect ETIMEDOUT` on the database URL. A duplicated environment receives the source's
+ * database *configuration*, because a Railway service is project-level and the duplicate only copies the pointer
+ * to it -- so a cloned database is not an isolated database, and no value of this field could make one. There is
+ * therefore no cloning field here at all: every environment declares its own resources and the provider creates
+ * them the way it creates production's (D57).
+ */
 export const EnvironmentPlanSchema = z.object({
   name: NameSchema,
-  cloneFrom: NameSchema.optional(),
   services: z.array(ServicePlanSchema).min(1),
   domains: z.array(DomainPlanSchema),
   databases: z.array(z.object({ name: NameSchema, kind: z.enum(['postgres', 'redis', 'mysql']) })),
@@ -378,9 +390,6 @@ export function planIssues(plan: unknown): Issue[] {
       if (!services.has(d.service)) {
         issues.push({ path: ['environments', env.name, 'domains', d.host], code: 'unknown-service', message: `domain targets service "${d.service}" which is not in environment "${env.name}"` });
       }
-    }
-    if (env.cloneFrom && !data.environments.some((e) => e.name === env.cloneFrom)) {
-      issues.push({ path: ['environments', env.name, 'cloneFrom'], code: 'unknown-environment', message: `cloneFrom "${env.cloneFrom}" does not name an environment in this plan` });
     }
     for (const s of env.services) {
       for (const pair of s.env) {

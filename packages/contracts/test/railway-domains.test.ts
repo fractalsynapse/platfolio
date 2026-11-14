@@ -8,7 +8,6 @@ function plan(): InfraPlan {
   for (const environment of p.environments) {
     environment.databases = [];
     environment.buckets = [];
-    environment.cloneFrom = undefined;
     for (const service of environment.services) {
       service.image = 'docker.io/library/nginx:alpine';
       service.digest = `sha256:${'c'.repeat(64)}`;
@@ -82,6 +81,29 @@ test('retryCertificate refuses an id that is not attached, rather than calling b
   await assert.rejects(() => provider.retryCertificate('cdom-nope'), /no custom domain with id/);
 });
 
+test('a domain binds to the environment’s own service, not to the first service carrying the plan name (D57)', async () => {
+  // Both environments declare the same service name, and both declare a host. Attaching a domain resolves the
+  // service id from THIS environment's placement -- if it resolved by name across the project, staging's host
+  // would land on production's service and stage traffic would be served by production's container.
+  const { mock, provider } = harness();
+  const p = plan();
+  p.environments[1]!.domains = [{ host: 'staging.example.com', service: 'api', port: 3000, verificationName: 'domain-verify' }];
+  const applied = await provider.applyPlan(p);
+  assert.deepEqual(applied.failures.map((f) => f.code), [], JSON.stringify(applied.failures));
+
+  const production = [...mock.environments.values()].find((e) => e.name === 'production')!;
+  const staging = [...mock.environments.values()].find((e) => e.name === 'staging')!;
+  const api = [...mock.services.values()].find((s) => s.name === 'api')!;
+  const apiStaging = [...mock.services.values()].find((s) => s.name === 'api-staging')!;
+  const boundTo = (host: string) => [...mock.instances.entries()].filter(([, i]) => i.domains.includes(host)).map(([k]) => k).sort();
+  assert.deepEqual(boundTo('api.example.com'), [`${production.id}:${api.id}`], 'production’s host is on production’s service');
+  assert.deepEqual(boundTo('staging.example.com'), [`${staging.id}:${apiStaging.id}`], 'staging’s host is on staging’s own service');
+  // Reported back the same way: a domain's targetService is the provider's name for the service it is bound to,
+  // so a tenant reading the state can tell the two environments' hosts apart.
+  const custom = applied.domains.filter((d) => !d.host.endsWith('.up.railway.app')).map((d) => `${d.host}<-${d.targetService}`).sort();
+  assert.deepEqual(custom, ['api.example.com<-api', 'staging.example.com<-api-staging'], JSON.stringify(applied.domains));
+});
+
 test('a failed private-registry deployment carries the tenant-only next action', async () => {
   const mock = new RailwayMock({ outcome: 'FAILED' });
   const provider = new RailwayInfraProvider({ credentials: mock, transport: mock, workspaceId: 'ws-1', deployBudget: 20, deployTimeoutMs: 1_000, pollIntervalMs: 1, sleep: async () => {} });
@@ -89,7 +111,6 @@ test('a failed private-registry deployment carries the tenant-only next action',
   for (const environment of p.environments) {
     environment.databases = [];
     environment.buckets = [];
-    environment.cloneFrom = undefined;
     for (const service of environment.services) { service.image = 'ghcr.io/acme/private-app:1.2.3'; service.digest = `sha256:${'e'.repeat(64)}`; }
   }
   const applied = await provider.applyPlan(p);
@@ -105,7 +126,6 @@ test('a failed private-registry deployment carries the tenant-only next action',
   for (const environment of p2.environments) {
     environment.databases = [];
     environment.buckets = [];
-    environment.cloneFrom = undefined;
     for (const service of environment.services) { service.image = 'docker.io/library/nginx:alpine'; service.digest = `sha256:${'e'.repeat(64)}`; }
   }
   const applied2 = await provider2.applyPlan(p2);

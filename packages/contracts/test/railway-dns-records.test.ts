@@ -10,7 +10,6 @@ function plan(): InfraPlan {
   for (const environment of p.environments) {
     environment.databases = [];
     environment.buckets = [];
-    environment.cloneFrom = undefined;
     for (const service of environment.services) {
       service.image = 'docker.io/library/nginx:alpine';
       service.digest = `sha256:${'c'.repeat(64)}`;
