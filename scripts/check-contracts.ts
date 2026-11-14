@@ -35,7 +35,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
-const BASELINE = path.join(ROOT, 'packages/contracts/api.md');
+const BASELINE = path.join(ROOT, 'packages/contracts/api.json');
 const VERSION_FILE = path.join(ROOT, 'packages/contracts/src/generated/contract-version.ts');
 const WORK = path.join(ROOT, '.tmp-contracts');
 const CONTRACTS_SRC = 'packages/contracts/src';
@@ -97,14 +97,57 @@ export function digest(text: string): string {
   return createHash('sha256').update(text).digest('hex').slice(0, 16);
 }
 
-/** The surface body of a baseline: between the first ``` fence and the next one, tolerating the
- * optional language tag. Both the committed file and the epoch-extracted file are read with this. */
+/**
+ * The committed baseline is **structured data**, not prose:
+ *
+ *   `{ "schema": 1, "version": "x.y.z", "bump": "…", "digest": "…", "declarations": [ … ] }`
+ *
+ * It used to be a markdown document whose header was recovered with regexes and whose declaration list lived
+ * between ``` fences. That made a deterministic gate depend on heading text and fence characters: a writer
+ * change could make the reader see zero declarations, and "sees zero" is how a drift gate passes while
+ * checking nothing -- the failure mode this project has hit repeatedly. `schema` is declared so a future shape
+ * change fails with a named reason instead of parsing into nonsense.
+ */
+interface Baseline {
+  schema: number;
+  version: string;
+  bump: string;
+  digest: string;
+  declarations: string[];
+}
+
+const BASELINE_SCHEMA = 1;
+
+/** Parse the committed baseline. Returns null only for an absent/empty file; a malformed one throws. */
+function parseBaseline(text: string): Baseline | null {
+  if (text.trim() === '') return null;
+  let doc: unknown;
+  try {
+    doc = JSON.parse(text);
+  } catch (error) {
+    throw new Error(`the committed baseline is not valid JSON (${(error as Error).message.slice(0, 90)}) -- it is data, not prose`);
+  }
+  const b = doc as Partial<Baseline>;
+  if (b.schema !== BASELINE_SCHEMA) {
+    throw new Error(`the committed baseline declares schema ${String(b.schema)}; this tool writes ${String(BASELINE_SCHEMA)} -- regenerate with \`tsx scripts/check-contracts.ts --update\``);
+  }
+  if (!Array.isArray(b.declarations)) throw new Error('the committed baseline has no `declarations` array');
+  // A vacuity guard, earned five times over today. A baseline with zero declarations would report "no drift"
+  // forever on the check path and happily rewrite itself on the update path: an empty surface is the most
+  // dangerous value a drift gate can read, because it agrees with everything.
+  if (b.declarations.length === 0) throw new Error('the committed baseline declares ZERO declarations -- refusing to read an empty surface as "no drift"');
+  if (typeof b.version !== 'string' || typeof b.digest !== 'string') throw new Error('the committed baseline is missing `version` or `digest`');
+  // The version is the thing the whole gate exists to protect, so its shape is checked here rather than
+  // assumed downstream: `applyBump` would otherwise do arithmetic on 'latest' and emit a nonsense semver.
+  if (!/^\d+\.\d+\.\d+$/.test(b.version)) throw new Error(`the committed baseline declares version ${JSON.stringify(b.version)}, which is not a semver`);
+  if (!/^[0-9a-f]{16}$/.test(b.digest)) throw new Error(`the committed baseline declares digest ${JSON.stringify(b.digest)}, expected 16 hex characters`);
+  return { schema: BASELINE_SCHEMA, version: b.version, bump: typeof b.bump === 'string' ? b.bump : '', digest: b.digest, declarations: b.declarations.map(String) };
+}
+
+/** The declaration surface of a baseline. Both the committed file and the epoch-extracted file read through here. */
 function surfaceOf(baseline: string): string {
-  const open = baseline.match(/^```[^\n]*\n/m);
-  if (!open || open.index === undefined) return '';
-  const rest = baseline.slice(open.index + open[0].length);
-  const close = rest.indexOf('\n```');
-  return close < 0 ? rest : rest.slice(0, close);
+  const b = parseBaseline(baseline);
+  return b === null ? '' : `${b.declarations.join('\n')}\n`;
 }
 
 /* --------------------------------------------------------------- version derivation (exported for tests) */
@@ -180,17 +223,17 @@ export function applyBump(version: string, bump: Bump): string {
   return version;
 }
 
-const VERSION_RE = /^Version: (\d+\.\d+\.\d+)$/m;
-const BUMP_RE = /^Bump: (.+)$/m;
-const DIGEST_RE = /^Digest: `([0-9a-f]+)`$/m;
-
 /** The version the committed baseline records, or null when it predates version tracking. */
 export function parseVersion(baseline: string): string | null {
-  return baseline.match(VERSION_RE)?.[1] ?? null;
+  return parseBaseline(baseline)?.version ?? null;
 }
 
 export function parseProvenance(baseline: string): string {
-  return baseline.match(BUMP_RE)?.[1] ?? '';
+  return parseBaseline(baseline)?.bump ?? '';
+}
+
+export function parseDigest(baseline: string): string {
+  return parseBaseline(baseline)?.digest ?? '';
 }
 
 /** The ONLY home of the contracts version string. The value is annotated `string`, deliberately NOT
@@ -201,7 +244,7 @@ export function renderVersionFile(version: string, provenance: string, baselineD
   return `/**
  * GENERATED by \`scripts/check-contracts.ts --update\` -- DO NOT EDIT, there is nothing here to edit
  * by hand. (D59: "we should never specify a version on contracts"; the value is derived from the
- * public-surface baseline in packages/contracts/api.md, and \`check-contracts\` without \`--update\`
+ * public-surface baseline in packages/contracts/api.json, and \`check-contracts\` without \`--update\`
  * reproduces this file from that baseline or fails.)
  *
  * Typed \`string\` on purpose: a literal type would put the version into the emitted declaration
@@ -215,22 +258,23 @@ export const CONTRACT_VERSION: string = '${version}';
 `;
 }
 
-/** Full baseline text for a surface at a recorded version with a provenance line. Exported so the
- * reproduce check and the tests build the same bytes -- a check against a format only one call site
- * knows is a check that passes because it parses nothing. */
+/** Full baseline for a surface at a recorded version with a provenance line, as JSON. Exported so the
+ * reproduce check and the tests build the same bytes -- a check against a format only one call site knows
+ * is a check that passes because it parses nothing. Key order and the trailing newline are fixed: the file is
+ * compared byte-for-byte, so the writer has to be deterministic as well as the reader. */
 export function renderBaseline(surface: string, version: string, provenance: string): string {
-  return `# contracts public surface
-
-Generated by \`scripts/check-contracts.ts --update\`. A change here is a version decision:
-additive -> minor; removal or tightening that an implementation relies on -> major.
-The \`Version:\` line is the derived contract version (D59) and the \`Bump:\` line says how it got there;
-\`packages/contracts/src/generated/contract-version.ts\` is a generated reflection of the two.
-Version: ${version}
-Bump: ${provenance}
-Digest: \`${digest(surface)}\`
-
-\`\`\`txt
-${surface}\`\`\`
+  const declarations = surface.split('\n').filter((line) => line.trim() !== '');
+  const b: Baseline = { schema: BASELINE_SCHEMA, version, bump: provenance, digest: digest(surface), declarations };
+  const rows = b.declarations.map((d) => `    ${JSON.stringify(d)}`).join(',\n');
+  return `{
+  "schema": ${String(b.schema)},
+  "version": ${JSON.stringify(b.version)},
+  "bump": ${JSON.stringify(b.bump)},
+  "digest": ${JSON.stringify(b.digest)},
+  "declarations": [
+${rows}
+  ]
+}
 `;
 }
 
@@ -243,16 +287,16 @@ export function versionFileErrors(baseline: string, fileText: string | null): st
   const errors: string[] = [];
   const version = parseVersion(baseline);
   if (version === null) {
-    return ['the committed baseline (packages/contracts/api.md) carries no `Version:` line, so the derived version has no record to reproduce from -- run `tsx scripts/check-contracts.ts --update` and commit the result (D59)'];
+    return ['the committed baseline (packages/contracts/api.json) carries no `version`, so the derived version has no record to reproduce from -- run `tsx scripts/check-contracts.ts --update` and commit the result (D59)'];
   }
-  if (!DIGEST_RE.test(baseline)) {
-    return ['the committed baseline carries no `Digest:` line; the generated file binds itself to that digest, so it cannot be reproduced -- regenerate with `tsx scripts/check-contracts.ts --update`'];
+  if (parseDigest(baseline) === '') {
+    return ['the committed baseline carries no `digest`; the generated file binds itself to that digest, so it cannot be reproduced -- regenerate with `tsx scripts/check-contracts.ts --update`'];
   }
-  const expected = renderVersionFile(version, parseProvenance(baseline), baseline.match(DIGEST_RE)![1]!);
+  const expected = renderVersionFile(version, parseProvenance(baseline), parseDigest(baseline));
   if (fileText === null) {
     errors.push(`packages/contracts/src/generated/contract-version.ts is missing -- run \`tsx scripts/check-contracts.ts --update\` (D59: the version is derived, so the file is generated, and its absence is never defaulted)`);
   } else if (fileText !== expected) {
-    errors.push('packages/contracts/src/generated/contract-version.ts does not reproduce from the committed baseline -- its version, provenance or baseline digest disagrees with packages/contracts/api.md; run `tsx scripts/check-contracts.ts --update` and commit both files together');
+    errors.push('packages/contracts/src/generated/contract-version.ts does not reproduce from the committed baseline -- its version, provenance or baseline digest disagrees with packages/contracts/api.json; run `tsx scripts/check-contracts.ts --update` and commit both files together');
   }
   return errors;
 }
@@ -330,7 +374,7 @@ async function main(): Promise<void> {
   const previous = fs.existsSync(BASELINE) ? fs.readFileSync(BASELINE, 'utf8') : '';
   const previousSurface = surfaceOf(previous);
   if (!previous) {
-    console.error('error: no baseline at packages/contracts/api.md; the version is derived from it, so there is nothing to derive without one. Run `tsx scripts/check-contracts.ts --update` against a committed baseline.');
+    console.error('error: no baseline at packages/contracts/api.json; the version is derived from it, so there is nothing to derive without one. Run `tsx scripts/check-contracts.ts --update` against a committed baseline.');
     process.exit(1);
   }
 

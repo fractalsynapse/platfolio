@@ -353,6 +353,47 @@ Stated plainly, because the maintainer's objection deserves an answer rather tha
 with the core platform is what makes this drift possible**, and `templates:check` closes the detection gap, not
 the design one. Separating them is a real option and is recorded as a decision to take, not as work done.
 
+### Changed — the contracts baseline is structured data, not prose that a test regex-parses
+
+`packages/contracts/api.md` is now `packages/contracts/api.json`:
+
+```json
+{ "schema": 1, "version": "3.0.0", "bump": "MAJOR 2.0.0 -> 3.0.0 (…)", "digest": "448cfa1167a4e06d",
+  "declarations": [ "attestation.d.ts: action: z.ZodEnum<{", … ] }
+```
+
+The maintainer asked why a deterministic test was reading a markdown file, and there was no good answer.
+`check-contracts.ts` recovered the header with three regexes (`Version:`, `Bump:`, `Digest:`) and lifted 4,324
+declaration lines out of a fenced block, so the gate's correctness depended on heading text and fence
+characters. Change the writer, or let a heading wrap, and the reader sees **zero** declarations and reports
+"no drift" -- the sixth vacuity failure of this session, in the one file whose entire job is detecting drift.
+
+**The migration was proven rather than eyeballed.** Extracting the fence and re-joining the declarations
+produces a surface whose digest is `448cfa1167a4e06d` -- identical to the digest the markdown recorded -- and the
+derived version stays 3.0.0 on a zero-size diff (0 removed / 0 widened / 0 added / 0 reordered). The committed
+file was then compared against the tool's own `renderBaseline()` output, not against my migration script's
+bytes: identical, 4,333 lines.
+
+Three guards ship with the format, each asserted by mutating the **parsed object** rather than regex-replacing a
+string:
+
+- `schema` mismatch -> a named refusal, not a parse into nonsense;
+- **zero declarations -> refused outright**, because an empty surface agrees with everything;
+- absent or non-semver `version`, malformed `digest` -> refused, never defaulted.
+
+That choice came from being caught: the existing tamper cases regex-replaced markdown header lines, and after
+the format change two of them silently matched nothing -- a "tamper" that is a no-op, asserting against an
+untouched file. The test failed loudly and the suite earned its keep. Rewritten as object mutations they cannot
+miss, and coverage went from four tamper checks to seven.
+
+The explanatory prose that headed the file moved into the code comment above the parser, where a reader of the
+format will actually meet it. `docs/design/01`, `docs/design/03` and the AGENTS layout row now name `api.json`;
+the dated research files that mention `api.md` are left alone as records of what existed then.
+
+Measured: version gate 8/8 · tsc 0 errors · 450 tests / 446 pass / 0 fail / 4 skipped · `check-contracts`
+reports `4324 exported declarations, derived Version: 3.0.0` · docs, `api:check` and `environment:registry`
+all exit 0.
+
 ### Changed — the last two declared versions now derive too (D59 completed)
 
 `IDENTITY_CONTRACT_VERSION` and `STORE_CONTRACT_VERSION` were the remaining hand-authored version literals in

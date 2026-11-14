@@ -366,7 +366,7 @@ conflict check. A manifest that cannot be rendered is not mergeable.
   tenant pinned to `arcnexus@0.8` must not be force-rendered with `1.x` semantics.
 - The provider **plan** carries the infra contract version in its `contract` field, and that version is
   derived, never declared (D59). `scripts/check-contracts.ts --update` computes it from the public-surface
-  diff of `packages/contracts/api.md` (removal or widening -> major, new declaration -> minor, pure
+  diff of `packages/contracts/api.json` (removal or widening -> major, new declaration -> minor, pure
   reordering -> nothing), records it in the baseline's `Version:` header, and regenerates
   `packages/contracts/src/generated/contract-version.ts`, which is the only place the string exists and is
   reproduced byte-for-byte from the baseline by the gate. `buildPlan` stamps that value; the plan renderers

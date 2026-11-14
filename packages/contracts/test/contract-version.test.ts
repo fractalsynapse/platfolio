@@ -86,15 +86,31 @@ test('the version file round-trips with the baseline, and drift is loud', () => 
   assert.deepEqual(versionFileErrors(baseline, fileText), [], 'a faithful pair produces no errors');
 
   // Tamper each binding in turn: every one must be caught by name, not silently defaulted.
-  const tampered = fileText.replace("'2.0.0'", "'1.0.0'");
-  assert.match(versionFileErrors(baseline, tampered).join('\n'), /does not reproduce/);
+  // These used to be regex replacements on markdown header lines. Once the baseline became JSON, two of them
+  // (`^Bump:` / `^Version:`) matched nothing -- so the "tamper" was a no-op and the assertions would have
+  // passed against an untouched file. They now mutate the parsed object, which cannot silently miss.
+  const tamperedVersion = fileText.replace("'2.0.0'", "'1.0.0'");
+  assert.match(versionFileErrors(baseline, tamperedVersion).join('\n'), /does not reproduce/);
   assert.match(versionFileErrors(baseline, null).join('\n'), /is missing/);
-  const staleBaseline = baseline.replace(digest(base), '0'.repeat(16));
-  assert.match(versionFileErrors(staleBaseline, fileText).join('\n'), /does not reproduce/);
-  const noProvenance = baseline.replace(/^Bump: .*$/m, '');
-  assert.match(versionFileErrors(noProvenance, fileText).join('\n'), /does not reproduce/);
-  const noVersion = baseline.replace(/^Version: .*$/m, '');
-  assert.match(versionFileErrors(noVersion, fileText).join('\n'), /no `Version:` line/);
+
+  const edit = (fn: (b: Record<string, unknown>) => void): string => {
+    const doc = JSON.parse(baseline) as Record<string, unknown>;
+    fn(doc);
+    return JSON.stringify(doc, null, 2) + '\n';
+  };
+  const staleDigest = edit((d) => { d.digest = '0'.repeat(16); });
+  assert.match(versionFileErrors(staleDigest, fileText).join('\n'), /does not reproduce/, 'a digest that does not match the surface is drift');
+  const noProvenance = edit((d) => { d.bump = ''; });
+  assert.match(versionFileErrors(noProvenance, fileText).join('\n'), /does not reproduce/, 'the generated file embeds provenance, so an unexplained version is a mismatch');
+  const noVersion = edit((d) => { delete d.version; });
+  assert.throws(() => versionFileErrors(noVersion, fileText), /version/, 'a baseline without a version is a refusal, not a default to 1.0.0');
+  const notSemver = edit((d) => { d.version = 'latest'; });
+  assert.throws(() => versionFileErrors(notSemver, fileText), /semver|version/, 'a version that is not a semver is refused, not coerced');
+  // The two guards that exist because this project keeps finding checks that pass on nothing.
+  const noDeclarations = edit((d) => { d.declarations = []; });
+  assert.throws(() => versionFileErrors(noDeclarations, fileText), /ZERO declarations/, 'an empty surface must never read as "no drift"');
+  const wrongSchema = edit((d) => { d.schema = 99; });
+  assert.throws(() => versionFileErrors(wrongSchema, fileText), /schema 99/, 'a future shape is named, not parsed into nonsense');
 });
 
 test('no source file outside the generated artifact assigns the contract version', () => {
@@ -125,7 +141,7 @@ test('the committed baseline and the generated file agree, or the pair is named 
   // no Version: line and the gate must say so loudly; AFTER it, the real pair must reproduce
   // byte-for-byte. Either branch is a falsifiable assertion about real repo files; neither is a tautology.
   const root = path.resolve(import.meta.dirname, '../../..');
-  const baseline = fs.readFileSync(path.join(root, 'packages/contracts/api.md'), 'utf8');
+  const baseline = fs.readFileSync(path.join(root, 'packages/contracts/api.json'), 'utf8');
   const file = path.join(root, 'packages/contracts/src/generated/contract-version.ts');
   const fileText = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;
   const errors = versionFileErrors(baseline, fileText);
