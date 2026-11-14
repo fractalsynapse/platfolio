@@ -257,6 +257,8 @@ export function parseCompose(texts: string | string[], options: ComposeOptions =
       secrets: Array.isArray(svcX.secrets) ? svcX.secrets : [],
       references: Array.isArray(svcX.references) ? svcX.references : [],
       ...(Array.isArray(svcX.environments) ? { environments: svcX.environments } : {}),
+      // Per-environment values (D56): environment name -> the entries of `environment` it replaces there.
+      ...(isRec(svcX.environmentValues) ? { environmentValues: svcX.environmentValues as Record<string, Record<string, string>> } : {}),
       ...(typeof svcX.ownership === 'string' ? { ownership: svcX.ownership } : {}),
       domains: Array.isArray(svcX.domains) ? svcX.domains : [],
       dependsOn: Array.isArray(svc.depends_on) ? svc.depends_on.map(String) : Object.keys(isRec(svc.depends_on) ? svc.depends_on as Rec : {}),

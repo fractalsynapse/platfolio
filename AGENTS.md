@@ -26,7 +26,7 @@ selections it has already made are recorded, not improvised:
 | Every environment variable: credential?, which environments (`development` / `staging` / `production` / `all`), where the value lives | [environment.yaml](environment.yaml) — the central registry (D52), enforced by `pnpm run environment:registry`: one definition per variable, one spelling of everywhere |
 
 Status: foundation poured, interfaces first (D40, [16](docs/design/16-foundation-build-order.md)). Slices 1
-and 2 of that plan are delivered (393 tests): `apps/control-plane` boots on the vendored runtime with
+and 2 of that plan are delivered (399 tests): `apps/control-plane` boots on the vendored runtime with
 Keycloak-verified bearer auth, persistent records (`Store` as a capability with a Postgres implementation and
 an in-memory double under one conformance suite, gated in CI against a live database), a controller
 that turns accepted attestations into stored state, and capability bindings that make shared services
@@ -48,8 +48,11 @@ walked by a test so a future instance-scoped route cannot skip the guard. Roles 
 instance are owner-only, and a new route must name its action or the coverage test fails.
 Teams are self-service now (#195): `POST /api/v1/teams` makes the caller its owner, and a team name is a
 platform-unique slug because it is the first half of every address. Instances are addressed `team/name` with slug names unique per team, carry `template`/`templateRef` (#180, D45),
-and report state **per environment** with `Instance.state` as a stated rollup (#179) -- staging degraded next to
-production live is a real Tuesday, not a contradiction to average away. `check-contracts.ts --update` refuses a
+report state **per environment** with `Instance.state` as a stated rollup (#179) -- staging degraded next to
+production live is a real Tuesday, not a contradiction to average away -- and carry **configuration** per
+environment inside the platform description (`environmentValues`, D56): platfolio's own staging runs against its
+own Keycloak realm on the same issuer host, because a second environment whose values are a copy of the first is
+a second copy of the truth, not a second environment. `check-contracts.ts --update` refuses a
 breaking baseline refresh without `--ack-breaking`, and says which bump the change implies. Platform email is the
 same seam shape (D46, #187): `smtp` in production, Mailpit in the local stack, an in-memory double in tests,
 one conformance suite each side of `EmailTransport`/`MailboxReader` -- a relay cannot be read back and the

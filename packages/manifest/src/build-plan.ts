@@ -66,7 +66,10 @@ export function buildPlan(manifest: Manifest, config: InstanceConfig): InfraPlan
           // Staging is a duplicate that sleeps by default (D23): one replica, never the production count.
           replicas: envName === 'production' ? svc.replicas : 1,
           limits,
-          env: Object.entries(svc.env).map(([key, value]) => ({ name: key, literal: value })),
+          // Base values first, then this environment's overrides (D56). Applied here, in the one place that
+          // knows which environment it is building, so no consumer has to re-derive an effective value.
+          env: Object.entries({ ...svc.env, ...(svc.environmentValues?.[envName] ?? {}) })
+            .map(([key, value]) => ({ name: key, literal: value })),
           secrets: svc.secrets.map((s) => ({ name: s.name, source: s.source })),
           references: svc.references ?? [],
         };
