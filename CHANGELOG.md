@@ -130,6 +130,37 @@ looked for an operation named `environmentCreate` while the mock records `enviro
 reduced-scope conformance plan declares hosts of the generated form, which made my first coverage check report
 a successfully applied plan as unfinished — caught by the suite rather than by me.
 
+### Corrected — three documents asserted something false about Keycloak, and it was never true
+
+`compose.dev.yaml`, `docs/design/16` and issue #168 all repeated: *"Keycloak 26.8.2's import format rejected
+role assignments in every shape tried."* Measured against the exact image we run, with everything read back
+through the Admin REST API and through an issued token
+([docs/research/keycloak-realm-import-roles-2026-11-14.md](docs/research/keycloak-realm-import-roles-2026-11-14.md)):
+
+- **Realm roles, client roles and user assignments all import** — via `roles.realm[]`, `roles.client` keyed by
+  **clientId**, and `users[].realmRoles` / `users[].clientRoles`. A token for an imported user carried
+  `realm_access.roles=["platfolio:user"]` and `resource_access["platfolio-api"].roles=["read"]`.
+- **Our observation was inverted.** The key we used (`users[].roles`) is not silently dropped: it aborts the
+  import and the **server fails to start**, naming the field and listing the 29 valid ones. Same for keying
+  `roles.client` by display name — fatal, `App doesn't exist in role definitions`.
+- **What actually happened is the part that matters:** once the realm exists in the shared Postgres schema,
+  `--import-realm` logs `already exists. Import skipped` and then **`Import finished successfully`** — a boot
+  that looks like it seeded and seeded nothing. A missing directory produces no import log line at all.
+- Re-application is the real reason the API seed stays: `kc.sh import` **deletes and recreates** the realm by
+  default; `partialImport` with `OVERWRITE` wiped an imported user's credentials; and `POST …/users` ignores
+  `realmRoles`/`clientRoles` (upstream #13390, still open). `seed-identity.ts` is idempotent and reads back what
+  it wrote.
+
+Consequences: `compose.dev.yaml`'s comment now states the measured behaviour and links the research; the
+sentence in `docs/design/16` is **kept with the correction attached** rather than rewritten, because it is what
+I believed and wrote at the time; #168 is closed with the evidence. No realm JSON is shipped — and if one ever
+is, it is first-boot-only and must be labelled as such.
+
+**Why this is in the changelog rather than quietly fixed:** a provider claim that was never re-tested after the
+version moved survived into three places and an issue title, and it was confident enough that a maintainer had
+to tell me I was wrong. Re-testing provider behaviour when the provider version changes is now stated as owed
+work, not a nicety.
+
 ### Changed — the registry's environment field: three words, one spelling of everywhere
 
 `appliesTo` became **`environments`**, valued `development | staging | production`, or `all`. The old vocabulary had six words -- adding `ci`, `test`, `local` -- and in practice one meaning was spelled four different ways across 81 entries: `[development, staging, production]`, `[development, staging, production, test, local]`, `[staging, production, ci, test, local]`, `[test, local]`. A registry whose synonymous sets differ by spelling cannot be searched ("does this variable reach production?"), diffed, or trusted. That was the maintainer's objection, and it was right.
