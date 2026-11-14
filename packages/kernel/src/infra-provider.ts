@@ -77,7 +77,7 @@ export class InfraService extends Service<z.infer<typeof ProviderConfigSchema>> 
     // describe().operations, so a handler that assumes the fake provider can do what Railway can is a bug
     // in the handler. The error names the provider rather than the verb, because that is what an operator
     // can act on.
-    putSecretValue(input: { instanceId: string; environment: string; service: string; name: string; value: string }) {
+    putSecretValue(input: { instanceId: string; environment: string; service: string; name: string; value: string; source?: 'service' | 'shared-variable' }) {
       const fn = this.selected.putSecretValue;
       if (typeof fn !== 'function') {
         throw new Error(`provider "${this.selected.describe().provider}" cannot deliver secrets: it does not implement putSecretValue`);

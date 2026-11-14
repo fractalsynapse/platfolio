@@ -28,6 +28,12 @@ const { values: flags } = parseArgs({
     'client-secret': { type: 'string', default: process.env.KC_CLIENT_SECRET ?? '' },
     'user-password': { type: 'string', default: process.env.KC_USER_PASSWORD ?? '' },
     'api-origin': { type: 'string', default: process.env.PLATFOLIO_API_ORIGIN ?? '' },
+    /**
+     * Which realm to seed (D56). Default `platfolio` -- production -- because the existing command must not
+     * change meaning. Staging gets its own realm on the SAME issuer host: one Keycloak, one certificate, and a
+     * token that cannot cross the boundary, since the issuer path carries the realm.
+     */
+    realm: { type: 'string', default: process.env.PLATFOLIO_IDENTITY_REALM ?? 'platfolio' },
   },
 });
 
@@ -48,8 +54,23 @@ if (remote && (apiSecret.length < 32 || userPassword.length < 24)) {
   console.error(`identity:seed refuses a remote run without strong credentials: --client-secret needs >=32 characters and --user-password >=24 (got ${String(apiSecret.length)} and ${String(userPassword.length)}). Values are never printed.`);
   process.exit(1);
 }
-const origins = flags['api-origin'] ? [flags['api-origin'] as string] : ['http://localhost:8082', 'http://localhost:5173'];
-const realm = 'platfolio';
+const realm = flags.realm as string;
+// Client id, audience and role names are deliberately UNCHANGED between realms. Keycloak scopes them per
+// realm, so `platfolio-api` in `platfolio-staging` is a different client from `platfolio-api` in `platfolio` --
+// suffixing them would be naming the same thing twice. What separates the two environments is the ISSUER, which
+// carries the realm in its path, and the control plane validates issuer and audience together.
+//
+// The staging realm's own control plane is a different host, so its web origins differ. Stated from the realm
+// rather than from a flag someone has to remember.
+const realmHosts: Record<string, string[]> = {
+  platfolio: ['https://api.platfolio.dev'],
+  'platfolio-staging': ['https://staging-api.platfolio.dev'],
+};
+
+const deployedHosts = realmHosts[realm] ?? [];
+const origins = flags['api-origin']
+  ? [flags['api-origin'] as string, ...deployedHosts]
+  : ['http://localhost:8082', 'http://localhost:5173', ...deployedHosts];
 const apiClientId = 'platfolio-api';
 const audience = 'platfolio-api';
 const role = 'platfolio.user';

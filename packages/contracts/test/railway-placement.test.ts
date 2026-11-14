@@ -87,3 +87,84 @@ test('the mock reproduces the silent no-op rather than helping the provider look
   const stillThere = await provider.readState(plan.instanceId);
   assert.equal(stillThere.services.filter((s) => s.environment === 'staging').length, 0, 'nothing was silently invented in staging');
 });
+
+/**
+ * Shared-variable delivery, checked where the provider actually operates.
+ *
+ * A composition can declare a secret `source: shared-variable`, which in Railway means the value lives at
+ * ENVIRONMENT scope and each service must be ATTACHED to see it. Two calls, and the schema is what says so:
+ * `SharedVariableConfigureInput` carries only enabledServiceIds/disabledServiceIds/name/environmentId/projectId
+ * -- there is no value field anywhere -- so it cannot create the variable, while an environment-scoped write
+ * without attachment leaves a credential the declaring service cannot read that still "exists" in the
+ * environment. A provider that called only the first would be describing a file left in the wrong room.
+ */
+test('a shared-variable secret is written at environment scope and attached to the declaring service', async () => {
+  const mock = new RailwayMock();
+  const plan = samplePlan({ instanceId: 'shared-delivery' });
+  const provider = new RailwayInfraProvider({ credentials: mock, transport: mock, workspaceId: 'ws-1', deployBudget: 20, deployTimeoutMs: 5_000, pollIntervalMs: 25 });
+  await provider.applyPlan(plan);
+  const environmentId = [...mock.environments.values()].find((e) => e.name === 'production')!.id;
+  const apiId = [...mock.services.values()].find((s) => s.name === 'api')!.id;
+
+  const result = await provider.putSecretValue!({
+    instanceId: 'shared-delivery', environment: 'production', service: 'api',
+    name: 'PLATFOLIO_GITHUB_APP_ID', value: '5694176', source: 'shared-variable',
+  });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.verified, true, 'delivery is not complete until the declaring service can read the name');
+
+  assert.equal(mock.sharedVariables.get(`${environmentId}:PLATFOLIO_GITHUB_APP_ID`), '5694176', 'the value belongs to the environment');
+  const apiInstance = mock.instances.get(`${environmentId}:${apiId}`)!;
+  assert.equal(apiInstance.variables.has('PLATFOLIO_GITHUB_APP_ID'), false, 'a shared delivery must not be smuggled in as a service variable');
+  assert.deepEqual([...(mock.sharedAttachments.get(`${environmentId}:PLATFOLIO_GITHUB_APP_ID`) ?? [])], [apiId], 'the attachment names exactly the declaring service');
+
+  const presence = await provider.secretPresence!({ instanceId: 'shared-delivery', environment: 'production', service: 'api', names: ['PLATFOLIO_GITHUB_APP_ID', 'PLATFOLIO_GITHUB_PRIVATE_KEY'] });
+  assert.equal(presence.PLATFOLIO_GITHUB_APP_ID, 'set');
+  assert.equal(presence.PLATFOLIO_GITHUB_PRIVATE_KEY, 'missing', 'presence must distinguish delivered from absent, or the read is decoration');
+
+  // The load-bearing part, shown rather than asserted about: undo the ATTACHMENT and presence flips back to
+  // `missing` even though the variable is still written at environment scope. So `verified` means "the service
+  // can read this", not "a value exists somewhere" -- the check depends on the second call.
+  mock.sharedAttachments.delete(`${environmentId}:PLATFOLIO_GITHUB_APP_ID`);
+  const detached = await provider.secretPresence!({ instanceId: 'shared-delivery', environment: 'production', service: 'api', names: ['PLATFOLIO_GITHUB_APP_ID'] });
+  assert.equal(detached.PLATFOLIO_GITHUB_APP_ID, 'missing', 'attachment is what makes a shared variable visible, and the check must depend on it');
+});
+
+test('default-scope delivery writes the service, not the environment', async () => {
+  const mock = new RailwayMock();
+  const plan = samplePlan({ instanceId: 'service-delivery' });
+  const provider = new RailwayInfraProvider({ credentials: mock, transport: mock, workspaceId: 'ws-1', deployBudget: 20, deployTimeoutMs: 5_000, pollIntervalMs: 25 });
+  await provider.applyPlan(plan);
+  const environmentId = [...mock.environments.values()].find((e) => e.name === 'production')!.id;
+
+  const result = await provider.putSecretValue!({ instanceId: 'service-delivery', environment: 'production', service: 'api', name: 'SESSION_KEY', value: 'abc123' });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(mock.sharedVariables.has(`${environmentId}:SESSION_KEY`), false, 'the default scope stays with the service');
+  assert.equal((mock.sharedAttachments.get(`${environmentId}:SESSION_KEY`) ?? new Set()).size, 0, 'and nothing is attached that was never shared');
+});
+
+test('the double refuses an attachment call that omits a NON_NULL field -- the mistake the live API caught', async () => {
+  const mock = new RailwayMock();
+  const plan = samplePlan({ instanceId: 'required-check' });
+  const provider = new RailwayInfraProvider({ credentials: mock, transport: mock, workspaceId: 'ws-1', deployBudget: 20, deployTimeoutMs: 5_000, pollIntervalMs: 25 });
+  await provider.applyPlan(plan);
+  const environmentId = [...mock.environments.values()].find((e) => e.name === 'production')!.id;
+  const projectId = [...mock.projects.values()][0]!.id;
+
+  // Exactly what my first implementation sent: enabledServiceIds without disabledServiceIds.
+  await assert.rejects(
+    () => mock.graphql({
+      operation: 'sharedVariableConfigure',
+      query: 'mutation ($input: SharedVariableConfigureInput!) { sharedVariableConfigure(input: $input) { id } }',
+      variables: { input: { projectId, environmentId, name: 'X', enabledServiceIds: ['svc-1'] } },
+      credential: { kind: 'project', token: 'mock-project-token-BBBBBBBBBBBBBBBBBBBBBBBB' },
+    }),
+    /disabledServiceIds.*String!|is not defined\. Expected a value/i,
+    'the double must reject the omission the real API rejects, or it is teaching the wrong lesson',
+  );
+
+  // And the provider now sends both, so the same call shape it produces goes through.
+  const ok = await provider.putSecretValue!({ instanceId: 'required-check', environment: 'production', service: 'api', name: 'X', value: 'v', source: 'shared-variable' });
+  assert.equal(ok.ok, true, JSON.stringify(ok));
+  assert.equal(ok.verified, true, 'write plus attachment leaves the declaring service able to read the name');
+});

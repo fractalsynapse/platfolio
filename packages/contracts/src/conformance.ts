@@ -193,6 +193,36 @@ export async function runConformance(make: () => InfraProvider, requiredRange = 
       : { status: 'pass', detail: 'plan JSON holds secret names and sources only' };
   });
 
+  await add('a delivered secret is readable by presence at both custody scopes (D53)', async () => {
+    const provider = make();
+    // The plan's OWN instance id: an earlier version passed a fresh one to planFor(), which a reduced fixture
+    // ignores, so delivery was aimed at an instance that had never been applied and the case failed for a
+    // reason that had nothing to do with the behaviour under test.
+    const plan = planFor();
+    await provider.applyPlan(plan);
+    if (typeof provider.putSecretValue !== 'function' || typeof provider.secretPresence !== 'function') {
+      return { status: 'not-implemented', detail: 'the driver exposes no secret delivery' };
+    }
+    const inst = plan.instanceId;
+    const outcomes: string[] = [];
+    for (const source of ['service', 'shared-variable'] as const) {
+      const name = `TOP_SECRET_${source === 'service' ? 'SVC' : 'SHARED'}`;
+      const written = await provider.putSecretValue({ instanceId: inst, environment: 'production', service: 'api', name, value: 'never-stored-by-platfolio', source });
+      if (!written.ok) return { status: 'fail', detail: `${source}: ${written.reason}` };
+      if (!written.verified) {
+        return { status: 'fail', detail: `${source}: write accepted but the declaring service cannot read the name -- presence at environment scope is not delivery` };
+      }
+      const seen = await provider.secretPresence({ instanceId: inst, environment: 'production', service: 'api', names: [name, 'NEVER_DELIVERED'] });
+      if (seen[name] !== 'set') return { status: 'fail', detail: `${source} delivery invisible through presence: ${JSON.stringify(seen)}` };
+      if (seen.NEVER_DELIVERED !== 'missing') return { status: 'fail', detail: `an undelivered name read as ${seen.NEVER_DELIVERED}` };
+      outcomes.push(source);
+    }
+    const empty = await provider.putSecretValue({ instanceId: inst, environment: 'production', service: 'api', name: 'EMPTY_CASE', value: '' });
+    return empty.ok === false && empty.code === 'invalid-value'
+      ? { status: 'pass', detail: `${outcomes.join(', ')} delivered; empty value refused rather than treated as deletion` }
+      : { status: 'fail', detail: JSON.stringify(empty) };
+  });
+
   await add('deleteInstance removes everything and reports orphans honestly', async () => {
     const provider = make();
     const plan = planFor();

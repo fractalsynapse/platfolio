@@ -16,7 +16,7 @@ variables:
     note: "which control plane a smoke script points at; never a deployment value"
   - name: CR_PAT
     secret: true
-    environments: [development]
+    environments: all
     deployedTo: ci:secret
     note: "GitHub Packages push token used by the image workflow"
   - name: DATABASE_URL
@@ -309,6 +309,11 @@ variables:
     environments: all
     deployedTo: railway:variable
     note: "referenced by .platfolio/environment.yaml, apps/control-plane/src/index.ts, compose.dev.yaml, compose.yaml"
+  - name: PLATFOLIO_IDENTITY_REALM
+    secret: false
+    environments: [development]
+    deployedTo: host:shell
+    note: "which realm identity:seed targets; production realm is `platfolio`, staging is `platfolio-staging` (D56)"
   - name: PLATFOLIO_IMAGE_TAG
     secret: false
     environments: [development]

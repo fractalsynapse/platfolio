@@ -99,6 +99,34 @@ schema's error type carries the issues. Fixed by deleting the import and matchin
 establish the claim. AGENTS.md already said this ("fake-only tests do not establish that wiring works"); this
 is the cost of reading past it.
 
+### Corrected — an entry in this file described work that was not in the repository
+
+The entry below was merged as PR #228, which contained **three documentation files and no code**: CHANGELOG,
+MAINTAINING and the decision register. Its commit message described two provider calls, a contracts helper,
+environment scope in the double, a conformance case and four tests -- none of which existed. CI passed,
+correctly, because it was testing a docs-only diff.
+
+The cause was mine and it is worth naming precisely: after merging #227 I ran
+`git checkout staging && git reset --hard origin/staging` to synchronise while that work was still uncommitted,
+and `reset --hard` deleted it. I then wrote the commit message from my account of the session instead of from
+the diff -- the same failure class as the Keycloak claim this file corrected days earlier, and exactly why
+AGENTS.md says to match evidence to the artifact. **The code is in the tree now**, in the change that follows,
+so the entry below reads as a description rather than a promise. #225 was reopened with the inventory, and PR
+#228 carries a comment stating what it does and does not contain rather than being quietly rewritten.
+
+### Fixed — `check-contracts` called a reordered union a removal and demanded a breaking ack
+
+TypeScript prints an inline union in inference order, so `"database" | "service" | …` becoming
+`"service" | "database" | …` is, in a text diff, one line deleted and another added. The gate classified that as
+`genuinely REMOVED -> MAJOR` and required `--ack-breaking`; I very nearly accepted a major bump for a type that
+had not changed, and had typed an ack before I stopped to check what was actually missing.
+
+Classification now pairs lines by **declaration head plus sorted member set**. Same members, different order:
+reported as a reordering and excluded from `breaking`. Two attempts were wrong first -- slicing at the first `|`
+swallowed the first member, and keying the head on `keyOf` matched nothing because a union line contains no
+bracket at all. Verified in both directions: the real reorder now reports `additive only -> MINOR` with no ack,
+while withdrawing `"volume"` from one baseline line still exits 1 as a genuine removal.
+
 ### Added — shared-variable delivery, and the platform description decides where a credential lands (D53, closes #225)
 
 `putSecretValue` gained a `source` argument, and the value is not the caller's to choose: it is read from the
@@ -118,7 +146,7 @@ A name the description never declared is refused with `secret-not-declared`, and
 not contain is refused the same way: platfolio will not invent a custody location for someone, and an undeclared
 variable is one no deployment was told to read. Presence and delivery agree because both consult the same entry.
 
-New first-party path: `platform-deploy --deliver-secrets` delivers every credential this composition declares,
+First-party path (landed with the correction above, not in #228): `platform-deploy --deliver-secrets` delivers every credential this composition declares,
 through the provider seam rather than the hand-written GraphQL that `--bootstrap-vars` uses. Finding that gap
 required staging to exist -- it was created, then immediately failed `secret-unavailable` in both environments,
 which is the plan check working, not the deploy being broken.

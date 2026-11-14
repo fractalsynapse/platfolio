@@ -151,6 +151,9 @@ const HUMAN: Record<string, Partial<Entry>> = {
   // A GitHub Packages push token. It is a credential even though the workflow reads it through `secrets.`, and
   // the emitter cannot know that from the name alone -- which is precisely why this table exists.
   CR_PAT: { secret: true, environments: 'all', deployedTo: 'ci:secret', note: 'GitHub Packages push token used by the image workflow' },
+  // Which realm a first-party seeding run targets (D56). Not a credential, not deployed: it selects which
+  // realm the operator is creating on the identity provider the platform already hosts.
+  PLATFOLIO_IDENTITY_REALM: { secret: false, environments: ['development'], deployedTo: 'host:shell', note: 'which realm identity:seed targets; production realm is `platfolio`, staging is `platfolio-staging` (D56)' },
   CONTROL_PLANE_BASE: { environments: ['development'], note: 'which control plane a smoke script points at; never a deployment value' },
   OIDC_CLIENT_SECRET: { note: 'template placeholder: a tenant app that keeps its own OIDC client secret' },
   STRIPE_WEBHOOK_SECRET: { note: 'template placeholder: a tenant app verifying Stripe webhooks itself' },

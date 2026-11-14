@@ -76,6 +76,20 @@ export const SecretRefSchema = z.object({
   source: z.enum(['preserve', 'shared-variable', 'resource', 'platform-internal', 'customer-held']),
 });
 
+/**
+ * Narrow a plan's declared secret `source` to the two scopes a provider can actually write (D53).
+ *
+ * Single-sourced here, beside the enum, because both the control-plane handler and the deploy script need the
+ * SAME answer and their agreement is a contract, not a coincidence: only `shared-variable` means "write at
+ * environment scope and attach the declaring service". Every other source describes a value the tenant placed
+ * somewhere already, or a reference the provider assembled, and when platfolio is asked to deliver one it
+ * belongs to the service that reads it. Duplicated, the two call sites drift the first time the enum grows --
+ * and the drift is invisible, because both versions still typecheck.
+ */
+export function secretWriteScope(source: string | undefined): 'service' | 'shared-variable' {
+  return source === 'shared-variable' ? 'shared-variable' : 'service';
+}
+
 export const ServicePlanSchema = z.object({
   name: NameSchema,
   image: z.string().min(1),
@@ -282,7 +296,7 @@ export interface InfraProvider {
    * Optional on the interface because a provider that cannot write configuration must say so through
    * `describe().operations` rather than pretend; the API answers 501 when the verb is absent.
    */
-  putSecretValue?(input: { instanceId: string; environment: string; service: string; name: string; value: string }): Promise<SecretWriteResult>;
+  putSecretValue?(input: { instanceId: string; environment: string; service: string; name: string; value: string; source?: 'service' | 'shared-variable' }): Promise<SecretWriteResult>;
   /**
    * Presence only -- never the value. The provider itself redacts secret values on read (measured for
    * Railway: `{ value: null }` even moments after a write), which is why presence is the only honest read.

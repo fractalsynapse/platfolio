@@ -89,8 +89,27 @@ const classify = (from: string, to: string) => {
   const nextKeys = new Set([...next].map(keyOf));
   // Same declaration head, different body: widened, not withdrawn.
   const widened = gone.filter((l) => nextKeys.has(keyOf(l)));
-  const removed = gone.filter((l) => !nextKeys.has(keyOf(l)));
-  return { added, widened, removed };
+  const stillGone = gone.filter((l) => !nextKeys.has(keyOf(l)));
+  // Reordering is not a version decision. TypeScript prints an inline union in inference order, so
+  // `"database" | "service" | ...` becoming `"service" | "database" | ...` shows up in a line diff as one line
+  // deleted and another added -- and this gate demanded a breaking ack for exactly that, while I very nearly
+  // accepted a MAJOR for a type that had not changed. Same members, different order, same type: compare the
+  // member set before calling anything a removal.
+  const membersOf = (line: string): string => {
+    // Pair by what a line IS: the declaration up to where the member list begins, plus the sorted members.
+    // keyOf cannot serve (an inline union line has no bracket, so it returns the whole line), and slicing at the
+    // first '|' swallows the first member -- which is how a first attempt still reported a pure reordering as a
+    // removal. Cut at the opening quote of the list; everything after it is members.
+    const listStart = line.search(/["'[{]/);
+    if (listStart < 0) return `${keyOf(line)}::`;
+    const head = line.slice(0, listStart).trim();
+    const members = line.slice(listStart).replace(/[;{}()]/g, '');
+    return `${head}::${members.split('|').map((x) => x.trim()).sort().join('|')}`;
+  };
+  const addedByMembers = new Set(added.map((l) => membersOf(l)));
+  const reordered = stillGone.filter((l) => addedByMembers.has(membersOf(l)));
+  const removed = stillGone.filter((l) => !addedByMembers.has(membersOf(l)));
+  return { added, widened, removed, reordered };
 };
 const ack = process.argv.find((a) => a.startsWith('--ack-breaking='))?.slice('--ack-breaking='.length);
 const diff = classify(previousSurface, surface);
