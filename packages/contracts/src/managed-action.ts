@@ -124,7 +124,13 @@ export function redactCredentialShaped(text: string): string {
     .replace(/(?:gh[pousr]_|github_pat_)[A-Za-z0-9]{8,}/g, '[redacted-token]')
     .replace(/Bearer\s+[A-Za-z0-9._-]{8,}/g, 'Bearer [redacted]')
     .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\\s\\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, '[redacted-key]')
-    .replace(/([?&](?:access_token|token|password)=)[^&\\s]+/gi, '$1[redacted]');
+    .replace(/([?&](?:access_token|token|password)=)[^&\\s]+/gi, '$1[redacted]')
+    // URL userinfo that carries a password: `postgresql://user:pw@host/db`. This is the form platfolio actually
+    // handles -- database DSNs arrive as provider references and appear verbatim inside the errors a failed
+    // connection throws -- and the helper did not cover it until a boot-failure test showed a DSN passing
+    // through untouched into a log line. Userinfo WITHOUT a colon is left alone: `https://user@host` holds no
+    // credential, and redacting usernames trains people to distrust the redaction.
+    .replace(/:\/\/([^/:@\s]+):([^@\s]+)@/g, '://$1:[redacted]@');
 }
 
 export function assertAttestationClean(attestation: Attestation): Attestation {
