@@ -49,3 +49,25 @@ test('a thrown non-Error is reported as what it is, not as an empty Error', () =
   assert.match(describeBootFailure('disk quota exceeded'), /thrown value \(string\): disk quota exceeded/);
   assert.match(describeBootFailure(undefined), /Error: \(no message\)/);
 });
+
+test('an AggregateError reports what it aggregated, because that is where a pool puts the reason', () => {
+  // pg-pool throws this shape when several connection attempts fail: `message` is empty, the causes live in
+  // `.errors`. Without the branch this line was `AggregateError: (no message)` and nothing else -- the exact
+  // log staging produced, which is why the describer had to grow.
+  const agg = Object.assign(new AggregateError([
+    Object.assign(new Error('connection refused'), { name: 'ECONNREFUSED' }),
+    new Error('password authentication failed for user "railway"'),
+  ], ''));
+  const line = describeBootFailure(agg);
+  assert.match(line, /aggregated 2 error\(s\)/, line);
+  assert.match(line, /ECONNREFUSED: connection refused/, line);
+  assert.match(line, /password authentication failed/, line);
+
+  // And the credential-bearing case: a pooled failure quoting a DSN must not launder the password through the
+  // aggregate branch, which is new code and therefore exactly where a leak would hide.
+  const withDsn = Object.assign(new AggregateError([new Error('no connect postgresql://app:s3cr3t@pg.internal:5432/db')], ''));
+  assert.equal(describeBootFailure(withDsn).includes('s3cr3t'), false, 'the aggregate path redacts like the others');
+
+  const many = Object.assign(new AggregateError(Array.from({ length: 6 }, (_, k) => new Error(`attempt ${String(k)}`)), ''));
+  assert.match(describeBootFailure(many), /\(\+2 more\)/, 'capped but honest about the cap');
+});
