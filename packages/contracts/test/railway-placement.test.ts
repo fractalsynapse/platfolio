@@ -142,3 +142,29 @@ test('default-scope delivery writes the service, not the environment', async () 
   assert.equal(mock.sharedVariables.has(`${environmentId}:SESSION_KEY`), false, 'the default scope stays with the service');
   assert.equal((mock.sharedAttachments.get(`${environmentId}:SESSION_KEY`) ?? new Set()).size, 0, 'and nothing is attached that was never shared');
 });
+
+test('the double refuses an attachment call that omits a NON_NULL field -- the mistake the live API caught', async () => {
+  const mock = new RailwayMock();
+  const plan = samplePlan({ instanceId: 'required-check' });
+  const provider = new RailwayInfraProvider({ credentials: mock, transport: mock, workspaceId: 'ws-1', deployBudget: 20, deployTimeoutMs: 5_000, pollIntervalMs: 25 });
+  await provider.applyPlan(plan);
+  const environmentId = [...mock.environments.values()].find((e) => e.name === 'production')!.id;
+  const projectId = [...mock.projects.values()][0]!.id;
+
+  // Exactly what my first implementation sent: enabledServiceIds without disabledServiceIds.
+  await assert.rejects(
+    () => mock.graphql({
+      operation: 'sharedVariableConfigure',
+      query: 'mutation ($input: SharedVariableConfigureInput!) { sharedVariableConfigure(input: $input) { id } }',
+      variables: { input: { projectId, environmentId, name: 'X', enabledServiceIds: ['svc-1'] } },
+      credential: { kind: 'project', token: 'mock-project-token-BBBBBBBBBBBBBBBBBBBBBBBB' },
+    }),
+    /disabledServiceIds.*String!|is not defined\. Expected a value/i,
+    'the double must reject the omission the real API rejects, or it is teaching the wrong lesson',
+  );
+
+  // And the provider now sends both, so the same call shape it produces goes through.
+  const ok = await provider.putSecretValue!({ instanceId: 'required-check', environment: 'production', service: 'api', name: 'X', value: 'v', source: 'shared-variable' });
+  assert.equal(ok.ok, true, JSON.stringify(ok));
+  assert.equal(ok.verified, true, 'write plus attachment leaves the declaring service able to read the name');
+});

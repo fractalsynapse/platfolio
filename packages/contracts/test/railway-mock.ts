@@ -175,12 +175,33 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
       customDomainCreate: ['projectId', 'environmentId', 'serviceId', 'domain', 'targetPort'],
       serviceInstanceLimitsUpdate: ['environmentId', 'serviceId', 'memoryGB', 'vCPUs'],
     };
+    /**
+     * Which input fields the API REQUIRES, per operation. Captured from live introspection: every field of
+     * `SharedVariableConfigureInput` is NON_NULL, including BOTH `enabledServiceIds` and `disabledServiceIds` --
+     * so an attachment call that omits the empty second list is not a shorthand, it is an invalid mutation.
+     *
+     * This map exists because the allowlist above can only reject names that ARE present. It happily accepted
+     * the omission my provider code shipped, and the live API answered `Variable "$input" got invalid value`:
+     * a double that agrees with a wrong assumption is worse than no double, because it converts a bug into
+     * evidence. Requiredness is the other half of a schema, and I had only modelled half of it.
+     */
+    const requiredFields: Record<string, string[]> = {
+      sharedVariableConfigure: ['projectId', 'environmentId', 'name', 'enabledServiceIds', 'disabledServiceIds'],
+    };
+
     const inputKey = ['projectCreate', 'projectUpdate', 'environmentCreate', 'projectTokenCreate', 'serviceCreate', 'serviceInstanceUpdate', 'variableUpsert', 'serviceDomainCreate', 'customDomainCreate', 'serviceInstanceLimitsUpdate', 'sharedVariableConfigure'].includes(operation) ? 'input' : null;
     if (inputKey) {
       const allowed = inputFields[operation];
       const payload = (v[inputKey] ?? {}) as Record<string, unknown>;
       const unknown = allowed ? Object.keys(payload).filter((k) => !allowed.includes(k)) : [];
       if (unknown.length) throw new Error(`railway ${operation}: Field ${JSON.stringify(unknown[0])} is not defined by ${operation} input (the real API rejects this)`);
+      // Requiredness, for operations whose captured input is all-NON_NULL. The name allowlist above cannot
+      // catch an omission, and an omission is what the live API threw on: my double validated my own
+      // misreading rather than the provider, which is how a bug becomes evidence.
+      const missing = (requiredFields[operation] ?? []).filter((k) => payload[k] === undefined);
+      if (missing.length) {
+        throw new Error(`railway ${operation}: Field ${JSON.stringify(missing[0])} of type String! is not defined. Expected a value (the real API rejects an absent NON_NULL input field)`);
+      }
     }
 
     // Guard the class of bug E26 exposed: mutations returning an OBJECT are rejected by the real API
