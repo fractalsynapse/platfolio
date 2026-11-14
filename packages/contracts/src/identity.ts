@@ -1,5 +1,6 @@
 import { createPublicKey, verify as cryptoVerify } from 'node:crypto';
 import { z } from 'zod';
+import { CONTRACT_VERSION } from './generated/contract-version.ts';
 
 /**
  * The `identity.provider` seam (docs/design/10, D40).
@@ -16,7 +17,20 @@ import { z } from 'zod';
  */
 
 export const IDENTITY_CONTRACT = 'identity.provider';
-export const IDENTITY_CONTRACT_VERSION = '1.0.0';
+/**
+ * The identity seam reports the project's DERIVED contract version (D59) -- it is not independently versioned,
+ * so a surface change anywhere in this package moves it too.
+ *
+ * The `1.0.0` literal that used to sit here was stale by construction rather than merely duplicative: nothing
+ * bumped it when this package's emitted surface changed, so the conformance suite compared an implementation
+ * against a number that never moved while the contracts had gone to 2.0.0. A version that cannot move is not a
+ * compatibility claim, it is a fossil.
+ *
+ * Typed `string` deliberately, for the second reason D59 found: a literal type publishes a version INTO the
+ * emitted surface, so every future bump would classify as a removed declaration -- the gate flagging its own
+ * arithmetic as breaking.
+ */
+export const IDENTITY_CONTRACT_VERSION: string = CONTRACT_VERSION;
 
 export const JwkSchema = z.object({
   kty: z.string().min(1),

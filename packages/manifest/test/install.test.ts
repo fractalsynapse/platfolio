@@ -25,7 +25,25 @@ test('the generated workflow is valid YAML with the expected shape', () => {
     assert.ok(doc.on.workflow_dispatch.inputs[key], `missing input ${key}`);
     assert.equal(doc.on.workflow_dispatch.inputs[key].required, true, `${key} must be required`);
   }
-  assert.deepEqual(doc.on.push.branches, ['production', 'staging']);
+  // Trigger branches come from the manifest's declared branch per environment, and both fixtures say
+  // main/staging. This line used to assert ['production','staging'] -- the test encoded the bug: the generated
+  // workflow listened for branch names that do not exist in a repository whose release branch is main, so a
+  // push never deployed and only a manual dispatch ever ran.
+  assert.deepEqual(doc.on.push.branches, ['main', 'staging'], 'push triggers bind to the declared branches');
+  assert.deepEqual(doc.on.pull_request.branches, ['main', 'staging'], 'a PR targeting a bound branch runs the workflow too');
+  assert.deepEqual(doc.on.pull_request.types, ['opened', 'synchronize', 'reopened']);
+  // A pull_request run has no inputs, so the event itself must decide that only a push applies.
+  // Read from the STEP that passes the dispatch inputs: `job.with` does not exist, and my first version of
+  // this line would have called String(undefined) and asserted against the word "undefined".
+  const applyStep = (doc.jobs.managed.steps as Array<Record<string, any>>).find((s) => s.with?.plan_hash !== undefined);
+  assert.ok(applyStep, 'a step hands the dispatch inputs to the action');
+  const actionExpr = String(applyStep.with.action);
+  assert.match(actionExpr, /pull_request.*check/, 'a PR run resolves to the read-only check action');
+  assert.match(actionExpr, /apply/, 'a push resolves to apply');
+  assert.doesNotMatch(actionExpr, /'deploy'/, 'the action never falls through to a value the control plane does not define');
+  // The starter is extensible: developer steps gate the managed job through `needs`, never by editing platfolio's job.
+  assert.ok(doc.jobs.tests, 'the starter ships a tests job for the developer to extend');
+  assert.equal(doc.jobs.managed.needs, 'tests', 'the managed deploy waits on the developer checks');
   assert.equal(doc.concurrency['cancel-in-progress'], false, 'an in-flight infra write must not be cancelled');
   assert.equal(doc.jobs.managed.timeout, undefined);
   assert.ok(doc.jobs.managed['timeout-minutes'] >= 5, 'must have a timeout');
@@ -133,7 +151,8 @@ test('staging is omitted from triggers when the platform does not enable it', ()
   const m = manifest('packages/manifest/test/fixtures/web-app-manifest.yaml');
   const prod = { ...m, spec: { ...m.spec, environments: { ...m.spec.environments, staging: { enabled: false, sleepByDefault: true } } } } as Manifest;
   const doc = yamlParse(renderInstallPullRequest(prod, OPTS).files[WORKFLOW_PATH]!) as Record<string, any>;
-  assert.deepEqual(doc.on.push.branches, ['production']);
+  assert.deepEqual(doc.on.push.branches, ['main'], "staging's branch is absent when the platform does not enable staging");
+  assert.deepEqual(doc.on.pull_request.branches, ['main'], 'and so is its PR trigger');
   assert.deepEqual(doc.on.workflow_dispatch.inputs.environment.options, ['production']);
 });
 

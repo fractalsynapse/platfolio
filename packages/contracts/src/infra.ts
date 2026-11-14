@@ -3,7 +3,7 @@ import type { SecretPresence } from './secret-writer.ts';
 
 /**
  * The `infra.provider` capability: everything platfolio needs from an infrastructure provider, and
- * nothing it should not have. This module is API-stable (see packages/contracts/api.md); provider
+ * nothing it should not have. This module is API-stable (see packages/contracts/api.json); provider
  * implementations import these types and never the framework.
  *
  * Two rules are structural, not advisory:
@@ -16,7 +16,7 @@ import type { SecretPresence } from './secret-writer.ts';
 
 export const CONTRACT_NAME = 'infra.provider' as const;
 // D59: the version is DERIVED, never declared. `check-contracts.ts --update` computes it from the
-// public-surface diff recorded in packages/contracts/api.md and writes it into the generated file
+// public-surface diff recorded in packages/contracts/api.json and writes it into the generated file
 // below; `check-contracts.ts` without --update reproduces that file from the baseline or fails.
 // There is deliberately no version literal in this source tree to edit by hand.
 export { CONTRACT_VERSION } from './generated/contract-version.ts';
