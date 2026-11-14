@@ -104,10 +104,12 @@ services:
     # `start-dev`, on the SAME Postgres instance as the control plane and in its own schema: the topology the
     # maintainer asked for (one container, one backup) without two owners in one namespace.
     #
-    # The realm is created by `pnpm run identity:seed` -- an idempotent Admin-API script -- rather than
-    # `--import-realm`. Keycloak 26.8.2's import format rejected role assignments in every shape tried
-    # (clientRoles on a client, federated on a user, realm-level clientMappings), and a file the platform
-    # boots is worse than a script that works. Recorded as #168 rather than hidden.
+    # Roles are seeded by `scripts/seed-identity.ts`, not by a realm file -- and the reason is NOT the one this
+    # comment used to give. Measured against 26.8.2 (docs/research/keycloak-realm-import-roles-2026-11-14.md):
+    # role declarations AND `users[].realmRoles`/`clientRoles` assignments import fine. What is true is worse:
+    # once the realm exists in the shared Postgres schema, `--import-realm` logs "already exists. Import
+    # skipped" and then "Import finished successfully" -- a boot that looks like it seeded and seeded nothing.
+    # The API seed is the mechanism because it is the only one that re-applies idempotently.
     # The entrypoint is inherited from the platform file; only the sub-command differs locally.
     command: ['start-dev']
     environment:

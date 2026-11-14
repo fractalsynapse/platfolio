@@ -49,7 +49,13 @@ Done means: cold clone → `pnpm i && docker compose up -d && pnpm run identity:
   checks drift in both directions, and every response body is validated **in the request path** -- a handler
   that would emit an undocumented shape returns 500 with the reason instead of shipping it.
 - The realm is seeded by an idempotent Admin-API script, **not** by `--import-realm`. Keycloak 26.8.2 rejected
-  role assignments in all three shapes I tried; #168 has the error text and the trade-off (two commands for a
+  role assignments in all three shapes I tried;
+  **corrected 2026-11-14:** that conclusion was wrong, and the measurement that disproved it is in
+  [docs/research/keycloak-realm-import-roles-2026-11-14.md](../research/keycloak-realm-import-roles-2026-11-14.md) -- the documented keys do import; what actually
+  happens is that `--import-realm` skips silently once the realm exists, and our field name had caused a hard
+  startup error rather than a silent drop. The decision to seed by API stands, for the re-application reason
+  rather than the one recorded here. The original sentence is kept because it is what I believed and wrote;
+  #168 has the error text and the trade-off (two commands for a
   cold clone, dev credentials in code, guarded to loopback).
 - The framework research that guided this build was partly wrong, and measurement caught it: a missing
   dependency does not produce the reported silent `PENDING` hang -- the property is simply absent, and
