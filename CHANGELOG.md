@@ -373,7 +373,7 @@ note databases.main@production:            legacy-reference-redeploy-required --
 Nothing was deleted. The volume, its data, the environment instances, the private network and the domains all
 followed the service id, which is why the rename replaced the delete-and-reprovision plan. **No DNS changes were
 needed and none were made**: the provider's shared hostnames already carried the environment
-(`api-production-b27113f4.up.railway.app`), so the published CNAMEs for `api.platfolio.dev` and
+(the host form carries the environment name), so the published CNAMEs for `api.platfolio.dev` and
 `auth.platfolio.dev` kept matching after the rename. Measured before and after, not assumed.
 
 Second apply: `verified=true noop=true` -- converged, and it did not re-rename. `--dry-run` shows no `legacy-*`

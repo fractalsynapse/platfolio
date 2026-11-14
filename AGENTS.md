@@ -87,7 +87,7 @@ database created and migrated by its own plan (#172's first run). It is not yet 
 Keycloak now boots (its JDBC DSN is wired as verified `references[].output` components, #198), and
 `api.platfolio.dev` / `auth.platfolio.dev` are **verified and certificate-issued** (#199 closed), the realm is
 seeded, and `identity:smoke` passes 11/11 **against those public URLs** — including a genuine master-realm token
-refused as `unknown-key`, which is D4 proven beyond loopback. What #172 still needs is the cutover: the three template
+refused as `unknown-key`, which is D4 proven beyond loopback — **though that cross-issuer check is currently unverified against production (#248)**: the hosted Keycloak declares only the deprecated `KEYCLOAK_ADMIN*` names and neither 26.x `KC_BOOTSTRAP_ADMIN*` name, so the smoke can no longer mint the foreign token the check needs. It passed 11/11 this morning and reads 10/11 now; the missing item is a check that could not run, not a check that failed. What #172 still needs is the cutover: the three template
 repositories pointing at `api.platfolio.dev` (a `PLATFOLIO_URL` repository variable each, D47) and one install
 PR watched end to end. platfolio's own repository already dispatches there, and its hosting description now sits
 at the root exactly like a tenant's (D50) -- `selfhost/` and the separate root `docker-compose.yml` are gone, so
