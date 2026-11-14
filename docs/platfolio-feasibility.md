@@ -251,7 +251,11 @@ mutations are **not exactly-once**, auth failures arrive as **HTTP 200 with `err
 `Deployment.status` includes `NEEDS_APPROVAL`/`SLEEPING`/`WAITING`, rate limits are
 **100/1000/10000 RPH** (free/Hobby/Pro) and 10/50 RPS with `429` + `Retry-After`, and
 `dockerComposeImport`/`environmentCreate(sourceEnvironmentId)` (clones services, volumes,
-configuration and variables) give cheap clone paths. So: per-step durable jobs keyed by
+configuration and variables) exist as cheap clone paths — **platfolio does not use the second one**:
+measured on our own project, a duplicated environment arrives with the source's *service ids*, so its
+service reads the source's database configuration and fails against a database it does not own. Each
+environment is provisioned independently instead, with a per-environment physical service name (D57).
+So: per-step durable jobs keyed by
 idempotency tokens, **verify by read-back**, a token bucket sized to the plan tier,
 webhook-first status (`project webhooks`: deployment status + volume/CPU/RAM alerts, 3 retries,
 30s timeout) with polling fallback, drift detection, saga compensation, and a reconciliation
@@ -370,9 +374,14 @@ Evidence, not features. Pass = all of:
       `required_inputs`; `templateDeployV2` a stack **into the customer's workspace**; confirm the
       project works with zero platfolio credentials left behind, and test whether a HIDDEN
       template is deployable by another account.
-- [ ] Compose round-trip: `dockerComposeImport` a manifest-rendered Compose file, then
-      `environmentCreate(sourceEnvironmentId)` to clone production→staging; assert services,
-      volumes and variables carried over.
+- [ ] Compose round-trip: `dockerComposeImport` a manifest-rendered Compose file. The second half of this
+      item — `environmentCreate(sourceEnvironmentId)` to clone production→staging and assert services,
+      volumes and variables carried over — was run, and the answer is that carrying them over is the bug:
+      the duplicate arrives with the source's *service ids*, so its service holds the source's database
+      configuration (measured on platfolio's own project; staging's api reached `connect ETIMEDOUT` on a
+      DSN it appeared to own). The probe that replaces it creates the environment standalone and provisions
+      it, asserting each environment's database is a **distinct service id** and each reference expression
+      names its own environment's service (D57).
 - [ ] Lifecycle: variables, `serviceInstanceDeployV2`, `latestDeployment` polling under a
       token-bucket at the plan's RPH, `customDomainAvailable`/`Create` with the required TXT,
       certificate issuance observed, `customDomainUpdate` retarget staging→production,

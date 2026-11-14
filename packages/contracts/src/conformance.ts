@@ -53,7 +53,9 @@ export function samplePlan(overrides: Partial<InfraPlan> = {}): InfraPlan {
     manifestRef: { template: 'example-web-app', version: '1.4.0' },
     environments: [
       { name: 'production', services: [service('api', 2)], domains: [{ host: 'api.example.com', service: 'api', port: 3000, verificationName: 'domain-verify' }], databases: [{ name: 'app-db', kind: 'postgres' }], buckets: [{ name: 'clones', region: 'iad' }] },
-      { name: 'staging', cloneFrom: 'production', services: [service('api', 1)], domains: [], databases: [{ name: 'app-db', kind: 'postgres' }], buckets: [] },
+      // Declared like production, not derived from it: staging's `api` and `app-db` are provisioned by the
+      // provider as staging's OWN resources, which is the property a consumer of this fixture can rely on (D57).
+      { name: 'staging', services: [service('api', 1)], domains: [], databases: [{ name: 'app-db', kind: 'postgres' }], buckets: [] },
     ],
     ...overrides,
   };

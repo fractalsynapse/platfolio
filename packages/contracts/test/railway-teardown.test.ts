@@ -9,10 +9,8 @@ const DIGEST = `sha256:${'d'.repeat(64)}`;
 function plan(mutate?: (p: InfraPlan) => void): InfraPlan {
   const p = samplePlan();
   for (const environment of p.environments) {
-    environment.cloneFrom = undefined;
     for (const service of environment.services) { service.image = IMAGE; service.digest = DIGEST; }
   }
-  p.environments[1]!.cloneFrom = 'production';
   p.environments[1]!.domains = [];
   mutate?.(p);
   return p;
@@ -62,4 +60,24 @@ test('the snapshot is taken before the sweep, so a service deleted first is stil
   assert.ok(before > 0, 'the instance had services to account for');
   assert.equal(deleted.orphans.length, 0, JSON.stringify(deleted.orphans));
   assert.ok(deleted.removed.length >= before, JSON.stringify(deleted.removed));
+});
+
+/**
+ * With one service per environment (D57) the project's service list and an environment's contents are different
+ * sets, so a teardown that walks their cross product would report deletes for pairs that never existed --
+ * `service:production/api-staging` is not something anyone removed. #111's three states only mean something if
+ * each row names a thing that was there.
+ */
+test('teardown deletes what was actually placed where, and claims nothing else (D57)', async () => {
+  const { mock, provider } = harness();
+  const p = plan((x) => { for (const environment of x.environments) environment.databases = []; });
+  await provider.applyPlan(p);
+  assert.deepEqual([...mock.services.values()].map((s) => s.name).sort(), ['api', 'api-staging'], 'the apply put one service in each environment');
+
+  const deleted = await provider.deleteInstance(p.instanceId);
+  assert.ok(deleted.removed.includes('service:production/api'), JSON.stringify(deleted.removed));
+  assert.ok(deleted.removed.includes('service:staging/api-staging'), JSON.stringify(deleted.removed));
+  assert.equal(deleted.removed.filter((r) => r.startsWith('service:')).length, 2, `one claim per placement, none for a pair that never existed: ${JSON.stringify(deleted.removed)}`);
+  assert.equal(deleted.removed.includes('service:production/api-staging'), false, 'production never held staging’s service');
+  assert.deepEqual(deleted.orphans, [], JSON.stringify(deleted.orphans));
 });

@@ -7,6 +7,11 @@ import { RAILWAY_ENDPOINT, type RailwayCredential, type RailwayCredentialSource,
  *
  * - `serviceCreate` / `variableUpsert` / `serviceInstanceDeploy` / instance reads require an
  *   **environment-scoped** credential; a workspace credential gets `Not Authorized` (measured).
+ * - `serviceCreate` and `templateDeployV2` REFUSE a service name the project already holds
+ *   (`A service named "api" already exists in this project`, measured against the live API): service names are
+ *   unique per project, not per environment, and no mutation places an existing service into a further
+ *   environment. That is the fact the provider's per-environment naming rule is built on (D57), and a double
+ *   that let the call through would let a provider share one service -- one database -- across environments.
  * - `serviceDelete` / `projectDelete` / token minting require the **workspace** credential.
  * - `variables()` — the one query that returns secret values — throws here, so any provider that tries to
  *   read values through it fails loudly in CI instead of leaking quietly in production.
@@ -77,7 +82,7 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
   readonly takenDomains = new Set<string>();
   readonly domainCreates: string[] = [];
   /** Template deploys recorded so tests can assert the composed name and the grant used. */
-  volumes: { id: string; projectId: string; name: string; serviceId: string; mountPath: string }[] = [];
+  volumes: { id: string; projectId: string; name: string; serviceId: string; environmentId: string; mountPath: string }[] = [];
   /** How many template-created services are still hidden (diagnostics for tests). */
   hiddenServiceCount(): number { return this.hiddenServices.size; }
   /** Services hidden until read N times, so single-shot lookups fail as they do live (#77). */
@@ -85,10 +90,21 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
   readonly templateServiceIds = new Set<string>();
   private templateDeleteAttempts = new Map<string, number>();
   readonly templateDeploys: { templateId: string; serviceName: string; credentialKind: string }[] = [];
+  /**
+   * Every `environmentCreate` input, in order. A test asserts against this that platfolio never creates an
+   * environment from a source (D57) -- the double still implements the source, because the real API does, and
+   * recording the call is how "we stopped doing that" stays checked instead of merely unfashionable.
+   */
+  readonly environmentCreates: { name: string; sourceEnvironmentId?: string }[] = [];
 
   deploys = 0;
   readonly operations: string[] = [];
-  readonly writtenVariables: { name: string; value: string }[] = [];
+  /**
+   * Every variable write, with WHERE it landed. A reference expression like `${{app-db.DATABASE_URL}}` is only
+   * proof of isolation when you know which service in which environment received it, and a flat name/value log
+   * could not say (D57). Values are the ones the test itself wrote -- this double holds no real credentials.
+   */
+  readonly writtenVariables: { name: string; value: string; environmentId: string; serviceId?: string }[] = [];
   readonly denied: string[] = [];
   private sequence = 0;
 
@@ -187,6 +203,11 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
      */
     const requiredFields: Record<string, string[]> = {
       sharedVariableConfigure: ['projectId', 'environmentId', 'name', 'enabledServiceIds', 'disabledServiceIds'],
+      // From the same captured introspection: `EnvironmentCreateInput` requires projectId and name and NOTHING
+      // else -- `sourceEnvironmentId` is optional, which is the schema's own answer to the claim that a second
+      // environment has to be made from a first one (D57). A provider that stops passing a source must still be
+      // able to create the environment.
+      environmentCreate: ['projectId', 'name'],
     };
 
     const inputKey = ['projectCreate', 'projectUpdate', 'environmentCreate', 'projectTokenCreate', 'serviceCreate', 'serviceInstanceUpdate', 'variableUpsert', 'serviceDomainCreate', 'customDomainCreate', 'serviceInstanceLimitsUpdate', 'sharedVariableConfigure'].includes(operation) ? 'input' : null;
@@ -263,8 +284,15 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
         const input = v.input as { projectId: string; name: string; sourceEnvironmentId?: string };
         const id = `env-${this.sequence++}`;
         this.environments.set(id, { id, projectId: input.projectId, name: input.name });
+        // Recorded so a test can hold the provider to the rule: platfolio never creates an environment from a
+        // source, because the source's services -- including its database -- arrive with it (D57).
+        this.environmentCreates.push({ name: input.name, ...(input.sourceEnvironmentId ? { sourceEnvironmentId: input.sourceEnvironmentId } : {}) });
         if (input.sourceEnvironmentId) {
-          // A clone carries configuration; the provider documents that sealed values are not copied.
+          // Kept because the live API does this, not because platfolio asks for it. Measured on our own project
+          // when staging was created from production: the duplicated environment's `api` and `main` carried the
+          // SAME service ids as production's, and staging's api then timed out on a DSN that pointed at a
+          // database it does not own. So the copy is faithful -- including the part that makes it dangerous:
+          // the serviceId travels, only the instance is new.
           for (const [key, instance] of this.instances) {
             if (!key.startsWith(`${input.sourceEnvironmentId}:`)) continue;
             const cloneKey = `${id}:${key.split(':')[1]}`;
@@ -282,25 +310,34 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
         return { project: { volumes: { edges: this.volumes.filter((x) => x.projectId === projectId).map((node) => ({ node })) } } } as T;
       }
       case 'volumeCreate': {
-        const input = v.input as { projectId: string; environmentId: string; serviceId: string; mountPath: string };
+        const input = v.input as { projectId: string; environmentId: string; serviceId: string, mountPath: string };
         if (!this.services.has(input.serviceId)) throw new Error('railway volumeCreate: unknown service [NOT_FOUND]');
+        if (!this.instances.has(`${input.environmentId}:${input.serviceId}`)) {
+          // The captured schema makes `VolumeInstance.environmentId` NON_NULL: a volume instance belongs to one
+          // environment's service. Attaching one where the service does not run is not a thing the API does, and
+          // a double that allowed it would let a shared disk pass as per-environment storage (D57).
+          throw new Error('railway volumeCreate: service has no instance in this environment [NOT_FOUND]');
+        }
         const id = `vol-${String(this.sequence).padStart(4, '0')}`;
         this.sequence += 1;
         // Named like the real API, which derives `<service>-volume` and ignores whatever label the plan used.
         // The double used to invent `volume-<id>`, and that difference is what made a match-by-name provider
-        // path look fine in CI and be dead code against production.
+        // path look fine in CI and be dead code against production. With per-environment services the derived
+        // name differs per environment too, which is the honest consequence of the naming rule.
         const owner = this.services.get(input.serviceId);
         const volumeName = `${owner?.name ?? 'orphan'}-volume`;
-        this.volumes.push({ id, projectId: input.projectId, name: volumeName, serviceId: input.serviceId, mountPath: input.mountPath });
+        this.volumes.push({ id, projectId: input.projectId, name: volumeName, serviceId: input.serviceId, environmentId: input.environmentId, mountPath: input.mountPath });
         return { volumeCreate: { id, name: volumeName } } as T;
       }
       case 'environment.volumeInstances': {
-        const environment = [...this.environments.values()].find((e) => e.id === v.environmentId);
-        const scoped = environment ? this.volumes.filter((x) => x.projectId === environment.projectId) : this.volumes;
+        // Scoped to the ENVIRONMENT, not to the project: `VolumeInstance.environmentId` is NON_NULL, so asking
+        // what is mounted here must not answer with what is mounted somewhere else. The double used to filter
+        // by project, which made production's surviving disk visible to staging's re-attach path.
+        const environmentId = v.environmentId as string;
         return {
           environment: {
             volumeInstances: {
-              edges: scoped.map((x) => ({
+              edges: this.volumes.filter((x) => x.environmentId === environmentId).map((x) => ({
                 node: { volumeId: x.id, serviceId: x.serviceId, mountPath: x.mountPath, volume: { name: x.name } },
               })),
             },
@@ -344,8 +381,15 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
       }
       case 'serviceCreate': {
         const input = v.input as { projectId: string; environmentId: string; name: string; source: { image: string } };
-        const existing = [...this.services.values()].find((s) => s.projectId === input.projectId && s.name === input.name);
-        const id = existing?.id ?? `svc-${this.sequence++}`;
+        // Measured against the live API: a name the project already holds is REFUSED, whatever environment the
+        // call names -- `A service named "api" already exists in this project`. The double used to accept the
+        // call and hand back the existing service, which is how a provider could "place" a second environment's
+        // api by pointing it at production's service and still pass every test. Names are the only thing that
+        // keeps two environments' services apart (D57), so the double enforces the one fact that makes the rule
+        // necessary.
+        const clash = [...this.services.values()].find((s) => s.projectId === input.projectId && s.name === input.name);
+        if (clash) throw new Error(`railway serviceCreate: A service named "${input.name}" already exists in this project [UNPROCESSABLE]`);
+        const id = `svc-${this.sequence++}`;
         this.services.set(id, { id, projectId: input.projectId, name: input.name });
         this.instances.set(`${input.environmentId}:${id}`, {
           instanceId: `inst-${this.sequence++}`,
@@ -407,6 +451,10 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
         const name = spec.name ?? 'Postgres';
         this.templateDeploys.push({ templateId: input.templateId, serviceName: name, credentialKind: credential.kind });
         if (!this.projects.has(input.projectId)) throw new Error('railway templateDeployV2: project not found [NOT_FOUND]');
+        // Same project-unique name rule as serviceCreate (measured), because a template deploy creates a service
+        // too: a provider that asked for a second `app-db` would get a refusal live and a second database here.
+        const clash = [...this.services.values()].find((s) => s.projectId === input.projectId && s.name === name);
+        if (clash) throw new Error(`railway templateDeployV2: A service named "${name}" already exists in this project [UNPROCESSABLE]`);
         const serviceId = `svc-${this.sequence++}`;
         this.services.set(serviceId, { id: serviceId, name, projectId: input.projectId });
         // Measured: a template deploy provisions AND deploys on its own -- the instance came up
@@ -448,13 +496,13 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
         if (!input.serviceId) {
           if (!this.environments.has(input.environmentId)) throw new Error('railway variableUpsert: no environment [NOT_FOUND]');
           this.sharedVariables.set(`${input.environmentId}:${input.name}`, input.value);
-          this.writtenVariables.push({ name: input.name, value: input.value });
+          this.writtenVariables.push({ name: input.name, value: input.value, environmentId: input.environmentId });
           return { variableUpsert: true } as T;
         }
         const instance = this.instances.get(`${input.environmentId}:${input.serviceId}`);
         if (!instance) throw new Error('railway variableUpsert: no instance [NOT_FOUND]');
         instance.variables.add(input.name);
-        this.writtenVariables.push({ name: input.name, value: input.value });
+        this.writtenVariables.push({ name: input.name, value: input.value, environmentId: input.environmentId, serviceId: input.serviceId });
         return { variableUpsert: true } as T;
       }
       case 'sharedVariableConfigure': {

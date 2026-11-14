@@ -5,6 +5,40 @@ change; entries describe merged intent, not aspirations.
 
 "## [Unreleased]
 
+### Changed — every environment is provisioned; a database belongs to one environment (D57)
+
+`EnvironmentPlanSchema.cloneFrom` is **gone**, and with it the mechanism it described. A second environment
+used to be created by duplicating the first (`environmentCreate` with a `sourceEnvironmentId`), which was
+measured against the live API on our own project and produced a staging whose `api` and `main` carried
+**production's service ids** — so staging's api read production's DSN and answered `connect ETIMEDOUT` on a
+database it did not own. A cloned database is not an isolated one, so no configuration layered on a copy could
+have fixed it (D56 gave staging its own values; this gives it its own data).
+
+Now each environment is provisioned from its own declaration, by the same path production's services were
+created by: `serviceCreate` for an image service, the template deploy for a database. Because Railway service
+names are unique **per project** (measured: `A service named "api" already exists in this project`) and the
+captured schema offers no way to place an existing service into a further environment (`serviceInstanceUpdate`
+on an unplaced instance returns `true` and changes nothing — E25), the provider resolves a **physical** name per
+environment: the declared name if nobody holds it or if that service already runs here, otherwise
+`<name>-<environment>`. Production therefore keeps `api`, `identity` and `main` — renaming them would mean
+deleting the services that hold live data — and a new environment gets `api-staging` and its own `main-staging`.
+The asymmetry is history, not a special case: whichever environment is provisioned first keeps the bare names,
+and `platform-deploy --dry-run` now prints the resolved names before anything is sent.
+
+Also in this change, because the naming rule makes them observable: reference expressions spell the
+environment's own database service, secret delivery addresses the environment's own service (a `PUT …/secrets`
+for `api` in staging can no longer land on production's), teardown claims only the placements that existed,
+coverage verification (D55) checks each environment's own services, and a service row that runs nowhere is
+reclaimed so a half-finished apply can converge — while a row that runs in another environment is reported,
+never deleted to free a name.
+
+**Live state, measured:** the broken staging environment was deleted from platfolio's Railway project as part of
+this work, and **production was left running and re-verified afterwards** — `readyz` returned
+`{"status":"ready","checks":[{"name":"identity","status":"ok"},{"name":"database","status":"ok"}]}`. Nothing was
+re-created live; the new provisioning path is tested against the double, and its first live run is this
+repository's next apply. Removing a schema field also changes every rendered plan, so every stored idempotency
+marker is stale exactly once: the next apply resumes instead of reporting `noop`, which is the path D55 governs.
+
 ### Added — releases are reported, secrets are delivered, and the templates need one file less
 
 Three API operations (32 → 35, spec written before the handlers), one store record, and two provider verbs:

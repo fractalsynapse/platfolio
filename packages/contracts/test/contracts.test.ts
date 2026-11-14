@@ -16,10 +16,10 @@ function railwayPlan() {
   for (const environment of plan.environments) {
     environment.databases = [];
     environment.buckets = [];
-    // cloneFrom is kept: E25 measured that duplicating an environment is the only placement mechanism
-    // Railway offers, so a plan that wants a service in two environments must clone -- and the provider
-    // now refuses to pretend otherwise. Nulling this out makes the reduced plan describe an
-    // arrangement the provider correctly rejects.
+    // Nothing is nulled out here to make staging "look" standalone. Each environment declares its resources in
+    // full and the provider provisions each one its own services (D57), so the reduced plan keeps both
+    // environments and both `api` declarations: stripping staging down would describe an arrangement the
+    // provider no longer implements and quietly turn the reduced gate into a single-environment test.
     environment.domains = environment.domains.map((d) => ({ ...d, host: `${d.service}.up.railway.app` }));
   }
   return plan;

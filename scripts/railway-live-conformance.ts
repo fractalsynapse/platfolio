@@ -75,7 +75,10 @@ function livePlan(): InfraPlan {
     manifestRef: { template: 'livecheck', version: '0.0.0' },
     environments: [
       { name: 'production', services: [service(1, [{ variable: 'DATABASE_URL', database: 'e2e-db', output: 'DATABASE_URL' }])], domains: [{ host: 'web.up.railway.app', service: 'web', port: 80, verificationName: 'unused' }], databases: [{ name: 'e2e-db', kind: 'postgres' }], buckets: [] },
-      { name: 'staging', cloneFrom: 'production', services: [service(1, [])], domains: [], databases: [], buckets: [] },
+      // Declared, not derived: this environment is provisioned the same way production's line above is, so the
+      // probe now measures the thing cloning hid -- `web` here becomes its OWN service (`web-staging`, since
+      // the project already holds `web`), and nothing in staging points at production's database (D57).
+      { name: 'staging', services: [service(1, [])], domains: [], databases: [], buckets: [] },
     ],
   };
 }

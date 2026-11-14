@@ -89,12 +89,12 @@ export function buildPlan(manifest: Manifest, config: InstanceConfig): InfraPlan
 
     return {
       name: envName,
-      ...(envName === 'staging' && enabled.includes('production') ? { cloneFrom: 'production' } : {}),
       services,
       domains,
-      // Declared in every environment: the provider provisions a template database once and places it in the
-      // duplicate, which is the behaviour measured live rather than an assumption (service names are
-      // project-wide).
+      // Declared in EVERY environment that places the service, because each environment gets its own database
+      // and the provider provisions it there (D57). This used to be justified the other way round -- "the
+      // provider provisions one and the duplicate receives it" -- and what the duplicate received was
+      // production's connection string, which is why staging could not reach a database it appeared to have.
       databases: database && placedNames.size ? [{ name: database.name, kind: database.kind }] : [],
       buckets: storage && placedNames.size ? [{ name: storage.name, ...(storage.region ? { region: storage.region } : {}) }] : [],
       volumes: declaredVolumes
