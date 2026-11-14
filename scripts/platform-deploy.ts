@@ -150,7 +150,69 @@ if (arg('bootstrap-vars')) {
   process.exit(0);
 }
 
+/**
+ * The lookup the maintenance paths share: a provider call bound to the workspace token, the self-host project,
+ * one environment, and the project's service names.
+ *
+ * Hoisted out of the `--prune-vars` branch because both maintenance actions need it, and because leaving it
+ * inline produced two defects at once in `--redeploy`: it only ran as a side effect of pruning (so
+ * `--redeploy=api-staging --apply` printed a plan and did nothing), and the environment was hard-wired to
+ * `production` -- which for a staging service means "silently cannot find the instance", and for a production
+ * service means a maintenance flag that can only ever touch the live environment. A flag that appears to work is
+ * worse than a missing one, so the environment is now explicit and defaulted only where it always was.
+ */
+async function maintenanceTarget(token: string, workspaceId: string, environmentName: string) {
+  const auth = { 'content-type': 'application/json', authorization: token };
+  const call = async (query: string, variables?: Record<string, unknown>) =>
+    (await (await fetch('https://backboard.railway.com/graphql/v2', { method: 'POST', headers: auth, body: JSON.stringify({ query, variables }) })).json() as any);
+  const projects = await call('query($w:String!){ projects(workspaceId:$w, first:50){ edges{ node{ id name } } } }', { w: workspaceId });
+  const project = (projects.data?.projects?.edges ?? []).find((x: any) => x.node.name === 'platfolio-selfhost');
+  if (!project) { console.error('  no platfolio-selfhost project -- run the apply first'); process.exit(1); }
+  const projectId: string = project.node.id;
+  const detail = await call('query($p:String!){ project(id:$p){ environments(first:10){ edges{ node{ id name } } } services(first:30){ edges{ node{ id name } } } } }', { p: projectId });
+  const environments = (detail.data?.project?.environments?.edges ?? []).map((x: any) => x.node) as Array<{ id: string; name: string }>;
+  const environmentId = environments.find((e) => e.name === environmentName)?.id;
+  if (!environmentId) {
+    console.error(`  no environment "${environmentName}" in this project (have: ${environments.map((e) => e.name).join(', ') || 'none'})`);
+    process.exit(1);
+  }
+  const nameToId = new Map<string, string>(((detail.data?.project?.services?.edges ?? []) as any[]).map((x) => [x.node.name, x.node.id]));
+  return { call, projectId, environmentId: environmentId as string, nameToId };
+}
+
+if (arg('redeploy') && !arg('prune-vars')) {
+  // Standalone: restarting one service in one environment, which is what an operator reaches for when a
+  // reference resolves only after the service first booted -- exactly today's staging case, where `api-staging`
+  // started before its `main-staging` database finished provisioning (provider references are asynchronous),
+  // read an empty `PLATFOLIO_DB_URL`, and fell back to the in-memory store while still answering `ready`.
+  const service = value('redeploy');
+  const environmentName = value('environment') ?? 'production';
+  if (!service) { console.error('  usage: --redeploy=<service> --environment=<name> --apply'); process.exit(1); }
+  if (!arg('apply')) {
+    console.error(`  --redeploy=${service} --environment=${environmentName} mutates a running service; add --apply`);
+    process.exit(1);
+  }
+  const token = process.env.RAILWAY_TOKEN;
+  const workspaceId = process.env.RAILWAY_WORKSPACE_ID;
+  if (!token || !workspaceId) { console.error('  --redeploy needs RAILWAY_TOKEN and RAILWAY_WORKSPACE_ID'); process.exit(1); }
+  const { call, projectId, environmentId, nameToId } = await maintenanceTarget(token, workspaceId, environmentName);
+  const serviceId = nameToId.get(service);
+  if (!serviceId) {
+    console.error(`  --redeploy: no service named "${service}" in this project (have: ${[...nameToId.keys()].join(', ')})`);
+    console.error('  note that names are physical after D57: staging runs api-staging, main-staging.');
+    process.exit(1);
+  }
+  const inst = await call('query($p:String!,$e:String!){ environment(projectId:$p, id:$e){ serviceInstances{ edges{ node{ serviceId id } } } } }', { p: projectId, e: environmentId });
+  const instance = (inst.data?.environment?.serviceInstances?.edges ?? []).find((x: any) => x.node.serviceId === serviceId);
+  if (!instance) { console.error(`  --redeploy: ${service} has no instance in "${environmentName}"`); process.exit(1); }
+  const dep = await call('mutation($e:String!,$s:String!){ serviceInstanceDeploy(environmentId:$e, serviceId:$s, latestCommit:true) }', { e: environmentId, s: serviceId });
+  if (dep.errors) { console.error(`  --redeploy failed: ${JSON.stringify(dep.errors).slice(0, 160)}`); process.exit(1); }
+  console.log(`  redeploy requested for ${service} in ${environmentName} (instance ${String(instance.node.id).slice(0, 8)})`);
+  process.exit(0);
+}
+
 if (arg('prune-vars')) {
+
   // An operator action, spelled out rather than hidden in the provider: the provider writes the plan's
   // references and never deletes variables a later plan dropped, because silently removing configuration a
   // tenant may have set by hand is a worse surprise than a stale variable. Pruning is therefore ours to do

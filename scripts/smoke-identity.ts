@@ -10,7 +10,11 @@
  */
 const idp = process.env.KC_BASE ?? 'http://localhost:8081';
 const api = process.env.CONTROL_PLANE_BASE ?? 'http://localhost:8082';
-const realm = 'platfolio';
+// The realm is a parameter (D56): platfolio runs ONE hosted Keycloak whose realms are per environment, so
+// `platfolio` and `platfolio-staging` are both real and only one of them is production. Hard-coding the
+// production realm meant the staging deployment could never be smoke-tested end to end -- its `/readyz` says
+// `identity: ok`, which is a JWKS reachability check, not proof that a token from ITS realm is accepted here.
+const realm = process.env.KC_REALM ?? 'platfolio';
 // The dev client secret by default, overridable so this same suite can run against the hosted
 // realm (KC_CLIENT_SECRET) -- acceptance is one list of checks, not a local-only ritual.
 const secret = process.env.KC_CLIENT_SECRET ?? 'platfolio-dev-only';
