@@ -68,6 +68,34 @@ were bundled first to `.archive/platfolio-all-refs-20261113.bundle` (gitignored:
 source). Recover with `git bundle unbundle .archive/<file>.bundle`, or per-PR with
 `gh pr view <N> --json headRefOid` -- GitHub retains `refs/pull/<N>/head` for every merged PR.
 
+## Delivering our own credentials (`--deliver-secrets`)
+
+The first-party stack declares three shared-variable secrets on its `api` service -- the GitHub App identity.
+They arrive through the provider seam, the same implementation a tenant's delivery uses:
+
+```sh
+PLATFOLIO_GITHUB_APP_ID=... PLATFOLIO_GITHUB_INSTALLATION_ID=... PLATFOLIO_GITHUB_PRIVATE_KEY=... \
+  npx -y tsx scripts/platform-deploy.ts --deliver-secrets
+```
+
+Read it as a list, not a guess:
+
+- the names and their **location** come from the registered composition, so a credential the platform never
+  declared is refused rather than parked somewhere plausible;
+- values are read from the local environment, written once, and **never logged, stored or echoed** -- the output
+  is names, environment, service, source and the provider's presence read-back (D4);
+- anything not supplied locally is listed as left alone, because inventing a value would be worse than an
+  incomplete install;
+- `verified: false` in that output is real information: the write was accepted but the name was not readable
+  back for that service -- which for `source: shared-variable` usually means the attachment is missing, and
+  attachment is the second of the two calls.
+
+`--bootstrap-vars` still exists for the two Keycloak bootstrap names, but it is the older shape of this
+problem: it talks to the provider's GraphQL endpoint with a hand-written query, knew only two variable names,
+and could only reach `production`. When staging was created those three App credentials did not exist in it, and
+the plan check correctly reported `secret-unavailable` for both environments -- the honest failure that produced
+`--deliver-secrets`. Retiring the raw-GraphQL blocks is #213.
+
 ## Two realms, one Keycloak (D56)
 
 platfolio's production and staging control planes share the hosted identity service -- one container, one

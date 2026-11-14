@@ -99,6 +99,40 @@ schema's error type carries the issues. Fixed by deleting the import and matchin
 establish the claim. AGENTS.md already said this ("fake-only tests do not establish that wiring works"); this
 is the cost of reading past it.
 
+### Added — shared-variable delivery, and the platform description decides where a credential lands (D53, closes #225)
+
+`putSecretValue` gained a `source` argument, and the value is not the caller's to choose: it is read from the
+registered plan's own `secrets` entry for that service in that environment. `source: shared-variable` means
+**two provider calls** -- `variableUpsert` with no `serviceId` (environment scope), then
+`sharedVariableConfigure` with `enabledServiceIds` (attachment). That second call is not ceremony: the captured
+provider schema shows `SharedVariableConfigureInput` carries `enabledServiceIds` / `disabledServiceIds` and **no
+value field whatsoever**, so it cannot create the variable -- and a value written at environment scope without
+attachment is invisible to the service that declared it, while still existing in the environment. `verified`
+therefore means "the declaring service can read this name", not "a value is somewhere".
+
+`secretWriteScope(source)` now lives in contracts and is the ONE narrowing both the API handler and the deploy
+script call. The first draft duplicated the mapping in the script; TypeScript refused the wider plan enum, and
+the fix was to make it single-sourced rather than to cast.
+
+A name the description never declared is refused with `secret-not-declared`, and a service the environment does
+not contain is refused the same way: platfolio will not invent a custody location for someone, and an undeclared
+variable is one no deployment was told to read. Presence and delivery agree because both consult the same entry.
+
+New first-party path: `platform-deploy --deliver-secrets` delivers every credential this composition declares,
+through the provider seam rather than the hand-written GraphQL that `--bootstrap-vars` uses. Finding that gap
+required staging to exist -- it was created, then immediately failed `secret-unavailable` in both environments,
+which is the plan check working, not the deploy being broken.
+
+Evidence: conformance gained a case that delivers at BOTH scopes and reads presence, so both drivers must
+implement the distinction; two Railway-specific tests prove the environment-scoped write lands at environment
+scope, that the attachment names exactly the declaring service, and -- the load-bearing one -- that undoing the
+attachment flips presence back to `missing`, which is what stops `verified` meaning "we hope". Default-scope
+delivery is asserted NOT to write at environment scope.
+
+230 tests in the contracts+control-plane pair, 0 failures; `check-contracts` classified the change **additive
+(4 lines, MINOR)** on its own -- the breaking ack I had prepared was unnecessary, which is the improved gate
+being right rather than me being right.
+
 ### Added — configuration is scoped per environment inside the platform description (D56)
 
 `x-platfolio.services.<name>.environmentValues.<env>.<NAME>`, composed by `buildPlan` into the effective
