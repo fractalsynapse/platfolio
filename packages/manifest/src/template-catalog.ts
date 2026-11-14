@@ -2,8 +2,9 @@
  * The template catalog: which published repository *is* which template, and how to read it.
  *
  * There is no bundled copy of a template in this repository any more, and that is the whole point. The three
- * `fractalsynapse/platfolio-*` repositories used to be *generated artifacts* of a `templates/` directory
- * (D38), and the gap between the two copies was maintained by a publisher and a parity checker whose combined
+ * published template repositories (the names live in `TEMPLATES` below, the only place a template name
+ * belongs -- D49). They used to be *generated artifacts* of a `templates/` directory (D38), and the gap
+ * between the two copies was maintained by a publisher and a parity checker whose combined
  * job was to keep one fiction in step with another. They drifted all day: the registry consolidation (D58)
  * deleted `.platfolio/environment.yaml` from the bundled copy and left it live in all three published
  * repositories, where `applyInventory` still merged it into the plan beside the new root registry -- two
