@@ -1,5 +1,5 @@
 import { createKernel, disposeKernel } from '@platfolio/kernel';
-import { EndpointKeySource, IdentityConfigSchema } from '@platfolio/contracts';
+import { EndpointKeySource, IdentityConfigSchema, redactCredentialShaped } from '@platfolio/contracts';
 import { ROUTE_MANIFEST } from './routes.ts';
 import { buildCapabilities } from './capabilities.ts';
 
@@ -90,9 +90,46 @@ export function configFromEnv(env: NodeJS.ProcessEnv): BootConfig {
   };
 }
 
+/**
+ * Say something useful about a boot failure.
+ *
+ * The first version printed only `error.message`. On staging's first boot that produced a log line reading
+ * `control-plane: cannot start: ` -- an empty message, no name, no stack, no cause -- which is a fail-closed
+ * path that fails closed *and* blind: the container refused correctly and told nobody why. A machine that
+ * refuses must also explain, or the operator has to guess between "configuration is missing" and "a dependency
+ * threw on the way in".
+ *
+ * Redaction is not optional here. Stack frames quote the very strings that failed, so a DSN with a password
+ * would otherwise land in the provider's log stream -- which is platfolio reading a tenant's secret, by
+ * accident, in the one component that promises not to (D4).
+ */
+export function describeBootFailure(error: unknown): string {
+  const e = error as { name?: string; message?: string; stack?: string; cause?: unknown };
+  // A thrown non-Error (a string, a domain object) used to render as `Error: (no message)`, which is how a real
+  // reason disappears: the boot path lost whatever was thrown the moment it was not an Error instance.
+  if (typeof error === 'string' || typeof error === 'number' || typeof error === 'bigint') {
+    return `thrown value (${typeof error}): ${redactCredentialShaped(String(error)).slice(0, 240)}`;
+  }
+  const name = typeof e?.name === 'string' && e.name.length > 0 ? e.name : 'Error';
+  const message = typeof e?.message === 'string' && e.message.length > 0 ? e.message : '(no message)';
+  const parts = [`${name}: ${redactCredentialShaped(message)}`];
+  // The cause chain, because a wrapped failure is where the real reason lives -- one level deep is enough to
+  // turn "database error" into "schema platfolio does not exist", and deeper chains are noise at boot.
+  const cause = e?.cause as { name?: string; message?: string } | undefined;
+  if (cause && (typeof cause.message === 'string' || typeof cause.name === 'string')) {
+    parts.push(`caused by ${cause.name ?? 'Error'}: ${redactCredentialShaped(String(cause.message ?? '(no message)'))}`);
+  }
+  const frames = typeof e?.stack === 'string'
+    ? e.stack.split('\n').slice(1).filter((l) => l.trim().startsWith('at ')).slice(0, 3).map((l) => l.trim())
+    : [];
+  if (frames.length > 0) parts.push(redactCredentialShaped(frames.join(' | ')));
+  return parts.join(' -- ');
+}
+
 export async function boot(config: BootConfig, fetchImpl: typeof fetch = fetch) {
   // Checked before anything starts: refusing after the listener is open would leave a half-booted control plane
   // holding a port, which is worse than not starting.
+
   if (!config.jwksUri) throw new Error('control-plane cannot start: PLATFOLIO_IDENTITY_JWKS_URI is not set -- identity would refuse every token, and starting in order to refuse everything is not the same as being able to serve');
   const identity = IdentityConfigSchema.parse({
     issuer: config.issuer,
@@ -149,7 +186,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
         stopping = true;
         process.stdout.write(`control-plane: ${signal} received, closing listener\n`);
         app.stop().then(() => process.exit(0), (error: unknown) => {
-          process.stderr.write(`control-plane: shutdown failed: ${(error as Error).message}\n`);
+          process.stderr.write(`control-plane: shutdown failed: ${describeBootFailure(error)}\n`);
           process.exit(1);
         });
       };
@@ -161,7 +198,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       process.stdout.write(`control-plane listening on ${app.address.host}:${String(app.address.port)}\n`);
     })
     .catch((error: unknown) => {
-      process.stderr.write(`control-plane: cannot start: ${(error as Error).message}\n`);
+      process.stderr.write(`control-plane: cannot start: ${describeBootFailure(error)}\n`);
       process.exit(1);
     });
 }

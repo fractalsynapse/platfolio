@@ -25629,7 +25629,7 @@ function normalizeHash(digest) {
   return digest.replace(/^sha256:/, "").slice(0, 64).toLowerCase();
 }
 function redactCredentialShaped(text) {
-  return text.replace(/(?:gh[pousr]_|github_pat_)[A-Za-z0-9]{8,}/g, "[redacted-token]").replace(/Bearer\s+[A-Za-z0-9._-]{8,}/g, "Bearer [redacted]").replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\\s\\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, "[redacted-key]").replace(/([?&](?:access_token|token|password)=)[^&\\s]+/gi, "$1[redacted]");
+  return text.replace(/(?:gh[pousr]_|github_pat_)[A-Za-z0-9]{8,}/g, "[redacted-token]").replace(/Bearer\s+[A-Za-z0-9._-]{8,}/g, "Bearer [redacted]").replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\\s\\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, "[redacted-key]").replace(/([?&](?:access_token|token|password)=)[^&\\s]+/gi, "$1[redacted]").replace(/:\/\/([^/:@\s]+):([^@\s]+)@/g, "://$1:[redacted]@");
 }
 
 // packages/contracts/src/railway-provider.ts
