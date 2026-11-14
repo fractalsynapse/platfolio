@@ -40,6 +40,28 @@ So the original observation — "import ran without an obvious error and the rol
 | `POST /admin/realms/{r}/users` carrying `realmRoles`/`clientRoles` | **ignored** — upstream issue #13390, still open | the API cannot declare assignments at creation |
 | Admin REST role-mapping endpoints (`…/role-mappings/clients/{id}`, or `kcadm add-roles`) | works, idempotent per name, read back and asserted | **what `scripts/seed-identity.ts` does, and should continue to do** |
 
+## Further measured facts from the same run (added after the first draft)
+
+| Finding | Why it matters here |
+| --- | --- |
+| A file named `<something>-realm.json` whose internal realm is `<other>` is **fatal**: `File name / realm name mismatch. … File name should be <realm>-realm.json`. A bare `realm.json` is accepted via the single-file provider | a silent-looking config bug in the filename is a startup failure; the convention is also what makes *user side-files* (`<realm>-users-N.json`) load at all |
+| `defaultRoles` populates the realm's default-role composite but grants **nothing to users declared in the same file**; a hand-written `default-roles-<realm>` entry produced a stray `default-roles-platfolio-1`; a real `kc.sh export` round-trips correctly | if a role must be on a user, write it in `realmRoles`. Do not hand-author default roles -- export them |
+| A role name referenced only by a user, never declared, is **auto-created** by the importer (no PK violation on 26.8.2 via boot import) | convenient, and a 26.5+ regression open upstream (#49731 / PR #50056, unmerged as of this writing) where two users referencing the same undeclared *client* role can hit a `KEYCLOAK_ROLE` PK violation. **Declare roles explicitly.** |
+| `partialImport` with `ifResourceExists=OVERWRITE` also **deletes `service-account-*` users of clients** upstream (#46674), on top of the credential wipe measured here | our own shared-identity realm runs on service accounts, so partial-import-overwrite is a non-starter for us even in principle |
+| The Kubernetes Operator's `KeycloakRealmImport` CR is likewise **create-only**: "does not update or delete those" | rules out "just use the operator" as an idempotent-seeding answer |
+| User Profile validators do **not** run for imported users (#52310): full import and `--import-realm` share the code path | one less candidate explanation for "roles vanished" -- the opposite risk applies (users the API would reject get created) |
+| `authorizationServicesEnabled` interplay: service accounts and authorization settings are set up *after* users and skipped entirely when the import is `skipUserDependent`; #37569 reports an NPE importing an admin-UI-exported realm on 26.1.0–26.1.2 | **not exercised here** (our probes ran with authorization services off) -- flagged as an untested edge rather than a clean bill of health |
+
+## Provenance of the article that prompted this re-check
+
+The maintainer pointed at <https://medium.com/@torinks/keycloak-roles-2a521e64344d>. **It could not be fetched (HTTP 403, bot protection), so its content is unverified in this document** and nothing above depends on it: every claim here traces to Keycloak's own docs, upstream code at tag `26.8.2`, or a measurement against that image. Search metadata describes it as a general realm-roles/client-roles explainer. It did its job -- it made me re-test a claim I had asserted three times.
+
+## Limits of this evidence
+
+Measured on `start-dev` with in-container H2 against the **same image digest we run**; the skip-on-existing and destructive-replace behaviours were also exercised via `kc.sh import/export`. Not exercised: Postgres-specific batching (relevant to #49731), clustered caches, realms with `authorizationServicesEnabled: true`, FGACv2/admin permissions, user side-files, and `--import-realm` of `master`. No Keycloak 27 exists (latest release 26.8.2), so anything labelled "27" would be `main`-branch code and is not claimed here.
+
+**Side effect of the experiment, disclosed:** the cleanup command `docker rm -f kc-*` also removed a pre-existing, unrelated container named `kc-seed`. Nothing in this repository references that name, our local stack runs Keycloak through Compose, and the dev Postgres (`platfolio-control-plane-main-1`) was left running and healthy. The 16 probe containers were ours; `kc-seed` was not.
+
 ## Consequences adopted
 
 1. `scripts/seed-identity.ts` stays the seeding mechanism — not because import cannot carry roles, but because **import cannot be re-applied idempotently** and the seed can. It creates the client role, maps it, and reads the mapping back (that read-back is the test).
@@ -51,7 +73,7 @@ So the original observation — "import ran without an obvious error and the rol
 - Keycloak 26.8 Server Developer — *Realm Import/Export* and *Role* sections: https://www.keycloak.org/docs/26.0/server_developer/
 - Keycloak 26.8 Admin Console Guide — *Assigning role mappings*: https://www.keycloak.org/docs/26.0/admin_console_guide/server_roles/
 - Upstream issue (API ignores role declarations on user creation): https://github.com/keycloak/keycloak/issues/13390
-- Community walkthrough that prompted this re-check (used as a pointer, not as authority): https://medium.com/@torinks/keycloak-roles-2a521e64344d
+- The walkthrough that prompted this re-check: https://medium.com/@torinks/keycloak-realm-import-roles-2a521e64344d -- **HTTP 403, not fetched; content unverified here.** It did its job (it made me re-test a claim I had asserted three times); no finding above rests on it
 - Upstream representations and import code: `UserRepresentation` (field list quoted in the measured error above), `RepresentationToModel.importRoles`: https://github.com/keycloak/keycloak
 
 **Method note.** The maintainer's objection was correct and the cost of my error was three documents asserting something untrue about a third-party product. The claim had survived because it was never re-tested after the container version moved, and because a silent skip is indistinguishable from success in a log that prints `Import finished successfully`. Any claim in this repository about provider behaviour owes a re-test when the provider version changes.
