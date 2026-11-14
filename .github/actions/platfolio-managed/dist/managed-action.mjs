@@ -25750,16 +25750,26 @@ var RailwayInfraProvider = class {
     const workspaceCredential = await this.credentials.workspace();
     await this.writeMarker(projectId, plan.planHash, workspaceCredential);
     if (this.markerOf(existing?.description) === plan.planHash) {
+      const coverage = await this.coverageOf(projectId, parsed.data.environments, workspaceCredential);
       const state = await this.snapshot(projectId);
-      return {
-        instanceId: plan.instanceId,
-        planHash: plan.planHash,
-        verified: state.services.length > 0 && state.services.every((s) => s.status === "live"),
-        services: state.services,
-        domains: state.domains,
-        failures,
-        noop: true
-      };
+      if (coverage.covered) {
+        return {
+          instanceId: plan.instanceId,
+          planHash: plan.planHash,
+          verified: state.services.length > 0 && state.services.every((s) => s.status === "live"),
+          services: state.services,
+          domains: state.domains,
+          failures,
+          noop: true
+        };
+      }
+      notes.push({
+        step: "idempotency",
+        code: "marker-without-state",
+        // Named, not counted: an operator reading this has to know WHICH declared thing the provider is missing,
+        // or the resume looks like flapping.
+        message: `this plan's marker is present but ${String(coverage.missing.length)} declared thing(s) are absent in the provider (${coverage.missing.slice(0, 6).join("; ")}); resuming the apply rather than reporting success`
+      });
     }
     for (const environment of parsed.data.environments) {
       const environmentId = await this.ensureEnvironment(projectId, environment.name, environment.cloneFrom, workspaceCredential);
@@ -26731,6 +26741,45 @@ var RailwayInfraProvider = class {
     } catch {
       return [];
     }
+  }
+  /**
+   * Does the provider's actual state contain everything the plan declares?
+   *
+   * Deliberately three nested questions rather than one "are the services healthy" sweep, because the failure
+   * this exists to catch is absence, not illness: a missing environment, a service that exists in the project
+   * but was never placed in this environment, and a service placed with no domain bound are all invisible to a
+   * liveness check over the services that happen to be there.
+   */
+  async coverageOf(projectId, environments, workspaceCredential) {
+    const missing = [];
+    const listed = await this.environments(projectId, workspaceCredential);
+    const projectServices = await this.listServices(projectId, workspaceCredential);
+    for (const environment of environments) {
+      const env = listed.find((e) => e.name === environment.name);
+      if (!env) {
+        missing.push(`environment "${environment.name}"`);
+        continue;
+      }
+      const token = await this.credentials.forEnvironment(projectId, env.name);
+      const placed = await this.environmentInstances(projectId, env.id, token);
+      for (const service of environment.services) {
+        const known = projectServices.find((s) => s.name === service.name);
+        if (!known) missing.push(`service "${service.name}" (project level)`);
+        else if (!placed.has(known.id)) missing.push(`service "${service.name}" is not placed in "${environment.name}"`);
+      }
+      for (const domain2 of environment.domains ?? []) {
+        const assigned = /\.up\.railway\.app$/.test(domain2.host);
+        if (assigned) {
+          const target = projectServices.find((s) => s.name === domain2.service);
+          const info = target ? placed.get(target.id) : void 0;
+          if (!info || (info.domainHosts ?? []).length === 0) missing.push(`no domain bound to "${domain2.service}" in "${environment.name}" (plan asserted the generated host "${domain2.host}")`);
+          continue;
+        }
+        const bound = [...placed.values()].some((info) => (info.domainHosts ?? []).includes(domain2.host));
+        if (!bound) missing.push(`domain "${domain2.host}" in "${environment.name}"`);
+      }
+    }
+    return { covered: missing.length === 0, missing };
   }
   markerOf(description) {
     if (!description) return null;
