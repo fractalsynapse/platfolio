@@ -108,10 +108,15 @@ export class FakeInfraProvider implements InfraProvider {
    * a test implementation that kept values would let the contract be satisfied by an implementation that
    * violates it.
    */
-  async putSecretValue(input: { instanceId: string; environment: string; service: string; name: string; value: string }): Promise<SecretWriteResult> {
+  async putSecretValue(input: { instanceId: string; environment: string; service: string; name: string; value: string; source?: 'service' | 'shared-variable' }): Promise<SecretWriteResult> {
     if (!this.instances.has(input.instanceId)) return { ok: false, code: 'not-found', reason: `unknown instance ${input.instanceId}` };
     if (input.value.length === 0) return { ok: false, code: 'invalid-value', reason: 'a secret value must be a non-empty string' };
-    this.secretNames.add(`${input.instanceId}/${input.environment}/${input.service}/${input.name}`);
+    // Two custody keys, because the contract distinguishes the scopes and a double that flattened them would
+    // let a driver pass every assertion while writing secrets the service cannot read.
+    const custodyKey = input.source === 'shared-variable'
+      ? `${input.instanceId}/${input.environment}/+shared/${input.name}#${input.service}`
+      : `${input.instanceId}/${input.environment}/${input.service}/${input.name}`;
+    this.secretNames.add(custodyKey);
     return { ok: true, verified: true };
   }
 
@@ -119,7 +124,9 @@ export class FakeInfraProvider implements InfraProvider {
     const out: Record<string, SecretPresence> = {};
     for (const name of input.names) {
       if (!this.instances.has(input.instanceId)) { out[name] = 'unverifiable'; continue; }
-      out[name] = this.secretNames.has(`${input.instanceId}/${input.environment}/${input.service}/${name}`) ? 'set' : 'missing';
+      const scoped = `${input.instanceId}/${input.environment}/${input.service}/${name}`;
+      const attached = `${input.instanceId}/${input.environment}/+shared/${name}#${input.service}`;
+      out[name] = this.secretNames.has(scoped) || this.secretNames.has(attached) ? 'set' : 'missing';
     }
     return out;
   }

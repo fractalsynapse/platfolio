@@ -996,6 +996,12 @@ paths:
         `platfolio-held` custody -- platfolio storing the value and serving it at boot -- stays forbidden by D4.
         This path is the alternative to it, not a version of it.
 
+        WHERE the value lands is decided by the platform description, not by the caller: the registered plan's
+        `secrets` entry for this service in this environment carries the source, and `source: shared-variable`
+        means the provider writes at environment scope and attaches the declaring service -- two calls, the
+        second being what makes the credential readable. A name the description never declared is refused as
+        `secret-not-declared`; no registered plan at all is `no-plan`.
+
         204 means the provider accepted the write. `verified` is deliberately absent: inviting a retry loop
         against a provider that redacts values would make the API encourage polling for something that cannot be
         observed.

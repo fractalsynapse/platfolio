@@ -558,7 +558,7 @@ export class RailwayInfraProvider implements InfraProvider {
    * presence check, never a value read: the provider redacts values on read, so the strongest claim available
    * is "the variable now exists", which is also the only claim worth making.
    */
-  async putSecretValue(input: { instanceId: string; environment: string; service: string; name: string; value: string }): Promise<SecretWriteResult> {
+  async putSecretValue(input: { instanceId: string; environment: string; service: string; name: string; value: string; source?: 'service' | 'shared-variable' }): Promise<SecretWriteResult> {
     if (typeof input.value !== 'string' || input.value.length === 0) {
       return { ok: false, code: 'invalid-value', reason: 'a secret value must be a non-empty string; an empty value is a deletion the tenant did not ask for' };
     }
@@ -572,14 +572,26 @@ export class RailwayInfraProvider implements InfraProvider {
     const svc = services.find((s) => s.name === input.service);
     if (!svc) return { ok: false, code: 'not-found', reason: `no service "${input.service}" in project ${project.name}; services are named by the platform description` };
     const token = await this.credentials.forEnvironment(project.id, env.name);
+    const shared = input.source === 'shared-variable';
     try {
-      await this.upsertVariable(project.id, env.id, svc.id, input.name, input.value, token);
+      if (shared) {
+        // Two calls, one meaning, both read off the captured provider schema rather than assumed.
+        // `variableUpsert` WITHOUT a serviceId writes the value at environment scope -- that is what Railway
+        // calls a shared variable. `sharedVariableConfigure`, whose input carries only the enable/disable service
+        // lists and NO value field, is what attaches it to the service that has to read it. Calling only the
+        // first would write a credential the service cannot see and then verify the wrong thing.
+        await this.upsertSharedVariable(project.id, env.id, input.name, input.value, token);
+        await this.attachSharedVariable(project.id, env.id, input.name, svc.id, token);
+      } else {
+        await this.upsertVariable(project.id, env.id, svc.id, input.name, input.value, token);
+      }
     } catch (error) {
       // The provider's words, redacted: a rejected write is worth reading, and a credential must never be in it.
       return { ok: false, code: 'provider-refused', reason: redactCredentialShaped(String((error as Error).message)).slice(0, 240) };
     }
+    // Presence is read for the DECLARING service, not for the environment, so a shared variable that was written
+    // but never attached reports verified:false -- the failure the second call exists to prevent.
     const present = (await this.configVariableNames(project.id, env.id, svc.id).catch(() => [] as string[])).includes(input.name);
-    // verified: false is reported honestly -- the write succeeded but presence could not be read back.
     return { ok: true, verified: present };
   }
 
@@ -773,6 +785,40 @@ export class RailwayInfraProvider implements InfraProvider {
       query: 'mutation ($input: VariableUpsertInput!) { variableUpsert(input: $input) }',
       // skipDeploys: a configuration write must not trigger a redeploy we did not decide on.
       variables: { input: { projectId, environmentId, serviceId, name, value, skipDeploys: true } },
+    });
+  }
+
+  /**
+   * Write one variable at ENVIRONMENT scope. Railway's `VariableUpsertInput` makes every field optional, and
+   * omitting `serviceId` is exactly what distinguishes a shared variable from a service variable: the value
+   * belongs to the environment, and services opt in to reading it.
+   */
+  private async upsertSharedVariable(projectId: string, environmentId: string, name: string, value: string, credential: RailwayCredential): Promise<void> {
+    await this.transport.graphql({
+      operation: 'variableUpsert',
+      credential,
+      query: 'mutation ($input: VariableUpsertInput!) { variableUpsert(input: $input) }',
+      // No serviceId: environment scope. skipDeploys for the same reason as the service-scoped write -- a
+      // credential arriving is not a decision to redeploy.
+      variables: { input: { projectId, environmentId, name, value, skipDeploys: true } },
+    });
+  }
+
+  /**
+   * Attach an environment-scoped variable to the service that declares it. This is the ONLY thing
+   * `sharedVariableConfigure` does -- the captured input shape is `projectId` / `environmentId` / `name` /
+   * `enabledServiceIds` / `disabledServiceIds`, with no value field anywhere -- so treating it as a write would
+   * be wrong in both directions, and skipping it would leave a delivered credential invisible to the service
+   * while still existing in the environment.
+   */
+  private async attachSharedVariable(projectId: string, environmentId: string, name: string, serviceId: string, credential: RailwayCredential): Promise<void> {
+    await this.transport.graphql({
+      operation: 'sharedVariableConfigure',
+      credential,
+      // Returns Variable!, so a sub-selection is required -- the same class of validation-time rejection that
+      // bit the marker write (E26) and is why the query is spelled out rather than sent bare.
+      query: 'mutation ($input: SharedVariableConfigureInput!) { sharedVariableConfigure(input: $input) { id } }',
+      variables: { input: { projectId, environmentId, name, enabledServiceIds: [serviceId] } },
     });
   }
 

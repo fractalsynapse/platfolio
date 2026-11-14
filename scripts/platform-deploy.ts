@@ -24,6 +24,7 @@ import { parseCompose } from '../packages/manifest/src/compose.ts';
 import { validateManifest } from '../packages/manifest/src/validate.ts';
 import { buildPlan } from '../packages/manifest/src/build-plan.ts';
 import type { InfraPlan } from '../packages/contracts/src/infra.ts';
+import { secretWriteScope } from '../packages/contracts/src/infra.ts';
 import { RailwayInfraProvider } from '../packages/contracts/src/railway-provider.ts';
 import type { RailwayCredential, RailwayCredentialSource } from '../packages/contracts/src/railway-transport.ts';
 
@@ -239,21 +240,77 @@ if (arg('generated-domains')) {
   }
 }
 
+/**
+ * Deliver the credentials THIS composition declares, through the provider seam rather than by hand.
+ *
+ * Why it exists: the first-party stack declares three shared-variable secrets on its `api` service (the GitHub
+ * App identity), and the only delivery path before D53 was `--bootstrap-vars` -- hand-written GraphQL, two
+ * variable names, production only. When staging was created those credentials did not exist in it, and the plan
+ * check correctly failed `secret-unavailable` in both environments. That is the gap D48 describes: behaviour
+ * living in a script instead of behind an operation.
+ *
+ * D4 in this function's terms: values are read from the local environment, written once, and never logged,
+ * stored or echoed. Names appear in the output because a name is not a secret.
+ */
+async function deliverDeclaredSecrets(target: RailwayInfraProvider): Promise<void> {
+  let delivered = 0;
+  const absent: string[] = [];
+  for (const env of plan.environments) {
+    for (const svc of env.services) {
+      for (const secret of svc.secrets) {
+        const value = process.env[secret.name];
+        if (value === undefined || value.length === 0) { absent.push(`${env.name}/${svc.name}.${secret.name}`); continue; }
+        const result = await target.putSecretValue({
+          instanceId: plan.instanceId, environment: env.name, service: svc.name, name: secret.name, value,
+          // The scope comes from the description, not from whoever is running the deploy -- the same
+          // `secretWriteScope` the API handler calls, so the two cannot drift.
+          source: secretWriteScope(secret.source),
+        });
+        if (!result.ok) {
+          console.error(`  FAILED ${env.name}/${svc.name}.${secret.name} (${secret.source}): ${result.code} -- ${result.reason}`);
+          process.exitCode = 1;
+          continue;
+        }
+        delivered++;
+        // `verified` is the provider's presence read-back for the DECLARING service, so a shared variable that
+        // was written but never attached says so here rather than at the next boot.
+        console.log(`  delivered ${env.name}/${svc.name}.${secret.name} (source ${secret.source}, verified ${String(result.verified)}) -- value withheld`);
+      }
+    }
+  }
+  if (absent.length > 0) {
+    console.log(`  not supplied locally, left alone: ${absent.join(', ')}`);
+    console.log('  platfolio does not invent a value for a declared credential; export it (or set it in your own provider project) and re-run');
+  }
+  console.log(`  ${String(delivered)} delivered, ${String(absent.length)} left unset -- re-run the apply to let the plan check see them`);
+}
+
 describePlan(plan);
 
-if (!arg('apply')) {
+// A dry run must stay a dry run: it renders and validates the plan and asks for nothing, which is the whole
+// reason it is the default. Requiring provider credentials before this check turned `platform:plan` into a
+// credentialed operation -- a regression I introduced while moving this block and caught by running it.
+if (!arg('apply') && !arg('deliver-secrets')) {
   console.log('\n  DRY RUN -- nothing was created or changed. Re-run with --apply.');
   process.exit(0);
 }
 
 if (!token || !workspaceId) {
-  console.error('  --apply needs RAILWAY_TOKEN and RAILWAY_WORKSPACE_ID in the environment');
+  console.error('  --apply and --deliver-secrets both need RAILWAY_TOKEN and RAILWAY_WORKSPACE_ID in the environment');
   process.exit(1);
 }
 
 // Keycloak's cold start against a shared Postgres runs past the provider's default three-minute
 // window, and timing out a deploy that is merely slow would leave a half-deployed first-party stack.
 const provider = new RailwayInfraProvider({ credentials, workspaceId, deployBudget: Number(process.env.PLATFOLIO_DEPLOY_BUDGET ?? 4), deployTimeoutMs: Number(process.env.PLATFOLIO_DEPLOY_TIMEOUT_MS ?? 600_000) });
+
+// Credential delivery is the same hosting operation through the same seam as the apply, so it shares this one
+// provider instance rather than constructing a second with its own budget and wiring.
+if (arg('deliver-secrets')) {
+  await deliverDeclaredSecrets(provider);
+  process.exit(process.exitCode ?? 0);
+}
+
 const info = provider.describe();
 console.log(`\n  applying via ${info.provider} (contract ${info.contract}; ${String(info.operations.length)} operations)...`);
 const result = await provider.applyPlan(plan);

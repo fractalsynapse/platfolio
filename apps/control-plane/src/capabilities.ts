@@ -7,7 +7,7 @@ import { RepositoryReadError } from '@platfolio/contracts';
 import { ScmNotConfiguredError } from '@platfolio/kernel';
 import { buildPlan, parseCompose } from '@platfolio/manifest';
 import type { ExtensionDescriptor, KernelContext, Request, Response_, RouteDefinition } from '@platfolio/kernel';
-import { ArtifactRecordSchema } from '@platfolio/contracts';
+import { ArtifactRecordSchema, secretWriteScope } from '@platfolio/contracts';
 import { badRequest, bearerToken, notFound, send, unauthorized } from './respond.ts';
 
 /**
@@ -129,6 +129,19 @@ function scoped(method: string, path: string, operationId: string, action: Polic
       return handler(resolved.scope, request, params);
     },
   };
+}
+
+/**
+ * The custody location the platform description chose for one declared secret, or `undefined` when the name is
+ * not declared for that service in that environment. Presence and delivery both consult THIS lookup, so they
+ * cannot disagree about what a service was told to expect.
+ */
+function declaredSecretSource(plan: unknown, environment: string, service: string, name: string): 'service' | 'shared-variable' | undefined {
+  const p = plan as { environments?: { name: string; services?: { name: string; secrets?: { name: string; source?: string }[] }[] }[] };
+  const env = (p.environments ?? []).find((e) => e.name === environment);
+  const svc = (env?.services ?? []).find((s) => s.name === service);
+  const entry = (svc?.secrets ?? []).find((s) => s.name === name);
+  return entry === undefined ? undefined : secretWriteScope(entry.source);
 }
 
 /**
@@ -1026,7 +1039,19 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
         if (scope.context.infra.canDeliverSecrets === false) {
           return { status: 501, body: { error: 'provider-cannot-deliver', message: `the selected provider (${scope.context.infra.describe().provider}) cannot deliver secrets; the value stays the tenant's to set in their own provider project` } };
         }
-        const delivered = await scope.context.infra.putSecretValue({ instanceId: id, environment, service, name, value });
+        // WHERE the value lands is decided by the platform description, not by whoever holds the value
+        // (D52, D53): the registered plan's own secrets entry for this service in this environment carries the
+        // source. An undeclared name is refused outright -- platfolio does not invent a custody location on
+        // someone's behalf, and a variable no deployment was told to read is not a credential we should place.
+        const planResult = await scope.context.store.getPlan(id);
+        if (planResult.ok === false) {
+          return { status: 400, body: { error: 'no-plan', message: `no plan is registered for "${id}", so platfolio cannot know where "${name}" belongs -- record the plan (from-repository or PUT …/plan) before delivering credentials` } };
+        }
+        const source = declaredSecretSource(planResult.value.plan, environment, service, name);
+        if (source === undefined) {
+          return { status: 400, body: { error: 'secret-not-declared', message: `"${name}" is not declared for service "${service}" in environment "${environment}" by the registered plan, and platfolio does not choose a custody location for a credential it was never told about (declare it in the platform description)` } };
+        }
+        const delivered = await scope.context.infra.putSecretValue({ instanceId: id, environment, service, name, value, source });
         if (delivered.ok === false) {
           if (delivered.code === 'not-found') return notFound(delivered.reason.includes('environment') ? 'environment' : 'service', id);
           if (delivered.code === 'invalid-value') return badRequest(delivered.reason);

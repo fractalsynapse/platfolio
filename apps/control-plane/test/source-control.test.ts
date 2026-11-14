@@ -585,3 +585,68 @@ test('a member cannot deliver a credential, and an empty write is refused rather
     await disposeKernel(app.ctx);
   }
 });
+
+/**
+ * D52 and D53 meet here: the platform description decides WHERE a credential lives, and platfolio refuses to
+ * decide otherwise. Four distinct refusals, each with a different fix, and one audit assertion.
+ */
+test('secret delivery is governed by the platform description, not by the caller', async () => {
+  const github = stubGithub({ files: { 'compose.yaml': BUILD_ONLY } });
+  const app = await start();
+  try {
+    const id = await forkInstance(app);
+    const value = 'x'.repeat(24);
+    const put = (name: string, body: Record<string, unknown>) => app.call(`/api/v1/instances/${id}/secrets/${name}`, {
+      method: 'PUT', ...app.asUser(), body: JSON.stringify(body),
+    });
+
+    // (1) No registered plan. create-instance stores the instance and attaches NO plan, so platfolio genuinely
+    // does not know where anything belongs -- and guessing is how a credential ends up in a variable no
+    // deployment was told to read.
+    const noPlan = await put('APP_SECRET', { service: 'web', environment: 'production', value });
+    assert.equal(noPlan.status, 400, noPlan.text);
+    assert.equal((noPlan.body as { error: string }).error, 'no-plan', noPlan.text);
+
+    // Register and apply the plan, so the provider has a project to deliver into.
+    await app.call(`/api/v1/instances/${id}/artifacts`, {
+      method: 'POST', ...app.asUser(), body: JSON.stringify({ service: 'web', image: 'ghcr.io/acme/fork', digest: REAL_DIGEST }),
+    });
+    assert.equal((await app.call(`/api/v1/instances/${id}/plan/from-repository`, { method: 'POST', ...app.asUser(), body: '{}' })).status, 200);
+    const registered = await app.ctx.store.getPlan(id);
+    assert.ok(registered.ok, 'the plan is registered');
+    const applied = await app.ctx.infra.applyPlan(registered.value.plan as Parameters<typeof app.ctx.infra.applyPlan>[0]);
+    assert.equal(applied.verified, true, JSON.stringify(applied.failures));
+
+    // (2) Declared by the composition as `source: shared-variable` -> accepted, and the scope travelled from the
+    // description rather than from this request body, which never mentions scope at all.
+    const declared = await put('APP_SECRET', { service: 'web', environment: 'production', value });
+    assert.equal(declared.status, 204, declared.text);
+    assert.equal(declared.text, '', '204 carries no body: an echo of a credential is the leak');
+
+    // (3) A name the description never mentions. This is the one that matters most.
+    const undeclared = await put('SOMETHING_UNDECLARED', { service: 'web', environment: 'production', value });
+    assert.equal(undeclared.status, 400, undeclared.text);
+    assert.equal((undeclared.body as { error: string }).error, 'secret-not-declared', undeclared.text);
+    assert.match((undeclared.body as { message: string }).message, /platform description/i, 'the refusal names where to fix it');
+
+    // (4) Right name, service that environment does not contain: the lookup is per (environment, service)
+    // because both presence and delivery answer about the deployment that will read the value.
+    const wrongService = await put('APP_SECRET', { service: 'nosuchservice', environment: 'production', value });
+    assert.equal(wrongService.status, 400, wrongService.text);
+    assert.equal((wrongService.body as { error: string }).error, 'secret-not-declared', wrongService.text);
+
+    const seen = await app.call(`/api/v1/instances/${id}/secrets?environment=production&service=web`, { ...app.asUser() });
+    assert.equal(seen.status, 200, seen.text);
+    assert.deepEqual((seen.body as { presence: unknown }).presence, [{ name: 'APP_SECRET', state: 'set' }], 'presence agrees with delivery');
+    assert.equal(JSON.stringify(seen.body).includes(value), false, 'the delivered value came back out');
+
+    const audit = await app.ctx.store.recentAudit(60);
+    const row = audit.find((r) => r.action === 'secret.deliver');
+    assert.ok(row, 'the accepted delivery was audited');
+    assert.deepEqual(Object.keys(row!.detail ?? {}).sort(), ['environment', 'name', 'service']);
+    assert.equal(JSON.stringify(row!.detail).includes(value), false, 'the audit trail is a leak surface like any other (D4)');
+  } finally {
+    github.restore();
+    await disposeKernel(app.ctx);
+  }
+});

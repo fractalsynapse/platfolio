@@ -61,6 +61,15 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
   readonly environments = new Map<string, { id: string; projectId: string; name: string }>();
   readonly services = new Map<string, MockService>();
   readonly instances = new Map<string, MockInstance>();
+  /**
+   * Environment-scoped variables, keyed `${environmentId}:${name}` -- what Railway calls a shared variable.
+   * Kept separate from service variables on purpose: the provider must write the value HERE and then attach it,
+   * and a double that merged the two would let a one-call implementation pass every assertion while leaving a
+   * credential the declaring service cannot read.
+   */
+  readonly sharedVariables = new Map<string, string>();
+  /** Which services see each environment-scoped variable: `${environmentId}:${name}` -> serviceIds. */
+  readonly sharedAttachments = new Map<string, Set<string>>();
   readonly tokens = new Map<string, { id: string; projectId: string; environmentId: string; name: string }>;
   readonly buckets = new Map<string, string>();
   readonly certRetries: string[] = [];
@@ -135,7 +144,7 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
 
     // The measured authorization split. Getting this wrong is how a provider "works" against a fake and
     // fails on the first real call.
-    const needsProject = ['serviceCreate', 'serviceInstanceUpdate', 'serviceInstanceLimitsUpdate', 'variableUpsert', 'serviceInstanceDeploy', 'environment.serviceInstances', 'environment.config', 'serviceDomainCreate', 'customDomainCreate', 'customDomainIssueCertificate'];
+    const needsProject = ['serviceCreate', 'serviceInstanceUpdate', 'serviceInstanceLimitsUpdate', 'variableUpsert', 'serviceInstanceDeploy', 'environment.serviceInstances', 'environment.config', 'serviceDomainCreate', 'customDomainCreate', 'customDomainIssueCertificate', 'sharedVariableConfigure'];
     const needsWorkspace = ['projects', 'project', 'projectCreate', 'projectUpdate', 'projectDelete', 'project.environments', 'environmentCreate', 'project.services', 'projectTokenCreate', 'projectTokens', 'projectTokenDelete', 'serviceDelete', 'project.buckets', 'bucketCreate', 'project.bucketsList'];
     if (needsProject.includes(operation) && credential.kind !== 'project') {
       this.denied.push(operation);
@@ -158,11 +167,15 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
       serviceCreate: ['projectId', 'environmentId', 'name', 'source', 'templateId', 'templateServiceId', 'variables', 'branch', 'icon', 'registryCredentials'],
       serviceInstanceUpdate: ['numReplicas', 'healthcheckPath', 'healthcheckTimeout', 'source', 'startCommand', 'buildCommand', 'preDeployCommand', 'region', 'restartPolicyType', 'sleepApplication', 'watchPatterns', 'cronSchedule', 'dockerfilePath', 'buildpacks', 'nixpacksPlan'],
       variableUpsert: ['projectId', 'environmentId', 'serviceId', 'name', 'value', 'skipDeploys'],
+      // Captured from `SharedVariableConfigureInput`: there is NO value field here, only which services the
+      // already-written environment-scoped variable is enabled or disabled for. Any provider that treats this
+      // call as the write is wrong, and the double refuses it rather than quietly agreeing.
+      sharedVariableConfigure: ['projectId', 'environmentId', 'name', 'enabledServiceIds', 'disabledServiceIds'],
       serviceDomainCreate: ['environmentId', 'serviceId', 'targetPort'],
       customDomainCreate: ['projectId', 'environmentId', 'serviceId', 'domain', 'targetPort'],
       serviceInstanceLimitsUpdate: ['environmentId', 'serviceId', 'memoryGB', 'vCPUs'],
     };
-    const inputKey = ['projectCreate', 'projectUpdate', 'environmentCreate', 'projectTokenCreate', 'serviceCreate', 'serviceInstanceUpdate', 'variableUpsert', 'serviceDomainCreate', 'customDomainCreate', 'serviceInstanceLimitsUpdate'].includes(operation) ? 'input' : null;
+    const inputKey = ['projectCreate', 'projectUpdate', 'environmentCreate', 'projectTokenCreate', 'serviceCreate', 'serviceInstanceUpdate', 'variableUpsert', 'serviceDomainCreate', 'customDomainCreate', 'serviceInstanceLimitsUpdate', 'sharedVariableConfigure'].includes(operation) ? 'input' : null;
     if (inputKey) {
       const allowed = inputFields[operation];
       const payload = (v[inputKey] ?? {}) as Record<string, unknown>;
@@ -172,7 +185,7 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
 
     // Guard the class of bug E26 exposed: mutations returning an OBJECT are rejected by the real API
     // unless they select a subfield. The mock used to accept the query and never notice.
-    const objectReturning = ['projectCreate', 'environmentCreate', 'serviceCreate', 'projectUpdate', 'serviceDomainCreate', 'customDomainCreate'];
+    const objectReturning = ['projectCreate', 'environmentCreate', 'serviceCreate', 'projectUpdate', 'serviceDomainCreate', 'customDomainCreate', 'sharedVariableConfigure'];
     // Match the *field's* own closing paren, not the mutation's variable list -- a first version used
     // `/\)\s*\{/`, which the outer `mutation (...) {` always satisfied, so the guard could not fail.
     const fieldSelection = new RegExp(`${operation}\\s*\\([^)]*\\)\\s*\\{`);
@@ -409,19 +422,49 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
         return { customDomainIssueCertificate: true } as T;
       }
       case 'variableUpsert': {
-        const input = v.input as { environmentId: string; serviceId: string; name: string; value: string };
+        const input = v.input as { environmentId: string; serviceId?: string; name: string; value: string };
+        // Omitting serviceId is exactly how Railway distinguishes a shared variable from a service one.
+        if (!input.serviceId) {
+          if (!this.environments.has(input.environmentId)) throw new Error('railway variableUpsert: no environment [NOT_FOUND]');
+          this.sharedVariables.set(`${input.environmentId}:${input.name}`, input.value);
+          this.writtenVariables.push({ name: input.name, value: input.value });
+          return { variableUpsert: true } as T;
+        }
         const instance = this.instances.get(`${input.environmentId}:${input.serviceId}`);
         if (!instance) throw new Error('railway variableUpsert: no instance [NOT_FOUND]');
         instance.variables.add(input.name);
         this.writtenVariables.push({ name: input.name, value: input.value });
         return { variableUpsert: true } as T;
       }
+      case 'sharedVariableConfigure': {
+        const input = v.input as { environmentId: string; name: string; enabledServiceIds?: string[]; disabledServiceIds?: string[] };
+        const key = `${input.environmentId}:${input.name}`;
+        if (!this.sharedVariables.has(key)) {
+          // The real API cannot attach a variable that was never written at this scope. Modelling the refusal is
+          // what stops a provider calling configure alone and describing that as delivery.
+          throw new Error(`railway sharedVariableConfigure: no shared variable "${input.name}" in this environment [NOT_FOUND]`);
+        }
+        const attached = this.sharedAttachments.get(key) ?? new Set<string>();
+        for (const id of input.disabledServiceIds ?? []) attached.delete(id);
+        for (const id of input.enabledServiceIds ?? []) attached.add(id);
+        this.sharedAttachments.set(key, attached);
+        return { sharedVariableConfigure: { id: `sv-${this.sequence++}` } } as T;
+      }
       case 'environment.config': {
         const environmentId = v.environmentId as string;
         const services: Record<string, { variables: Record<string, { value: null }> }> = {};
         for (const [key, instance] of this.instances) {
           if (!key.startsWith(`${environmentId}:`)) continue;
-          services[key.split(':')[1]!] = { variables: Object.fromEntries([...instance.variables].map((name) => [name, { value: null }])) };
+          const serviceId = key.split(':')[1]!;
+          // What the service actually sees: its own variables PLUS every environment-scoped variable attached to
+          // it. Values stay redacted exactly as the real API does, and a shared variable that was written but
+          // never attached is deliberately absent -- that is the failure a correct delivery has to avoid.
+          const visible = new Set(instance.variables);
+          for (const [sharedKey, attached] of this.sharedAttachments) {
+            if (!sharedKey.startsWith(`${environmentId}:`)) continue;
+            if (attached.has(serviceId)) visible.add(sharedKey.slice(environmentId.length + 1));
+          }
+          services[serviceId] = { variables: Object.fromEntries([...visible].map((name) => [name, { value: null }])) };
         }
         return { environment: { config: { services } } } as T;
       }

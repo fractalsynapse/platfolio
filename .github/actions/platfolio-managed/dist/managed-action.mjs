@@ -26011,8 +26011,14 @@ var RailwayInfraProvider = class {
     const svc = services.find((s) => s.name === input2.service);
     if (!svc) return { ok: false, code: "not-found", reason: `no service "${input2.service}" in project ${project.name}; services are named by the platform description` };
     const token = await this.credentials.forEnvironment(project.id, env.name);
+    const shared = input2.source === "shared-variable";
     try {
-      await this.upsertVariable(project.id, env.id, svc.id, input2.name, input2.value, token);
+      if (shared) {
+        await this.upsertSharedVariable(project.id, env.id, input2.name, input2.value, token);
+        await this.attachSharedVariable(project.id, env.id, input2.name, svc.id, token);
+      } else {
+        await this.upsertVariable(project.id, env.id, svc.id, input2.name, input2.value, token);
+      }
     } catch (error62) {
       return { ok: false, code: "provider-refused", reason: redactCredentialShaped(String(error62.message)).slice(0, 240) };
     }
@@ -26191,6 +26197,38 @@ var RailwayInfraProvider = class {
       query: "mutation ($input: VariableUpsertInput!) { variableUpsert(input: $input) }",
       // skipDeploys: a configuration write must not trigger a redeploy we did not decide on.
       variables: { input: { projectId, environmentId, serviceId, name, value, skipDeploys: true } }
+    });
+  }
+  /**
+   * Write one variable at ENVIRONMENT scope. Railway's `VariableUpsertInput` makes every field optional, and
+   * omitting `serviceId` is exactly what distinguishes a shared variable from a service variable: the value
+   * belongs to the environment, and services opt in to reading it.
+   */
+  async upsertSharedVariable(projectId, environmentId, name, value, credential) {
+    await this.transport.graphql({
+      operation: "variableUpsert",
+      credential,
+      query: "mutation ($input: VariableUpsertInput!) { variableUpsert(input: $input) }",
+      // No serviceId: environment scope. skipDeploys for the same reason as the service-scoped write -- a
+      // credential arriving is not a decision to redeploy.
+      variables: { input: { projectId, environmentId, name, value, skipDeploys: true } }
+    });
+  }
+  /**
+   * Attach an environment-scoped variable to the service that declares it. This is the ONLY thing
+   * `sharedVariableConfigure` does -- the captured input shape is `projectId` / `environmentId` / `name` /
+   * `enabledServiceIds` / `disabledServiceIds`, with no value field anywhere -- so treating it as a write would
+   * be wrong in both directions, and skipping it would leave a delivered credential invisible to the service
+   * while still existing in the environment.
+   */
+  async attachSharedVariable(projectId, environmentId, name, serviceId, credential) {
+    await this.transport.graphql({
+      operation: "sharedVariableConfigure",
+      credential,
+      // Returns Variable!, so a sub-selection is required -- the same class of validation-time rejection that
+      // bit the marker write (E26) and is why the query is spelled out rather than sent bare.
+      query: "mutation ($input: SharedVariableConfigureInput!) { sharedVariableConfigure(input: $input) { id } }",
+      variables: { input: { projectId, environmentId, name, enabledServiceIds: [serviceId] } }
     });
   }
   /**
