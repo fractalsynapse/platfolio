@@ -148,6 +148,44 @@ Three things an operator should expect from these:
 environment:registry` fails if code reads a variable the registry does not declare, or the registry declares
 one nothing reads.
 
+## Publishing the templates, and proving the published thing is the source thing
+
+`templates/` is bundled in this repository, but tenants consume it from three separate GitHub repositories. That
+split has no gate in the normal path: every check in `verify` runs offline, so a change under `templates/` is
+green the moment it merges while the published template -- the thing someone actually forks -- keeps the old
+files. It happened the day the registry was consolidated (D58): `.platfolio/environment.yaml` was deleted here and
+remained live in all three published repositories, where `applyInventory` still merges it into the plan. Two
+registries per platform, surviving in exactly the place users touch.
+
+| Command | What it does | Needs |
+| --- | --- | --- |
+| `pnpm run templates:publish` | Dry run: the file list per repository, plus the paths being retired | credentials |
+| `pnpm run templates:publish -- --apply` | Publishes. A repository whose whole history is `chore(platfolio)` is updated on its default branch; one carrying someone else's history gets a branch and a pull request | credentials |
+| `pnpm run templates:publish -- --apply --template starter-web` | One repository. The first run of any new write mechanism goes here, gets read back, and only then touches the other two | credentials |
+| `pnpm run templates:check` | **Parity**, per file, by blob SHA: `STALE` (published content differs), `MISSING` (we ship it, they don't), `ORPHAN` (they ship it, we don't, and it is not a declared retirement) | credentials, read-only |
+
+Three rules that are not obvious and are easy to break again:
+
+- **Retirement is declared, never derived.** The publisher adds and replaces; it does not delete anything absent
+  from the source, because a fork adds files (its own Dockerfile, CI, README) and mirror-deleting would eat a
+  tenant's work on the next publish. So removing a published path is an explicit entry in `RETIRED_PATHS`
+  (`scripts/template-manifest.ts`), and `templates:check` reports any published file that is neither in the source
+  nor in that list. The list is therefore not trusted -- an incomplete list shows up as an ORPHAN.
+- **A tree built on `base_tree` only adds and replaces.** Deleting a path means a `sha: null` entry for it. And
+  the entry must be for a path that exists on the base commit: republishing a repository that already retired the
+  path failed with `GitRPC::BadObjectState` (HTTP 422), which is why the writer reads the base tree first and
+  reports both halves -- `retired` and `alreadyAbsent`. "Retired X" and "X was already gone" are different facts,
+  and conflating them is how a check starts lying quietly.
+- **Publisher and checker share one manifest.** `scripts/template-manifest.ts` holds the template list and the
+  retirement list precisely so the two programs cannot disagree about what should be published. A checker reading
+  a different set than the publisher writes is the least useful kind of gate.
+
+`check-project.ts` carries the offline half -- every platform directory has its registry at its root, no shipped
+path is under the retired `.platfolio/` prefix, and no shipped path is declared retired -- because
+`templates:check` needs credentials and network, and a check that silently cannot run is not a check. It is
+verified by falsification, not by hope: recreating `.platfolio/environment.yaml` in a template, and deleting a
+template's `environment.yaml`, each fail the build.
+
 ## The environment registry: one file per platform, at its root
 
 `environment.yaml` is both the **central registry** (D52) and, for a platform, its **obligations** (D33): custody,

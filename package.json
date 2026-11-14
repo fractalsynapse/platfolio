@@ -40,7 +40,8 @@
     "platform:plan": "tsx scripts/platform-deploy.ts",
     "platform:apply": "tsx scripts/platform-deploy.ts --apply --strip-domains",
     "platform:overlay": "tsx scripts/render-platform-overlay.ts",
-    "platform:overlay:check": "tsx scripts/render-platform-overlay.ts --check"
+    "platform:overlay:check": "tsx scripts/render-platform-overlay.ts --check",
+    "templates:check": "tsx scripts/check-template-publication.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

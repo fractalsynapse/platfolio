@@ -157,7 +157,9 @@ throughout, because Railway names volumes itself and ignores the declared label.
 
 ### Environment inventory (D33, implemented)
 
-Obligations live beside the manifest, not inside it: `templates/*/.platfolio/environment.yaml` declares
+Obligations live in the platform's own registry -- `environment.yaml` at the platform root (D58). The separate
+`.platfolio/environment.yaml` this section used to name was folded into it, because two documents declaring the
+same variables drift, and the derived registry had been reading the hand-authored one.
 `reference` / `secret` / `value` / `output` entries with defaults, applicability and descriptions.
 `applyInventory` folds them into the service model, so the plan builder and provider stay untouched, and it
 is idempotent because install can be re-run after a tenant edits the file. The refusal rules are the point:

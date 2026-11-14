@@ -25,6 +25,6 @@ points at the previous one"* rather than as a mystery 401 at three in the mornin
 1. **Create a realm per team, never use `master`.** The bootstrap admin password exists to do that once.
 2. Set `KC_HOSTNAME` after your DNS is delegated; until then the generated `*.up.railway.app` host works, and
    an unverifiable custom host will sit at `applying` forever without failing.
-3. Rotate `KEYCLOAK_ADMIN_PASSWORD` out of use, and prefer a service account per consumer over shared
+3. Rotate `KC_BOOTSTRAP_ADMIN_PASSWORD` out of use once the realm and its consumers exist -- the bootstrap admin exists to create the first administrator, and a standing admin credential in your provider is exactly what D4 is about -- and prefer a service account per consumer over shared
    credentials.
 4. `onEject` includes `realm-export`: identity is the one thing a tenant must be able to walk away with.

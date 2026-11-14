@@ -168,7 +168,7 @@ onboarding checklist gets invented per platform. So the model gains an inventory
 own repository and built up over time:
 
 ```yaml
-# .platfolio/environment.yaml (or x-platfolio.environment inside the Compose document)
+# environment.yaml at the platform root (D58), or an x-platfolio.environment array inside the Compose document
 - name: DATABASE_URL
   kind: reference            # resolved by the provider; never a value here
   service: web

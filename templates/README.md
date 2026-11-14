@@ -9,7 +9,7 @@ admire: small enough that the first change a team makes is deleting something.
 | `starter-worker` | scaled background processing, no inbound | a **volume that outlives its service** (`retention: survive`), which is how an idle platform stops paying for compute |
 | `shared-identity` | stock Keycloak on Postgres | publishing a **capability** others bind to (`provides: identity`), including a `client_secret` that is relayed once and cannot be replayed |
 
-Each directory is the same three things: `compose.yaml` with an `x-platfolio` block, `.platfolio/environment.yaml`
+Each directory is the same three things: `compose.yaml` with an `x-platfolio` block, `environment.yaml`
 declaring obligations, and the smallest possible source.
 
 ## Adding a fourth
@@ -34,7 +34,7 @@ removed, and because a directory that no longer exists was described here for a 
 | Path | Is | Changes when |
 | --- | --- | --- |
 | `templates/` | **the three reference platforms and the source a team forks**: `starter-web` (web/API), `starter-worker` (background worker), `shared-identity` (shared service), published into their own repositories by `pnpm run templates:publish` | the scaffold stops being a good starting point, or the manifest format changes — `packages/manifest/test/templates.test.ts` parses, validates and plans every one of them, so an unhostable scaffold fails CI rather than a tenant's first deployment |
-| root `compose.yaml`, `compose.prod.yaml`, `.platfolio/` | **platfolio hosting itself** — the same three kinds of file a tenant repository has, in the same place (D50) | the control plane's own topology changes; `pnpm run platform:plan` is how you find out before a provider call does |
+| root `compose.yaml`, `compose.prod.yaml`, `environment.yaml` | **platfolio hosting itself** — the same three kinds of file a tenant repository has, in the same place (D50) | the control plane's own topology changes; `pnpm run platform:plan` is how you find out before a provider call does |
 | `.agents/skills/` | agent procedures, inherited from the starter scaffold and left identical to their source | almost never, and never by editing them here |
 | ~~`platforms/`, `platform-templates/`, `samples/`, `selfhost/`~~ | **deleted** (Nov 2026) — see the CHANGELOG | a catalog that duplicated `templates/`, fixtures that lived outside the test tree, and a special-case hosting description |
 
