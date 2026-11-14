@@ -11,10 +11,16 @@ on:
       nonce: { required: true, type: string, description: "single-use, echoed back in the attestation" }
       plan_hash: { required: true, type: string }
       action: { required: true, type: choice, options: [apply, check, drift, suspend, export] }
-      environment: { required: true, type: choice, options: [production] }
+      environment: { required: true, type: choice, options: [production, staging] }
   push:
     branches:
-      - production
+      - main
+      - staging
+  pull_request:
+    branches:
+      - main
+      - staging
+    types: [opened, synchronize, reopened]
 
 permissions:
   checks: write
@@ -27,25 +33,35 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  tests:
+    name: your checks (starter -- add steps here)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      # Add test steps below. Until you do, this job is a no-op gate in front of the managed deploy.
+      - name: No project checks configured yet
+        run: echo "platfolio installed this starter; add your own test steps in jobs.tests.steps"
+
   managed:
-    name: platfolio ${{ inputs.action || 'deploy' }}
+    name: platfolio ${{ inputs.action || (github.event_name == 'pull_request' && 'check' || 'apply') }}
+    needs: tests
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment:
       name: ${{ inputs.environment }}
     steps:
       - uses: actions/checkout@v7
-
-      - name: Check the control-plane endpoint is configured
+      - name: Check the platfolio control-plane endpoint is configured
         env:
           PLATFOLIO_URL: ${{ vars.PLATFOLIO_URL }}
         run: |
           if [ -z "$PLATFOLIO_URL" ]; then
-            echo "::error::repository variable PLATFOLIO_URL is unset. Point it at your platfolio control plane,"
-            echo "::error::for example https://api.example.com -- see docs/MAINTAINING.md."
+            echo "::error::repository variable PLATFOLIO_URL is unset -- set it to the platfolio control-plane origin given with your install request,"
+            echo "::error::for example https://api.example.com. See README.md, managed by platfolio."
             exit 1
           fi
-          echo "dispatching to the platfolio control plane configured for this repository"
+          echo "reporting to the platfolio control plane configured for this repository"
 
       - name: Apply desired state with this repository's own credentials
         id: apply
@@ -55,19 +71,13 @@ jobs:
           PLATFOLIO_DISPATCH_TOKEN: ${{ secrets.PLATFOLIO_DISPATCH_TOKEN }}
           RAILWAY_WORKSPACE_ID: 82ba4aff-61f3-4b19-b863-8b650ebb66b2
         with:
-          action: ${{ inputs.action || 'deploy' }}
+          action: ${{ inputs.action || (github.event_name == 'pull_request' && 'check' || 'apply') }}
           environment: ${{ inputs.environment }}
           instance_id: ${{ inputs.instance_id }}
           dispatch_id: ${{ inputs.dispatch_id }}
           nonce: ${{ inputs.nonce }}
           plan_hash: ${{ inputs.plan_hash }}
-          # D47: an endpoint that belongs to a running environment is environment configuration, so it is a
-          # repository variable and not a committed literal. This line has carried a generated
-          # `{service}-{environment}-{hash}.up.railway.app` hostname before -- instance-specific, different
-          # per deployment, and not something a tenant can be pointed at. The guard step below turns an
-          # unset variable into a clear message instead of a fetch against an empty URL.
           platfolio_url: ${{ vars.PLATFOLIO_URL }}
-          platfolio_url: https://api.platfolio.dev
 
       - name: Report the outcome for platfolio to verify by read-back
         if: always()

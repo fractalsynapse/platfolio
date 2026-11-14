@@ -31,7 +31,9 @@ export const WORKFLOW_PERMISSIONS: Record<string, string> = {
 // GitHub expressions live in ordinary strings: a template literal would try to interpolate them.
 const EXPR = {
   dispatchOrRef: "platfolio-${{ inputs.dispatch_id || github.run_id }}",
-  action: "${{ inputs.action || 'deploy' }}",
+  // A pull request has no inputs, so the event decides: pushes apply, PRs check. Without this a PR targeting
+  // the release branch would deploy on open, which contradicts the release policy the project runs on.
+  action: "${{ inputs.action || (github.event_name == 'pull_request' && 'check' || 'apply') }}",
   environment: '${{ inputs.environment }}',
   instance: '${{ inputs.instance_id }}',
   dispatch: '${{ inputs.dispatch_id }}',
@@ -70,6 +72,22 @@ export interface InstallOptions {
  */
 export function renderInstallPullRequest(m: Manifest, opts: InstallOptions): InstallFiles {
   const envs = m.spec.environments.staging.enabled ? ['production', 'staging'] : ['production'];
+  // An environment is not a branch. The manifest declares `production: { enabled, branch: main }`, and this
+  // renderer used to put the environment NAMES into `on.push.branches` -- so platfolio's own committed workflow
+  // listened for a branch called `production` that has never existed in the repository, and every "deploys on
+  // push" claim about it was fiction: it only ever ran when dispatched by hand. Bind each environment to its
+  // declared branch, falling back to the name only where the manifest is silent.
+  const envBindings = envs.map((name) => {
+    // Enumerated per environment rather than indexed generically: when a third environment is added to the
+    // schema, this is the line that fails to compile and forces the decision, instead of silently falling back
+    // to a branch named after the environment -- which is exactly the bug this binding replaced.
+    const declared: Record<string, string | undefined> = {
+      production: m.spec.environments.production.branch,
+      staging: m.spec.environments.staging.branch,
+    };
+    return { name, branch: declared[name] ?? name };
+  });
+  const pushBranches = [...new Set(envBindings.map((b) => b.branch))];
   const runner = m.metadata.architectures.includes('arm64') && m.metadata.architectures.length === 1 ? 'ubicloud-arm' : 'ubuntu-latest';
   const services = sorted(Object.keys(m.spec.services), (s) => s);
 
@@ -88,9 +106,18 @@ export function renderInstallPullRequest(m: Manifest, opts: InstallOptions): Ins
     '      plan_hash: { required: true, type: string }',
     '      action: { required: true, type: choice, options: [apply, check, drift, suspend, export] }',
     `      environment: { required: true, type: choice, options: [${envs.join(', ')}] }`,
+    // Pushes to a bound branch apply. A PULL REQUEST targeting one of those branches runs the read-only
+    // action instead: `check` fetches the plan, applies nothing, and still reports drift -- which is what makes
+    // "deploy on PR to staging" and "release only from a merged main" the same workflow rather than a policy
+    // that depends on nobody wiring the wrong trigger. GitHub gives a pull_request run no `inputs`, so the
+    // expression below is the only place that decision can live.
     '  push:',
     '    branches:',
-    ...envs.map((e) => `      - ${e}`),
+    ...pushBranches.map((b) => `      - ${b}`),
+    '  pull_request:',
+    '    branches:',
+    ...pushBranches.map((b) => `      - ${b}`),
+    '    types: [opened, synchronize, reopened]',
     '',
     'permissions:',
     ...Object.entries(WORKFLOW_PERMISSIONS).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `  ${k}: ${v}`),
@@ -100,8 +127,23 @@ export function renderInstallPullRequest(m: Manifest, opts: InstallOptions): Ins
     '  cancel-in-progress: false',
     '',
     'jobs:',
+    // The extension point. A starter that cannot be extended becomes a fork of a workflow nobody maintains,
+    // so the deploy is deliberately gated on a job the developer owns: add `run:` steps under `tests.steps` and
+    // they gate both the push deploy and the PR check, with no editing of anything platfolio wrote. It passes
+    // trivially until they add something -- which is the point of a starter, not an oversight.
+    '  tests:',
+    `    name: your checks (starter -- add steps here)`,
+    `    runs-on: ${runner}`,
+    '    timeout-minutes: 30',
+    '    steps:',
+    '      - uses: actions/checkout@v7',
+    '      # Add test steps below. Until you do, this job is a no-op gate in front of the managed deploy.',
+    '      - name: No project checks configured yet',
+    '        run: echo "platfolio installed this starter; add your own test steps in jobs.tests.steps"',
+    '',
     '  managed:',
     `    name: platfolio ${EXPR.action}`,
+    '    needs: tests',
     `    runs-on: ${runner}`,
     '    timeout-minutes: 30',
     '    environment:',
