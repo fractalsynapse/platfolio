@@ -99,6 +99,52 @@ schema's error type carries the issues. Fixed by deleting the import and matchin
 establish the claim. AGENTS.md already said this ("fake-only tests do not establish that wiring works"); this
 is the cost of reading past it.
 
+### Fixed — the templates were shipping obligations nobody reads, and the registry was being fed by them
+
+Two related cleanups, both prompted by the maintainer noticing that `.platfolio/environment.yaml` and
+`environment.yaml` looked like a duplicate. They are not the same thing -- one is the platform **inventory**
+(D33, merged into the plan by `applyInventory`), the other the central **registry** (D52, derived from code and
+composition) -- but they were *duplicated plumbing*: the registry scanned the inventory for names.
+
+**The experiment first:** exclude `.platfolio/` from the scanner and re-run -- 82 variables, all still
+referenced, nothing lost. The inventory contributed zero unique facts. Keeping it as a source meant the registry
+inherited the inventory's staleness, and the inventory's own header already records a version that named
+`SESSION_SIGNING_KEY` and `PUBLIC_ORIGIN` (nothing reads either) and called `KEYCLOAK_ISSUER` optional when the
+control plane refuses to start without it.
+
+Then the dependency was reversed and made a gate: inventory names in our namespace must be declared in the
+registry, and the two must agree about custody in **both** directions -- an inventory calling something a secret
+while the registry says `secret: false`, or the reverse, fails the build. Understating custody in an
+operator-facing file is how a credential gets pasted into a support ticket.
+
+**What the new rule caught, immediately and for real:**
+
+| Template | Declared | Read by |
+| --- | --- | --- |
+| starter-web | `APP_SESSION_KEY` as `kind: secret, required: true` | nothing -- the template has no sessions |
+| starter-web | `LOG_LEVEL` | nothing |
+| starter-worker | `QUEUE_DRIVER`, `STATE_ENCRYPTION_KEY` | nothing |
+| shared-identity | `KEYCLOAK_ADMIN_PASSWORD` | nothing -- 26.x reads `KC_BOOTSTRAP_ADMIN_PASSWORD`, and the template's compose still set the deprecated `KEYCLOAK_ADMIN` username |
+
+Because `applyInventory` merges the inventory into the plan, these were not stale comments: each `required: true`
+secret became a blocking obligation on every tenant who forks the template -- a deploy that never goes healthy
+over a credential with no consumer. `templates.test.ts` asserted `APP_SESSION_KEY` by name, which is how a
+fiction gets frozen: the assertion was protecting the bug. It now asserts the rule.
+
+The exemption is structural rather than a convenience: for a `build:` service the consumer is source we can
+grep; for a third-party image (Keycloak) the consumer is that image's documented configuration, and demanding a
+local mention there would only teach people to write fake mentions.
+
+**And the falsification that caught a hole in my own gate:** my first attempt to prove the rule appended a
+malformed line, the inventory failed to parse to zero entries, the loop iterated over nothing, and the test
+reported **green**. The rule now asserts its inventory parsed to more than zero entries. I had shipped two
+gates this session that could pass by checking nothing, and this one was found only because I tried to break it
+before believing it.
+
+Templates' `KC_BOOTSTRAP_ADMIN_*` names are now discovered by the registry (they match the `KC_` prefix) and
+declared; `shared-identity`'s compose uses the bootstrap pair its dev overlay already used, so the template and
+the platform stopped disagreeing about how to create the same admin.
+
 ### Corrected — an entry in this file described work that was not in the repository
 
 The entry below was merged as PR #228, which contained **three documentation files and no code**: CHANGELOG,

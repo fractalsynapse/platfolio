@@ -1,3 +1,12 @@
-- { name: QUEUE_DRIVER,   kind: value, default: disk, service: queue, description: disk keeps jobs in the retained volume; swap for a hosted queue when scale matters. }
+# Obligations, wiring and defaults for this platform (D33).
+#
+# An inventory is an INPUT to the plan, not documentation: applyInventory merges it, so every name listed
+# here becomes a real obligation on each tenant who forks this template. `kind: secret, required: true` for
+# a variable nothing reads is a deploy that never becomes healthy over a credential nobody consumes. Only
+# names this template actually references belong here -- enforced twice: `pnpm run environment:registry`
+# cross-checks every inventory against the central registry (D52), and templates.test.ts fails if an entry
+# names something no source or compose file in the template mentions.
+
+# The worker has no inbound host and no managed database of its own in this template: its state lives on the
+# volume declared in compose.yaml, which is why WORKER_CONCURRENCY is the only obligation here.
 - { name: WORKER_CONCURRENCY, kind: value, default: "4", service: queue }
-- { name: STATE_ENCRYPTION_KEY, kind: secret, required: false, service: queue, description: Optional at-rest key for job payloads. platfolio writes it once and never reads it back (D32). }

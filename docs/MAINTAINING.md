@@ -148,6 +148,37 @@ Three things an operator should expect from these:
 environment:registry` fails if code reads a variable the registry does not declare, or the registry declares
 one nothing reads.
 
+## Two files named `environment.yaml`, doing two different jobs
+
+| File | What it is | Who reads it |
+| --- | --- | --- |
+| `environment.yaml` (root) | The **central environment registry** (D52). Every variable this project touches, is it a credential, which environments, where the value lives. Generated from code and composition, cross-checked in CI | `pnpm run environment:registry`, and humans auditing custody |
+| `.platfolio/environment.yaml` (ours, and each template's) | The **platform inventory** (D33). Obligations, wiring and defaults for the platform this repo describes, in `kind: value \| secret \| reference` form | `applyInventory` merges it **into the plan**, and the install PR renders it for tenants |
+
+They are not duplicates, but they were **duplicated plumbing**: the registry used to scan `.platfolio/` as a
+source of variable names. The experiment that settled it -- exclude `.platfolio/` from discovery and re-run --
+produced 82 variables, all still referenced, nothing lost: the inventory was contributing zero unique facts, so
+it was a second copy of claims the code and composition already made, with a worse freshness record. Its own
+header documents a prior version that named `SESSION_SIGNING_KEY` and `PUBLIC_ORIGIN` (nothing read either) and
+called `KEYCLOAK_ISSUER` optional when the control plane refuses to start without it. A registry fed by that
+document inherits its lies.
+
+Now the dependency runs the other way, and it is checked:
+
+- every inventory name in **our** namespace must be declared in the registry, or the build fails;
+- custody claims must agree -- an inventory calling something a secret while the registry says `secret: false`
+  is a failure, in both directions, because the inventory is operator-facing and understating custody there is
+  how a credential ends up pasted into a support ticket;
+- every inventory name belonging to a **tenant-compiled** service must be referenced by that template's own
+  source or compose files. This is what caught four fabricated obligations (`APP_SESSION_KEY`, `LOG_LEVEL`,
+  `QUEUE_DRIVER`, `STATE_ENCRYPTION_KEY`) that the templates had been shipping as tenant-facing requirements.
+  The exemption is structural, not a convenience: a `build:` service's consumer is source we can grep, while
+  Keycloak reads its own documented configuration and our repository contains no Keycloak source to search.
+- the rule test asserts its inventory parsed to **more than zero entries**. I found that out by trying to
+  falsify it with a malformed append: the file failed to parse, the loop iterated over nothing, and the test
+  reported green. A check that can pass by checking nothing is worse than no check, because it advertises
+  coverage.
+
 ## The environment registry (D52)
 
 `environment.yaml` at the repository root is the authoritative list of every variable platfolio reads or

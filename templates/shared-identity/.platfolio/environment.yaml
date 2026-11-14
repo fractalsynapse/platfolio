@@ -1,5 +1,14 @@
-# Nothing here is a value the tenant types except the admin bootstrap secret, which exists only to create the
-# first realm and should be rotated away afterwards. Everything else is wiring platfolio resolves.
-- { name: KEYCLOAK_ADMIN_PASSWORD, kind: secret, required: true, rotate: on-demand, service: keycloak, description: "Bootstrap administrator password. Set it once, create your realm, then rotate it out of use." }
+# Obligations, wiring and defaults for this platform (D33).
+# Nothing here is a value the tenant types except the admin bootstrap secret, which exists only to create
+# the first realm and should be rotated away afterwards. Everything else is wiring platfolio resolves.
+#
+# An inventory is an INPUT to the plan, not documentation: applyInventory merges it, so every name listed
+# here becomes a real obligation on each tenant who forks this template. `kind: secret, required: true` for
+# a variable nothing reads is a deploy that never becomes healthy over a credential nobody consumes. Only
+# names this template actually references belong here -- enforced twice: `pnpm run environment:registry`
+# cross-checks every inventory against the central registry (D52), and templates.test.ts fails if an entry
+# names something no source or compose file in the template mentions.
+
+- { name: KC_BOOTSTRAP_ADMIN_PASSWORD, kind: secret, required: true, rotate: on-demand, service: keycloak, description: "Bootstrap administrator password, paired with KC_BOOTSTRAP_ADMIN_USERNAME in compose.yaml. Set it once, create your realm, then rotate it out of use." }
 - { name: KC_DB_URL,   kind: reference, service: keycloak, database: keycloak-db, output: DATABASE_URL }
 - { name: KC_HOSTNAME, kind: value, default: "", service: keycloak, description: Externally reachable host. Empty means use the provider's generated host until your own DNS is delegated. }
