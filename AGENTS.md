@@ -23,7 +23,7 @@ selections it has already made are recorded, not improvised:
 | Change, review, check and release policy | [docs/MAINTAINING.md](docs/MAINTAINING.md) |
 | Project-specific procedures | [.agents/skills/README.md](.agents/skills/README.md) |
 | Control-plane API design (the validation mechanism itself) | [apps/control-plane/openapi.yaml](apps/control-plane/openapi.yaml) — spec first, then the handler |
-| Every environment variable: credential?, environments, where the value lives | [environment.yaml](environment.yaml) — the central registry (D52), enforced by `pnpm run environment:registry` |
+| Every environment variable: credential?, which environments (`development` / `staging` / `production` / `all`), where the value lives | [environment.yaml](environment.yaml) — the central registry (D52), enforced by `pnpm run environment:registry`: one definition per variable, one spelling of everywhere |
 
 Status: foundation poured, interfaces first (D40, [16](docs/design/16-foundation-build-order.md)). Slices 1
 and 2 of that plan are delivered (393 tests): `apps/control-plane` boots on the vendored runtime with

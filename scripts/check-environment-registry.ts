@@ -44,9 +44,37 @@ const OURS = /^(PLATFOLIO|RAILWAY|KEYCLOAK|KC_|MP_|MAILPIT|SESSION_|APP_|POSTGRE
 const IN_SCOPE = /^(apps\/|packages\/(contracts|kernel|manifest|api-contract)\/src\/|scripts\/|\.github\/|db\/|templates\/(starter-web|starter-worker|shared-identity)\/(compose\.dev\.yaml|src\/))/;
 const IN_SCOPE_ROOT = /^(compose\.yaml|compose\.prod\.yaml|compose\.dev\.yaml|\.platfolio\/|Dockerfile)/;
 
-const ENVIRONMENTS = ['development', 'staging', 'production', 'ci', 'test', 'local'];
+/**
+ * The three environments a platform can live in (D51), and the only words allowed in an entry's
+ * `environments` field.
+ *
+ * The vocabulary used to be six -- development, staging, production, ci, test, local -- and that is the
+ * duplication the maintainer objected to: one fact, four spellings. `[development, staging, production]`,
+ * `[development, staging, production, test, local]` and `[staging, production, ci, test, local]` all meant
+ * "everywhere", and a registry whose same-meaning sets differ by spelling cannot be diffed, searched, or
+ * trusted to answer "does this reach production?".
+ *
+ * `ci`, `test` and `local` are not environments. They describe *where a value lives*, which is `deployedTo`'s
+ * job -- `ci:secret`, `local:compose-overlay`, `host:shell` already say it precisely. A runner is the
+ * development environment; a laptop is the development environment.
+ */
+const ENVIRONMENTS = ['development', 'staging', 'production'] as const;
 
-interface Entry { name?: string; secret?: boolean; appliesTo?: string[]; deployedTo?: string; note?: string }
+/** Rejected with the reason and the field that actually owns the claim, because "not allowed" teaches nothing. */
+const NOT_ENVIRONMENTS: Record<string, string> = {
+  ci: 'a runner is the development environment; where its value lives belongs in `deployedTo` (ci:secret, ci:env)',
+  test: 'tests run in the development environment -- use `development`',
+  local: 'a laptop is the development environment -- use `development`',
+};
+
+interface Entry {
+  name?: string;
+  secret?: boolean;
+  /** `all` (the only legal spelling of the full set) or a non-empty subset of ENVIRONMENTS. */
+  environments?: string[] | 'all';
+  deployedTo?: string;
+  note?: string;
+}
 
 function trackedFiles(): string[] {
   return execFileSync('git', ['ls-files'], { cwd: ROOT, encoding: 'utf8' }).split('\n').filter(Boolean);
@@ -117,13 +145,13 @@ const HUMAN: Record<string, Partial<Entry>> = {
   // Loopback and CI container passwords: not secrets in the custody sense, because there is nothing behind them.
   POSTGRES_PASSWORD: { secret: false, note: 'a container password on loopback/CI; no real service listens' },
   RAILWAY_TOKEN: { note: 'the provider grant. Exactly one per managed instance (D24), held as a GitHub environment secret so platfolio never stores it' },
-  PLATFOLIO_GIT_TOKEN: { secret: true, appliesTo: ['development', 'local', 'test'], deployedTo: 'host:shell', note: 'the git driver\'s HTTPS token, operator-supplied; production uses the App installation' },
+  PLATFOLIO_GIT_TOKEN: { secret: true, environments: ['development'], deployedTo: 'host:shell', note: 'the git driver\'s HTTPS token, operator-supplied; production uses the App installation' },
   PLATFOLIO_SCM_DRIVER: { note: 'which driver is live: git | github-app | none (D51/D50)' },
   KEYCLOAK_ADMIN: { secret: false, note: 'a username is not a credential' },
   // A GitHub Packages push token. It is a credential even though the workflow reads it through `secrets.`, and
   // the emitter cannot know that from the name alone -- which is precisely why this table exists.
-  CR_PAT: { secret: true, appliesTo: ['ci'], deployedTo: 'ci:secret', note: 'GitHub Packages push token used by the image workflow' },
-  CONTROL_PLANE_BASE: { appliesTo: ['local', 'test'], note: 'which control plane a smoke script points at; never a deployment value' },
+  CR_PAT: { secret: true, environments: 'all', deployedTo: 'ci:secret', note: 'GitHub Packages push token used by the image workflow' },
+  CONTROL_PLANE_BASE: { environments: ['development'], note: 'which control plane a smoke script points at; never a deployment value' },
   OIDC_CLIENT_SECRET: { note: 'template placeholder: a tenant app that keeps its own OIDC client secret' },
   STRIPE_WEBHOOK_SECRET: { note: 'template placeholder: a tenant app verifying Stripe webhooks itself' },
   KEYCLOAK_ADMIN_PASSWORD: { note: 'the bootstrap admin of the hosted identity service, declared by name in the composition' },
@@ -140,11 +168,11 @@ function guess(name: string, places: Set<string>): Entry {
   // kind the registry exists to make visible.
   const credentialUrl = new Set(['DATABASE_URL', 'PLATFOLIO_DB_URL', 'POSTGRES_URL', 'PGPASSWORD']);
   const secret = /SECRET|TOKEN|_KEY$|_KEY_|PASSWORD|CREDENTIAL/.test(name) || credentialUrl.has(name);
-  let appliesTo = devOnly ? ['development']
-    : composeOnly ? ['production', 'staging']
-      : ci && !scripts ? ['ci']
-        : scripts && !composeOnly ? ['local', 'test']
-          : ['development', 'staging', 'production'];
+  let environments: string[] | 'all' = devOnly ? ['development']
+    : composeOnly ? ['staging', 'production']
+      : ci && !scripts ? ['development']
+        : scripts && !composeOnly ? ['development']
+          : 'all';
   // Where the value lives is derived from the files that actually reference it, not from the shape of its
   // name. A prefix rule put RAILWAY_TOKEN in `railway:variable` when every workflow that reads it takes it from
   // a GitHub environment secret -- a registry whose only job is custody must not be right by guesswork.
@@ -161,34 +189,84 @@ function guess(name: string, places: Set<string>): Entry {
       : inWorkflows && !inComposition ? 'ci:env'
         : inComposition ? 'railway:variable'
           : 'host:shell';
-  // appliesTo comes from which files reference it, not from a guess about the name: the platform file means the
-  // deployed environments, the dev overlay means development, workflows mean ci, scripts mean local and test.
+  // `environments` is derived from which files reference the name, not from a guess about the name. The rule set
+  // is deliberately small: the platform description means the two provider environments, the dev overlay means
+  // development, code that ships inside a deployed service means provider environments, a template must work
+  // everywhere, and a maintainer script or a CI job runs in development.
   const applies = new Set<string>();
   if (hosts.some((h) => /^compose\.(yaml|prod\.yaml)$/.test(h) || h.startsWith('.platfolio/'))) { applies.add('production'); applies.add('staging'); }
   if (hosts.some((h) => /compose\.dev\.yaml/.test(h))) applies.add('development');
-  if (inWorkflows) applies.add('ci');
-  if (hosts.some((h) => h.startsWith('scripts/') || h.startsWith('apps/managed-action/'))) { applies.add('local'); applies.add('test'); }
+  if (hosts.some((h) => h.startsWith('scripts/') || h.startsWith('apps/managed-action/') || h.startsWith('.github/'))) applies.add('development');
   if (hosts.some((h) => h.startsWith('templates/'))) { applies.add('development'); applies.add('staging'); applies.add('production'); }
   if (hosts.some((h) => h.startsWith('packages/') || h.startsWith('apps/control-plane/'))) { applies.add('production'); applies.add('staging'); }
-  if (applies.size === 0) applies.add('local');
-  appliesTo = [...applies].sort((a, b) => ENVIRONMENTS.indexOf(a) - ENVIRONMENTS.indexOf(b));
+  if (applies.size === 0) applies.add('development');
+  // Normalise: three-of-three is `all`, and `all` is the only way to write it. Emitting both spellings is how a
+  // field with four synonyms for one meaning comes back.
+  environments = applies.size === ENVIRONMENTS.length ? 'all' : ENVIRONMENTS.filter((e) => applies.has(e));
   const over = HUMAN[name] ?? {};
-  return { name, secret: over.secret ?? secret, appliesTo: over.appliesTo ?? appliesTo, deployedTo: over.deployedTo ?? deployedTo, note: over.note ?? `referenced by ${[...new Set(hosts.map((h) => h.split(':')[0]!))].slice(0, 4).join(', ')}` };
+  return { name, secret: over.secret ?? secret, environments: over.environments ?? environments, deployedTo: over.deployedTo ?? deployedTo, note: over.note ?? `referenced by ${[...new Set(hosts.map((h) => h.split(':')[0]!))].slice(0, 4).join(', ')}` };
+}
+
+/**
+ * Migration, in code, once: the registry used to spell environments six ways. `--emit` reads the old field so a
+ * hand-curated file survives regeneration, mapping each retired word to the field that owns the claim now --
+ * `ci`/`local`/`test` were never environments, and the full set has exactly one spelling.
+ */
+function migrateLegacy(value: unknown): string[] | 'all' | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const mapped = new Set<string>();
+  for (const raw of value) {
+    const word = String(raw).toLowerCase();
+    if ((ENVIRONMENTS as readonly string[]).includes(word)) { mapped.add(word); continue; }
+    if (word === 'ci' || word === 'local' || word === 'test') { mapped.add('development'); continue; }
+    // An unrecognised old word is dropped rather than guessed at, because the entry that needs it will fail the
+    // check with its name in the message -- silence here would be a silent reclassification.
+  }
+  if (mapped.size === 0) return ['development'];
+  return mapped.size === ENVIRONMENTS.length ? 'all' : ENVIRONMENTS.filter((e) => mapped.has(e));
 }
 
 const found = discover();
 const { entries, error } = loadRegistry();
 const declared = new Map(entries.map((e) => [e.name ?? '', e]));
+// One definition per variable (D52). The Map hides repeats, so they are named before anything else runs: a
+// variable declared twice is two claims about custody that can disagree, and which one wins is a detail of
+// parse order.
+const duplicateProblems: string[] = [];
+const seen = new Set<string>();
+for (const e of entries) {
+  const n = e.name ?? '(unnamed entry)';
+  if (seen.has(n)) duplicateProblems.push(`${REGISTRY_PATH} defines ${n} more than once -- one variable, one definition, with \`environments\` saying where it applies`);
+  seen.add(n);
+}
 
 if (process.argv.includes('--emit')) {
   const rows = [...found.keys()].sort();
   const body = rows.map((name) => {
     const existing = declared.get(name);
     const e = existing ?? guess(name, found.get(name)!);
-    return `  - name: ${e.name}\n    secret: ${String(e.secret ?? false)}\n    appliesTo: [${(e.appliesTo ?? []).join(', ')}]\n    deployedTo: ${e.deployedTo ?? 'host:shell'}${e.note ? `\n    note: ${JSON.stringify(e.note)}` : ''}`;
+    // Prefer a curated value; else migrate the retired field; else the derivation. `all` is then enforced as
+    // the only spelling of the full set, so a migrated file cannot reintroduce the four-way synonymy.
+    const raw = e.environments ?? migrateLegacy((e as { appliesTo?: unknown }).appliesTo) ?? guess(name, found.get(name)!).environments;
+    const list = raw === 'all' ? [...ENVIRONMENTS] : raw ?? [];
+    const envsOut = ENVIRONMENTS.every((x) => list.includes(x)) ? 'all' : `[${ENVIRONMENTS.filter((x) => list.includes(x)).join(', ')}]`;
+    return `  - name: ${e.name}\n    secret: ${String(e.secret ?? false)}\n    environments: ${envsOut}\n    deployedTo: ${e.deployedTo ?? 'host:shell'}${e.note ? `\n    note: ${JSON.stringify(e.note)}` : ''}`;
   }).join('\n');
-  process.stdout.write(`# The central environment registry (D52).\n# Every variable platfolio's configuration reads or deploys, whether it carries a\n# credential, which environments it applies to, and where its value lives.\n# Enforced by scripts/check-environment-registry.ts, both directions.\n# Skeleton from --emit. Judgement calls (which names are credentials, where values live) live in
-# the script's HUMAN table: edit them there, because a hand-edit here is lost on the next --emit.\nvariables:\n${body}\n`);
+  process.stdout.write([
+    '# The central environment registry (D52).',
+    '',
+    '# Every variable this project reads or deploys: whether it carries a credential (a custody claim, not a',
+    '# guess), which environments it applies to -- development | staging | production, or all -- and where its',
+    '# value actually lives.',
+    '',
+    '# Enforced both ways by `pnpm run environment:registry`: an undeclared variable and a declaration nothing',
+    '# references are both failures, as is a variable defined twice or the full set written any way but `all`.',
+    '# Regenerate the skeleton with --emit; judgement calls belong in the HUMAN table inside that script, never',
+    '# hand-edited here, or the next regeneration silently loses them.',
+    'variables:',
+    body,
+    '',
+  ].join('\n'));
   process.exit(0);
 }
 
@@ -202,7 +280,7 @@ if (process.argv.includes('--report')) {
   process.exit(0);
 }
 
-const problems: string[] = [];
+const problems: string[] = [...duplicateProblems];
 if (error) problems.push(`environment registry: ${error} -- the central registry is required at the repository root (D52)`);
 
 for (const [name, places] of found) {
@@ -215,8 +293,22 @@ for (const e of entries) {
   const name = e.name ?? '(unnamed entry)';
   if (!found.has(name)) problems.push(`${REGISTRY_PATH} declares ${name}, which nothing in configuration references any more -- delete it or wire it up`);
   if (typeof e.secret !== 'boolean') problems.push(`${name}: \`secret\` must be true or false -- custody is a per-variable claim, not a guess`);
-  if (!Array.isArray(e.appliesTo) || e.appliesTo.length === 0) problems.push(`${name}: appliesTo must list at least one of ${ENVIRONMENTS.join('|')}`);
-  else for (const a of e.appliesTo) if (!ENVIRONMENTS.includes(String(a))) problems.push(`${name}: appliesTo entry "${String(a)}" is not one of ${ENVIRONMENTS.join('|')}`);
+  // The anti-duplication rule, enforced: one variable, one entry, one way to say "everywhere".
+  const legacy = (e as { appliesTo?: unknown }).appliesTo;
+  if (legacy !== undefined) problems.push(`${name}: \`appliesTo\` is retired -- the field is \`environments\`, valued development|staging|production|all (D52)`);
+  if (e.environments === undefined) problems.push(`${name}: \`environments\` is required (development | staging | production, or all)`);
+  else if (e.environments === 'all') { /* the only legal spelling of the full set */ }
+  else if (!Array.isArray(e.environments) || e.environments.length === 0) problems.push(`${name}: \`environments\` must be all or a non-empty list of ${ENVIRONMENTS.join('|')}`);
+  else {
+    const list = e.environments.map(String);
+    for (const v of list) {
+      if ((ENVIRONMENTS as readonly string[]).includes(v)) continue;
+      const hint = NOT_ENVIRONMENTS[v.toLowerCase()];
+      problems.push(`${name}: \`environments: ${v}\` is not an environment${hint ? ` -- ${hint}` : ` (allowed: ${ENVIRONMENTS.join('|')} or all)`}`);
+    }
+    if (ENVIRONMENTS.every((x) => list.includes(x))) problems.push(`${name}: list all three environments as \`environments: all\` -- the same set must not have two spellings`);
+    if (new Set(list).size !== list.length) problems.push(`${name}: \`environments\` lists the same environment twice`);
+  }
   if (typeof e.deployedTo !== 'string' || e.deployedTo.length === 0) problems.push(`${name}: deployedTo must say where the value lives (railway:variable | railway:shared-variable | railway:reference | github:environment-secret | ci:secret | local:file | local:compose-overlay | host:shell)`);
 
   if (e.secret === true) {
