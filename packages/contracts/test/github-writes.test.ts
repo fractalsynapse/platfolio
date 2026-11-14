@@ -3,7 +3,8 @@ import { test } from 'node:test';
 import { DEFAULT_APP_PERMISSIONS, GithubRepositoryWrites, localDevManifest } from '../src/index.ts';
 
 interface Sent { method: string; path: string; body?: Record<string, unknown> }
-function harness(handlers: Record<string, () => unknown> = {}) {
+function harness(handlers: Record<string, () => unknown> = {}, opts: { baseTree?: string[] } = {}) {
+  const baseTreePaths = opts.baseTree;
   const sent: Sent[] = [];
   const fetchImpl = (async (url: string, init?: { method?: string; body?: string }) => {
     const path = url.replace('https://api.github.com', '');
@@ -14,6 +15,12 @@ function harness(handlers: Record<string, () => unknown> = {}) {
     if (custom) return { ok: true, status: 200, async json() { return custom(); }, async text() { return ''; } } as Response;
     if (path === '/repos/o/r/git/ref/heads/main') return { ok: true, status: 200, async json() { return { object: { sha: 'base111' } }; } } as Response;
     if (path.endsWith('/git/blobs')) return { ok: true, status: 201, async json() { return { sha: `blob-${String(sent.filter((s) => s.path.includes('/git/blobs')).length)}` }; } } as Response;
+    // A tree READ is `/git/trees/<sha>?recursive=1`; a tree WRITE is `/git/trees`. They must not be matched by
+    // the same rule, or the double cannot tell a base-tree lookup from the commit it feeds.
+    if (method === 'GET' && path.includes('/git/trees/')) {
+      const entries = { tree: (baseTreePaths ?? []).map((p) => ({ path: p, type: 'blob', sha: 's' })) };
+      return { ok: true, status: 200, async json() { return entries; }, async text() { return ''; } } as Response;
+    }
     if (path.endsWith('/git/trees')) return { ok: true, status: 201, async json() { return { sha: 'tree1' }; } } as Response;
     if (path.endsWith('/git/commits')) return { ok: true, status: 201, async json() { return { sha: 'head999' }; } } as Response;
     if (path === '/repos/o/r/pulls') return { ok: true, status: 201, async json() { return { number: 7, url: 'u', html_url: 'h', head: { sha: 'head999' }, base: { sha: 'base111' } }; } } as Response;
@@ -293,4 +300,58 @@ test('listCommits reads the bare array GitHub actually returns', async () => {
     fetch: (async () => ({ ok: false, status: 403, async json() { return {}; }, async text() { return ''; } })) as unknown as typeof globalThis.fetch,
   });
   await assert.rejects(() => failed.listCommits('o/r', 'main'), /failed \(403\)/, 'a refused read is not "no history"');
+});
+
+// ---- retiring a published path (D58: the publisher must be able to STOP shipping a file)
+
+test('a retired path becomes a null-sha tree entry, which is how Git deletes a file', async () => {
+  const { sent, writes } = harness({}, { baseTree: ['.platfolio/environment.yaml', 'README.md'] });
+  const result = await writes.commitFiles({
+    repo: 'o/r', baseBranch: 'main', branch: 'platfolio/install', message: 'm',
+    files: { 'README.md': 'x' }, deletePaths: ['.platfolio/environment.yaml'],
+  });
+  const tree = sent.find((s) => s.method === 'POST' && s.path.endsWith('/git/trees'));
+  const entries = (tree?.body as { tree: { path: string; sha: string | null }[] }).tree;
+  assert.deepEqual(
+    entries.filter((e) => e.sha === null).map((e) => e.path),
+    ['.platfolio/environment.yaml'],
+    'the retirement is a null sha on that path, alongside the ordinary blobs',
+  );
+  assert.deepEqual(result.retired, ['.platfolio/environment.yaml']);
+  assert.deepEqual(result.alreadyAbsent, []);
+});
+
+test('retiring a path the repository does not have is reported, not faked, and not an error', async () => {
+  // Measured: GitHub answers `GitRPC::BadObjectState` (422) for a null-sha entry on a path absent from the base
+  // tree. The first publisher run retired the file; the second must not fail, and must not claim it deleted
+  // something either. Those are different facts and both matter.
+  const { sent, writes } = harness({}, { baseTree: ['README.md'] });
+  const result = await writes.commitFiles({
+    repo: 'o/r', baseBranch: 'main', branch: 'b', message: 'm',
+    files: { 'README.md': 'x' }, deletePaths: ['.platfolio/environment.yaml'],
+  });
+  const tree = sent.find((s) => s.method === 'POST' && s.path.endsWith('/git/trees'));
+  const entries = (tree?.body as { tree: { sha: string | null }[] }).tree;
+  assert.equal(entries.some((e) => e.sha === null), false, 'no null-sha entry for a path that is not there');
+  assert.deepEqual(result.retired, []);
+  assert.deepEqual(result.alreadyAbsent, ['.platfolio/environment.yaml']);
+});
+
+test('a path being both written and retired is written -- the retirement cannot delete its own new content', async () => {
+  const { writes } = harness({}, { baseTree: ['environment.yaml'] });
+  const result = await writes.commitFiles({
+    repo: 'o/r', baseBranch: 'main', branch: 'b', message: 'm',
+    files: { 'environment.yaml': 'variables: []' }, deletePaths: ['environment.yaml'],
+  });
+  assert.deepEqual(result.retired, [], 'a conflicted instruction resolves toward keeping the content we ship');
+  assert.deepEqual(result.alreadyAbsent, [], 'filtered before any tree read, so nothing is claimed absent either');
+});
+
+test('no retirements means no base-tree round trip', async () => {
+  // The regression that CI caught: reading the base tree unconditionally put an extra request on every install
+  // commit, and the double's 204 default parsed to undefined -- `Cannot read properties of undefined
+  // (reading 'tree')`. A guard that only asks the question when it has an answer to use.
+  const { sent, writes } = harness();
+  await writes.commitFiles({ repo: 'o/r', baseBranch: 'main', branch: 'b', message: 'm', files: { 'a': '1' } });
+  assert.equal(sent.filter((s) => s.method === 'GET' && s.path.includes('/git/trees/')).length, 0);
 });

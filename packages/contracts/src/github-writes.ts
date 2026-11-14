@@ -73,12 +73,35 @@ export class GithubRepositoryWrites {
   }
 
   /** One atomic commit containing every install file, on a fresh branch off the current base. */
-  async commitFiles(input: { repo: string; baseBranch: string; branch: string; message: string; files: Record<string, string> }): Promise<{ headSha: string; baseSha: string }> {
+  async commitFiles(input: { repo: string; baseBranch: string; branch: string; message: string; files: Record<string, string>; deletePaths?: string[] }): Promise<{ headSha: string; baseSha: string; retired: string[]; alreadyAbsent: string[] }> {
     Repo.parse(input.repo);
     const paths = Object.keys(input.files).sort();
     if (paths.length === 0) throw new Error('github: refusing to open an install PR with no files');
     const baseSha = await this.branchSha(input.repo, input.baseBranch);
 
+    // A tree built on `base_tree` only ADDS and REPLACES. Without an explicit null-sha entry, a file the
+    // source stopped shipping survives forever in the published repository -- which is how consolidating two
+    // environment.yaml files into one would have left every fork with BOTH: the new one at the root and the
+    // retired one under .platfolio/, still merged into the plan by applyInventory. Deleting a path in Git is
+    // `sha: null` on that path in the tree.
+    // Retirements are applied only to paths that EXIST on the base commit. This was measured, not assumed: the
+    // second publish of starter-web failed with `GitRPC::BadObjectState` (HTTP 422) because the first publish had
+    // already removed `.platfolio/environment.yaml`, and GitHub rejects a null-sha entry for a path that is not
+    // in the base tree. So "delete this retired path" is idempotent here -- re-publishing a repository that
+    // already moved on is the normal case, not an error case.
+    //
+    // The base tree is read ONLY when there is something to retire. My first version read it unconditionally, and
+    // the writer's own tests caught it as `Cannot read properties of undefined (reading 'tree')` -- a 204 with no
+    // body parses to undefined, and an extra round trip on every install commit bought nothing.
+    const deletions = (input.deletePaths ?? []).filter((path) => !input.files[path]).sort();
+    let applicableDeletions: string[] = [];
+    let alreadyGone: string[] = [];
+    if (deletions.length > 0) {
+      const baseTree = await this.call<{ tree?: Array<{ path: string }> } | undefined>(`/repos/${input.repo}/git/trees/${baseSha}?recursive=1`);
+      const present = new Set((baseTree?.tree ?? []).map((e) => e.path));
+      applicableDeletions = deletions.filter((path) => present.has(path));
+      alreadyGone = deletions.filter((path) => !present.has(path));
+    }
     const blobs = await Promise.all(paths.map(async (path) => {
       const content = input.files[path]!;
       if (content.includes('\u0000')) throw new Error(`github: refusing to commit a NUL byte in ${path}`);
@@ -88,7 +111,7 @@ export class GithubRepositoryWrites {
 
     const tree = await this.call<{ sha: string }>(`/repos/${input.repo}/git/trees`, {
       method: 'POST',
-      body: { base_tree: baseSha, tree: blobs },
+      body: { base_tree: baseSha, tree: [...blobs, ...applicableDeletions.map((path) => ({ path, sha: null as string | null, mode: '100644' }))] },
     });
     const commit = await this.call<{ sha: string }>(`/repos/${input.repo}/git/commits`, {
       method: 'POST',
@@ -104,7 +127,24 @@ export class GithubRepositoryWrites {
       if (!/Reference already exists/.test(message)) throw error;
       await this.call(`/repos/${input.repo}/git/refs/heads/${encodeURIComponent(input.branch)}`, { method: 'PATCH', body: { sha: commit.sha, force: true } });
     }
-    return { headSha: commit.sha, baseSha };
+    // Both halves are returned so a publisher can say what it actually did: "retired X" and "X was already
+    // gone" are different facts, and reporting the second as the first is how a check starts lying quietly.
+    return { headSha: commit.sha, baseSha, retired: applicableDeletions, alreadyAbsent: alreadyGone };
+  }
+
+  /**
+   * The published tree as blob SHAs. Public because parity between a source directory and a published
+   * repository is a fact worth checking rather than assuming: `check-template-publication.ts` compares these
+   * against `git hash-object` of the local files. A blob SHA is computed identically on both sides, so a match
+   * is evidence rather than an opinion -- the same property that made the Contents-API reads and the artifact
+   * reporting (D54) verifiable.
+   */
+  async treeEntries(repo: string, ref: string): Promise<Array<{ path: string; type: string; sha: string }>> {
+    Repo.parse(repo);
+    const tree = await this.call<{ tree: Array<{ path: string; type: string; sha: string }> }>(
+      `/repos/${repo}/git/trees/${encodeURIComponent(ref)}?recursive=1`,
+    );
+    return tree.tree ?? [];
   }
 
   /**

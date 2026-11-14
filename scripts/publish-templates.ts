@@ -14,39 +14,24 @@
  * An empty repository gets an initial commit with no parents; a repository that already has history gets a
  * branch and a pull request, so nothing is ever pushed onto a default branch without a human reviewing it.
  */
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import {
   GithubRepositoryWrites,
   createInstallationAccessToken,
   revokeInstallationAccessToken,
 } from '../packages/contracts/src/index.ts';
+import { RETIRED_PATHS, TEMPLATES } from './template-manifest.ts';
 
 const args = process.argv.slice(2).filter((a) => a !== '--');
 const apply = args.includes('--apply');
 const org = args.find((_, i) => args[i - 1] === '--org') ?? 'fractalsynapse';
 const branch = args.find((_, i) => args[i - 1] === '--branch') ?? 'main';
 
-const TEMPLATES = [
-  { dir: 'starter-web', repo: 'platfolio-starter-web', label: 'web service (public UI + API, managed Postgres)' },
-  { dir: 'starter-worker', repo: 'platfolio-starter-worker', label: 'worker (no inbound, retained volume)' },
-  { dir: 'shared-identity', repo: 'platfolio-shared-identity', label: 'shared identity (Keycloak, provides identity)' },
-];
-
-/** Everything under the template directory, including dotfiles -- `.platfolio/environment.yaml` is the point. */
-function collect(dir: string): Record<string, string> {
-  const out: Record<string, string> = {};
-  const walk = (rel: string): void => {
-    for (const entry of readdirSync(join(dir, rel)).sort()) {
-      const full = join(dir, rel, entry);
-      const key = rel ? `${rel}/${entry}` : entry;
-      if (statSync(full).isDirectory()) walk(key);
-      else out[key] = readFileSync(full, 'utf8');
-    }
-  };
-  walk('');
-  return out;
-}
+// Publishing is per-repository reviewable, because the writes are to repositories other people will fork. The
+// first run of a new write mechanism (retiring a path via a null-sha tree entry) should be proven against ONE
+// repository and read back before it touches all three.
+const only = args.find((_, i) => args[i - 1] === '--template');
 
 const credsPath = resolve('.secrets/platfolio-app.json');
 if (!existsSync(credsPath)) {
@@ -57,10 +42,17 @@ const creds = JSON.parse(readFileSync(credsPath, 'utf8')) as { appId: number; pr
 if (!creds.installationId) { console.error('  No installationId recorded; install the app, then re-run.'); process.exit(1); }
 
 console.log(`  organization: ${org}   branch: ${branch}   ${apply ? 'APPLY' : 'DRY RUN (no writes)'}`);
-const plans = TEMPLATES.map((t) => ({ ...t, files: collect(`templates/${t.dir}`) }));
+// `TEMPLATES` and `RETIRED_PATHS` come from ./template-manifest.ts -- the same source the parity check reads, so
+// the publisher and the checker cannot disagree about what should be published. The rationale for declaring
+// retirements rather than deriving them lives there.
+const plans = TEMPLATES
+  .filter((t) => (only ? t.dir === only : true))
+  .map((t) => ({ ...t, files: t.files(), retired: RETIRED_PATHS }));
+if (only && plans.length === 0) { console.error(`  --template=${only} matches no known template`); process.exit(1); }
 for (const p of plans) {
   console.log(`  ${p.repo}  <- templates/${p.dir}  (${String(Object.keys(p.files).length)} files: ${p.label})`);
   console.log(`      ${Object.keys(p.files).sort().join(', ')}`);
+  console.log(`      retiring: ${p.retired.join(', ')}`);
 }
 if (!apply) {
   console.log('\n  DRY RUN. Re-run with --apply once the repositories exist and are added to the installation.');
@@ -110,11 +102,13 @@ try {
     const history = await writes.listCommits(repo, branch);
     const oursSoFar = history.length > 0 && history.every((m) => m.startsWith('chore(platfolio)'));
     if (oursSoFar) {
-      const { headSha } = await writes.commitFiles({ repo, baseBranch: branch, branch, message: `chore(platfolio): update the ${p.dir} template`, files: p.files });
+      const { headSha, retired, alreadyAbsent } = await writes.commitFiles({ repo, baseBranch: branch, branch, message: `chore(platfolio): update the ${p.dir} template`, files: p.files, deletePaths: p.retired });
+      if (retired.length > 0) console.log(`      retired in the published repo: ${retired.join(', ')}`);
+      if (alreadyAbsent.length > 0) console.log(`      already absent, nothing to retire: ${alreadyAbsent.join(', ')}`);
       console.log(`  ${repo}: republished onto ${branch} at ${headSha.slice(0, 10)}`);
     } else {
       const b = `platfolio/publish-${p.dir}`;
-      const { headSha } = await writes.commitFiles({ repo, baseBranch: branch, branch: b, message: `chore(platfolio): publish the ${p.dir} template`, files: p.files });
+      const { headSha } = await writes.commitFiles({ repo, baseBranch: branch, branch: b, message: `chore(platfolio): publish the ${p.dir} template`, files: p.files, deletePaths: p.retired });
       const pr = await writes.openPullRequest({
         repo, title: `Publish the ${p.dir} platform template`, base: branch, head: b,
         body: `Written by platfolio from \`templates/${p.dir}\` in platfolio's own repository.\n\nThis is ${p.label}. The source of truth stays in platfolio; this repository is the artifact, so a team that wants a different starting point forks it and owns the result.`,

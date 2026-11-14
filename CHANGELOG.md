@@ -99,6 +99,43 @@ schema's error type carries the issues. Fixed by deleting the import and matchin
 establish the claim. AGENTS.md already said this ("fake-only tests do not establish that wiring works"); this
 is the cost of reading past it.
 
+### Fixed — the published templates were not the templates, and nothing could tell us
+
+The registry consolidation (D58) deleted `.platfolio/environment.yaml` from `templates/` and stopped at the
+repository boundary. All three **published** template repositories still served it, and `applyInventory` merges
+whatever is there -- so a fork on that day would have carried two registries describing one platform, the exact
+defect D58 was raised to remove, surviving in the one place tenants actually touch. Found only because the
+maintainer asked whether the published repos had been updated. They had not.
+
+This is a structural gap, not a slip: every gate in `verify` runs offline, so nothing in the normal path ever
+looks at the published copy.
+
+- **`pnpm run templates:check`** compares, per template, the blob SHA of every local file against the same path in
+  the published repository, and reports `STALE` / `MISSING` / `ORPHAN`. A blob SHA is computed identically on both
+  sides, so a match is evidence rather than an opinion. It found the two stale READMEs immediately, and reported
+  in sync after the republish.
+- **Retiring a published path** is now expressible at all: the publisher accepts `deletePaths`, and the writer
+  emits `sha: null` tree entries. Two measured lessons -- a tree built on `base_tree` only adds and replaces, and
+  GitHub rejects a null-sha entry for a path that is not in the base commit (`GitRPC::BadObjectState`, 422), so
+  re-publishing a repository that already moved on used to fail the whole commit. Retirements are now filtered
+  against the base tree and reported as `retired` vs `alreadyAbsent`, because those are different facts.
+- **Retirement is declared, never derived.** A publisher that deleted "anything not in the source" would eat a
+  fork's own files, so `RETIRED_PATHS` in the new `scripts/template-manifest.ts` is explicit -- and
+  `templates:check` flags any published file that is neither shipped nor declared retired, so an incomplete list
+  cannot pass silently.
+- **Publisher and checker share that one manifest**, so they cannot disagree about what should be published.
+- **`check-project.ts` gained the offline half** (a platform directory without a registry, a shipped path under
+  the retired prefix, or a shipped path that is also declared retired), because `templates:check` needs
+  credentials and network. Verified by breaking it both ways.
+- The templates' own documentation was two layers stale: `templates/starter-web/README.md` promised a secret
+  (`APP_SESSION_KEY`) that the template removed in #238 and pointed at the retired `.platfolio/` path, and
+  `shared-identity`'s told tenants to rotate `KEYCLOAK_ADMIN_PASSWORD`, a variable 26.x does not read. Both
+  corrected; `docs/design/03`, `13` and `14`'s normative path references updated.
+
+Stated plainly, because the maintainer's objection deserves an answer rather than a gate: **bundling the templates
+with the core platform is what makes this drift possible**, and `templates:check` closes the detection gap, not
+the design one. Separating them is a real option and is recorded as a decision to take, not as work done.
+
 ### Changed — one environment registry per platform. `.platfolio/` is gone (D58)
 
 Two files named `environment.yaml`, two schemas, one set of variables. The registry is now the only one, and the

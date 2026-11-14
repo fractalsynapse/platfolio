@@ -487,14 +487,47 @@ const endpointProblems = await checkCommittedEndpoints();
 const projectProblems = await checkCommittedProjects();
 const overlayProblems = await checkDevOverlayPairing();
 const actionProblems = await checkActionManifests();
+const registryProblems = await checkTemplateRegistries();
 
-const all = [...docProblems, ...skillProblems, ...workflowProblems, ...actionProblems, ...hygieneProblems, ...endpointProblems, ...projectProblems, ...overlayProblems];
+/**
+ * The offline half of template-publication integrity.
+ *
+ * `pnpm run templates:check` compares the templates against the PUBLISHED repositories, over the network, with
+ * credentials -- so it can say "the thing a tenant forks is the thing we ship". That check cannot run in every
+ * environment, and when it is skipped nothing else notices. These assertions are the part that always runs:
+ *
+ *  - every platform directory carries its registry at its root (D58: one file per platform, not two);
+ *  - nothing under the retired `.platfolio/` path is still shipped;
+ *  - a path declared retired in `template-manifest.ts` does not exist in a template (the declaration and the
+ *    tree cannot disagree, or the publisher would silently keep serving the file it claims to remove).
+ *
+ * The live instance: the consolidation deleted `.platfolio/environment.yaml` from `templates/` while all three
+ * published repositories kept it, and `applyInventory` merges whatever is there into the plan -- so a fork would
+ * have carried two registries describing one platform, which is the exact defect D58 was raised to remove.
+ */
+async function checkTemplateRegistries(): Promise<string[]> {
+  const problems: string[] = [];
+  const { RETIRED_PATHS, TEMPLATES } = await import('./template-manifest.ts');
+  for (const t of TEMPLATES) {
+    const files = t.files();
+    const root = `templates/${t.dir}`;
+    if (!Object.keys(files).includes('environment.yaml')) problems.push(`${root}: no environment.yaml -- every platform declares its variables in one registry at its root (D58)`);
+    for (const path of Object.keys(files)) {
+      if (path.startsWith('.platfolio/')) problems.push(`${root}/${path}: the platform inventory was folded into the registry (D58); a second registry per platform is the duplication that change removed`);
+      if (RETIRED_PATHS.includes(path)) problems.push(`${root}/${path}: shipped here but declared retired in template-manifest.ts -- the publisher would keep the published copy forever, believing it removed`);
+    }
+  }
+  return problems;
+}
+
+const all = [...docProblems, ...skillProblems, ...workflowProblems, ...actionProblems, ...hygieneProblems, ...endpointProblems, ...projectProblems, ...overlayProblems, ...registryProblems];
 say(`skills checked: ${skills.length} (${skills.map((s) => s.name).join(', ')})`);
 say(`workflows linted: ${workflowProblems.length === 0 ? 'clean' : `${workflowProblems.length} problem(s)`}`);
 say(`action manifests checked: ${actionProblems.length === 0 ? 'clean' : `${actionProblems.length} problem(s)`}`);
 say(`committed endpoints: ${endpointProblems.length === 0 ? 'no generated hostnames in tracked files' : `${endpointProblems.length} problem(s)`}`);
 say(`test targets (D49): ${projectProblems.length === 0 ? 'only the real projects are named in code' : `${projectProblems.length} problem(s)`}`);
 say(`dev overlays (D50): ${overlayProblems.length === 0 ? 'every platform service has a dev entry; extras are declared' : `${overlayProblems.length} problem(s)`}`);
+say(`template registries (D58): ${registryProblems.length === 0 ? 'one environment.yaml per platform, no retired path shipped' : `${registryProblems.length} problem(s)`}`);
 
 if (all.length) {
   console.error(`\n${all.length} problem(s):`);
