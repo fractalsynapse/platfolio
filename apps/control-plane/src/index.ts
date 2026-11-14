@@ -104,7 +104,7 @@ export function configFromEnv(env: NodeJS.ProcessEnv): BootConfig {
  * accident, in the one component that promises not to (D4).
  */
 export function describeBootFailure(error: unknown): string {
-  const e = error as { name?: string; message?: string; stack?: string; cause?: unknown };
+  const e = error as { name?: string; message?: string; stack?: string; cause?: unknown; errors?: unknown };
   // A thrown non-Error (a string, a domain object) used to render as `Error: (no message)`, which is how a real
   // reason disappears: the boot path lost whatever was thrown the moment it was not an Error instance.
   if (typeof error === 'string' || typeof error === 'number' || typeof error === 'bigint') {
@@ -113,6 +113,15 @@ export function describeBootFailure(error: unknown): string {
   const name = typeof e?.name === 'string' && e.name.length > 0 ? e.name : 'Error';
   const message = typeof e?.message === 'string' && e.message.length > 0 ? e.message : '(no message)';
   const parts = [`${name}: ${redactCredentialShaped(message)}`];
+  // AggregateError is what a connection pool throws when several attempts fail, and `pg-pool` uses it -- so the
+  // one error type that carried staging's actual boot failure was the one whose contents were invisible: its
+  // `message` is empty and the reasons live in `.errors`. Listing them, redacted and capped, is the difference
+  // between "cannot start: AggregateError" and "cannot start: AggregateError -- [ECONNREFUSED, ...]".
+  const aggregate = e?.errors as Array<{ name?: string; message?: string }> | undefined;
+  if (Array.isArray(aggregate) && aggregate.length > 0) {
+    const inner = aggregate.slice(0, 4).map((x) => `${x?.name ?? 'Error'}: ${redactCredentialShaped(String(x?.message ?? '(no message)'))}`);
+    parts.push(`aggregated ${String(aggregate.length)} error(s): ${inner.join('; ')}${aggregate.length > 4 ? ` (+${String(aggregate.length - 4)} more)` : ''}`);
+  }
   // The cause chain, because a wrapped failure is where the real reason lives -- one level deep is enough to
   // turn "database error" into "schema platfolio does not exist", and deeper chains are noise at boot.
   const cause = e?.cause as { name?: string; message?: string } | undefined;
