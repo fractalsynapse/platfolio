@@ -219,17 +219,38 @@ export class RailwayInfraProvider implements InfraProvider {
     await this.writeMarker(projectId, plan.planHash, workspaceCredential);
 
     // Already applied and unchanged: a re-delivered dispatch must not redeploy the world.
+    //
+    // But the marker above records INTENT, deliberately written before anything mutates (E26: a marker written
+    // only at the end meant every retry re-deployed everything). So a matching marker is not proof the work
+    // FINISHED -- an apply interrupted between the marker and the last environment leaves the promise without
+    // the state. Measured on our own infrastructure: the retry answered `noop: true, verified: true` while the
+    // staging environment did not exist, because `verified` asked "is every service in the project live", and a
+    // service that was never placed anywhere is simply absent from the list it checks.
+    //
+    // A marker therefore earns a coverage check rather than a certificate: every environment the plan declares
+    // must exist, every service in it must be placed, every domain in it must be bound. Anything missing resumes
+    // the apply, and the resume is reported instead of being silent.
     if (this.markerOf(existing?.description) === plan.planHash) {
+      const coverage = await this.coverageOf(projectId, parsed.data.environments, workspaceCredential);
       const state = await this.snapshot(projectId);
-      return {
-        instanceId: plan.instanceId,
-        planHash: plan.planHash,
-        verified: state.services.length > 0 && state.services.every((s) => s.status === 'live'),
-        services: state.services,
-        domains: state.domains,
-        failures,
-        noop: true,
-      };
+      if (coverage.covered) {
+        return {
+          instanceId: plan.instanceId,
+          planHash: plan.planHash,
+          verified: state.services.length > 0 && state.services.every((s) => s.status === 'live'),
+          services: state.services,
+          domains: state.domains,
+          failures,
+          noop: true,
+        };
+      }
+      notes.push({
+        step: 'idempotency',
+        code: 'marker-without-state',
+        // Named, not counted: an operator reading this has to know WHICH declared thing the provider is missing,
+        // or the resume looks like flapping.
+        message: `this plan's marker is present but ${String(coverage.missing.length)} declared thing(s) are absent in the provider (${coverage.missing.slice(0, 6).join('; ')}); resuming the apply rather than reporting success`,
+      });
     }
 
     for (const environment of parsed.data.environments) {
@@ -1395,6 +1416,52 @@ export class RailwayInfraProvider implements InfraProvider {
     } catch {
       return [];
     }
+  }
+
+  /**
+   * Does the provider's actual state contain everything the plan declares?
+   *
+   * Deliberately three nested questions rather than one "are the services healthy" sweep, because the failure
+   * this exists to catch is absence, not illness: a missing environment, a service that exists in the project
+   * but was never placed in this environment, and a service placed with no domain bound are all invisible to a
+   * liveness check over the services that happen to be there.
+   */
+  private async coverageOf(
+    projectId: string,
+    environments: { name: string; services: { name: string }[]; domains?: { host: string; service: string }[] }[],
+    workspaceCredential: RailwayCredential,
+  ): Promise<{ covered: boolean; missing: string[] }> {
+    const missing: string[] = [];
+    const listed = await this.environments(projectId, workspaceCredential);
+    const projectServices = await this.listServices(projectId, workspaceCredential);
+    for (const environment of environments) {
+      const env = listed.find((e) => e.name === environment.name);
+      if (!env) { missing.push(`environment "${environment.name}"`); continue; }
+      const token = await this.credentials.forEnvironment(projectId, env.name);
+      const placed = await this.environmentInstances(projectId, env.id, token);
+      for (const service of environment.services) {
+        const known = projectServices.find((s) => s.name === service.name);
+        if (!known) missing.push(`service "${service.name}" (project level)`);
+        else if (!placed.has(known.id)) missing.push(`service "${service.name}" is not placed in "${environment.name}"`);
+      }
+      for (const domain of environment.domains ?? []) {
+        // Two kinds of host, and they are not checked the same way. A custom domain is OUR assertion: the exact
+        // hostname must be bound in this environment. A `*.up.railway.app` host is provider-ASSIGNED -- Railway
+        // names generated domains itself, so demanding the literal would report a correctly applied plan as
+        // unfinished forever, which is precisely the false positive that makes a check get ignored. What the plan
+        // actually asserts for a generated host is that the service has traffic in this environment.
+        const assigned = /\.up\.railway\.app$/.test(domain.host);
+        if (assigned) {
+          const target = projectServices.find((s) => s.name === domain.service);
+          const info = target ? placed.get(target.id) : undefined;
+          if (!info || (info.domainHosts ?? []).length === 0) missing.push(`no domain bound to "${domain.service}" in "${environment.name}" (plan asserted the generated host "${domain.host}")`);
+          continue;
+        }
+        const bound = [...placed.values()].some((info) => (info.domainHosts ?? []).includes(domain.host));
+        if (!bound) missing.push(`domain "${domain.host}" in "${environment.name}"`);
+      }
+    }
+    return { covered: missing.length === 0, missing };
   }
 
   private markerOf(description: string | undefined | null): string | null {
