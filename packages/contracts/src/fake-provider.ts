@@ -1,4 +1,4 @@
-import { OPERATIONS, planIssues, type CapabilityInfo, type ApplyResult, type DeleteResult, type InfraPlan, type InfraProvider, type SecretPresence, type SecretWriteResult, type Issue, type StateSnapshot } from './infra.ts';
+import { CONTRACT_VERSION, OPERATIONS, planIssues, type CapabilityInfo, type ApplyResult, type DeleteResult, type InfraPlan, type InfraProvider, type SecretPresence, type SecretWriteResult, type Issue, type StateSnapshot } from './infra.ts';
 import { samplePlan } from './conformance.ts';
 
 export interface FakeOptions {
@@ -23,7 +23,7 @@ export class FakeInfraProvider implements InfraProvider {
   private readonly opts: Required<Pick<FakeOptions, 'contract' | 'name'>> & FakeOptions;
 
   constructor(options: FakeOptions = {}) {
-    this.opts = { contract: '1.0.0', name: 'fake', ...options };
+    this.opts = { contract: CONTRACT_VERSION, name: 'fake', ...options };
   }
 
   describe(): CapabilityInfo {

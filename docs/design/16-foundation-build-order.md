@@ -20,7 +20,8 @@ Two facts make the ordering concrete:
 Cordis kernel (`apps/control-plane`), Postgres, Astro site later, containerized, **Docker Compose for local
 development**, and its own Railway project for staging and production — the same architecture it will sell.
 platfolio's own identity is Keycloak (D40), the same shared-service shape a tenant gets from
-`templates/shared-identity`.
+`fractalsynapse/platfolio-shared-identity` -- the published repository, read through the seam (D60), which is
+why our own identity path is exercised by the artifact people fork rather than by a copy of it.
 
 ## Slice 1 — a service that starts, locally, with real tokens
 

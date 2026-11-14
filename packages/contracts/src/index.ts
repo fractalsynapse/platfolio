@@ -11,7 +11,7 @@ export * from './scm-conformance.ts';
 export * from './railway-transport.ts';
 // The physical-name rule travels with the provider that applies it (D57): `scripts/platform-deploy.ts` renders it
 // for a dry run, and a second copy of the rule in a script would be a second answer to the same question.
-export { RailwayInfraProvider, physicalServiceName, resolvePlacement, previewPlacement, placementCollisions, type ServicePlacement, type RailwayProviderOptions } from './railway-provider.ts';
+export { RailwayInfraProvider, physicalServiceName, type RailwayProviderOptions } from './railway-provider.ts';
 export * from './railway-changeset.ts';
 export * from './secret-writer.ts';
 export * from './binding.ts';

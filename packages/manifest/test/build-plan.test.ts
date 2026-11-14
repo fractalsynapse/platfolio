@@ -8,12 +8,14 @@ import { RailwayInfraProvider } from '@platfolio/contracts';
 import { RailwayMock } from '../../../packages/contracts/test/railway-mock.ts';
 import { buildPlan, parse, validateManifest } from '../src/index.ts';
 
-// Tests run from the repository root (pnpm test); templates live there, not beside the package.
+// Tests run from the repository root (pnpm test); the fixtures live under this package's test tree, and they are
+// fixtures -- not the published templates, which are repositories read through the source-control seam
+// (packages/manifest/test/templates.test.ts).
 const dir = path.resolve('packages/manifest/test/fixtures');
 const raw = (f: string) => fs.readFileSync(path.join(dir, f + '-manifest.yaml'), 'utf8');
 function loaded(name: string) {
   const result = parse(raw(name));
-  if (!result.manifest) throw new Error(`template "templates/${name}" did not parse: ${JSON.stringify(result.issues)}`);
+  if (!result.manifest) throw new Error(`fixture "packages/manifest/test/fixtures/${name}-manifest.yaml" did not parse: ${JSON.stringify(result.issues)}`);
   return result.manifest;
 }
 const webApp = loaded('web-app');
@@ -152,10 +154,12 @@ test('the whole chain composes: manifest -> plan -> provider wires the reference
     'environments.staging.services.api.secrets.APP_API_SIGNING_KEY',
   ], 'each failure names its environment -- a duplicate step would tell a tenant nothing');
 
+  // The PLAN still carries the logical names -- that is the point of the deterministic rule -- but the
+  // PROJECT holds `{name}-{environment}` for every environment, production included (D57).
   const prod = plan.environments.find((e) => e.name === 'production')!;
-  const dbServiceId = [...mock.services.values()].find((s) => s.name === prod.databases[0]!.name);
-  assert.ok(dbServiceId, `the declared database "${prod.databases[0]!.name}" was provisioned from the manifest`);
-  const apiId = [...mock.services.values()].find((s) => s.name === 'api');
+  const dbServiceId = [...mock.services.values()].find((s) => s.name === `${prod.databases[0]!.name}-production`);
+  assert.ok(dbServiceId, `the declared database "${prod.databases[0]!.name}-production" was provisioned from the manifest`);
+  const apiId = [...mock.services.values()].find((s) => s.name === 'api-production');
   assert.ok(apiId, 'the app service from the manifest exists');
   const instanceKey = [...mock.instances.keys()].find((k) => k.endsWith(`:${apiId.id}`));
   assert.ok(instanceKey, 'the app service has an instance in the environment');
@@ -173,7 +177,7 @@ test('the whole chain composes: manifest -> plan -> provider wires the reference
   assert.notEqual(stagingApi.id, apiId.id);
   assert.deepEqual(
     [...new Set(mock.writtenVariables.filter((w) => w.name === 'DATABASE_URL').map((w) => w.value))].sort(),
-    ['${{app-db-staging.DATABASE_URL}}', '${{app-db.DATABASE_URL}}'],
+    ['${{app-db-production.DATABASE_URL}}', '${{app-db-staging.DATABASE_URL}}'],
     'each environment’s connection reference names the database it owns -- never the other one’s',
   );
   // Names are asserted, never values: the wiring is provider-resolved by construction.

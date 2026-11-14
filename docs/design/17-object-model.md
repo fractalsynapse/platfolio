@@ -40,8 +40,10 @@ instances, and a person is never a billing unit.
 The word "platform" is currently overloaded three ways, and the confusion is not academic — it has already
 produced a field named `platform` that stores a template identifier.
 
-1. **Template** — the source of a kind of thing. Lives in `templates/`, published to
-   `fractalsynapse/platfolio-*` repositories. A tenant never edits it; they copy it.
+1. **Template** — the source of a kind of thing. It IS a published repository
+   (`fractalsynapse/platfolio-*`), not a directory in platfolio (D60): `packages/manifest/src/template-catalog.ts`
+   maps the name to the repository, and platfolio reads it through the same source-control seam it uses for a
+   tenant's platform. A tenant never edits it; they copy it.
 2. **Instance** — a running copy of a template, owned by exactly one team, deployed in that team's provider
    project. This is the unit platfolio manages, bills for, and reports status on.
 3. **Shared service** — an *instance whose declared job is to serve other instances*: the identity case

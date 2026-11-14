@@ -224,13 +224,46 @@ A cloned database is not an isolated database.
 Because Railway service names are unique per project (`serviceCreate` refuses a name the project holds) and no
 mutation places an existing service into a further environment (`serviceInstanceUpdate` on an unplaced instance
 returns `true` and changes nothing — E25, and the captured schema has no `serviceInstanceCreate`), the provider
-derives a **physical** service name per environment from the declared one: the declared name when no project
-service holds it or when that service already runs in this environment, otherwise `<name>-<environment>`. So
-`production` keeps the names it was created with — `api`, `identity`, `main`, which is history, not a special
-case — and an environment added later gets `api-staging` and its own `main-staging`, created by the same
-template path production's database was. A plan that declares two names resolving to one service is refused
-(`service-name-collision`) rather than merged, and `platform-deploy --dry-run` prints the resolved names before
-anything is sent. See [the record](../research/railway-token-and-sealing-2026-11-08.md).
+names each service **deterministically**:
+
+> **`{name}-{environment}`**, where `{name}` is the compose definition's service key — the same key that is the
+> resource name — and `{environment}` is that key's environment, lowercased. Every environment, always, with no
+> exceptions. `physicalServiceName(logical, environment)` in `packages/contracts/src/railway-provider.ts` is the
+> one implementation, and the dry run renders from it, so a preview and an apply cannot disagree.
+
+The rule consults nothing: not the project's current service list, not which environment a service already runs
+in, not the provider's project description. The compose service key **is** the base name — the specification adds
+no field for it and does not derive it from a description. `production` is therefore `api-production`,
+`identity-production` and `main-production`, exactly as staging is `api-staging` and `main-staging`, and both
+environments come from one plan in any order.
+
+Services found in a project under a name that does not fit the rule — platfolio's own `api`, `identity` and
+`main`, created before per-environment provisioning — are **moved into it, not replaced**. `serviceUpdate(id,
+input: {name})` renames the service in place (`ServiceUpdateInput` carries `name`; the name lives on the service,
+not on the instance), and the volume, its data, the environment instances, the attached domains and the private
+network all follow the service id. Deleting a Railway service destroys its environments and its database volume,
+so a naming question is never answered by a delete. Three limits, all reported rather than assumed:
+
+| Shape found in the project | What the provider does |
+| --- | --- |
+| row named exactly a logical name this plan declares, running in this environment and nowhere else | rename it into `{name}-{environment}`; note `legacy-service-renamed` / `legacy-database-renamed`, naming the old id and the new name |
+| row named exactly a logical name this plan declares, running in **another** environment | leave it, provision this environment's own row; note `legacy-row-belongs-to-another-environment` |
+| row named exactly a logical name this plan declares, running in **no** environment | leave it and say so (`legacy-row-left-unplaced`). Renaming would install the name with no instance behind it and block the only placer; deleting is destructive and belongs to the operator's destroy path (D36/D43), never to a successful apply |
+| row whose name this plan does not declare | **never touched.** A rename candidate exists only when the row's current name is a logical name of this plan, which is what makes a foreign or hand-made service untouchable without any ownership marker to parse |
+
+Ownership is inferred from the one-project-per-instance layout plus the plan's declared names, not proven by a
+per-row marker, so a hand-made service inside a tenant's own platfolio project that happens to share a logical
+name is the one case this provider could mistake for its own legacy row — and the worst outcome of that mistake
+is a rename an operator can undo. See [the record](../research/railway-token-and-sealing-2026-11-08.md).
+
+A reference expression is expanded by Railway **at write time**, so a rename is followed by a rewrite of every
+expression that spells the old name, in the same apply, after the rename. The running containers still hold the
+value expanded from the old name until they are deployed again, and the apply says which ones (`legacy-reference-redeploy-required`).
+
+A plan that declares the same logical name twice is refused before a provider sees it (`duplicate-service`,
+`duplicate-database` in `planIssues`): under a deterministic rule, two *different* names can never resolve to one
+service, so a duplicate declaration is the only remaining way to ask for the same service twice — and `InfraPlan`
+carries services as an array, which is what the API and `plan/from-repository` hand over.
 
 The default is **`tenant-side`**, not `relay-sealed` — that ordering was reversed by E18, and the panel
 renders accordingly.
@@ -331,6 +364,16 @@ conflict check. A manifest that cannot be rendered is not mergeable.
 
 - `metadata.version` is the platform release; `apiVersion` is the manifest schema. Both matter: a
   tenant pinned to `arcnexus@0.8` must not be force-rendered with `1.x` semantics.
+- The provider **plan** carries the infra contract version in its `contract` field, and that version is
+  derived, never declared (D59). `scripts/check-contracts.ts --update` computes it from the public-surface
+  diff of `packages/contracts/api.md` (removal or widening -> major, new declaration -> minor, pure
+  reordering -> nothing), records it in the baseline's `Version:` header, and regenerates
+  `packages/contracts/src/generated/contract-version.ts`, which is the only place the string exists and is
+  reproduced byte-for-byte from the baseline by the gate. `buildPlan` stamps that value; the plan renderers
+  and `platform-deploy --dry-run` print it. A stored plan keeps the version it was made with as history:
+  `InfraPlanSchema.contract` is an unconstrained string on purpose, so old plans remain parseable audit
+  records, and applying a plan whose version disagrees with a provider's is refused by the provider, not
+  by the schema.
 - `requires.platfolio` is enforced by the control plane before dispatch, with an actionable message
   ("this platform needs platfolio renderer ≥ 0.4; your instance is running 0.3.2").
 - Migrations run via `preDeployCommand`, forward-only, with `migration_window` advisory; the release
@@ -340,12 +383,23 @@ conflict check. A manifest that cannot be rendered is not mergeable.
 - Self-hosted support policy (see [08](08-distribution-and-licensing.md)): latest minor +1,
   security cherry-picks to the previous minor for ~6 months.
 
-## Adding a platform (D9)
+## Adding a platform (D9, D60)
 
-Adding TreeDX or any future platform is a **data PR** into `templates/<name>/<version>/` containing
-the manifest, `kind` and `mode`, the variable NAMES it needs (the authoritative list is the project's
-`environment.yaml` registry, not a `.env.example` -- D52), a fixture used by CI, and generated docs.
-schema change and gets its own `apiVersion` review.
+Adding TreeDX or any future platform is a **data change in that platform's own repository**, not a directory in
+platfolio: `compose.yaml` with its `x-platfolio` block, its own `environment.yaml` registry at the same root
+(the authoritative list of the variable NAMES it needs, not a `.env.example` -- D52, D58), and the source that
+reads them. It enters platfolio as tenant data through the install flow, and the instance carries `templateRef`
+`{repo, commitSha}` so the plan is built from a pinned commit (D29, D45).
+
+The three published templates (`fractalsynapse/platfolio-starter-web`, `-starter-worker`,
+`-shared-identity`) are the reference implementations of this specification, and platfolio reads them the way it
+reads any tenant repository -- through the source-control seam. `packages/manifest/test/templates.test.ts`
+therefore validates the specification against real artifacts on every run rather than against a bundled copy
+that could disagree with them. A new *template* (as opposed to a hosted platform) additionally needs one entry
+in `packages/manifest/src/template-catalog.ts`, which is where the name→repository mapping lives; anything that
+wants to reach for a local copy instead fails `pnpm run check`.
+
+A schema change is not a data change: it gets its own `apiVersion` review.
 
 ## Worked examples to write next
 

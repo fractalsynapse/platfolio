@@ -215,7 +215,7 @@ test('deleteInstance retains what the plan said to keep, and reports it as retai
 
   const deleted = await provider.deleteInstance(plan().instanceId, { retainMounts: ['/var/cache/app'] });
   assert.equal(mock.volumes.length, 1, 'a retained volume is still there after teardown');
-  assert.deepEqual(deleted.retained, ['api-volume (mounted at /var/cache/app)']);
+  assert.deepEqual(deleted.retained, ['api-production-volume (mounted at /var/cache/app)'], 'the disk is named for the PHYSICAL service, which since D57 carries the environment suffix');
   assert.ok(!deleted.removed.some((r) => r.startsWith('volume:')), 'and it is not claimed as removed');
 
   // Contrasting case with its own instance: omitting the option keeps today's behaviour. Retention must be a

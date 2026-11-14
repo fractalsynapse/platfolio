@@ -21,13 +21,14 @@ function checkPlatformRegistries(): string[] {
       problems.push(`${rel}: declares no variables -- either the platform has none (delete the file) or the shape changed and this check reads nothing`);
       continue;
     }
-    for (const p of checkObligations(rows)) problems.push(`${rel}: ${p}`);
+    for (const p of checkRegistryObligations(rows)) problems.push(`${rel}: ${p}`);
   }
   return problems;
 }import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
+import { checkRegistryObligations } from '../packages/manifest/src/registry-obligations.ts';
 
 /**
  * The central environment registry (D52): `environment.yaml`, machine-readable, at the repository root.
@@ -66,8 +67,19 @@ const EXTERNAL_PREFIXES = ['INPUT_', 'GITHUB_', 'ACTIONS_'];
 /** The name shapes that are ours: our prefix, a provider we configure, or a credential-shaped suffix. */
 const OURS = /^(PLATFOLIO|RAILWAY|KEYCLOAK|KC_|MP_|MAILPIT|SESSION_|APP_|POSTGRES_|PGHOST|PGPORT|PGUSER|PGPASSWORD|PGDATABASE|PGDATA|LIVE_|CONTROL_PLANE_|DATABASE_URL$|CR_)|(_TOKEN|_KEY|_SECRET|_PASSWORD|_URL)$/;
 
-/** Where configuration lives: our code, our composition, our CI, our templates' own settings. */
-const IN_SCOPE = /^(apps\/|packages\/(contracts|kernel|manifest|api-contract)\/src\/|scripts\/|\.github\/|db\/|templates\/(starter-web|starter-worker|shared-identity)\/(compose(\.dev)?\.yaml|src\/))/;
+/**
+ * Where configuration lives: our code, our composition, our CI.
+ *
+ * `templates/(starter-web|starter-worker|shared-identity)/(compose(\.dev)?\.yaml|src/)` was the last clause
+ * here, and it left with the directory it scanned (maintainer's ruling, 2026-11-14). That clause was not
+ * cosmetic: it is how `QUEUE_URL` came to sit in OUR registry. A template's development overlay was a discovery
+ * source for a variable no service of ours reads, which is the cross-namespace borrowing D58 forbids ("each
+ * registry is authoritative for its own platform"). The scan set is now exactly the configuration this
+ * repository owns, and what a published template declares is checked where the template lives --
+ * `packages/manifest/test/templates.test.ts` reads each repository's own `environment.yaml` through the
+ * source-control seam and applies the same obligation predicate.
+ */
+const IN_SCOPE = /^(apps\/|packages\/(contracts|kernel|manifest|api-contract)\/src\/|scripts\/|\.github\/|db\/)/;
 /**
  * Files at the repository root whose contents are configuration.
  *
@@ -168,9 +180,11 @@ function discover(): Map<string, Set<string>> {
     // not me -- the check passed locally only because the file was still untracked, so `git ls-files` never
     // listed it. A tool that reads the repository has to state where it stops reading itself.
     // A registry is a statement ABOUT variables, not a place that reads them. Scanning one (ours, or a
-    // template's) would let declarations feed the derivation that produces them -- the loop we broke when the
-    // platform inventory stopped being a discovery source, generalised: no registry file is ever a source.
-    if (f === REGISTRY_PATH || f === 'scripts/check-environment-registry.ts' || /^templates\/[^/]+\/environment\.yaml$/.test(f) || f.startsWith('vendor/') || f.includes('/dist/')) continue;
+    // platform's that lives in this tree) would let declarations feed the derivation that produces them -- the
+    // loop we broke when the platform inventory stopped being a discovery source, generalised: no registry file
+    // is ever a source. Stated as a name pattern rather than a list of template paths, because the platforms
+    // that used to be listed here are now their own repositories and this scanner cannot see them at all.
+    if (f === REGISTRY_PATH || f === 'scripts/check-environment-registry.ts' || /(^|\/)environment\.yaml$/.test(f) || f.startsWith('vendor/') || f.includes('/dist/')) continue;
     if (/\.md$/.test(f) || f === 'pnpm-lock.yaml' || f.includes('/test/') || f.startsWith('spikes/') || f.startsWith('examples/')) continue;
     if (!(/\.(ts|mjs|js|yaml|yml)$/.test(f) || f.endsWith('Dockerfile'))) continue;
     if (!(IN_SCOPE.test(f) || IN_SCOPE_ROOT.test(f))) continue;
@@ -255,7 +269,10 @@ const HUMAN: Record<string, Partial<Entry>> = {
 function guess(name: string, places: Set<string>): Entry {
   const hosts = [...places].map((h) => h.split(':')[0]!);
   const composeOnly = hosts.every((h) => /^compose\.(prod\.)?yaml/.test(h));
-  const devOnly = hosts.every((h) => /compose\.dev\.yaml|templates\/.*compose\.dev\.yaml/.test(h));
+  // The dev-overlay clause used to include `templates/.*compose\.dev\.yaml`. Template files are not in this
+  // repository's scan set any more, so the root overlay is the only overlay this derivation can see -- and a
+  // clause that can never match is fiction about a scan set, which is what got us a borrowed QUEUE_URL.
+  const devOnly = hosts.every((h) => /compose\.dev\.yaml/.test(h));
   const ci = hosts.some((h) => h.startsWith('.github/'));
   const scripts = hosts.some((h) => h.startsWith('scripts/'));
   // A JDBC or connection URL carries the password inside it, so the name alone is not the test. PLATFOLIO_DB_URL
@@ -272,7 +289,7 @@ function guess(name: string, places: Set<string>): Entry {
   // name. A prefix rule put RAILWAY_TOKEN in `railway:variable` when every workflow that reads it takes it from
   // a GitHub environment secret -- a registry whose only job is custody must not be right by guesswork.
   const inComposition = hosts.some((h) => /^compose\.(prod\.)?yaml/.test(h));
-  const sharedVariableDeclared = ['compose.yaml', 'compose.prod.yaml', 'templates/starter-web/compose.yaml', 'templates/shared-identity/compose.yaml']
+  const sharedVariableDeclared = ['compose.yaml', 'compose.prod.yaml']
     .some((f) => fs.existsSync(path.join(ROOT, f)) && fs.readFileSync(path.join(ROOT, f), 'utf8').includes(`{ name: ${name}, source: shared-variable }`));
   const inWorkflows = hosts.some((h) => h.startsWith('.github/'));
   const deployedTo = secret
@@ -286,13 +303,14 @@ function guess(name: string, places: Set<string>): Entry {
           : 'host:shell';
   // `environments` is derived from which files reference the name, not from a guess about the name. The rule set
   // is deliberately small: the platform description means the two provider environments, the dev overlay means
-  // development, code that ships inside a deployed service means provider environments, a template must work
-  // everywhere, and a maintainer script or a CI job runs in development.
+  // development, code that ships inside a deployed service means provider environments, and a maintainer script
+  // or a CI job runs in development. The fourth rule that used to live here -- "a template must work everywhere"
+  // -- left with the bundled templates: a published template's own registry now declares its environments
+  // itself, in its own repository, and `applyInventory` reads it from there (D58, one file per platform).
   const applies = new Set<string>();
   if (hosts.some((h) => /^compose\.(yaml|prod\.yaml)$/.test(h))) { applies.add('production'); applies.add('staging'); }
   if (hosts.some((h) => /compose\.dev\.yaml/.test(h))) applies.add('development');
   if (hosts.some((h) => h.startsWith('scripts/') || h.startsWith('apps/managed-action/') || h.startsWith('.github/'))) applies.add('development');
-  if (hosts.some((h) => h.startsWith('templates/'))) { applies.add('development'); applies.add('staging'); applies.add('production'); }
   if (hosts.some((h) => h.startsWith('packages/') || h.startsWith('apps/control-plane/'))) { applies.add('production'); applies.add('staging'); }
   if (applies.size === 0) applies.add('development');
   // Normalise: three-of-three is `all`, and `all` is the only way to write it. Emitting both spellings is how a
@@ -334,38 +352,29 @@ function migrateLegacy(value: unknown): string[] | 'all' | undefined {
  * only useful direction of trust.
  */
 /**
- * The obligations are now part of the registry, so the registry has to hold them to the standard the separate
- * inventory schema used to: a `reference` must name a database, an `output` must be `capability#output`, a
- * `default` on a secret is a contradiction, and `kind: secret` must agree with `secret: true`. Dropping these
- * rules with the old file would have quietly weakened a check while appearing to simplify one.
+ * The platform registries this gate checks, other than our own root registry.
+ *
+ * The obligation rules themselves (`kind: secret` must agree with `secret: true`, a secret carries no default,
+ * a reference names a database, an `output` is `capability#output`, wiring is never `required`) moved to
+ * `packages/manifest/src/registry-obligations.ts`, because their subjects are no longer only files in this tree:
+ * `packages/manifest/test/templates.test.ts` applies the identical predicate to each published template's own
+ * registry, read through the source-control seam. One rule, one spelling, two callers -- a rule written twice is
+ * a rule that can disagree with itself, which is the defect class this change exists to close.
+ *
+ * This list used to name the three template directories. Those directories are gone -- a template is its own
+ * public repository now (maintainer's ruling, 2026-11-14), so its registry is checked where it lives. What is
+ * left is a rule rather than a list: any tracked `environment.yaml` that is not our root registry belongs to
+ * another platform sitting in this tree, and if one ever appears it gets the same check ours does.
+ *
+ * An empty result is the honest state, not a silent gap: our own registry is still checked, by
+ * `checkRegistryObligations` in the main path on the rows as they are parsed, and every published platform is
+ * named by the catalog the acceptance test reads -- so a template that stopped being checked would have to
+ * first stop being in the catalog, which is a reviewable line in a diff.
  */
-function checkObligations(entries: Entry[]): string[] {
-  const problems: string[] = [];
-  for (const e of entries) {
-    const name = e.name ?? '(unnamed entry)';
-    const kind = e.kind ?? (e.secret ? 'secret' : 'value');
-    if (!['value', 'secret', 'reference', 'output'].includes(kind)) {
-      problems.push(`${name}: kind "${kind}" is not one of value | secret | reference | output`);
-      continue;
-    }
-    if (kind === 'secret' && e.secret !== true) problems.push(`${name}: kind is secret but secret: ${String(e.secret)} -- the custody claim and the obligation disagree (D4)`);
-    if (kind !== 'secret' && e.secret === true) problems.push(`${name}: secret: true with kind "${kind}" -- a credential cannot be a default, a reference, or an output`);
-    if (kind === 'secret' && e.default !== undefined) problems.push(`${name}: a secret declares a default value; defaults are for non-credentials precisely because they are committed (D4)`);
-    if (kind === 'reference' && !e.database) problems.push(`${name}: kind is reference but names no database to resolve from -- this is the field a tenant is never asked to type, so a dangling reference is a deploy that fails at boot`);
-    if (kind === 'output' && !(e.from ?? '').includes('#')) problems.push(`${name}: kind is output but \`from\` is not capability#output (D34)`);
-    if ((kind === 'reference' || kind === 'output') && e.required === true) problems.push(`${name}: wiring cannot be required of an operator -- it is resolved by the platform, not supplied`);
-  }
-  return problems;
-}
-
 function inventoryFiles(): string[] {
-  // Each platform declares its obligations in its OWN registry, at its root -- one file per platform, one
-  // schema, no `.platfolio/` shadow copy of the same facts.
-  return [
-    'templates/starter-web/environment.yaml',
-    'templates/starter-worker/environment.yaml',
-    'templates/shared-identity/environment.yaml',
-  ].filter((rel) => fs.existsSync(path.join(ROOT, rel)));
+  return trackedFiles()
+    .filter((f) => /(^|\/)environment\.yaml$/.test(f) && f !== REGISTRY_PATH)
+    .filter((f) => fs.existsSync(path.join(ROOT, f)));
 }
 
 const found = discover();
@@ -444,7 +453,7 @@ if (error) problems.push(`environment registry: ${error} -- the central registry
 // The inventory-vs-registry cross-check, before the reference checks, because a disagreement between two
 // declarations of the same fact is the more confusing failure to be told about second.
 problems.push(...checkPlatformRegistries());
-problems.push(...checkObligations(entries));
+problems.push(...checkRegistryObligations(entries));
 
 for (const [name, places] of found) {
   if (!declared.has(name)) {
@@ -483,8 +492,11 @@ for (const e of entries) {
      * test doubles violations; five findings, all of them the scanner's fault, which is why the scope is now
      * stated as file classes.
      */
-    const PRODUCTION_BEARING = /^(compose\.yaml|compose\.prod\.yaml|\.platfolio\/|templates\/[^/]+\/compose\.yaml|apps\/[^/]+\/Dockerfile|apps\/control-plane\/src\/|apps\/managed-action\/src\/|packages\/(contracts|kernel|manifest)\/src\/|\.github\/actions\/[^/]+\/action\.yml)/;
-    const DEV_OVERLAY = /^(compose\.dev\.yaml|templates\/[^/]+\/compose\.dev\.yaml)/;
+    // Both patterns used to carry a `templates/[^/]+/compose...` alternative. A template is a repository now,
+    // so those paths are not in `git ls-files` and the alternatives could not match -- and a file class that
+    // silently stops existing is how a leak rule starts checking nothing while still printing "clean".
+    const PRODUCTION_BEARING = /^(compose\.yaml|compose\.prod\.yaml|\.platfolio\/|apps\/[^/]+\/Dockerfile|apps\/control-plane\/src\/|apps\/managed-action\/src\/|packages\/(contracts|kernel|manifest)\/src\/|\.github\/actions\/[^/]+\/action\.yml)/;
+    const DEV_OVERLAY = /^compose\.dev\.yaml/;
     for (const f of trackedFiles()) {
       if (f === REGISTRY_PATH || f.startsWith('vendor/') || f.includes('/dist/')) continue;
       if (!PRODUCTION_BEARING.test(f) && !DEV_OVERLAY.test(f)) continue;   // tests, CI jobs and scripts hold throwaways legitimately
@@ -519,7 +531,10 @@ for (const e of entries) {
         problems.push(`${f}:${String(i + 1)} assigns a literal value to ${name}, which the registry marks secret -- commit the NAME and let the provider hold the value (D4)`);
       }
     }
-    const declaredByComposition = ['compose.yaml', 'compose.prod.yaml', 'compose.dev.yaml', '.platfolio/environment.yaml', 'templates/starter-web/compose.yaml', 'templates/starter-web/compose.dev.yaml', 'templates/starter-worker/compose.dev.yaml', 'templates/shared-identity/compose.yaml'].some((f) => {
+    // The four template composition files that used to be listed here are gone with the directory: a secret
+    // declared only in a published template is that template's business, checked by the acceptance test against
+    // the repository that ships it, not a claim this registry has to be able to see.
+    const declaredByComposition = ['compose.yaml', 'compose.prod.yaml', 'compose.dev.yaml', '.platfolio/environment.yaml'].some((f) => {
       const p = path.join(ROOT, f);
       return fs.existsSync(p) && fs.readFileSync(p, 'utf8').includes(name);
     });

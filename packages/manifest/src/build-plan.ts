@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { InfraPlanSchema, type InfraPlan } from '@platfolio/contracts';
+import { CONTRACT_VERSION, InfraPlanSchema, type InfraPlan } from '@platfolio/contracts';
 import { enabledEnvironments, serviceEnvironments } from './environments.ts';
 import { stagingHost } from './render.ts';
 import type { Manifest } from './schema.ts';
@@ -107,7 +107,8 @@ export function buildPlan(manifest: Manifest, config: InstanceConfig): InfraPlan
     instanceId: config.instanceId,
     teamId: config.teamId,
     provider: config.provider ?? 'railway',
-    contract: '1.0.0',
+    // D59: the version a plan carries is the derived one, not a number this builder maintains.
+    contract: CONTRACT_VERSION,
     // Hash of the rendered desired state, so a re-apply of an unchanged manifest is idempotent.
     planHash: createHash('sha256').update(JSON.stringify({ platform, version: manifest.metadata.version, environments })).digest('hex'),
     manifestRef: { template: platform, version: manifest.metadata.version },

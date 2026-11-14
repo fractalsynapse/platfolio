@@ -14,7 +14,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  HttpRailwayTransport, MintingRailwayCredentials, RailwayInfraProvider, runConformance,
+  CONTRACT_VERSION, HttpRailwayTransport, MintingRailwayCredentials, RailwayInfraProvider, runConformance,
   type InfraPlan,
 } from '../packages/contracts/src/index.ts';
 
@@ -70,7 +70,7 @@ function livePlan(): InfraPlan {
     instanceId: 'e26',
     teamId: 'team-e26',
     provider: 'railway',
-    contract: '1.0.0',
+    contract: CONTRACT_VERSION,
     planHash: 'e26'.padEnd(16, '0'),
     manifestRef: { template: 'livecheck', version: '0.0.0' },
     environments: [
@@ -127,7 +127,7 @@ try {
   const deadline = new Promise<never>((_, reject) => {
     setTimeout(() => reject(new Error('E26 exceeded its wall-clock budget')), Number(process.env.LIVE_TOTAL_TIMEOUT_MS ?? 780_000));
   });
-  const report = await Promise.race([runConformance(() => provider(6), '^1.0.0', { plan: livePlan }), deadline]);
+  const report = await Promise.race([runConformance(() => provider(6), `^${CONTRACT_VERSION}`, { plan: livePlan }), deadline]);
   console.log(`\nscope=${report.scope} provider=${report.provider} contract=${report.contract}`);
   for (const result of report.results) {
     console.log(`  ${result.status === 'pass' ? 'PASS' : result.status === 'fail' ? 'FAIL' : 'N/I '} ${result.name}`);

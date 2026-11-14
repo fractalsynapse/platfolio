@@ -254,7 +254,13 @@ mutations are **not exactly-once**, auth failures arrive as **HTTP 200 with `err
 configuration and variables) exist as cheap clone paths — **platfolio does not use the second one**:
 measured on our own project, a duplicated environment arrives with the source's *service ids*, so its
 service reads the source's database configuration and fails against a database it does not own. Each
-environment is provisioned independently instead, with a per-environment physical service name (D57).
+environment is provisioned independently instead, under the deterministic name `{name}-{environment}` (D57).
+Two provider properties that migration depends on, both read from the captured schema rather than assumed:
+`serviceUpdate(id, input: {name, icon})` renames a service **in place** -- the name lives on `Service`, since
+`ServiceInstanceUpdateInput` has no `name` and `ServiceInstance` has none either -- so a service that is
+mislabeled keeps its volume, its environment instances, its domains and its private network; and there is **no**
+`serviceInstanceCreate`, which is why `serviceCreate` is the only placer and why a row with no instance anywhere
+cannot be fixed by renaming it.
 So: per-step durable jobs keyed by
 idempotency tokens, **verify by read-back**, a token bucket sized to the plan tier,
 webhook-first status (`project webhooks`: deployment status + volume/CPU/RAM alerts, 3 retries,

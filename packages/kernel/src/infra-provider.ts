@@ -1,7 +1,7 @@
 import { Context, Service } from 'cordis';
 import { z } from 'zod';
 import {
-  CONTRACT_NAME, FakeInfraProvider, RailwayInfraProvider, satisfiesRange,
+  CONTRACT_NAME, CONTRACT_VERSION, FakeInfraProvider, RailwayInfraProvider, satisfiesRange,
   type InfraPlan, type InfraProvider,
 } from '@platfolio/contracts';
 
@@ -12,7 +12,9 @@ import {
  */
 export const ProviderConfigSchema = z.object({
   provider: z.enum(['fake', 'railway']),
-  contract: z.string().min(1).default('^1.0.0'),
+  // D59: the default required range is derived from the contract this build compiled against, so a
+  // version bump cannot leave a stale "^1.0.0" guard that refuses the provider it ships with.
+  contract: z.string().min(1).default(`^${CONTRACT_VERSION}`),
   features: z.array(z.string()).default([]),
 }).strict();
 

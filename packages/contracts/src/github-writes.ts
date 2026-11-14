@@ -133,11 +133,15 @@ export class GithubRepositoryWrites {
   }
 
   /**
-   * The published tree as blob SHAs. Public because parity between a source directory and a published
-   * repository is a fact worth checking rather than assuming: `check-template-publication.ts` compares these
-   * against `git hash-object` of the local files. A blob SHA is computed identically on both sides, so a match
-   * is evidence rather than an opinion -- the same property that made the Contents-API reads and the artifact
+   * The published tree as blob SHAs. Public because what a repository actually contains is a fact worth
+   * checking rather than assuming. A blob SHA is computed identically on both sides, so a match is evidence
+   * rather than an opinion -- the same property that made the Contents-API reads and the artifact
    * reporting (D54) verifiable.
+   *
+   * Its first caller was the template parity check, which compared these against `git hash-object` of a bundled
+   * `templates/` directory. That program and the directory are gone (D60): a published template repository IS
+   * the source, so there is nothing local left to compare it against. The method stays, because the SHA
+   * identity it reports is the contract's own point and the install path still reads a tenant's tree with it.
    */
   async treeEntries(repo: string, ref: string): Promise<Array<{ path: string; type: string; sha: string }>> {
     Repo.parse(repo);

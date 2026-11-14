@@ -36,6 +36,12 @@ export interface MockOptions {
   completedOnly?: boolean;
   /** Refuse serviceDelete for template-created services, modelling #80's survivor. */
   refuseTemplateServiceDelete?: boolean;
+  /**
+   * Make `serviceUpdate` answer with the OLD name and change nothing. Not invented: it is the measured shape of
+   * this API's silent no-op (`serviceInstanceUpdate` on an environment with no instance returns `true` and places
+   * nothing, E25), and a rename is only safe if the provider checks the name back rather than trusting the call.
+   */
+  renameDoesNothing?: boolean;
   /** Model a partial delete: projectDelete answers true but the project remains readable (#111). */
   keepProjectAfterDelete?: boolean;
   /** Fail the first N serviceDelete calls for template services, to test the retry. */
@@ -91,6 +97,19 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
   private templateDeleteAttempts = new Map<string, number>();
   readonly templateDeploys: { templateId: string; serviceName: string; credentialKind: string }[] = [];
   /**
+   * Every successful `serviceUpdate` that changed a name, in order. The legacy-shape path is a rename rather
+   * than a recreate, so what a test has to see is WHICH row moved from WHICH name to WHICH name: the final
+   * name set alone cannot distinguish "the row holding production's data was renamed" from "that row was
+   * deleted and a fresh one created under the same name", and those are opposite claims about data.
+   *
+   * `at` is the position in `operations` when the rename landed. Reference expressions are expanded by the
+   * provider AT WRITE TIME (measured: docs/research/railway-token-and-sealing-2026-11-08.md), so "the rename
+   * happened before the reference was written" is the property that decides whether the rewritten value points
+   * at the service that now exists. Ordering is the whole claim, so it is recorded rather than inferred from
+   * two separately ordered arrays.
+   */
+  readonly renames: { id: string; from: string; to: string; at: number }[] = [];
+  /**
    * Every `environmentCreate` input, in order. A test asserts against this that platfolio never creates an
    * environment from a source (D57) -- the double still implements the source, because the real API does, and
    * recording the call is how "we stopped doing that" stays checked instead of merely unfashionable.
@@ -104,7 +123,13 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
    * proof of isolation when you know which service in which environment received it, and a flat name/value log
    * could not say (D57). Values are the ones the test itself wrote -- this double holds no real credentials.
    */
-  readonly writtenVariables: { name: string; value: string; environmentId: string; serviceId?: string }[] = [];
+  /**
+   * `at` is the position in `operations` when the write landed. A rename only fixes a reference expression if
+   * the rewrite happens AFTER it -- Railway expands the expression at write time -- so ordering between a
+   * `serviceUpdate` and a `variableUpsert` is an assertion a test has to be able to make, not a property it
+   * has to infer from two separately ordered arrays.
+   */
+  readonly writtenVariables: { name: string; value: string; environmentId: string; serviceId?: string; at: number }[] = [];
   readonly denied: string[] = [];
   private sequence = 0;
 
@@ -121,6 +146,7 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
       templateRevealAfter: options.templateRevealAfter ?? 2,
       templateNeverReveals: options.templateNeverReveals ?? false,
       refuseTemplateServiceDelete: options.refuseTemplateServiceDelete ?? false,
+      renameDoesNothing: options.renameDoesNothing ?? false,
       // Not a whitelist entry: the constructor rebuilds options, and a flag left out here is silently
       // undefined -- the exact bug that once made a test vacuous. Any new option must be threaded through.
       keepProjectAfterDelete: options.keepProjectAfterDelete ?? false,
@@ -181,6 +207,11 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
       environmentCreate: ['projectId', 'name', 'sourceEnvironmentId', 'skipInitialDeploys', 'applyChangesInBackground', 'ephemeral', 'stageInitialChanges'],
       projectTokenCreate: ['projectId', 'environmentId', 'name'],
       serviceCreate: ['projectId', 'environmentId', 'name', 'source', 'templateId', 'templateServiceId', 'variables', 'branch', 'icon', 'registryCredentials'],
+      // Captured from the introspected schema, not guessed: `Mutation.serviceUpdate(id: String!, input:
+      // ServiceUpdateInput!)` returns `Service!`, and `ServiceUpdateInput` has exactly two fields -- `icon` and
+      // `name`. That is why a rename is a SERVICE-level operation: `ServiceInstanceUpdateInput` carries no
+      // `name` at all, and `ServiceInstance` has `serviceId`/`serviceName` but no name of its own.
+      serviceUpdate: ['icon', 'name'],
       serviceInstanceUpdate: ['numReplicas', 'healthcheckPath', 'healthcheckTimeout', 'source', 'startCommand', 'buildCommand', 'preDeployCommand', 'region', 'restartPolicyType', 'sleepApplication', 'watchPatterns', 'cronSchedule', 'dockerfilePath', 'buildpacks', 'nixpacksPlan'],
       variableUpsert: ['projectId', 'environmentId', 'serviceId', 'name', 'value', 'skipDeploys'],
       // Captured from `SharedVariableConfigureInput`: there is NO value field here, only which services the
@@ -210,7 +241,7 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
       environmentCreate: ['projectId', 'name'],
     };
 
-    const inputKey = ['projectCreate', 'projectUpdate', 'environmentCreate', 'projectTokenCreate', 'serviceCreate', 'serviceInstanceUpdate', 'variableUpsert', 'serviceDomainCreate', 'customDomainCreate', 'serviceInstanceLimitsUpdate', 'sharedVariableConfigure'].includes(operation) ? 'input' : null;
+    const inputKey = ['projectCreate', 'projectUpdate', 'environmentCreate', 'projectTokenCreate', 'serviceCreate', 'serviceUpdate', 'serviceInstanceUpdate', 'variableUpsert', 'serviceDomainCreate', 'customDomainCreate', 'serviceInstanceLimitsUpdate', 'sharedVariableConfigure'].includes(operation) ? 'input' : null;
     if (inputKey) {
       const allowed = inputFields[operation];
       const payload = (v[inputKey] ?? {}) as Record<string, unknown>;
@@ -227,7 +258,7 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
 
     // Guard the class of bug E26 exposed: mutations returning an OBJECT are rejected by the real API
     // unless they select a subfield. The mock used to accept the query and never notice.
-    const objectReturning = ['projectCreate', 'environmentCreate', 'serviceCreate', 'projectUpdate', 'serviceDomainCreate', 'customDomainCreate', 'sharedVariableConfigure'];
+    const objectReturning = ['projectCreate', 'environmentCreate', 'serviceCreate', 'projectUpdate', 'serviceUpdate', 'serviceDomainCreate', 'customDomainCreate', 'sharedVariableConfigure'];
     // Match the *field's* own closing paren, not the mutation's variable list -- a first version used
     // `/\)\s*\{/`, which the outer `mutation (...) {` always satisfied, so the guard could not fail.
     const fieldSelection = new RegExp(`${operation}\\s*\\([^)]*\\)\\s*\\{`);
@@ -402,6 +433,29 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
         });
         return { serviceCreate: { id } } as T;
       }
+      case 'serviceUpdate': {
+        const input = v.input as { name?: string; icon?: string };
+        const service = this.services.get(v.id as string);
+        if (!service) throw new Error('railway serviceUpdate: service not found [NOT_FOUND]');
+        // The measured silent no-op, in this mutation's shape: the call answers, the object comes back, and the
+        // name did not move. A provider that trusts the call rather than the answer provisions on top of a row
+        // that never changed.
+        if (this.options.renameDoesNothing) return { serviceUpdate: { id: service.id, name: service.name } } as T;
+        if (input.name !== undefined && input.name !== service.name) {
+          // DERIVED, not measured for this mutation: service names are unique per project (measured against
+          // `serviceCreate` and `templateDeployV2`), and the uniqueness is a property of the project's service
+          // set rather than of the call that changes it, so a rename onto a held name cannot be accepted. The
+          // provider refuses before ever asking, so no test depends on this refusal -- it exists so that a
+          // future change which DID rely on the API to arbitrate fails here instead of passing on an
+          // assumption. Uniqueness on rename has not been observed on the live API and must not be quoted as
+          // if it had.
+          const clash = [...this.services.values()].find((s) => s.projectId === service.projectId && s.name === input.name);
+          if (clash) throw new Error(`railway serviceUpdate: A service named "${input.name}" already exists in this project [UNPROCESSABLE]`);
+          this.renames.push({ id: service.id, from: service.name, to: input.name, at: this.operations.length });
+          service.name = input.name;
+        }
+        return { serviceUpdate: { id: service.id, name: service.name } } as T;
+      }
       case 'serviceInstanceUpdate': {
         const key = `${v.environmentId}:${v.serviceId}`;
         const instance = this.instances.get(key);
@@ -496,13 +550,13 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
         if (!input.serviceId) {
           if (!this.environments.has(input.environmentId)) throw new Error('railway variableUpsert: no environment [NOT_FOUND]');
           this.sharedVariables.set(`${input.environmentId}:${input.name}`, input.value);
-          this.writtenVariables.push({ name: input.name, value: input.value, environmentId: input.environmentId });
+          this.writtenVariables.push({ name: input.name, value: input.value, environmentId: input.environmentId, at: this.operations.length });
           return { variableUpsert: true } as T;
         }
         const instance = this.instances.get(`${input.environmentId}:${input.serviceId}`);
         if (!instance) throw new Error('railway variableUpsert: no instance [NOT_FOUND]');
         instance.variables.add(input.name);
-        this.writtenVariables.push({ name: input.name, value: input.value, environmentId: input.environmentId, serviceId: input.serviceId });
+        this.writtenVariables.push({ name: input.name, value: input.value, environmentId: input.environmentId, serviceId: input.serviceId, at: this.operations.length });
         return { variableUpsert: true } as T;
       }
       case 'sharedVariableConfigure': {

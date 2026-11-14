@@ -9,6 +9,7 @@
  */
 import { createHmac } from 'node:crypto';
 import { PostgresStore } from '../packages/contracts/src/postgres-store.ts';
+import { CONTRACT_VERSION } from '../packages/contracts/src/infra.ts';
 
 const api = process.env.CONTROL_PLANE_BASE ?? 'http://localhost:8082';
 const idp = process.env.KC_BASE ?? 'http://localhost:8081';
@@ -72,7 +73,7 @@ check('a created instance starts pending, not live', created.json?.state === 'pe
 if (!instanceId) { await reader.close(); process.exit(1); }
 const planHash = createHmac('sha256', 'smoke').update(instanceId).digest('hex');
 const plan = {
-  instanceId, teamId, provider: 'railway', contract: '1.0.0', planHash,
+  instanceId, teamId, provider: 'railway', contract: CONTRACT_VERSION, planHash,
   manifestRef: { template: 'starter-web', version: '0.1.0' },
   environments: [{ name: 'production', services: [], databases: [], volumes: [], buckets: [], domains: [] }],
 };

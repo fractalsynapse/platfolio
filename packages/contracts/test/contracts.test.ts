@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { FakeInfraProvider, RailwayInfraProvider, runConformance, samplePlan, satisfiesRange, CONTRACT_VERSION, OPERATIONS } from '../src/index.ts';
+import { applyBump } from '../../../scripts/check-contracts.ts';
 import { RailwayMock } from './railway-mock.ts';
 
 /** A Railway provider over the mock: fresh mock per case, so state cannot leak between cases. */
@@ -26,14 +27,14 @@ function railwayPlan() {
 }
 
 test('fake provider passes the full conformance suite', async () => {
-  const report = await runConformance(() => new FakeInfraProvider(), '^1.0.0');
+  const report = await runConformance(() => new FakeInfraProvider(), `^${CONTRACT_VERSION}`);
   const bad = report.results.filter((r) => r.status !== 'pass');
   assert.equal(bad.length, 0, `unexpected results: ${bad.map((b) => `${b.name}=${b.status} (${b.detail})`).join('; ')}`);
   assert.ok(report.ok, 'suite verdict should be ok');
 });
 
 test('railway fails the FULL conformance gate because databases and buckets are unimplemented', async () => {
-  const report = await runConformance(railwayProvider, '^1.0.0');
+  const report = await runConformance(railwayProvider, `^${CONTRACT_VERSION}`);
   assert.equal(report.scope, 'full');
   assert.equal(report.ok, false, 'a provider that cannot deliver the reference plan is not conformant, and the gate must say so');
   assert.equal(report.unimplemented, 0, 'the operations are implemented; it is the resources that are missing');
@@ -41,7 +42,7 @@ test('railway fails the FULL conformance gate because databases and buckets are 
 });
 
 test('railway passes the reduced gate for the surface it actually implements', async () => {
-  const report = await runConformance(railwayProvider, '^1.0.0', { plan: railwayPlan });
+  const report = await runConformance(railwayProvider, `^${CONTRACT_VERSION}`, { plan: railwayPlan });
   assert.equal(report.scope, 'reduced', 'a reduced run must never be quotable as full conformance');
   const bad = report.results.filter((r) => r.status !== 'pass');
   assert.equal(bad.length, 0, `reduced-scope results: ${bad.map((b) => `${b.name}=${b.status} (${b.detail})`).join('; ')}`);
@@ -51,14 +52,14 @@ test('railway passes the reduced gate for the surface it actually implements', a
 test('a reduced plan that stops exercising the surface is refused', () => {
   const hollow = samplePlan();
   hollow.environments = [{ ...hollow.environments[0]!, domains: [], services: [hollow.environments[0]!.services[0]!], databases: [], buckets: [] }];
-  return runConformance(railwayProvider, '^1.0.0', { plan: () => hollow }).then(
+  return runConformance(railwayProvider, `^${CONTRACT_VERSION}`, { plan: () => hollow }).then(
     () => assert.fail('expected the guard to reject a hollow plan'),
     (error: Error) => assert.match(error.message, /must still exercise/),
   );
 });
 
 test('a plan that serializes with a secret value fails conformance', async () => {
-  const report = await runConformance(() => new FakeInfraProvider(), '^1.0.0');
+  const report = await runConformance(() => new FakeInfraProvider(), `^${CONTRACT_VERSION}`);
   const secretsCase = report.results.find((r) => r.name.includes('secrets are never carried'));
   assert.ok(secretsCase && secretsCase.status === 'pass', 'baseline plan must be value-free');
 });
@@ -73,13 +74,15 @@ test('duplicate services after a retry are caught by the suite', async () => {
       return { ...r, noop: false };
     }
   }
-  const report = await runConformance(() => new Noisy(), '^1.0.0');
+  const report = await runConformance(() => new Noisy(), `^${CONTRACT_VERSION}`);
   const dup = report.results.find((r) => r.name.includes('same planHash'));
   assert.ok(dup && dup.status === 'fail', `expected the no-op case to fail for a non-idempotent provider, got ${dup?.status}`);
 });
 
 test('contract mismatch is reported, not tolerated', async () => {
-  const report = await runConformance(() => new FakeInfraProvider({ contract: '2.0.0' }), '^1.0.0');
+  // A version that can never satisfy the required range for ANY derived major (D59: the range and the
+  // providers' claims below are derived, so this fixture stays a mismatch after every bump).
+  const report = await runConformance(() => new FakeInfraProvider({ contract: '0.0.1' }), `^${CONTRACT_VERSION}`);
   const c = report.results.find((r) => r.name.includes('contract version'));
   assert.ok(c && c.status === 'fail');
   assert.equal(report.ok, false);
@@ -108,7 +111,13 @@ test('operations list is the contract surface, and both providers stay inside it
       assert.equal(typeof provider[op as 'describe'], 'function');
     }
   }
-  assert.equal(CONTRACT_VERSION, '1.0.0');
+// Not `=== '1.0.0'` (a tautology of the old literal, and the proof this file owed): both providers must
+  // report the DERIVED version, whatever it is -- the derivation itself is proven in contract-version.test.ts.
+  for (const provider of [new FakeInfraProvider(), railwayProvider()]) {
+    assert.equal(provider.describe().contract, CONTRACT_VERSION, `${provider.describe().provider} must report the derived version`);
+  }
+  assert.match(CONTRACT_VERSION, /^\d+\.\d+\.\d+$/, 'the derived version is semver-shaped -- check-contracts rejects anything else');
+  assert.ok(satisfiesRange(applyBump(CONTRACT_VERSION, 'major'), '>=1.0.0'), 'the derivation chain composes (a guard against applyBump returning garbage)');
 });
 
 test('satisfiesRange covers the forms the resolver uses', () => {
