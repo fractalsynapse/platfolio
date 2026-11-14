@@ -353,6 +353,58 @@ Stated plainly, because the maintainer's objection deserves an answer rather tha
 with the core platform is what makes this drift possible**, and `templates:check` closes the detection gap, not
 the design one. Separating them is a real option and is recorded as a decision to take, not as work done.
 
+### Measured — the production rename ran: every service in every environment now follows `{name}-{environment}`
+
+Executed through platfolio's own implementation (`platform-deploy --apply`, then `--redeploy` per the write-time
+expansion rule), not the provider console. The manifest was **not** edited, and that matters: the rule appends the
+environment, so writing `api-production` into `compose.yaml` would have produced `api-production-production`. The
+logical names stay; the physical names are derived.
+
+Provider state, read back after the apply:
+
+```
+services: main-staging, api-production, identity-production, main-production, api-staging   (no bare rows remain)
+note services.api-production@production:   legacy-service-renamed   "api" (258c8da7) -> "api-production"
+note services.identity-production@production: legacy-service-renamed "identity" (6bacf3ed) -> "identity-production"
+note databases.main@production:            legacy-database-renamed  "main" (9308eb5e) -> "main-production"
+note databases.main@production:            legacy-reference-redeploy-required -- 6 expressions rewritten
+```
+
+Nothing was deleted. The volume, its data, the environment instances, the private network and the domains all
+followed the service id, which is why the rename replaced the delete-and-reprovision plan. **No DNS changes were
+needed and none were made**: the provider's shared hostnames already carried the environment
+(`api-production-b27113f4.up.railway.app`), so the published CNAMEs for `api.platfolio.dev` and
+`auth.platfolio.dev` kept matching after the rename. Measured before and after, not assumed.
+
+Second apply: `verified=true noop=true` -- converged, and it did not re-rename. `--dry-run` shows no `legacy-*`
+notes, so there is no residue left to migrate.
+
+Endpoints after rename -> rewrite -> redeploy of `identity-production` and `api-production`:
+
+| Check | Result |
+| --- | --- |
+| `https://api.platfolio.dev/readyz` | `{"status":"ready","checks":[{"identity":"ok"},{"database":"ok"}]}` |
+| `https://staging-api.platfolio.dev/readyz` | same, unaffected throughout |
+| `identity:smoke` staging realm | **11/11** |
+| `identity:smoke` production realm | **10/11** -- see below |
+| all gates | tsc 0 · 450 tests / 446 pass / 0 fail / 4 skipped · contracts 3.0.0 · registry 82 · api:check 35 · bundle 0 · graphql 37/697 |
+
+**One check no longer runs, and I am not calling it a pass.** The cross-issuer refusal -- a master-realm admin
+token presented to a tenant endpoint, refused as `unknown-key`, the strongest D4 proof we had -- now fails to
+*acquire* its foreign token: Keycloak answers `400 invalid_grant / Invalid user credentials` for the recorded
+master admin. Names-only inspection (values never read, D4) says why a reboot would be the trigger point but not
+what changed: `identity-production` still has `KEYCLOAK_ADMIN` and `KEYCLOAK_ADMIN_PASSWORD`, and has **neither**
+`KC_BOOTSTRAP_ADMIN_USERNAME` nor `KC_BOOTSTRAP_ADMIN_PASSWORD` -- the 26.x names. So this boot had no bootstrap
+admin credential at all, and the password we hold does not match the one in the database.
+
+**Cause not established, stated as such.** The variables were not touched by the rename (they were already in that
+state when the same smoke passed 11/11 hours earlier), so the honest candidates are: the Keycloak restart changed
+the admin user, or our recorded credential was already stale and the earlier 11/11 used a still-running container
+whose admin predated it. I re-ran the smoke between two of my own redeploys and got **8/11**, then 10/11 -- a
+measurement moving under repeated restarts, which is why I stopped restarting and reported the varying numbers
+rather than the flattest one. #248 records it: production's cross-issuer claim is currently unverified, the fix is
+to set the `KC_BOOTSTRAP_ADMIN_*` pair deliberately (as the shared-identity template already does) and re-run.
+
 ### Changed — the contracts baseline is structured data, not prose that a test regex-parses
 
 `packages/contracts/api.md` is now `packages/contracts/api.json`:
