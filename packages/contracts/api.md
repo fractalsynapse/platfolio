@@ -398,6 +398,7 @@ git-scm.d.ts: token?: string;
 git-scm.d.ts: tokenSupplied: boolean;
 git-scm.d.ts: transport: string;
 git-scm.d.ts: transport?: 'https' | 'ssh';
+github-writes.d.ts: alreadyAbsent: string[];
 github-writes.d.ts: base: string;
 github-writes.d.ts: baseBranch: string;
 github-writes.d.ts: baseSha: string;
@@ -411,6 +412,7 @@ github-writes.d.ts: commitFiles(input: {
 github-writes.d.ts: constructor(config: WriteConfig);
 github-writes.d.ts: content: string;
 github-writes.d.ts: createRepositoryFromTemplate(request: TemplateRepositoryRequest): Promise<{
+github-writes.d.ts: deletePaths?: string[];
 github-writes.d.ts: description?: string;
 github-writes.d.ts: draft?: boolean;
 github-writes.d.ts: ensureEnvironment(repo: string, name: string, protection?: EnvironmentProtection): Promise<void>;
@@ -449,15 +451,18 @@ github-writes.d.ts: repo: string;
 github-writes.d.ts: repo: string;
 github-writes.d.ts: repo: string;
 github-writes.d.ts: repositoryVisible(repo: string): Promise<boolean>;
+github-writes.d.ts: retired: string[];
 github-writes.d.ts: reviewers?: EnvironmentReviewer[];
 github-writes.d.ts: reviewers?: {
 github-writes.d.ts: seedAndCommit(input: {
 github-writes.d.ts: seedFile: {
 github-writes.d.ts: seeded: boolean;
+github-writes.d.ts: sha: string;
 github-writes.d.ts: templateOwner: string;
 github-writes.d.ts: templateRepo: string;
 github-writes.d.ts: title: string;
 github-writes.d.ts: token: string;
+github-writes.d.ts: treeEntries(repo: string, ref: string): Promise<Array<{
 github-writes.d.ts: type: 'User' | 'Team';
 github-writes.d.ts: type: string;
 github-writes.d.ts: url: string;
