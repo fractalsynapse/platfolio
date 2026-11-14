@@ -99,6 +99,58 @@ schema's error type carries the issues. Fixed by deleting the import and matchin
 establish the claim. AGENTS.md already said this ("fake-only tests do not establish that wiring works"); this
 is the cost of reading past it.
 
+### Changed — the registry's environment field: three words, one spelling of everywhere
+
+`appliesTo` became **`environments`**, valued `development | staging | production`, or `all`. The old vocabulary had six words -- adding `ci`, `test`, `local` -- and in practice one meaning was spelled four different ways across 81 entries: `[development, staging, production]`, `[development, staging, production, test, local]`, `[staging, production, ci, test, local]`, `[test, local]`. A registry whose synonymous sets differ by spelling cannot be searched ("does this variable reach production?"), diffed, or trusted. That was the maintainer's objection, and it was right.
+
+Five rules now enforced by the same script, each falsified by mutating the file and reading the failure:
+
+| Mutation | What the gate said |
+| --- | --- |
+| the old field name | `CONTROL_PLANE_BASE: appliesTo is retired -- the field is environments` |
+| full set not written as `all` | `DATABASE_URL: list all three environments as environments: all -- the same set must not have two spellings` |
+| `ci` as an environment | `environments: ci is not an environment -- a runner is the development environment; where its value lives belongs in deployedTo` |
+| an environment twice in one entry | `KC_HTTP_ENABLED: environments lists the same environment twice` |
+| the same variable defined twice | `environment.yaml defines CONTROL_PLANE_BASE more than once -- one variable, one definition` |
+
+`ci`, `test` and `local` were not discarded: they describe **where a value lives**, which was always `deployedTo`'s claim (`ci:secret`, `ci:env`, `local:compose-overlay`, `host:shell`), so the information moved to the field that already owned it. **Eight spellings became three** (`[development]` 37, `all` 34, `[staging, production]` 10).
+
+`--emit` carries the migration -- a curated `appliesTo` list is mapped to the new field rather than trusted -- so regenerating cannot reintroduce the synonyms.
+
+**And a probe failure worth recording:** my first attempt at the falsifications above reported five rules as *not caught*, which would have made me "fix" a gate that was already working. The mutations had not been applied: I used six-space indentation against a four-space file. Every probe now asserts the file's checksum changed before it trusts a result.
+
+### Fixed — staging's history was an orphan snapshot with no parents
+
+`origin/staging` began at root commit `d4a2dc8` ("Merge of PR #214") with **no parents**: the integration line
+had been recreated on 2026-11-13 from a working-tree snapshot whose tree is byte-identical to PR #214's head
+commit `7a9aa029`. Consequence: ~270 commits -- every merge from #99 to #213 -- were unreachable from staging,
+so `git log` reported a project that had begun last Friday, and `git blame` could not reach the commits that
+wrote most of the code.
+
+Repaired with two `git merge -s ours` commits (`c529012`, `0e0f711`): the snapshot's source and `main`'s three
+integration merges become ancestors, tree byte-identical before and after, verified by comparing tree objects
+and by an empty `git diff --stat` against the previous tip. Staging now reaches **346 commits back to
+`50fe8c2 Initial commit` (2026-10-23)**.
+
+Deliberately **not** done: rebuilding the ~20 snapshot commits so `d4a2dc8` stops being a second root. That
+needs a force-push to a shared branch and would renumber every commit from PR #215 onward, breaking the
+association between each GitHub PR page and the commit actually merged. Two roots, documented, beat a
+cosmetically clean line bought by destroying traceability.
+
+The repair also invalidated the documentation I had written an hour earlier, which asserted the history was
+disconnected -- corrected in the same push rather than left as a confident falsehood. `docs/MAINTAINING.md` now
+records the four ways I mis-measured "is this merged?" (`git cherry -q` prints *nothing*, so my grep counted an
+empty stream and reported a clean result), because the next agent will ask the same question.
+
+### Removed — the repository's stale branches
+
+Remote heads went from 13 to 2 (`main`, `staging`): 10 deleted, each first shown contained in staging or
+superseded. `docs/182-object-model` was not contained -- it is the earlier draft of the object-model document
+whose successor landed as PR #182 from the sibling branch `docs/183-object-model`; its unique lines are the
+pre-#176 state ("no user row", "bindings absent") that staging has since corrected. 112 stale local
+remote-tracking refs pruned; one worktree; local branches 15 → 2. All 145 refs bundled to
+`.archive/` before anything was deleted.
+
 ### Added — the central environment registry, `environment.yaml` (D52)
 
 One machine-readable file at the repository root declaring every variable this project reads or deploys: whether

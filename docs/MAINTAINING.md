@@ -30,26 +30,43 @@ workflows from the default branch only (#149).
 `open-install-pr.ts` still renders and opens the PR itself and still defaults `--platform .`. That
 remaining local-filesystem logic is the next thing to move behind an operation, not a design decision.
 
-## Repository history: where the line actually starts
+## Repository history: the snapshot orphan, and what was restored
 
-`origin/staging`'s oldest commit is `d4a2dc8` (Merge of PR #214) **with no parents**: the staging line was
-recreated from a working-tree snapshot on 2026-11-13, so the ~270 commits before it -- every merge from PR #99
-to #213 -- are not ancestors of staging today. `origin/main` still carries the pre-snapshot line (167 commits
-back to 2026-10-23), and GitHub retains `refs/pull/<N>/head` for each merged PR, which is where an individual
-commit can still be fetched from.
+`origin/staging` used to begin at a root commit `d4a2dc8` ("Merge of PR #214") **with no parents**: the
+integration line had been recreated from a working-tree snapshot on 2026-11-13. That snapshot's tree is
+byte-identical to PR #214's head commit `7a9aa029`, which is how the source of the snapshot was identified.
 
-Two consequences that matter in practice:
+**It is now repaired** (`c529012`, `0e0f711`): both `7a9aa029` and `main`'s three integration merges are
+ancestors of staging, merged with `git merge -s ours` -- a strategy that records the other side as history and
+leaves the tree exactly as it was. Verified by comparing the tree object before and after each merge: identical,
+and `git diff --stat` against the previous tip is empty. Staging now reaches **346 commits** back to
+`50fe8c2 Initial commit` (2026-10-23), and `git merge-base --is-ancestor` answers YES for pre-snapshot work
+such as PR #171's `02df442`.
 
-- **`git log` on staging is not the project's history.** The narrative lives in `CHANGELOG.md` and the decision
-  register, which is why both are written as they are -- they are the durable record, not a convenience.
-- **Do not judge "is this branch merged?" by `merge-base --is-ancestor`.** It answers "no" for work that was
-  merged before the snapshot, and it answered "no" for branches whose content is plainly in staging's tree. The
-  reliable signals are the merged-PR record (`gh pr list --state merged --head <branch>`) and the tree itself.
+One artifact remains, deliberately: `d4a2dc8` is still a second root, because a commit's parents cannot be
+changed without rewriting it. Removing that wart means rebuilding the ~20 snapshot commits so the orphan gains
+a parent and force-pushing `staging` -- which would give every commit from PR #215 onward a new SHA and break
+the association GitHub holds between each PR page and the commit that was actually merged. That trade is not
+mine to make silently, so the duplicate line stays and is documented here.
 
-Before pruning the stale local branches, every ref (145 of them, 340 commits) was bundled to
-`.archive/platfolio-all-refs-<date>.bundle`, gitignored because a bundle is not project source. To recover a
-line from it: `git bundle verify` it, then `git bundle unbundle .archive/<file>.bundle` and read the printed
-refs, or fetch the PR head directly: `gh pr view <N> --json headRefOid`.
+**Why `git log` was never the right record anyway:** the narrative lives in `CHANGELOG.md` and the decision
+register. The orphan proved that -- a repository whose history could be replaced by a snapshot without anything
+breaking is a repository that was relying on its files, not its VCS, for institutional memory.
+
+**How to judge "is this branch merged", measured the hard way (four wrong answers in one session):**
+
+| Tool | What it said | Why it mislead |
+| --- | --- | --- |
+| `merge-base --is-ancestor` | "not contained" | true of every pre-snapshot branch while the orphan line existed |
+| `git cherry -q … \| grep -c '^+'` | `0 unapplied` | `-q` prints nothing; the grep counted an empty stream |
+| `git cherry -v` | 122–312 unapplied | measures against the orphan line, so the number is history length, not work |
+| `git apply --reverse --check` | "not provable" | correct but too strict: later edits to the same files defeat a byte-level reverse patch |
+
+The signals that actually work: the merged-PR record (`gh pr list --state merged --head <branch>`) and the
+tree. Branches were pruned only after each was shown contained by one of those, and all 145 refs / 340 commits
+were bundled first to `.archive/platfolio-all-refs-20261113.bundle` (gitignored: a bundle is backup, not
+source). Recover with `git bundle unbundle .archive/<file>.bundle`, or per-PR with
+`gh pr view <N> --json headRefOid` -- GitHub retains `refs/pull/<N>/head` for every merged PR.
 
 ## Releases and credentials are operations, not console work
 
@@ -87,10 +104,10 @@ deploys:
 
 ```yaml
   - name: PLATFOLIO_GITHUB_PRIVATE_KEY
-    secret: true                       # a custody claim, not a guess
-    appliesTo: [staging, production]
-    deployedTo: railway:shared-variable
-    note: "..."
+    secret: true                          # a custody claim, not a guess
+    environments: [staging, production]   # development | staging | production, or all
+    deployedTo: railway:shared-variable   # where the value actually lives
+    note: "referenced by compose.yaml:69, apps/control-plane/src/index.ts:79"
 ```
 
 `pnpm run environment:registry` (inside `pnpm run check`, so inside `verify`) fails on:
@@ -98,6 +115,11 @@ deploys:
 - a variable referenced in configuration and **not declared** -- including the ones that look harmless but carry
   credentials, which is why `DATABASE_URL` and `PLATFOLIO_DB_URL` are marked secret;
 - a declaration **nothing references** any more, because a registry that accretes memorials stops being trusted;
+- a variable **defined twice**, and the full environment set written any way except `environments: all` --
+  `appliesTo` is retired, and so are `ci`, `test` and `local` as environment names. Those three were never
+  environments: a laptop and a runner are both the development environment, and where a value lives is
+  `deployedTo`'s claim (`ci:secret`, `local:compose-overlay`, `host:shell`). The old file spelled one meaning
+  four ways, which is how a registry stops being searchable;
 - a secret with a **literal value** in a production-bearing file (D4: commit the name, let the provider hold the
   value). A development overlay may hold a stand-in, and the rule is structural rather than a whitelist of
   friendly strings: any URL userinfo must be dev-shaped, because a whitelist is how a leak gets blessed;
