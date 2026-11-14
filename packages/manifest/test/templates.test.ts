@@ -27,7 +27,7 @@ function load(dir: string, pinned: boolean): { manifest: Manifest | undefined; i
     docs.push(renderProdOverlay(base, pins));
   }
   const parsed = parseCompose(docs);
-  const invPath = path.join(ROOT, dir, '.platfolio/environment.yaml');
+  const invPath = path.join(ROOT, dir, 'environment.yaml');
   const entries = fs.existsSync(invPath) ? parseInventory(fs.readFileSync(invPath, 'utf8')).entries : [];
   const invIssues = fs.existsSync(invPath) ? parseInventory(fs.readFileSync(invPath, 'utf8')).issues.map((i) => `${i.code}@${i.path}`) : [];
   const cross = parsed.manifest ? validateInventory(entries, parsed.manifest).map((i) => `${i.code}@${i.path}`) : [];
@@ -156,7 +156,7 @@ function referencedInTemplate(dir: string, name: string): boolean {
 
 /** Entry names plus the service each one targets, from a template's own inventory. */
 function inventoryEntriesOf(dir: string): Array<{ name: string; service?: string }> {
-  const invPath = path.join(ROOT, dir, '.platfolio/environment.yaml');
+  const invPath = path.join(ROOT, dir, 'environment.yaml');
   if (!fs.existsSync(invPath)) return [];
   return parseInventory(fs.readFileSync(invPath, 'utf8')).entries as Array<{ name: string; service?: string }>;
 }

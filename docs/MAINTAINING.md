@@ -148,36 +148,52 @@ Three things an operator should expect from these:
 environment:registry` fails if code reads a variable the registry does not declare, or the registry declares
 one nothing reads.
 
-## Two files named `environment.yaml`, doing two different jobs
+## The environment registry: one file per platform, at its root
 
-| File | What it is | Who reads it |
-| --- | --- | --- |
-| `environment.yaml` (root) | The **central environment registry** (D52). Every variable this project touches, is it a credential, which environments, where the value lives. Generated from code and composition, cross-checked in CI | `pnpm run environment:registry`, and humans auditing custody |
-| `.platfolio/environment.yaml` (ours, and each template's) | The **platform inventory** (D33). Obligations, wiring and defaults for the platform this repo describes, in `kind: value \| secret \| reference` form | `applyInventory` merges it **into the plan**, and the install PR renders it for tenants |
+`environment.yaml` is both the **central registry** (D52) and, for a platform, its **obligations** (D33): custody,
+environments, defaults, and the wiring a deploy resolves. There used to be a second file —
+`.platfolio/environment.yaml` — with its own schema describing the same variables. It is gone, because two
+documents describing one fact drift, and because the registry used to *scan* the inventory for names: excluding
+it and re-running lost nothing, which meant the "source" was a copy.
 
-They are not duplicates, but they were **duplicated plumbing**: the registry used to scan `.platfolio/` as a
-source of variable names. The experiment that settled it -- exclude `.platfolio/` from discovery and re-run --
-produced 82 variables, all still referenced, nothing lost: the inventory was contributing zero unique facts, so
-it was a second copy of claims the code and composition already made, with a worse freshness record. Its own
-header documents a prior version that named `SESSION_SIGNING_KEY` and `PUBLIC_ORIGIN` (nothing read either) and
-called `KEYCLOAK_ISSUER` optional when the control plane refuses to start without it. A registry fed by that
-document inherits its lies.
+| Field | Meaning |
+| --- | --- |
+| `name` | the variable. **One row per name** — a second definition is a second custody claim, and parse order decides which wins |
+| `kind` | `value` / `secret` are obligations an operator supplies or defaults; `reference` / `output` are wiring the platform resolves and **must never appear on a panel asking a tenant to type** (D33) |
+| `secret` | the custody claim, not a guess: a name shaped like a credential is not proof, and `PLATFOLIO_DB_URL` carries a password in its userinfo (D4) |
+| `environments` | `all` — the only legal spelling of the full set — or a subset of `development \| staging \| production` |
+| `service` | which service reads it |
+| `required` / `default` / `enum` / `rotate` | the obligation's shape. Wiring cannot be `required`, and a secret cannot carry a `default` |
+| `database` / `output` / `from` | wiring targets: `database: app-db, output: DATABASE_URL`, or `from: identity#jwks` (D34) |
+| `deployedTo` | where the value lives: `railway:shared-variable`, `railway:reference`, `ci:secret`, `local:compose-overlay`, `host:shell` … |
+| `note` | provenance, or the judgement behind the row |
 
-Now the dependency runs the other way, and it is checked:
+Each platform carries its own at its root: `templates/starter-web/environment.yaml` and so on, plus ours. A
+platform's registry is authoritative **for that platform** — shared-identity's `KC_DB_URL` is not a variable this
+control plane reads, and forcing it into our registry would recreate the duplication this rule exists to prevent.
 
-- every inventory name in **our** namespace must be declared in the registry, or the build fails;
-- custody claims must agree -- an inventory calling something a secret while the registry says `secret: false`
-  is a failure, in both directions, because the inventory is operator-facing and understating custody there is
-  how a credential ends up pasted into a support ticket;
-- every inventory name belonging to a **tenant-compiled** service must be referenced by that template's own
-  source or compose files. This is what caught four fabricated obligations (`APP_SESSION_KEY`, `LOG_LEVEL`,
-  `QUEUE_DRIVER`, `STATE_ENCRYPTION_KEY`) that the templates had been shipping as tenant-facing requirements.
-  The exemption is structural, not a convenience: a `build:` service's consumer is source we can grep, while
-  Keycloak reads its own documented configuration and our repository contains no Keycloak source to search.
-- the rule test asserts its inventory parsed to **more than zero entries**. I found that out by trying to
-  falsify it with a malformed append: the file failed to parse, the loop iterated over nothing, and the test
-  reported green. A check that can pass by checking nothing is worse than no check, because it advertises
-  coverage.
+`pnpm run environment:registry` (in `check`, so in `verify`) fails on:
+
+- a variable referenced in configuration and **not declared**, and a declaration **nothing references**;
+- a **duplicate name**, or the full environment set written any way but `all`;
+- an obligation that contradicts itself: `kind: secret` with `secret: false`, a secret with a `default`, a
+  `reference` with no `database`, wiring marked `required`, a `kind` outside the four;
+- a platform registry that yields **no rows at all** — the vacuity guard. Three separate times this session a
+  check passed because it was parsing nothing (`git cherry -q` printing nothing; a malformed appended inventory
+  line producing zero entries; this function reading an old envelope name). A check that can pass by checking
+  nothing is worse than none, because it advertises coverage;
+- a secret with a **literal value** in a production-bearing file. A development overlay may hold a stand-in, and
+  the test is structural — URL userinfo must be dev-shaped — because a whitelist of "obviously fake" strings is
+  how a leak gets blessed.
+
+Judgements live in the `HUMAN` table inside the script, not in the generated file: hand-edit the output and the
+next `--emit` silently loses it. That is also where the 16 obligations moved with their notes, which is why they
+survive regeneration.
+
+Scope is deliberate. Prose, fixtures and spikes are excluded — an early pass applied a YAML-key regex to
+TypeScript and filled the registry with the provider's deployment-status vocabulary (`PENDING`, `NEEDS_APPROVAL`).
+And **no registry file is ever a discovery source**: a registry that feeds the derivation that produces it is a
+loop, not a check.
 
 ## The environment registry (D52)
 

@@ -48,3 +48,8 @@ probe.ts
 
 # Local history archive (git bundle). Not project source; see MAINTAINING.
 .archive/
+
+# Atomic-write scratch files. A `write` helper that stages `file.tmp` then renames leaves the
+# intermediate if the rename fails, and without this rule a `git add -A` commits it: this repository had a
+# 461-line copy of a checker sitting in version control until an `add -A` happened to remove it.
+*.tmp

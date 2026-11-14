@@ -1,4 +1,30 @@
-import { execFileSync } from 'node:child_process';
+/**
+ * Every platform's own registry is authoritative FOR THAT PLATFORM, so what generalises across them is the
+ * obligation schema, not the name list. A template's `KC_DB_URL` is not a variable this control plane reads, and
+ * demanding it in our root registry would recreate exactly the cross-namespace duplication D52 exists to remove
+ * -- which is the mistake an earlier version of this function made, and why it is now a schema check.
+ */
+function checkPlatformRegistries(): string[] {
+  const problems: string[] = [];
+  for (const rel of inventoryFiles()) {
+    let doc: unknown;
+    try {
+      doc = parseYaml(fs.readFileSync(path.join(ROOT, rel), 'utf8'));
+    } catch (error) {
+      problems.push(`${rel}: does not parse (${(error as Error).message.slice(0, 70)})`);
+      continue;
+    }
+    const rows = Array.isArray((doc as { variables?: unknown })?.variables) ? (doc as { variables: Entry[] }).variables : [];
+    // A vacuity guard, earned twice today: a shape change that makes a parser return zero rows turns a check
+    // green without it looking at anything. Assert there are rows before reasoning about them.
+    if (rows.length === 0) {
+      problems.push(`${rel}: declares no variables -- either the platform has none (delete the file) or the shape changed and this check reads nothing`);
+      continue;
+    }
+    for (const p of checkObligations(rows)) problems.push(`${rel}: ${p}`);
+  }
+  return problems;
+}import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
@@ -57,7 +83,8 @@ const IN_SCOPE = /^(apps\/|packages\/(contracts|kernel|manifest|api-contract)\/s
  * all still referenced, no committed secret values, nothing lost. The inventory contributes zero facts the code
  * and composition do not already give, so it was pure duplication.
  *
- * It is still validated, in the direction that matters: `checkInventoryAgreement` below.
+ * It is still validated, in the direction that matters: `checkPlatformRegistries` applies the obligation schema to
+ * every platform's registry, and no registry file is ever a discovery source.
  */
 const IN_SCOPE_ROOT = /^(compose\.yaml|compose\.prod\.yaml|compose\.dev\.yaml|Dockerfile)/;
 
@@ -84,11 +111,36 @@ const NOT_ENVIRONMENTS: Record<string, string> = {
   local: 'a laptop is the development environment -- use `development`',
 };
 
+/**
+ * One variable, one definition (D52), now carrying the obligations the platform inventory used to hold in a
+ * second file with a second schema. The two files were merged because the same facts kept twice drift -- and
+ * one of them had already drifted in this repository's own history (an inventory naming SESSION_SIGNING_KEY
+ * and PUBLIC_ORIGIN, which nothing reads).
+ *
+ * `kind` is the field that decides what an operator is being asked to do:
+ *   value / secret  -- things supplied or defaulted; a secret is a custody claim (D4: platfolio stores none)
+ *   reference       -- wiring resolved by the platform from a declared database; never typed by a tenant
+ *   output          -- wiring provided from a capability (D34), e.g. `identity#jwks`
+ * Mixing them up is the failure D33 was written to prevent: a panel that asks a tenant to type a value the
+ * platform is supposed to resolve.
+ */
 interface Entry {
   name?: string;
+  kind?: 'value' | 'secret' | 'reference' | 'output';
   secret?: boolean;
   /** `all` (the only legal spelling of the full set) or a non-empty subset of ENVIRONMENTS. */
   environments?: string[] | 'all';
+  /** The service that reads it, where the composition says so. */
+  service?: string;
+  required?: boolean;
+  default?: string;
+  enum?: unknown[];
+  rotate?: string;
+  /** kind: reference -- the declared database whose output resolves this name. */
+  database?: string;
+  output?: string;
+  /** kind: output -- `capability#output`. */
+  from?: string;
   deployedTo?: string;
   note?: string;
 }
@@ -115,7 +167,10 @@ function discover(): Map<string, Set<string>> {
     // (`POSTGRES_URL`, `PGPASSWORD`) are vocabulary ABOUT variables, not variables anyone sets. CI found this,
     // not me -- the check passed locally only because the file was still untracked, so `git ls-files` never
     // listed it. A tool that reads the repository has to state where it stops reading itself.
-    if (f === REGISTRY_PATH || f === 'scripts/check-environment-registry.ts' || f.startsWith('vendor/') || f.includes('/dist/')) continue;
+    // A registry is a statement ABOUT variables, not a place that reads them. Scanning one (ours, or a
+    // template's) would let declarations feed the derivation that produces them -- the loop we broke when the
+    // platform inventory stopped being a discovery source, generalised: no registry file is ever a source.
+    if (f === REGISTRY_PATH || f === 'scripts/check-environment-registry.ts' || /^templates\/[^/]+\/environment\.yaml$/.test(f) || f.startsWith('vendor/') || f.includes('/dist/')) continue;
     if (/\.md$/.test(f) || f === 'pnpm-lock.yaml' || f.includes('/test/') || f.startsWith('spikes/') || f.startsWith('examples/')) continue;
     if (!(/\.(ts|mjs|js|yaml|yml)$/.test(f) || f.endsWith('Dockerfile'))) continue;
     if (!(IN_SCOPE.test(f) || IN_SCOPE_ROOT.test(f))) continue;
@@ -158,7 +213,6 @@ const HUMAN: Record<string, Partial<Entry>> = {
   // The tenant application reads it; platfolio never does. It is credential-bearing, and it is the reason
   // `references` exist instead of a typed URL (D4, OD13).
   DATABASE_URL: { note: 'read by the tenant application (starter-web); platfolio resolves the production value from the database reference' },
-  PLATFOLIO_DB_URL: { note: 'the same credential, delivered as a provider reference rather than a literal (OD13)' },
   // Loopback and CI container passwords: not secrets in the custody sense, because there is nothing behind them.
   POSTGRES_PASSWORD: { secret: false, note: 'a container password on loopback/CI; no real service listens' },
   RAILWAY_TOKEN: { note: 'the provider grant. Exactly one per managed instance (D24), held as a GitHub environment secret so platfolio never stores it' },
@@ -175,6 +229,26 @@ const HUMAN: Record<string, Partial<Entry>> = {
   OIDC_CLIENT_SECRET: { note: 'template placeholder: a tenant app that keeps its own OIDC client secret' },
   STRIPE_WEBHOOK_SECRET: { note: 'template placeholder: a tenant app verifying Stripe webhooks itself' },
   KEYCLOAK_ADMIN_PASSWORD: { note: 'the bootstrap admin of the hosted identity service, declared by name in the composition' },
+  // ---- obligations carried over from the retired platform inventory (D33 folded into D52). These were the
+  // only facts that file held which the derived registry could not know: which service reads a name, whether
+  // it is required, its default, and the wiring that resolves it. They live here rather than in the generated
+  // output because -- as with every judgement above -- a hand-edit to `environment.yaml` is lost on --emit.
+  PLATFOLIO_IDENTITY_ISSUER: { kind: 'value', required: true, service: 'api', note: 'who an access token must be addressed to; staging overrides it per environment (D56)' },
+  PLATFOLIO_IDENTITY_JWKS_URI: { kind: 'output', from: 'identity#jwks', required: true, service: 'api', note: 'resolved from the hosted identity capability, not typed (D34)' },
+  PLATFOLIO_IDENTITY_AUDIENCE: { kind: 'value', required: true, default: 'platfolio-api', service: 'api' },
+  PLATFOLIO_DB_URL: { kind: 'secret', required: false, service: 'api', note: 'the same credential as DATABASE_URL, delivered as a provider reference rather than a literal (OD13); the platform resolves it from the environment\'s own database, so no one types it' },
+  PLATFOLIO_DB_MIGRATE: { kind: 'value', required: false, default: 'true', service: 'api', note: 'runs migrations at boot for the single-replica first-party deployment' },
+  PLATFOLIO_RECONCILE_INTERVAL_MS: { kind: 'value', required: false, default: '60000', service: 'api' },
+  PLATFOLIO_VERSION: { kind: 'value', required: false, service: 'api', note: 'reported by /healthz; set by the build, not the operator' },
+  PLATFOLIO_EMAIL_DRIVER: { kind: 'value', required: false, default: 'none', enum: ['none', 'smtp', 'mailpit', 'memory'], service: 'api' },
+  PLATFOLIO_EMAIL_FROM: { kind: 'value', required: false, default: 'platfolio@platfolio.dev', service: 'api' },
+  PLATFOLIO_SMTP_HOST: { kind: 'value', required: false, service: 'api' },
+  PLATFOLIO_SMTP_PORT: { kind: 'value', required: false, default: '587', service: 'api' },
+  PLATFOLIO_SMTP_SECURE: { kind: 'value', required: false, default: 'false', service: 'api' },
+  PLATFOLIO_SMTP_STARTTLS: { kind: 'value', required: false, default: 'require', enum: ['require', 'allow', 'off'], service: 'api' },
+  PLATFOLIO_SMTP_USER: { kind: 'value', required: false, service: 'api' },
+  PLATFOLIO_SMTP_PASSWORD: { kind: 'secret', required: false, service: 'api' },
+  PLATFOLIO_MAILPIT_URL: { kind: 'value', required: false, service: 'api', note: 'the local mailbox reader; absent in production (D46)' },
 };
 
 function guess(name: string, places: Set<string>): Entry {
@@ -258,52 +332,39 @@ function migrateLegacy(value: unknown): string[] | 'all' | undefined {
  * the control plane refuses to start without it). Letting the stale document feed the derived one inverted the
  * only useful direction of trust.
  */
-function inventoryFiles(): string[] {
-  return [
-    '.platfolio/environment.yaml',
-    'templates/starter-web/.platfolio/environment.yaml',
-    'templates/starter-worker/.platfolio/environment.yaml',
-    'templates/shared-identity/.platfolio/environment.yaml',
-  ].filter((rel) => fs.existsSync(path.join(ROOT, rel)));
-}
-
-function checkInventoryAgreement(declared: Map<string, Entry>): string[] {
+/**
+ * The obligations are now part of the registry, so the registry has to hold them to the standard the separate
+ * inventory schema used to: a `reference` must name a database, an `output` must be `capability#output`, a
+ * `default` on a secret is a contradiction, and `kind: secret` must agree with `secret: true`. Dropping these
+ * rules with the old file would have quietly weakened a check while appearing to simplify one.
+ */
+function checkObligations(entries: Entry[]): string[] {
   const problems: string[] = [];
-  for (const rel of inventoryFiles()) {
-    let doc: unknown;
-    try {
-      doc = parseYaml(fs.readFileSync(path.join(ROOT, rel), 'utf8'));
-    } catch (error) {
-      problems.push(`${rel}: does not parse (${(error as Error).message.slice(0, 70)})`);
+  for (const e of entries) {
+    const name = e.name ?? '(unnamed entry)';
+    const kind = e.kind ?? (e.secret ? 'secret' : 'value');
+    if (!['value', 'secret', 'reference', 'output'].includes(kind)) {
+      problems.push(`${name}: kind "${kind}" is not one of value | secret | reference | output`);
       continue;
     }
-    const entries = Array.isArray((doc as { entries?: unknown })?.entries)
-      ? (doc as { entries: Record<string, unknown>[] }).entries
-      : Array.isArray(doc) ? (doc as Record<string, unknown>[]) : [];
-    for (const entry of entries) {
-      const name = typeof entry.name === 'string' ? entry.name : '';
-      if (!name) continue;
-      // The registry tracks OUR variables (the OURS filter is what makes it a registry rather than a grep
-      // result). A template's own app settings -- UI_BRAND, WORKER_CONCURRENCY -- are the tenant's namespace and
-      // are checked instead by templates.test.ts, which asks the narrower and more useful question: does that
-      // template reference it. Flagging them here would be the gate claiming authority over names it never
-      // discovered, which is how checks get ignored.
-      if (!OURS.test(name)) continue;
-      const reg = declared.get(name);
-      if (!reg) {
-        problems.push(`${rel}: declares ${name} as an operator obligation, but the central registry does not know it -- either nothing references it (delete the claim) or the code needs it and the registry must be regenerated (D52 is the authority, D53's custody model depends on it)`);
-        continue;
-      }
-      const claimsSecret = entry.kind === 'secret' || entry.secret === true;
-      if (claimsSecret && reg.secret === false) {
-        problems.push(`${rel}: calls ${name} a secret while the registry records secret: false -- two custody claims about one variable is the disagreement a tenant would inherit (D4)`);
-      }
-      if (!claimsSecret && entry.kind === 'value' && reg.secret === true) {
-        problems.push(`${rel}: calls ${name} a plain value while the registry records it as a credential -- the inventory is operator-facing, so understating custody here is how a secret ends up typed into a ticket`);
-      }
-    }
+    if (kind === 'secret' && e.secret !== true) problems.push(`${name}: kind is secret but secret: ${String(e.secret)} -- the custody claim and the obligation disagree (D4)`);
+    if (kind !== 'secret' && e.secret === true) problems.push(`${name}: secret: true with kind "${kind}" -- a credential cannot be a default, a reference, or an output`);
+    if (kind === 'secret' && e.default !== undefined) problems.push(`${name}: a secret declares a default value; defaults are for non-credentials precisely because they are committed (D4)`);
+    if (kind === 'reference' && !e.database) problems.push(`${name}: kind is reference but names no database to resolve from -- this is the field a tenant is never asked to type, so a dangling reference is a deploy that fails at boot`);
+    if (kind === 'output' && !(e.from ?? '').includes('#')) problems.push(`${name}: kind is output but \`from\` is not capability#output (D34)`);
+    if ((kind === 'reference' || kind === 'output') && e.required === true) problems.push(`${name}: wiring cannot be required of an operator -- it is resolved by the platform, not supplied`);
   }
   return problems;
+}
+
+function inventoryFiles(): string[] {
+  // Each platform declares its obligations in its OWN registry, at its root -- one file per platform, one
+  // schema, no `.platfolio/` shadow copy of the same facts.
+  return [
+    'templates/starter-web/environment.yaml',
+    'templates/starter-worker/environment.yaml',
+    'templates/shared-identity/environment.yaml',
+  ].filter((rel) => fs.existsSync(path.join(ROOT, rel)));
 }
 
 const found = discover();
@@ -330,7 +391,23 @@ if (process.argv.includes('--emit')) {
     const raw = e.environments ?? migrateLegacy((e as { appliesTo?: unknown }).appliesTo) ?? guess(name, found.get(name)!).environments;
     const list = raw === 'all' ? [...ENVIRONMENTS] : raw ?? [];
     const envsOut = ENVIRONMENTS.every((x) => list.includes(x)) ? 'all' : `[${ENVIRONMENTS.filter((x) => list.includes(x)).join(', ')}]`;
-    return `  - name: ${e.name}\n    secret: ${String(e.secret ?? false)}\n    environments: ${envsOut}\n    deployedTo: ${e.deployedTo ?? 'host:shell'}${e.note ? `\n    note: ${JSON.stringify(e.note)}` : ''}`;
+    const rows = [
+      `  - name: ${e.name}`,
+      `    kind: ${e.kind ?? (e.secret ? 'secret' : 'value')}`,
+      `    secret: ${String(e.secret ?? false)}`,
+      `    environments: ${envsOut}`,
+    ];
+    if (e.service) rows.push(`    service: ${e.service}`);
+    if (e.required !== undefined) rows.push(`    required: ${String(e.required)}`);
+    if (e.default !== undefined) rows.push(`    default: ${JSON.stringify(e.default)}`);
+    if (e.enum) rows.push(`    enum: [${e.enum.map((v) => JSON.stringify(v)).join(', ')}]`);
+    if (e.rotate) rows.push(`    rotate: ${e.rotate}`);
+    if (e.database) rows.push(`    database: ${e.database}`);
+    if (e.output) rows.push(`    output: ${e.output}`);
+    if (e.from) rows.push(`    from: ${e.from}`);
+    rows.push(`    deployedTo: ${e.deployedTo ?? 'host:shell'}`);
+    if (e.note) rows.push(`    note: ${JSON.stringify(e.note)}`);
+    return rows.join('\n');
   }).join('\n');
   process.stdout.write([
     '# The central environment registry (D52).',
@@ -365,7 +442,8 @@ if (error) problems.push(`environment registry: ${error} -- the central registry
 
 // The inventory-vs-registry cross-check, before the reference checks, because a disagreement between two
 // declarations of the same fact is the more confusing failure to be told about second.
-problems.push(...checkInventoryAgreement(declared));
+problems.push(...checkPlatformRegistries());
+problems.push(...checkObligations(entries));
 
 for (const [name, places] of found) {
   if (!declared.has(name)) {

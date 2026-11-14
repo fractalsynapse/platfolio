@@ -99,6 +99,45 @@ schema's error type carries the issues. Fixed by deleting the import and matchin
 establish the claim. AGENTS.md already said this ("fake-only tests do not establish that wiring works"); this
 is the cost of reading past it.
 
+### Changed — one environment registry per platform. `.platfolio/` is gone (D58)
+
+Two files named `environment.yaml`, two schemas, one set of variables. The registry is now the only one, and the
+platform inventory's facts moved into it as fields: `kind` (`value | secret | reference | output`), `service`,
+`required`, `default`, `enum`, `rotate`, `database`, `output`, `from` -- beside the custody fields (`secret`,
+`environments`, `deployedTo`, `note`). Our 16 obligations were re-homed in the checker's `HUMAN` table so
+`--emit` regenerates them instead of losing them; each template's inventory became
+`templates/<name>/environment.yaml`; `.platfolio/` was deleted everywhere.
+
+`kind` survived because it is the field that decides what an operator is asked to do: `value`/`secret` are
+obligations, `reference`/`output` are wiring the platform resolves and must never appear on a panel asking a
+tenant to type (D33). Dropping it would have quietly deleted a rule while appearing to simplify a file.
+
+Also fixed, in the same change:
+
+- **The dependency was backwards.** The registry scanned the inventory for names, so a hand-authored list -- one
+  with a documented history of naming variables nothing reads -- fed the derived authority. Excluding it and
+  re-running lost nothing, which is the proof it was pure duplication. Now **no registry file is ever a
+  discovery source**: a registry that feeds the derivation producing it is a loop, not a check.
+- **The cross-check compared the wrong namespaces.** It asked whether a *template's* names appeared in *our*
+  registry -- `KC_DB_URL` on the identity platform is not a variable this control plane reads, and forcing it in
+  would have recreated the duplication the change exists to prevent. What generalises across registries is the
+  obligation schema, so that is now what is checked, per platform file.
+- **A vacuity guard**, added because the first version of that check parsed zero rows from the new envelope and
+  reported green. Third time today a check could pass by checking nothing (`git cherry -q` printing nothing; a
+  malformed appended inventory yielding no entries; this). It now fails when a registry declares no variables,
+  naming both possible causes.
+
+Verified by falsification, five rules: `kind: secret` with `secret: false`, a secret with a `default`, a
+`reference` with no `database`, wiring marked `required`, an unknown `kind`, and the vacuity case -- each exits
+1, and the restored tree exits 0. Two of the first probes were bogus and I redid them: one mutated the file into
+invalid YAML (proving the parser works, not the rule), the other aimed `required:` at a `value` row, where it is
+meaningless -- **an anchor that does not match is now reported as `ANCHOR MISSING` instead of being counted as a
+pass**, because a silent no-op probe is how a check gets a certificate it never earned.
+
+Two self-inflicted errors recorded in the commit: I added the 16 rows to the `HUMAN` table without noticing
+three names were already there (duplicate object keys -- TypeScript caught what I had just written a rule
+about), and my first pass left the cross-check reading an envelope name that no longer existed.
+
 ### Fixed — the templates were shipping obligations nobody reads, and the registry was being fed by them
 
 Two related cleanups, both prompted by the maintainer noticing that `.platfolio/environment.yaml` and
