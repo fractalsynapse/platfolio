@@ -83,7 +83,8 @@ const IN_SCOPE = /^(apps\/|packages\/(contracts|kernel|manifest|api-contract)\/s
  * all still referenced, no committed secret values, nothing lost. The inventory contributes zero facts the code
  * and composition do not already give, so it was pure duplication.
  *
- * It is still validated, in the direction that matters: `checkInventoryAgreement` below.
+ * It is still validated, in the direction that matters: `checkPlatformRegistries` applies the obligation schema to
+ * every platform's registry, and no registry file is ever a discovery source.
  */
 const IN_SCOPE_ROOT = /^(compose\.yaml|compose\.prod\.yaml|compose\.dev\.yaml|Dockerfile)/;
 
@@ -364,45 +365,6 @@ function inventoryFiles(): string[] {
     'templates/starter-worker/environment.yaml',
     'templates/shared-identity/environment.yaml',
   ].filter((rel) => fs.existsSync(path.join(ROOT, rel)));
-}
-
-function checkInventoryAgreement(declared: Map<string, Entry>): string[] {
-  const problems: string[] = [];
-  for (const rel of inventoryFiles()) {
-    let doc: unknown;
-    try {
-      doc = parseYaml(fs.readFileSync(path.join(ROOT, rel), 'utf8'));
-    } catch (error) {
-      problems.push(`${rel}: does not parse (${(error as Error).message.slice(0, 70)})`);
-      continue;
-    }
-    const entries = Array.isArray((doc as { entries?: unknown })?.entries)
-      ? (doc as { entries: Record<string, unknown>[] }).entries
-      : Array.isArray(doc) ? (doc as Record<string, unknown>[]) : [];
-    for (const entry of entries) {
-      const name = typeof entry.name === 'string' ? entry.name : '';
-      if (!name) continue;
-      // The registry tracks OUR variables (the OURS filter is what makes it a registry rather than a grep
-      // result). A template's own app settings -- UI_BRAND, WORKER_CONCURRENCY -- are the tenant's namespace and
-      // are checked instead by templates.test.ts, which asks the narrower and more useful question: does that
-      // template reference it. Flagging them here would be the gate claiming authority over names it never
-      // discovered, which is how checks get ignored.
-      if (!OURS.test(name)) continue;
-      const reg = declared.get(name);
-      if (!reg) {
-        problems.push(`${rel}: declares ${name} as an operator obligation, but the central registry does not know it -- either nothing references it (delete the claim) or the code needs it and the registry must be regenerated (D52 is the authority, D53's custody model depends on it)`);
-        continue;
-      }
-      const claimsSecret = entry.kind === 'secret' || entry.secret === true;
-      if (claimsSecret && reg.secret === false) {
-        problems.push(`${rel}: calls ${name} a secret while the registry records secret: false -- two custody claims about one variable is the disagreement a tenant would inherit (D4)`);
-      }
-      if (!claimsSecret && entry.kind === 'value' && reg.secret === true) {
-        problems.push(`${rel}: calls ${name} a plain value while the registry records it as a credential -- the inventory is operator-facing, so understating custody here is how a secret ends up typed into a ticket`);
-      }
-    }
-  }
-  return problems;
 }
 
 const found = discover();
