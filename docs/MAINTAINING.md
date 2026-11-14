@@ -27,8 +27,13 @@ the path or ref is wrong; `manifest-invalid` (400) quotes the renderer, usually 
 `workflow-not-found` (502 via the trigger) means the install PR was never merged, because GitHub enumerates
 workflows from the default branch only (#149).
 
-`open-install-pr.ts` still renders and opens the PR itself and still defaults `--platform .`. That
-remaining local-filesystem logic is the next thing to move behind an operation, not a design decision.
+`open-install-pr.ts` still renders and opens the PR itself -- that remaining logic is #213 -- but it no longer
+reads a local directory: `--platform .` is gone, and the platform description is fetched from a repository at a
+ref through the source-control seam (`--template=<name>` for a catalog template, otherwise the repository named
+by `--repo`, at its base branch). The rendered pull request is unchanged; what changed is that the tool can no
+longer describe platfolio's own platform while aimed at somebody else's repository (D48, D60). The driver follows
+`PLATFOLIO_SCM_DRIVER`: `git` reads public repositories anonymously, `github-app` is what a private tenant
+repository needs.
 
 ## Repository history: the snapshot orphan, and what was restored
 
@@ -148,43 +153,64 @@ Three things an operator should expect from these:
 environment:registry` fails if code reads a variable the registry does not declare, or the registry declares
 one nothing reads.
 
-## Publishing the templates, and proving the published thing is the source thing
+## The templates are repositories, and this repository reads them
 
-`templates/` is bundled in this repository, but tenants consume it from three separate GitHub repositories. That
-split has no gate in the normal path: every check in `verify` runs offline, so a change under `templates/` is
-green the moment it merges while the published template -- the thing someone actually forks -- keeps the old
-files. It happened the day the registry was consolidated (D58): `.platfolio/environment.yaml` was deleted here and
-remained live in all three published repositories, where `applyInventory` still merges it into the plan. Two
-registries per platform, surviving in exactly the place users touch.
+There is no bundled copy of a template in this tree, and there is no publisher. `templates/` was deleted
+(maintainer's ruling, 2026-11-14; D60) and the three published repositories are the source of truth:
 
-| Command | What it does | Needs |
+| Template | Repository | Shape |
 | --- | --- | --- |
-| `pnpm run templates:publish` | Dry run: the file list per repository, plus the paths being retired | credentials |
-| `pnpm run templates:publish -- --apply` | Publishes. A repository whose whole history is `chore(platfolio)` is updated on its default branch; one carrying someone else's history gets a branch and a pull request | credentials |
-| `pnpm run templates:publish -- --apply --template starter-web` | One repository. The first run of any new write mechanism goes here, gets read back, and only then touches the other two | credentials |
-| `pnpm run templates:check` | **Parity**, per file, by blob SHA: `STALE` (published content differs), `MISSING` (we ship it, they don't), `ORPHAN` (they ship it, we don't, and it is not a declared retirement) | credentials, read-only |
+| `starter-web` | `fractalsynapse/platfolio-starter-web` | `kind: web`, `mode: development` -- public UI + JSON API, managed Postgres |
+| `starter-worker` | `fractalsynapse/platfolio-starter-worker` | `kind: worker`, `mode: development` -- no inbound host, retained volume |
+| `shared-identity` | `fractalsynapse/platfolio-shared-identity` | `kind: web`, `mode: hosted` -- stock Keycloak, `provides: identity` |
 
-Three rules that are not obvious and are easy to break again:
+Platfolio consumes them the way it consumes a tenant's platform: through the source-control seam (D22), at a
+ref, one file at a time. `packages/manifest/src/template-catalog.ts` holds the name→repository mapping and the
+file list per template; `packages/manifest/test/templates.test.ts` reads each repository with `GitScm` -- the
+same `git` driver `POST …/instances/{id}/plan/from-repository` uses -- parses and validates it, builds a plan
+from it, and checks its registry against it. That is the double win the ruling asked for: platfolio's own
+parsing is exercised, and the scaffolds people actually fork are exercised, on every run.
 
-- **Retirement is declared, never derived.** The publisher adds and replaces; it does not delete anything absent
-  from the source, because a fork adds files (its own Dockerfile, CI, README) and mirror-deleting would eat a
-  tenant's work on the next publish. So removing a published path is an explicit entry in `RETIRED_PATHS`
-  (`scripts/template-manifest.ts`), and `templates:check` reports any published file that is neither in the source
-  nor in that list. The list is therefore not trusted -- an incomplete list shows up as an ORPHAN.
-- **A tree built on `base_tree` only adds and replaces.** Deleting a path means a `sha: null` entry for it. And
-  the entry must be for a path that exists on the base commit: republishing a repository that already retired the
-  path failed with `GitRPC::BadObjectState` (HTTP 422), which is why the writer reads the base tree first and
-  reports both halves -- `retired` and `alreadyAbsent`. "Retired X" and "X was already gone" are different facts,
-  and conflating them is how a check starts lying quietly.
-- **Publisher and checker share one manifest.** `scripts/template-manifest.ts` holds the template list and the
-  retirement list precisely so the two programs cannot disagree about what should be published. A checker reading
-  a different set than the publisher writes is the least useful kind of gate.
+**These repositories are public and open source, and reading them needs no credential -- that is a requirement,
+not a convenience.** The three were found to be *private* while this change was being made (anonymous fetch →
+`401` → `GitScm` reports `kind=forbidden`), which is why the ruling was carried out rather than documented:
+visibility was set to public, then re-verified anonymously, with a full-history secret scan first. If the
+acceptance test ever needs a token, that is a finding about the repositories, not a configuration option. And
+because a public repository is a forkable one, the prose inside it -- `README.md`, `environment.yaml` -- is the
+tenant-facing contract in the strongest sense: `APP_SESSION_KEY` and `KEYCLOAK_ADMIN_PASSWORD` were both shipped
+into public artifacts while nothing read them.
 
-`check-project.ts` carries the offline half -- every platform directory has its registry at its root, no shipped
-path is under the retired `.platfolio/` prefix, and no shipped path is declared retired -- because
-`templates:check` needs credentials and network, and a check that silently cannot run is not a check. It is
-verified by falsification, not by hope: recreating `.platfolio/environment.yaml` in a template, and deleting a
-template's `environment.yaml`, each fail the build.
+### Commands that no longer exist, and why
+
+`pnpm run templates:publish` and `pnpm run templates:check` are gone, together with
+`scripts/publish-templates.ts`, `scripts/check-template-publication.ts` and
+`scripts/template-manifest.ts`. **The parity gate is deleted because its subject is gone, not because drift was
+accepted**: it existed only to compare a bundled copy against a published copy, and with one copy there is
+nothing to keep in step. Nothing in this repository now claims those repositories match anything here, because
+nothing here is the thing they are supposed to match. What replaced the check is stronger in the way that
+matters -- the old gate compared bytes; the acceptance test asks whether platfolio can actually *parse,
+validate and host* what a tenant forks, which is the question a fork cares about.
+
+Two properties of the deleted arrangement are worth keeping as rules rather than as history:
+
+- **A published template is never mirror-deleted or force-pushed by us.** A fork adds files (its own Dockerfile,
+  CI, README) and a publisher that deleted "anything not in the source" would eat a tenant's work. Nothing here
+  writes to those repositories any more, so the rule holds by construction -- and the retirement list that
+  encoded it (`RETIRED_PATHS`) went with the publisher, because a declared retirement is only meaningful
+  beside a publisher that could forget it.
+- **A check that cannot run must not look like a check that passed.** The old `check-project.ts` carried an
+  "offline half" of publication integrity precisely because `templates:check` needed credentials and network.
+  The new gates keep that discipline in the opposite direction: the networked acceptance test **fails with the
+  driver's reason when a repository cannot be read** -- it never skips -- and the offline gate now asserts what
+  it can still see (our own registry exists and declares rows; no `.platfolio/` path returns; no code or
+  configuration reaches for a bundled `templates/` path). Verified by falsification, not by hope: pointing the
+  catalog at a ref that does not exist, at a repository that does not exist, and naming a source file the
+  published repository does not have each turn the named tests red with a different reason, and removing the
+  template's own source from the scan set turns the orphan-obligation rule red.
+
+Changing a template means editing its repository (and, if it is a new template, adding one catalog entry).
+`docs/design/03` describes what a template's `compose.yaml` must declare; the published repositories are the
+reference implementations of it.
 
 ## The environment registry: one file per platform, at its root
 
@@ -206,9 +232,14 @@ it and re-running lost nothing, which meant the "source" was a copy.
 | `deployedTo` | where the value lives: `railway:shared-variable`, `railway:reference`, `ci:secret`, `local:compose-overlay`, `host:shell` … |
 | `note` | provenance, or the judgement behind the row |
 
-Each platform carries its own at its root: `templates/starter-web/environment.yaml` and so on, plus ours. A
-platform's registry is authoritative **for that platform** — shared-identity's `KC_DB_URL` is not a variable this
-control plane reads, and forcing it into our registry would recreate the duplication this rule exists to prevent.
+Each platform carries its own at its root: ours is this repository's `environment.yaml`, and each published
+template carries one in its own repository (`fractalsynapse/platfolio-starter-web/environment.yaml` and its two
+siblings, D60). A platform's registry is authoritative **for that platform** -- shared-identity's `KC_DB_URL` is
+not a variable this control plane reads, and forcing it into our registry would recreate the duplication this
+rule exists to prevent. That is not a motto but a scan-set boundary: `environment:registry` discovers names from
+this repository's configuration only, so a template's variable cannot leak in the way `QUEUE_URL` once did
+through a bundled overlay; and the templates' own registries are validated where they live, by
+`packages/manifest/test/templates.test.ts` reading them through the seam.
 
 `pnpm run environment:registry` (in `check`, so in `verify`) fails on:
 

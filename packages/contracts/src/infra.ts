@@ -15,9 +15,13 @@ import type { SecretPresence } from './secret-writer.ts';
  */
 
 export const CONTRACT_NAME = 'infra.provider' as const;
-export const CONTRACT_VERSION = '1.0.0' as const;
+// D59: the version is DERIVED, never declared. `check-contracts.ts --update` computes it from the
+// public-surface diff recorded in packages/contracts/api.md and writes it into the generated file
+// below; `check-contracts.ts` without --update reproduces that file from the baseline or fails.
+// There is deliberately no version literal in this source tree to edit by hand.
+export { CONTRACT_VERSION } from './generated/contract-version.ts';
 
-/** Operations a provider must implement to claim contract 1.x. */
+/** Operations a provider must implement to claim this contract. (Which version they claim it AT is derived -- see CONTRACT_VERSION above, D59.) */
 export const OPERATIONS = [
   'describe',
   'validatePlan',
@@ -372,6 +376,22 @@ export function planIssues(plan: unknown): Issue[] {
   if (new Set(names).size !== names.length) issues.push({ path: ['environments'], code: 'duplicate-environment', message: 'environment names must be unique' });
   for (const env of data.environments) {
     const services = new Set(env.services.map((s) => s.name));
+    // Uniqueness of the DECLARED names, not of the resolved ones. The provider maps a logical name to a
+    // physical service name deterministically (`{name}-{environment}`), so two declarations that differ can
+    // never resolve to one service, and the only remaining way to ask for the same Railway service twice is
+    // to declare the same logical name twice. That is reachable here and nowhere upstream: `spec.services` in
+    // a manifest is a keyed map, so a rendered plan cannot carry it -- but `InfraPlan.services` is an ARRAY,
+    // and this schema is exactly what the API and `plan/from-repository` hand to a provider. A plan is a
+    // provider input in its own right, so the invariant is asserted at that boundary rather than inherited
+    // from a renderer that happens to obey it.
+    const serviceNames = env.services.map((s) => s.name);
+    for (const name of new Set(serviceNames.filter((n, i) => serviceNames.indexOf(n) !== i))) {
+      issues.push({ path: ['environments', env.name, 'services', name], code: 'duplicate-service', message: `service "${name}" is declared more than once in "${env.name}"` });
+    }
+    const databaseNames = env.databases.map((d) => d.name);
+    for (const name of new Set(databaseNames.filter((n, i) => databaseNames.indexOf(n) !== i))) {
+      issues.push({ path: ['environments', env.name, 'databases', name], code: 'duplicate-database', message: `database "${name}" is declared more than once in "${env.name}"` });
+    }
 
     const databases = new Set(env.databases.map((d) => d.name));
     for (const service of env.services) {

@@ -56,7 +56,7 @@ variables:
     secret: false
     environments: all
     deployedTo: host:shell
-    note: "referenced by compose.dev.yaml, templates/shared-identity/compose.yaml"
+    note: "referenced by compose.dev.yaml"
   - name: KC_CLIENT_SECRET
     kind: secret
     secret: true
@@ -68,7 +68,7 @@ variables:
     secret: false
     environments: all
     deployedTo: railway:variable
-    note: "referenced by compose.dev.yaml, compose.yaml, templates/shared-identity/compose.yaml"
+    note: "referenced by compose.dev.yaml, compose.yaml"
   - name: KC_DB_PASSWORD
     kind: secret
     secret: true
@@ -98,7 +98,7 @@ variables:
     secret: false
     environments: all
     deployedTo: railway:variable
-    note: "referenced by compose.dev.yaml, compose.yaml, templates/shared-identity/compose.yaml"
+    note: "referenced by compose.dev.yaml, compose.yaml"
   - name: KC_HOSTNAME
     kind: value
     secret: false
@@ -470,19 +470,13 @@ variables:
     secret: false
     environments: all
     deployedTo: ci:env
-    note: "referenced by .github/workflows/development.yml, .github/workflows/integration.yml, compose.dev.yaml, templates/starter-web/compose.dev.yaml"
+    note: "referenced by .github/workflows/development.yml, .github/workflows/integration.yml, compose.dev.yaml"
   - name: POSTGRES_PASSWORD
     kind: value
     secret: false
     environments: all
     deployedTo: github:environment-secret
     note: "a container password on loopback/CI; no real service listens"
-  - name: QUEUE_URL
-    kind: value
-    secret: false
-    environments: all
-    deployedTo: local:compose-overlay
-    note: "referenced by templates/starter-worker/compose.dev.yaml"
   - name: RAILWAY_TOKEN
     kind: secret
     secret: true

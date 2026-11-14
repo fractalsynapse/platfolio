@@ -25,7 +25,7 @@ import { validateManifest } from '../packages/manifest/src/validate.ts';
 import { buildPlan } from '../packages/manifest/src/build-plan.ts';
 import type { InfraPlan } from '../packages/contracts/src/infra.ts';
 import { secretWriteScope } from '../packages/contracts/src/infra.ts';
-import { previewPlacement, RailwayInfraProvider } from '../packages/contracts/src/railway-provider.ts';
+import { physicalServiceName, RailwayInfraProvider } from '../packages/contracts/src/railway-provider.ts';
 import type { RailwayCredential, RailwayCredentialSource } from '../packages/contracts/src/railway-transport.ts';
 
 const root = path.resolve(import.meta.dirname, '..');
@@ -65,17 +65,12 @@ function loadManifest(): NonNullable<ReturnType<typeof parseCompose>['manifest']
 
 function describePlan(plan: InfraPlan): void {
   console.log(`  plan: ${String(plan.environments.length)} environment(s), contract ${plan.contract}, provider ${plan.provider}`);
-  // The PHYSICAL names the provider will create (D57), from the same rule the provider applies -- so "which
-  // service will staging actually get" is answerable before a call is made rather than after an outage. Fed an
-  // empty project on purpose: asking the live project would make a dry run a read, and what it would add is only
-  // which environment got to a name first.
-  const placement = previewPlacement(plan);
+  // The PHYSICAL names the provider will create (D57), from the same rule the provider applies. The rule is
+  // deterministic now, so this needs no preview helper and no provider read at all: the script and the provider
+  // compute the same string from the same two inputs, which is what makes "which service will staging actually
+  // get" answerable -- and answerable identically -- before anything is sent.
   for (const e of plan.environments) {
-    const physical = placement.get(e.name) ?? new Map<string, string>();
-    const name = (logical: string): string => {
-      const resolved = physical.get(logical) ?? logical;
-      return resolved === logical ? logical : `${logical} -> ${resolved}`;
-    };
+    const name = (logical: string): string => physicalServiceName(logical, e.name);
     console.log(`    env ${e.name}: databases=[${e.databases.map((d) => `${name(d.name)}:${d.kind}`).join(', ') || 'none'}]`);
     for (const s of e.services) {
       const env = s.env.map((x) => (x.literal === undefined ? `${x.name}=*declared-name*` : `${x.name}=${x.literal}`)).join(' ');
@@ -83,7 +78,10 @@ function describePlan(plan: InfraPlan): void {
       console.log(`        refs=[${(s.references ?? []).map((r) => `${r.variable}<-${name(r.database)}`).join(', ') || 'none'}]`);
       console.log(`        env: ${env}`);
     }
-    console.log(`      domains: ${e.domains.length > 0 ? e.domains.map((d) => `${d.host}->${d.service}:${String(d.port)}`).join(', ') : '(generated hosts only)'}`);
+    // The domain target is spelled the same way the service above it is: one render, one vocabulary, and
+    // `applyPlan` reports `targetService` as the physical name too. Printing `api` here next to
+    // `api-production` above would be two answers to the same question on one screen.
+    console.log(`      domains: ${e.domains.length > 0 ? e.domains.map((d) => `${d.host}->${name(d.service)}:${String(d.port)}`).join(', ') : '(generated hosts only)'}`);
   }
 }
 
@@ -116,9 +114,15 @@ if (arg('bootstrap-vars')) {
   for (const candidate of project.data?.projects?.edges ?? []) {
     const list = await withServices(candidate.node.id);
     const names = new Set(list.map((x) => x.node.name));
-    if (names.has('api') && names.has('identity')) { target = candidate; foundServices = list; break; }
+    // The names this looks for are PHYSICAL, and they come from the same rule the provider applies: a project
+    // whose services are `api-production` and `identity-production` is a platfolio-managed one, and after the
+    // D57 amendment that is the shape every managed project has. The bare names are what a NOT-YET-MIGRATED
+    // project still holds, so they are recognized as that case rather than silently matching a hand-made project.
+    const managed = names.has(physicalServiceName('api', 'production')) && names.has(physicalServiceName('identity', 'production'));
+    const preMigration = names.has('api') && names.has('identity');
+    if (managed || preMigration) { target = candidate; foundServices = list; break; }
   }
-  if (!target) { console.error('  no project in this workspace has both an `api` and an `identity` service; run the apply first'); process.exit(1); }
+  if (!target) { console.error(`  no project in this workspace has both \`${physicalServiceName('api', 'production')}\` and \`${physicalServiceName('identity', 'production')}\` services; run the apply first`); process.exit(1); }
   const envs = await (await fetch('https://backboard.railway.com/graphql/v2', {
     method: 'POST', headers: { 'content-type': 'application/json', authorization: token },
     body: JSON.stringify({ query: 'query($id:String!){ project(id:$id){ environments(first:10){ edges{ node{ id name } } } } }', variables: { id: target.node.id } }),
@@ -137,8 +141,10 @@ if (arg('bootstrap-vars')) {
   for (const entry of plan2) {
     const value = supplied[entry.variable];
     if (value === undefined || value.length === 0) { console.error(`  ${entry.variable} is not set in the local environment`); process.exit(1); }
-    const serviceId = owner(entry.service);
-    if (!serviceId) { console.error(`  no "${entry.service}" service in this project yet -- run the apply first`); process.exit(1); }
+    // Suffix first, bare second: this operator step has to work on a project that has not been migrated yet, and
+    // writing onto the bare row is correct HERE because the row is the same service the apply is about to rename.
+    const serviceId = owner(physicalServiceName(entry.service, 'production')) ?? owner(entry.service);
+    if (!serviceId) { console.error(`  no "${physicalServiceName(entry.service, 'production')}" service in this project yet -- run the apply first`); process.exit(1); }
     const r = await (await fetch('https://backboard.railway.com/graphql/v2', {
       method: 'POST', headers: { 'content-type': 'application/json', authorization: token },
       body: JSON.stringify({ query: 'mutation($input:VariableUpsertInput!){ variableUpsert(input:$input) }', variables: { input: { projectId: target.node.id, environmentId: production.node.id, serviceId, name: entry.variable, value, skipDeploys: true } } }),
@@ -199,7 +205,7 @@ if (arg('redeploy') && !arg('prune-vars')) {
   const serviceId = nameToId.get(service);
   if (!serviceId) {
     console.error(`  --redeploy: no service named "${service}" in this project (have: ${[...nameToId.keys()].join(', ')})`);
-    console.error('  note that names are physical after D57: staging runs api-staging, main-staging.');
+    console.error('  note that names are physical after D57, for EVERY environment: production runs api-production and main-production, staging runs api-staging and main-staging.');
     process.exit(1);
   }
   const inst = await call('query($p:String!,$e:String!){ environment(projectId:$p, id:$e){ serviceInstances{ edges{ node{ serviceId id } } } } }', { p: projectId, e: environmentId });

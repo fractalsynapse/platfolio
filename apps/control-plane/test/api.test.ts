@@ -5,7 +5,7 @@ import path from 'node:path';
 import { createKernel, disposeKernel, type KernelContext } from '@platfolio/kernel';
 import { buildCapabilities } from '../src/capabilities.ts';
 import {
-  createIdentityFixture, defaultIdentityConfig, reasonOf, signToken,
+  CONTRACT_VERSION, createIdentityFixture, defaultIdentityConfig, reasonOf, signToken,
   type DispatchIntent, type StoreResult,
 } from '@platfolio/contracts';
 import { loadSpec, operationsOf, validateResponse, type RouteManifestEntry, type SpecDocument } from '@platfolio/api-contract';
@@ -119,7 +119,7 @@ test('the lifecycle: record, register a plan, dispatch, fetch once, attest, reco
     assert.match((badHash.body as { message: string }).message, /buildPlan/, 'the refusal must name the one place a digest is computed');
 
     const plan = {
-      instanceId: instance.id, teamId, provider: 'railway', contract: '1.0.0', planHash: 'b'.repeat(64),
+      instanceId: instance.id, teamId, provider: 'railway', contract: CONTRACT_VERSION, planHash: 'b'.repeat(64),
       manifestRef: { template: 'starter-web', version: '1.0.0' },
       environments: [{ name: 'production', services: [], databases: [], volumes: [], buckets: [], domains: [] }],
     };

@@ -3,7 +3,190 @@
 Notable changes to the platfolio project. One human-readable entry per user- or developer-visible
 change; entries describe merged intent, not aspirations.
 
-"## [Unreleased]
+## [Unreleased]
+
+### Changed — the templates are repositories, and this repository reads them (D60); the toolchain is TypeScript (D61)
+
+**`templates/` is deleted.** The three published repositories are the source of a template now, and platfolio
+consumes them the same way it consumes a tenant's platform — through its own source-control seam. This is not a
+reorganisation, it is the removal of a defect class: a bundled copy and a published copy of the same three
+platforms had to be kept in step by hand, and they were not. The registry consolidation (D58) deleted
+`.platfolio/environment.yaml` from the bundled tree while all three published repositories kept it, where
+`applyInventory` merges whatever it finds into the plan — so a fork carried two registries describing one
+platform, and every offline gate stayed green because nothing in `verify` touched the network. One copy needs no
+publisher.
+
+The maintainer's ruling, 2026-11-14: *"These template repositories are currently and will ALWAYS be public and
+open source so there is no need for credentials to clone them and they are small so there is not a size
+bottleneck. I still favor removing the hardcoded templates and using and aligning the REAL templates that people
+actually use. This tests the core Platfolio platform and the basic templates, so it is a double win with very
+little cost."* Supersedes **D38**; recorded as [D60](docs/design/01-product-and-decisions.md).
+
+- **`pnpm run templates:publish` and `pnpm run templates:check` no longer exist**, with
+  `scripts/publish-templates.ts`, `scripts/check-template-publication.ts` and
+  `scripts/template-manifest.ts`. The parity gate is deleted **because its subject is gone, not because drift
+  was accepted**: it compared a bundled copy to a published copy, and there is no bundled copy to compare. The
+  retirement list (`RETIRED_PATHS`) left with it, since a declared retirement only means something beside a
+  publisher that could forget it.
+- **New: `packages/manifest/src/template-catalog.ts`** is the catalog — which repository *is* which template, at
+  which ref, and which files of it platfolio reads. It reaches the forge through `GitScm` (the `git` driver
+  behind `ctx.scm.readFile` in `POST …/plan/from-repository`), so there is exactly one way to read a repository
+  here. The `sourcePaths` per entry are a declaration, not a listing: the seam reads one file at one ref and no
+  tree-walking workaround was added, so a template that gains a source file fails the acceptance test by name
+  rather than passing on content nobody looked at — the coupling errs in the loud direction.
+- **`packages/manifest/test/templates.test.ts` is now the real-template acceptance.** It parses, validates,
+  plans and cross-checks the three published repositories on every run, keeps the rule it enforced before
+  (every obligation declared by a tenant-compiled service must be referenced by that repository's own text),
+  and adds the two checks that left the offline gates with the directory: the dev-overlay pairing (D50) and the
+  registry obligation schema (D58), the latter through `packages/manifest/src/registry-obligations.ts` — one
+  predicate, now shared with `check-environment-registry.ts` rather than spelled twice. **A repository it cannot
+  read is a failure, never a skip**: every test awaits the same read and reports the driver's own reason.
+  Measured falsifications — a ref that does not exist (`ref-not-found`), a repository that does not exist
+  (`kind=forbidden`), and a catalog entry naming a source the repository does not have — each fail the named
+  tests; removing the template's source text from the scan set fails the orphan-obligation rule by name.
+- **`open-install-pr.ts` no longer reads a maintainer's filesystem.** `--platform <dir>` is gone; the platform
+  description is fetched from a repository at a ref through the seam (`--template=<name>` for a catalog
+  template, otherwise the repository the PR lands in at its base branch). This closes the D48 defect at its
+  source. **The rendered pull request is unchanged**: rendering the same commit both ways produced identical
+  file contents (`sha256 313c3af5edcf52d5` for the file set), identical secret *names*, identical permission
+  keys and the same action pin, and the manifest itself hashed equal. The action-pin check moved to the seam
+  too — it was a second reader (`gh api`) of the same fact. Credentials are still required, and only for the
+  write; `--apply` still mints an installation token and revokes it.
+- **These repositories were private until this change.** The ruling's premise was checked rather than assumed,
+  and all three answered `401` to an unauthenticated fetch (while `fractalsynapse/platfolio` itself was already
+  public); with the credential helper disabled — exactly `GitScm`'s conditions — the read failed with
+  `kind=forbidden`. The stated fact was therefore made true (`PATCH /repos/… {"private": false}`, full-history
+  secret scan clean, re-verified anonymously with a public control repo as the comparison) instead of being
+  documented as a ruling the tests would have had to disbelieve. An acceptance test that needs a token is a
+  finding, not a configuration. The consequence of going public is worth stating: the templates' `README.md` and
+  `environment.yaml` are now the tenant-facing contract in the strongest sense, which is why the
+  orphan-obligation rule above is an acceptance test and not advice.
+- **`scan set` consequences, measured:** `check-environment-registry.ts` no longer discovers from template
+  composition or source, which is the point — a template's variables were never ours to declare (D58) — and it
+  is how `QUEUE_URL` had entered our registry in the first place, through a bundled dev overlay. Its scan set
+  now holds 82 of the 83 declared names, so `pnpm run environment:registry` fails with *"environment.yaml
+  declares QUEUE_URL, which nothing in configuration references any more"* until the generated file is
+  re-emitted (**not emitted here**: `environment.yaml` is the orchestrator's artifact). The five `note:` fields
+  that cite `templates/...` paths are `--emit`-preserved text and will not self-heal; they are stale claims
+  about where a variable is read.
+- **`check-project.ts`:** the D58 rule retargeted (`.platfolio/` may not return; our own registry must exist and
+  declare rows — the zero-row vacuity guard now says so directly instead of via 82 misleading "undeclared"
+  lines; and **no code or configuration may reach for a bundled `templates/` path**, which is how "nothing still
+  expects a local copy" stays enforced rather than asserted once). The template dev-overlay pairs left with the
+  files. Measured against the tree: the reach-for-a-bundled-path rule caught a stale error message in
+  `build-plan.test.ts` that claimed a fixture was at `templates/<name>` when it has always been a fixture; the
+  patterns were then tightened after two false positives were measured (`"referenced by …, templates/…"` in a
+  generated note, and `ghcr.io/railwayapp-templates/…`, the provider's image namespace, which is not a template).
+- **D61: this repository is TypeScript.** A tracked `*.py` fails the build, as does an interpreter or package
+  installer invoked from a tracked file under `scripts/`, `docs/`, `.github/workflows/` or `package.json`;
+  ad-hoc scripting belongs in `tsx` under `.tmp/`. Measured: 0 tracked `.py` files, and the command-shape
+  pattern finds 0 invocations where a bare case-insensitive word match finds 5 — all of them evidence about
+  other projects' stacks (Railway IaC's Python/Go beta note, Authentik's Python/Django), which dated research
+  notes exist to hold. Falsified both ways: a `git add -N` file made the tracked-file rule fail, and a temporary
+  workflow running `python3 -m http.server` / `pip install` made the invocation rule fail at both lines; the
+  probe paths were then removed index-only and `git status` was verified byte-identical to before, because this
+  tree is shared with two other agents.
+
+
+### Changed — service names are declared, not observed, and misfit rows are renamed (D57)
+
+The Railway provider's physical-name rule is now **`{name}-{environment}`** for every environment, with no
+exceptions: `physicalServiceName(logical, environment)` takes two arguments and consults nothing else. Production
+is `api-production`, `identity-production` and `main-production` exactly as staging is `api-staging` and
+`main-staging`. The compose definition's service key **is** the base name -- no field was added for it, and
+nothing is parsed from a provider project description.
+
+The rule it replaced read the project first and returned the bare name when no service held it or when it already
+ran in this environment. That existed only to preserve the bare production names created before per-environment
+provisioning, on the argument that preserving them was the alternative to deleting the services that hold live
+data. The maintainer ruled the preservation was not worth an observational rule, and the premise was wrong:
+`serviceUpdate(id, input: {name})` renames a service **in place** (the name is a `Service` field;
+`ServiceInstanceUpdateInput` has no name), and the volume, its data, the environment instances, the attached
+domains and the private network all follow the service id. So the services that do not fit the convention are
+**moved into it**, not destroyed -- which makes this a rename migration, not a delete-and-reprovision one.
+
+- **Deleted, not left behind**: `resolvePlacement`, `previewPlacement`, `placementCollisions` and
+  `ServicePlacement` -- the one `project.services` plus one `environment.serviceInstances` read per environment
+  that existed to decide a name. `platform-deploy --dry-run` renders from the same function the provider applies,
+  so a preview and an apply cannot disagree, and the `->` bare-name branches went out with the observation that
+  produced them.
+- **The collision guard moved rather than vanished.** Under a deterministic rule two *different* logical names can
+  never resolve to one service, so the only way left to ask for the same service twice is a plan declaring the same
+  logical name twice -- and `InfraPlan.services` is an array, which is exactly what the API and
+  `plan/from-repository` hand a provider. `planIssues` now refuses that (`duplicate-service`,
+  `duplicate-database`). The assumption that the manifest schema already covered it was checked rather than
+  accepted: it holds for `spec.services` (a keyed map) and did not hold at the plan boundary.
+- **New reported outcomes**: `legacy-service-renamed` / `legacy-database-renamed` (old id, new name, and for a
+  database the plain statement that its volume and data were not destroyed), `legacy-service-ambiguous` (a row two
+  environments run at once -- refused, renamed by neither, naming the service id),
+  `legacy-row-belongs-to-another-environment`, `legacy-row-left-unplaced`, `legacy-service-rename-failed` and
+  `legacy-reference-redeploy-required`.
+- **Ownership without a marker.** A row is a rename candidate only when its current name is a logical name THIS
+  plan declares, so a foreign or hand-made service in a shared project is untouchable by construction.
+  Description-parsing was ruled out, and the project marker (`platfolio:plan=`, which identifies a project and its
+  last plan hash -- not a row) is deliberately not used for this. Residual risk, stated rather than implied away:
+  ownership is inferred from the one-project-per-instance layout plus the plan's declared names, so a hand-made
+  service inside a tenant's own platfolio project that happens to share a logical name is the one case this
+  provider can mistake for its own legacy row -- and the worst outcome of that mistake is a rename an operator can
+  undo (#243).
+- **Deletion is no longer reachable for a row this plan declares.** An interrupted-apply residue (a row with no
+  instance in any environment) is now **left alone and reported in full** rather than reclaimed: renaming it would
+  install the name with nothing behind it and block the only placer (the captured schema has no
+  `serviceInstanceCreate`), and deleting it could orphan a disk that is still billing. Deleting belongs to the
+  operator's destroy path (D36/D43), never to a successful apply.
+- **A reference expression is only as good as its target at the moment it is written.** Railway expands
+  `${{Service.VAR}}` at write time, so a rename is followed -- in the same apply, and asserted by operation order
+  rather than argued -- by a rewrite of every expression spelling the old name. The running containers still hold
+  the value expanded from the old name until they are redeployed, and the apply now names each of those services
+  and the command that redeploys it. This corrects #242's diagnosis on the way: staging's empty
+  `PLATFOLIO_DB_URL` was not a boot-order race over a variable nobody had written -- the variable was written, and
+  expanded to *nothing* because `main-staging` did not exist yet at the moment of the write. That is why the name
+  was present, why `verified` was confidently wrong, and why a redeploy fixed it.
+- Secret delivery and its read-back (`serviceInEnvironment`) resolve the deterministic name and nothing else; a
+  legacy row that has not been renamed yet answers `not-found`, naming the name the rule produces. Guessing the
+  bare name would write a credential onto a service the plan does not name and report it as delivered.
+
+Covered by 28 tests in `packages/contracts/test/railway-placement.test.ts`, falsified by 18 mutations of the
+implementation, each requiring the *named* test to fail -- including "someone swaps `serviceUpdate` for
+`serviceDelete`", "someone rewrites the reference before the rename", "someone trusts the rename's 2xx instead of
+the name it returns", and "someone reaches for `serviceDelete` to tidy the residue row away".
+
+**Operator consequence**: this changes every production service name, so the live migration is one apply that
+renames `api`→`api-production`, `identity`→`identity-production` and `main`→`main-production`, then a redeploy of
+each service that reads the database reference, then measurement against the public URLs. No infrastructure was
+touched to land this change; `--apply` was never run.
+
+### Changed — the infra contract version is derived, and it says 2.0.0 (D59)
+
+`CONTRACT_VERSION` is **gone as a literal**. The maintainer's rule -- "contracts should have a derived
+MAJOR version; we should never specify a version on contracts" -- now holds where it counted least and
+was therefore easy to break: the drift gate already derived a bump from the public-surface diff it
+gates, printed it once into a terminal, and threw it away, while `packages/contracts/src/infra.ts`
+went on declaring `1.0.0` and `platform-deploy --dry-run` went on printing `contract 1.0.0` after the
+contract had in fact broken (the plan schema lost `cloneFrom` under D57, and `contractVersion` with it).
+
+The record now lives where the measurement is: `packages/contracts/api.md` gained a `Version:` header
+line beside the `Digest:` line, plus a `Bump:` line saying what moved it. `check-contracts.ts --update`
+computes both; the verify pass reproduces
+`packages/contracts/src/generated/contract-version.ts` from them **byte-for-byte or fails loudly** --
+there is no fallback default anywhere in the chain. Every consumer reads the generated value:
+`buildPlan` stamps it into plans, the fake provider and the conformance defaults claim it,
+`/version` reports it, the deploy dry-run prints it.
+
+Two decisions worth their provenance. The starting version was **seeded, not typed**: the baseline
+predated version tracking, so the tool replayed the one diff a declared version was ever honestly
+made against -- the surface at the commit that introduced the literal (extracted with `git archive`
+and emitted through today's checker, so the checker's own format evolution cannot masquerade as
+contract removals) against the surface since -- which said MAJOR: 1.0.0 -> **2.0.0**. And the
+generated constant is typed `string` rather than `'2.0.0' as const` deliberately: a literal type
+would publish the version into the emitted declaration surface, so every future bump would read as a
+removed declaration and the gate would demand a breaking ack for its own arithmetic.
+
+Stored plans stay readable: `InfraPlanSchema.contract` is an unconstrained string, so a plan made
+under 1.0.0 parses as the historical fact it is; it is the **provider** that refuses to apply a plan
+whose version it does not speak. Proofs are in `packages/contracts/test/contract-version.test.ts` --
+removed declaration -> major, added -> minor, widened -> major, reordered -> **nothing** -- each
+falsified by mutating the classifier and watching the named test fail.
 
 ### Changed — every environment is provisioned; a database belongs to one environment (D57)
 

@@ -7,3 +7,5 @@ export { parse } from './parse.ts';
 export { enabledEnvironments, serviceEnvironments, presentIn, type EnvName } from './environments.ts';
 export * from './build-plan.ts';
 export { InventoryEntrySchema, parseInventory, validateInventory, deriveObligations, applyInventory, type InventoryEntry, type InventoryObligations, type ParsedInventory } from './inventory.ts';
+export * from './template-catalog.ts';
+export { checkRegistryObligations, type RegistryRow } from './registry-obligations.ts';

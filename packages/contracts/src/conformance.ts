@@ -1,4 +1,4 @@
-import { OPERATIONS, ProviderUnsupported, satisfiesRange, type ApplyResult, type CapabilityInfo, type DeleteResult, type InfraPlan, type InfraProvider, type Issue, type StateSnapshot } from './infra.ts';
+import { CONTRACT_VERSION, OPERATIONS, ProviderUnsupported, satisfiesRange, type ApplyResult, type CapabilityInfo, type DeleteResult, type InfraPlan, type InfraProvider, type Issue, type StateSnapshot } from './infra.ts';
 
 /**
  * The conformance suite: what makes "swappable provider" a claim that can be tested instead of
@@ -48,7 +48,7 @@ export function samplePlan(overrides: Partial<InfraPlan> = {}): InfraPlan {
     instanceId: 'inst-01',
     teamId: 'team-01',
     provider: 'sample',
-    contract: '1.0.0',
+    contract: CONTRACT_VERSION,
     planHash: 'a'.repeat(16),
     manifestRef: { template: 'example-web-app', version: '1.4.0' },
     environments: [
@@ -83,7 +83,9 @@ export interface ConformanceOptions {
   plan?: () => InfraPlan;
 }
 
-export async function runConformance(make: () => InfraProvider, requiredRange = '^1.0.0', options: ConformanceOptions = {}): Promise<ConformanceReport> {
+// D59: the default required range is derived from the contract version itself, so the suite cannot
+// pin a major the package no longer speaks.
+export async function runConformance(make: () => InfraProvider, requiredRange = `^${CONTRACT_VERSION}`, options: ConformanceOptions = {}): Promise<ConformanceReport> {
   const scope: ConformanceReport['scope'] = options.plan ? 'reduced' : 'full';
   if (options.plan) {
     const probe = options.plan();

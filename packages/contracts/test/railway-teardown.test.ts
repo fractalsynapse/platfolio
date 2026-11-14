@@ -72,10 +72,10 @@ test('teardown deletes what was actually placed where, and claims nothing else (
   const { mock, provider } = harness();
   const p = plan((x) => { for (const environment of x.environments) environment.databases = []; });
   await provider.applyPlan(p);
-  assert.deepEqual([...mock.services.values()].map((s) => s.name).sort(), ['api', 'api-staging'], 'the apply put one service in each environment');
+  assert.deepEqual([...mock.services.values()].map((s) => s.name).sort(), ['api-production', 'api-staging'], 'the apply put one suffixed service in each environment (D57)');
 
   const deleted = await provider.deleteInstance(p.instanceId);
-  assert.ok(deleted.removed.includes('service:production/api'), JSON.stringify(deleted.removed));
+  assert.ok(deleted.removed.includes('service:production/api-production'), JSON.stringify(deleted.removed));
   assert.ok(deleted.removed.includes('service:staging/api-staging'), JSON.stringify(deleted.removed));
   assert.equal(deleted.removed.filter((r) => r.startsWith('service:')).length, 2, `one claim per placement, none for a pair that never existed: ${JSON.stringify(deleted.removed)}`);
   assert.equal(deleted.removed.includes('service:production/api-staging'), false, 'production never held staging’s service');

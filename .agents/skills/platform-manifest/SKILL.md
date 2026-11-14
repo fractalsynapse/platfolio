@@ -14,9 +14,14 @@ code, that is a schema change and needs its own review.
 
 ## Procedure
 
-1. **Write the fixture before the renderer.** Add `templates/<platform>/<version>/` with the manifest
-   and the two example fixtures. Declare `apiVersion` (schema) and `metadata.version` (platform
-   release) separately, plus `requires.platfolio`.
+1. **Write the platform description in the platform's own repository.** A hosted platform is not a directory
+   under `templates/` -- that is gone (D60): `compose.yaml` with its `x-platfolio` block and its own
+   `environment.yaml` registry at the same root (D58) live where the platform lives, and they enter platfolio as
+   tenant data with `templateRef` pinned to a commit (D29, D45). A new *template* is a published repository plus
+   one entry in `packages/manifest/src/template-catalog.ts`; parse fixtures for the schema and the renderers
+   belong in `packages/manifest/test/fixtures/`, and the published templates are validated against the real
+   repositories by `packages/manifest/test/templates.test.ts`. Declare `apiVersion` (schema) and
+   `metadata.version` (platform release) separately, plus `requires.platfolio`.
 2. **Declare `kind` and `mode`, then override.** `api-service` or `full-stack-web` supply defaults and
    validation rules. Short manifests are the goal; a manifest that restates every default hides drift.
 3. **Secrets are names.** Every secret is `{ valueFrom: secret, source: … }` with a `value_source`

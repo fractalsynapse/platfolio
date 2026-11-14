@@ -28,7 +28,6 @@
     "app:local:check": "tsx scripts/github-app-local.ts --check",
     "app:check": "tsx scripts/github-app-check.ts",
     "install:pr": "tsx scripts/open-install-pr.ts",
-    "templates:publish": "tsx scripts/publish-templates.ts",
     "action:bundle": "tsx scripts/bundle-action.ts",
     "identity:seed": "tsx scripts/seed-identity.ts",
     "identity:smoke": "tsx scripts/smoke-identity.ts",
@@ -40,8 +39,7 @@
     "platform:plan": "tsx scripts/platform-deploy.ts",
     "platform:apply": "tsx scripts/platform-deploy.ts --apply --strip-domains",
     "platform:overlay": "tsx scripts/render-platform-overlay.ts",
-    "platform:overlay:check": "tsx scripts/render-platform-overlay.ts --check",
-    "templates:check": "tsx scripts/check-template-publication.ts"
+    "platform:overlay:check": "tsx scripts/render-platform-overlay.ts --check"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

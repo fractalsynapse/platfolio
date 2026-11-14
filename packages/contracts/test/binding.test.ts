@@ -99,8 +99,8 @@ test('the team summary is what lets a UI say "two of three consumers are stale"'
 });
 
 test('the two reference fixtures describe a provider and a consumer of the same capability', async () => {
-  // `packages/manifest/test/fixtures/`, not `templates/`: these are manifest fixtures for tests and docs. The three templates that
-  // get published to repositories live in `templates/` -- the naming split is the point of the reorganisation,
+  // `packages/manifest/test/fixtures/`, not a bundled template directory: these are manifest fixtures for tests and docs.
+  // A template is a published repository, read through the source-control seam (D60) -- the naming split is the point,
   // and this test's own title used to argue against it.
   const fs = await import('node:fs');
   const path = await import('node:path');

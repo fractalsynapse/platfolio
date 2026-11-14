@@ -26,7 +26,7 @@ const rootIndex = argv.indexOf('--root');
 const rootArg = rootIndex === -1 ? undefined : argv[rootIndex + 1];
 const ROOT = path.resolve(rootArg ?? process.cwd());
 
-const EXCLUDED_DIRS = ['node_modules', '.cache', '.research', '.git'];
+const EXCLUDED_DIRS = ['node_modules', '.cache', '.research', '.git', '.tmp']; // .tmp: gitignored scratch, incl. agent checkpoints
 /** Vendored trees are excluded except their top-level project documents. */
 const VENDOR_TOP_LEVEL = ['vendor/CORDIS.md'];
 
@@ -233,7 +233,7 @@ const GENERATED_HOST = /\b[a-z0-9]+-[a-z0-9]+-[0-9a-f]{6,}\.up\.railway\.app\b|\
  */
 const REAL_PROJECTS = new Set(['platfolio', 'platfolio-starter-web', 'platfolio-starter-worker', 'platfolio-shared-identity']);
 const PUBLISHED_IMAGES = new Set(['platfolio-control-plane', 'platfolio-status-api']);
-const EXECUTABLE_PATH = /^(apps|packages|scripts|templates|db|\.github)\//;
+const EXECUTABLE_PATH = /^(apps|packages|scripts|db|\.github)\//;
 const ORG_REF = /fractalsynapse\/([A-Za-z0-9._-]+)/g;
 
 /**
@@ -277,11 +277,13 @@ async function checkDevOverlayPairing(): Promise<string[]> {
   };
 
   const findings: string[] = [];
+  // Only platfolio's own platform description is in this tree. The three published templates used to be paired
+  // here from `templates/<name>/`, and that half of the rule now runs where the files live:
+  // `packages/manifest/test/templates.test.ts` reads each repository's `compose.yaml` and `compose.dev.yaml`
+  // through the source-control seam and applies the same first requirement (D50). Keeping the local pairs would
+  // mean pointing at paths that no longer exist -- a rule that quietly checks nothing.
   const pairs: [string, string][] = [
     ['compose.yaml', 'compose.dev.yaml'],
-    ['templates/starter-web/compose.yaml', 'templates/starter-web/compose.dev.yaml'],
-    ['templates/starter-worker/compose.yaml', 'templates/starter-worker/compose.dev.yaml'],
-    ['templates/shared-identity/compose.yaml', 'templates/shared-identity/compose.dev.yaml'],
   ];
   for (const [platformRel, devRel] of pairs) {
     const platformPath = path.join(ROOT, platformRel);
@@ -479,6 +481,31 @@ async function checkActionManifests(): Promise<string[]> {
 const files = await markdownFiles(ROOT);
 say(`scanning ${files.length} markdown files under ${path.relative(ROOT, ROOT) || ROOT}`);
 
+/** The tracked file list, from the index rather than the disk: an ignored scratch file is not a claim about the project. */
+function trackedFiles(): string[] {
+  const out = spawnSync('git', ['ls-files'], { cwd: ROOT, encoding: 'utf8' });
+  if (out.status !== 0) throw new Error('git ls-files failed');
+  return out.stdout.split('\n').filter(Boolean);
+}
+
+/** platfolio's own environment registry (D52, D58), which makes this repository one of the platforms it hosts. */
+const REGISTRY_NAME = 'environment.yaml';
+
+async function registryRows(rel: string): Promise<{ rows: Record<string, unknown>[]; error?: string }> {
+  let text: string;
+  try {
+    text = await fs.readFile(path.join(ROOT, rel), 'utf8');
+  } catch (error) {
+    return { rows: [], error: `cannot be read (${(error as Error).message.slice(0, 60)})` };
+  }
+  try {
+    const doc = parseYaml(text) as { variables?: unknown } | null;
+    return { rows: Array.isArray(doc?.variables) ? doc.variables as Record<string, unknown>[] : [] };
+  } catch (error) {
+    return { rows: [], error: `does not parse: ${(error as Error).message.split('\n')[0] ?? ''}`.slice(0, 160) };
+  }
+}
+
 const docProblems = await checkDocuments(files);
 const { skills, problems: skillProblems } = await checkSkills();
 const workflowProblems = await checkWorkflows();
@@ -490,37 +517,183 @@ const actionProblems = await checkActionManifests();
 const registryProblems = await checkTemplateRegistries();
 
 /**
- * The offline half of template-publication integrity.
+ * The templates are repositories, so this is the half that stays offline (D58, and the maintainer's ruling of
+ * 2026-11-14 that ended the bundled copies).
  *
- * `pnpm run templates:check` compares the templates against the PUBLISHED repositories, over the network, with
- * credentials -- so it can say "the thing a tenant forks is the thing we ship". That check cannot run in every
- * environment, and when it is skipped nothing else notices. These assertions are the part that always runs:
+ * What used to live here was the offline half of *publication integrity*: a bundled `templates/` directory had
+ * to be kept in step with three published repositories, and `pnpm run templates:check` was the networked half.
+ * There is one copy now, so there is nothing to keep in step -- and the rules below are the ones that survive
+ * the arrangement rather than the ones that served it.
  *
- *  - every platform directory carries its registry at its root (D58: one file per platform, not two);
- *  - nothing under the retired `.platfolio/` path is still shipped;
- *  - a path declared retired in `template-manifest.ts` does not exist in a template (the declaration and the
- *    tree cannot disagree, or the publisher would silently keep serving the file it claims to remove).
+ *  - nothing in this repository may put a platform's files under a second `.platfolio/` registry, which is the
+ *    duplication D58 was raised to remove (measured the hard way: the consolidation deleted the bundled copy
+ *    while all three published repositories kept theirs, and `applyInventory` merges whatever it finds);
+ *  - platfolio is itself one of the platforms it hosts (D49, D50), so its registry sits at this repository's
+ *    root and must exist and declare rows -- a registry that parses to zero variables makes every other rule
+ *    about it vacuous, and a vacuous rule is how a green gate hides a missing check;
+ *  - no code or configuration may name a path under `templates/` as a literal. This is the assertion that the
+ *    retargeting is *complete*: the directory is deleted by the orchestrator, and what must not survive is the
+ *    reading of it. Prose is out of scope (comments, CHANGELOG and dated research notes describe what used to
+ *    exist, and rewriting history is a worse drift than an old sentence -- the same reasoning D49 gives), so the
+ *    pattern looks for a quoted path, which is how a program reaches for a file and not how a person writes
+ *    about one.
  *
- * The live instance: the consolidation deleted `.platfolio/environment.yaml` from `templates/` while all three
- * published repositories kept it, and `applyInventory` merges whatever is there into the plan -- so a fork would
- * have carried two registries describing one platform, which is the exact defect D58 was raised to remove.
+ * What a published template *contains* is checked where it lives, over the seam, by
+ * `packages/manifest/test/templates.test.ts`.
  */
 async function checkTemplateRegistries(): Promise<string[]> {
   const problems: string[] = [];
-  const { RETIRED_PATHS, TEMPLATES } = await import('./template-manifest.ts');
-  for (const t of TEMPLATES) {
-    const files = t.files();
-    const root = `templates/${t.dir}`;
-    if (!Object.keys(files).includes('environment.yaml')) problems.push(`${root}: no environment.yaml -- every platform declares its variables in one registry at its root (D58)`);
-    for (const path of Object.keys(files)) {
-      if (path.startsWith('.platfolio/')) problems.push(`${root}/${path}: the platform inventory was folded into the registry (D58); a second registry per platform is the duplication that change removed`);
-      if (RETIRED_PATHS.includes(path)) problems.push(`${root}/${path}: shipped here but declared retired in template-manifest.ts -- the publisher would keep the published copy forever, believing it removed`);
+  const tracked = trackedFiles();
+  for (const f of tracked) {
+    if (f.startsWith('.platfolio/') || f.includes('/.platfolio/')) {
+      problems.push(`${f}: the platform inventory was folded into the registry (D58); a second registry per platform is the duplication that change removed`);
+    }
+  }
+  problems.push(...await checkNoBundledTemplateReads(tracked));
+  if (!tracked.includes(REGISTRY_NAME)) {
+    problems.push(`${REGISTRY_NAME}: missing -- platfolio hosts itself (D50), so this repository is a platform and declares its variables in one registry at its root (D58)`);
+    return problems;
+  }
+  const registry = await registryRows(REGISTRY_NAME);
+  if (registry.error !== undefined) problems.push(`${REGISTRY_NAME}: ${registry.error}`);
+  // The vacuity guard, and it is not decoration: with zero rows every "is this declared, is it referenced, is
+  // its custody right" rule reads nothing and still reports clean. `environment:registry` catches this sideways
+  // (every discovered name becomes "undeclared"); this gate says the actual reason, in one line.
+  else if (registry.rows.length === 0) {
+    problems.push(`${REGISTRY_NAME}: declares no variables -- either this platform has none (delete the file) or its shape changed and every rule that reads it now reads nothing (D58)`);
+  }
+  return problems;
+}
+
+/**
+ * Nothing may reach for a bundled template: a quoted path literal under `templates/` in code or composition.
+ *
+ * The directory itself is not checked here, deliberately. It is deleted by the orchestrator in a tree three
+ * agents are editing at once, so pointing a gate at a path that is pending somebody else's move would only make
+ * this check red for a reason nobody can act on. What must not survive the change is the READING: a `resolve('templates/...')`
+ * left behind in a script, a CI path filter that still names the directory, a compose file that mounts it. Those
+ * are the second way of reading a repository this change exists to end, and each one is a string literal a
+ * program actually evaluates -- which is why the pattern is a quote followed by `templates/`, and why prose that
+ * describes the old arrangement stays out of scope.
+ */
+async function checkNoBundledTemplateReads(tracked: string[]): Promise<string[]> {
+  const problems: string[] = [];
+  // Two shapes, because "reaching for a bundled copy" means different syntax in code and in configuration.
+  //
+  // In code the tell is a filesystem call whose argument is a `templates/` path -- which is why this rule does
+  // not need an exemption for itself: `f.startsWith('templates/')` in the loop below is a test on a path string,
+  // not a read of one, and a checker that had to hide its own definition would be a checker people route around.
+  // In configuration the tell is a value position holding the path (a CI path filter, a compose mount, a script
+  // argument in package.json), where there is no call to name.
+  // The quote set, written as an ordinary string so a backtick can appear in it without ending a template
+  // literal: `['"`]` inside String.raw`...` is the one thing that syntax cannot hold.
+  const QUOTE = "['\"`]";
+  const CODE_READ = new RegExp('\\b(?:readFileSync|readFile|existsSync|readdirSync|statSync|createReadStream|openSync|rmSync|writeFileSync|resolve|join|glob)\\s*\\([^)]{0,120}' + QUOTE + 'templates\\/');
+  // The quote is REQUIRED and must sit directly against the path, so the value *begins* there. Measured reason:
+  // the looser form caught `"referenced by compose.dev.yaml, templates/shared-identity/compose.yaml"` (a
+  // generated note in the registry, which prose about the old layout and is the orchestrator's to re-emit) and
+  // `"ghcr.io/railwayapp-templates/postgres-ssl:18"` (the provider's own image namespace, which is not a
+  // template and never was). A path a program reads starts with the path; a sentence about one does not.
+  const CONFIG_VALUE = new RegExp('(?:^|[\\s:,\[-])' + QUOTE + 'templates\\/');
+  for (const f of tracked) {
+    if (f.startsWith('templates/') || f.startsWith('vendor/') || f.includes('/dist/')) continue;
+    if (/\.md$/.test(f)) continue;                                   // prose about the old layout is history, not a read
+    if (!(/\.(ts|mjs|js|cjs|ya?ml|json)$/.test(f))) continue;
+    let text: string;
+    try {
+      text = await fs.readFile(path.join(ROOT, f), 'utf8');
+    } catch {
+      continue;   // tracked but absent: the pending deletion, which is the orchestrator's to make, not a finding here
+    }
+    const isConfig = /\.(ya?ml|json)$/.test(f);
+    for (const [i, line] of text.split('\n').entries()) {
+      // Comments are not a program reaching for a file. This file's own documentation has to say what the old
+      // arrangement was in order to explain why it ended, and a gate that forbids its own prose either gets
+      // reworded into silence or gets ignored -- both of which are worse than the exemption. Same reasoning,
+      // same shape as `check-environment-registry.ts` skipping its own name sets.
+      const t = line.trim();
+      if (t.startsWith('//') || t.startsWith('/*') || t.startsWith('*') || t.startsWith('#')) continue;
+      const hit = isConfig ? line.match(CONFIG_VALUE) : line.match(CODE_READ);
+      if (hit) problems.push(`${f}:${String(i + 1)} reaches for a bundled template path (${hit[0].trim().slice(0, 70)}) -- a template is its published repository now, read through the source-control seam (packages/manifest/src/template-catalog.ts). Keeping a second reader is the defect this change removed (2026-11-14)`);
     }
   }
   return problems;
 }
 
-const all = [...docProblems, ...skillProblems, ...workflowProblems, ...actionProblems, ...hygieneProblems, ...endpointProblems, ...projectProblems, ...overlayProblems, ...registryProblems];
+/**
+ * This repository is TypeScript. No Python, and a gate so it cannot creep back.
+ *
+ * The maintainer's ruling: one language for the toolchain. Ad-hoc scripting belongs in `tsx` under `.tmp/`
+ * (gitignored, disposable, and it runs against the same types as everything else), not in a `.py` file beside
+ * it. The reason is the one this whole change runs on: a second way of doing a thing is a second thing to keep
+ * in step. Two interpreters means two dependency stories, a lockfile that describes only one of them, a CI
+ * runner that installs a runtime nobody reviewed, and a script that is invisible to `typecheck`, to
+ * `contracts:check` and to every gate that reads TypeScript.
+ *
+ * Two rules, both over TRACKED files (`git ls-files`), because an ignored scratch file is exactly what `.tmp/`
+ * is for and a gate on scratch would only train people to scratch elsewhere:
+ *
+ *  1. no `*.py` file is tracked;
+ *  2. no tracked file under `scripts/`, `docs/`, `.github/workflows/`, or `package.json` *invokes* an
+ *     interpreter or a package installer.
+ *
+ * "Invokes" is the narrow half of the rule, and deliberately so: prose about somebody else's stack is not our
+ * toolchain problem, and a checker that flags the word "Python" gets trained to be ignored inside a week. The
+ * pattern therefore needs a command shape -- the interpreter with a flag, with a `.py` argument, or with a
+ * subcommand; the installer with its subcommand; a shebang line; or a wrapper (uv, poetry, conda, pipx)
+ * reaching for pip. Measured against the current tree: this rule finds 0 lines, while a bare case-insensitive
+ * word match finds 5, all of them evidence about other projects (Railway's IaC note that Python and Go are in
+ * beta, Authentik's Python/Django row) -- and evidence about the world is what docs/research is for.
+ *
+ * This file is not excluded from its own rule. The pattern source holds the words only inside regular-expression
+ * syntax, which the boundary test does not read as a command; if that ever stops being true, this gate will fail
+ * on itself, which is the correct and visible outcome.
+ */
+const PY_SCOPE = /^(scripts\/|docs\/|\.github\/workflows\/|package\.json$)/;
+/**
+ * Command shapes, not vocabulary.
+ *
+ * `BOUNDARY` is what makes prose safe to keep: a command token must begin after something that is not a word
+ * character (line start, whitespace, punctuation), and must be followed by a flag, a script name, or a
+ * subcommand. "Railway IaC supports Python and Go" satisfies neither half; a workflow line that runs the
+ * interpreter with a flag satisfies both.
+ */
+const BOUNDARY = String.raw`(?:^|[^A-Za-z0-9_])`;
+const PY_INVOCATION = new RegExp([
+  `${BOUNDARY}python3?\\s+-[\\w-]`,
+  `${BOUNDARY}python3?\\s+[\\w./-]+\\.py`,
+  `${BOUNDARY}python3?\\s+(?:-m|install|run|venv|freeze|download|wheel|compile)\\b`,
+  `${BOUNDARY}pip3?\\s+(?:install|freeze|download|wheel|list|show|uninstall|-\\w)`,
+  String.raw`^\s*#!.*\bpython`,
+  `${BOUNDARY}(?:uv|poetry|conda|pipx)\\s+pip\\b`,
+].join('|'));
+
+async function checkNoPython(): Promise<string[]> {
+  const problems: string[] = [];
+  for (const f of trackedFiles()) {
+    if (f.endsWith('.py')) {
+      problems.push(`${f}: a Python file is tracked -- this repository's toolchain is TypeScript, and ad-hoc scripting belongs in tsx under .tmp/ (gitignored, disposable, and it runs against the same types as everything else)`);
+      continue;
+    }
+    if (!PY_SCOPE.test(f)) continue;
+    let text: string;
+    try {
+      text = await fs.readFile(path.join(ROOT, f), 'utf8');
+    } catch {
+      continue;
+    }
+    for (const [i, line] of text.split('\n').entries()) {
+      if (PY_INVOCATION.test(line)) {
+        problems.push(`${f}:${String(i + 1)}: invokes Python (${line.trim().slice(0, 90)}) -- the toolchain here is TypeScript only. Move it to \`npx -y tsx\` under .tmp/, or state in prose what it is evidence about rather than how to run it.`);
+      }
+    }
+  }
+  return problems;
+}
+
+const pythonProblems = await checkNoPython();
+
+const all = [...docProblems, ...skillProblems, ...workflowProblems, ...actionProblems, ...hygieneProblems, ...endpointProblems, ...projectProblems, ...overlayProblems, ...registryProblems, ...pythonProblems];
 say(`skills checked: ${skills.length} (${skills.map((s) => s.name).join(', ')})`);
 say(`workflows linted: ${workflowProblems.length === 0 ? 'clean' : `${workflowProblems.length} problem(s)`}`);
 say(`action manifests checked: ${actionProblems.length === 0 ? 'clean' : `${actionProblems.length} problem(s)`}`);
@@ -528,6 +701,7 @@ say(`committed endpoints: ${endpointProblems.length === 0 ? 'no generated hostna
 say(`test targets (D49): ${projectProblems.length === 0 ? 'only the real projects are named in code' : `${projectProblems.length} problem(s)`}`);
 say(`dev overlays (D50): ${overlayProblems.length === 0 ? 'every platform service has a dev entry; extras are declared' : `${overlayProblems.length} problem(s)`}`);
 say(`template registries (D58): ${registryProblems.length === 0 ? 'one environment.yaml per platform, no retired path shipped' : `${registryProblems.length} problem(s)`}`);
+say(`toolchain (TypeScript only): ${pythonProblems.length === 0 ? 'no tracked Python, no tracked file invokes python/pip' : `${pythonProblems.length} problem(s)`}`);
 
 if (all.length) {
   console.error(`\n${all.length} problem(s):`);

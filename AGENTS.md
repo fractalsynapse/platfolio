@@ -26,7 +26,7 @@ selections it has already made are recorded, not improvised:
 | Every environment variable: custody, environments, obligations and wiring -- one registry per platform, at its root | [environment.yaml](environment.yaml) — the central registry (D52, and D33's obligations since D58), enforced by `pnpm run environment:registry`: one definition per variable, one spelling of everywhere, one file per platform |
 
 Status: foundation poured, interfaces first (D40, [16](docs/design/16-foundation-build-order.md)). Slices 1
-and 2 of that plan are delivered (411 tests): `apps/control-plane` boots on the vendored runtime with
+and 2 of that plan are delivered (450 tests): `apps/control-plane` boots on the vendored runtime with
 Keycloak-verified bearer auth, persistent records (`Store` as a capability with a Postgres implementation and
 an in-memory double under one conformance suite, gated in CI against a live database), a controller
 that turns accepted attestations into stored state, and capability bindings that make shared services
@@ -72,7 +72,11 @@ SHAs `git hash-object` computes locally. Three more operations came after them, 
 instead of committing one -- D54, which closed #217 and removed `compose.prod.yaml` as a requirement for a
 fork), `PUT …/secrets/{name}` (deliver a credential through to the tenant's provider and keep nothing -- D53),
 and `GET …/secrets` (presence: set / missing / unverifiable, never the value). `open-install-pr.ts` still
-renders the install PR itself; that remaining logic is #213.
+renders the install PR itself (that remaining logic is #213), but it no longer reads a maintainer's filesystem:
+the platform description now arrives from a repository at a ref through the same seam, defaulting to the
+repository the PR lands in (`--template=<name>` reads a published template from the catalog instead), so a dry
+run can report the platform of the repository it names rather than the one the operator happens to have
+checked out (D60).
 
 What is still **not** delivered, stated because the earlier version of this paragraph was the first thing an
 agent read and it had gone stale: no Stripe integration, no CLI or web UI, and no tenant on either service.
@@ -148,10 +152,10 @@ The layout is therefore explicit, and a new file goes where its **kind** goes:
 
 | Path | What lives there | Rule it enforces |
 | --- | --- | --- |
-| `templates/` | The three platform templates published to `fractalsynapse/platfolio-*` repositories | The only thing called a template is a template |
+| `packages/manifest/src/template-catalog.ts` | The template catalog: which published repository *is* which template, and which files of it platfolio reads | **D60: a template is a repository, not a directory.** Read through the source-control seam, anonymously, because these repositories are public and open source and always will be. Adding a template means a repository plus one entry here -- never a copy under this tree |
 | `packages/manifest/test/fixtures/` | Manifest fixtures the tests and [03](docs/design/03-manifest-spec.md) parse | Test input is not a catalog entry, and does not live at the top level. Fixtures are not projects (D49) |
 | `compose.yaml` + `compose.prod.yaml` (repository root) | platfolio's own platform description and generated pin | **D50: one hosting specification for all four platforms.** The root is where a tenant's platform lives, so it is where ours lives too -- `selfhost/` was a special case and it made platfolio's architecture differ from the templates' |
-| `environment.yaml` (one per platform: repository root, and `templates/<name>/`) | The **environment registry**: every variable that platform reads or deploys -- custody (`secret`), `environments` (`development` / `staging` / `production` / `all`), obligations (`kind`, `service`, `required`, `default`, `enum`, `rotate`) and wiring (`database`, `output`, `from`), plus `deployedTo` and `note` | **D58: one file per platform, one definition per variable.** `applyInventory` merges it into the plan, so it is an input, not documentation. A name is not a custody claim (`PLATFOLIO_DB_URL` carries a password); **no registry file is ever a discovery source**, and `environment:registry` fails a duplicate name, a second spelling of the full set, an obligation that contradicts itself, or a registry that parses to zero rows |
+| `environment.yaml` (one per platform: this repository's root, and each published template's root) | The **environment registry**: every variable that platform reads or deploys -- custody (`secret`), `environments` (`development` / `staging` / `production` / `all`), obligations (`kind`, `service`, `required`, `default`, `enum`, `rotate`) and wiring (`database`, `output`, `from`), plus `deployedTo` and `note` | **D58: one file per platform, one definition per variable.** `applyInventory` merges it into the plan, so it is an input, not documentation. A name is not a custody claim (`PLATFOLIO_DB_URL` carries a password); **no registry file is ever a discovery source**, and `environment:registry` fails a duplicate name, a second spelling of the full set, an obligation that contradicts itself, or a registry that parses to zero rows. The published platforms' registries are checked where they live: `packages/manifest/test/templates.test.ts` reads them over the seam and applies the same obligation predicate (D60) |
 | `compose.dev.yaml` | the local development topology (database container, Mailpit, source mount, `start-dev`, published ports) as an **overlay** | Dev convenience is a separate layer, not a second definition of the platform. `docker compose -f compose.yaml -f compose.dev.yaml up` |
 | `apps/<name>/` | Source, Dockerfile, `package.json` -- the deployable artifact itself | Deployment *shape* does not live with the app |
 | `packages/contracts/` | Capability interfaces, DTO schemas, conformance suites, provider implementations | Framework-free; the only place a seam is defined |
@@ -160,7 +164,7 @@ The layout is therefore explicit, and a new file goes where its **kind** goes:
 | `packages/contracts/api.md` | Generated public-surface baseline for the contracts package | Lives with what it measures; `check-contracts` writes it |
 | `packages/contracts/railway-graphql-schema.json` | Captured provider schema, evidence for `graphql:check` | Provider evidence sits with the provider implementation |
 | `db/` | Forward-only migrations and Postgres init scripts | Readiness comes from the migrations ledger |
-| `platform-templates`, `platforms/`, `apps/status-api`, `api/`, `samples/`, `selfhost/`, root `docker-compose.yml`, `.platfolio/` | **gone** (Nov 2026): see CHANGELOG | A directory with one member that duplicates another app's file was the bug; a second API that duplicates the first is the same bug with an endpoint surface; and a second `environment.yaml` describing the same variables in a second schema was the same bug again |
+| `platform-templates`, `platforms/`, `apps/status-api`, `api/`, `samples/`, `selfhost/`, root `docker-compose.yml`, `.platfolio/`, `templates/` | **gone** (Nov 2026): see CHANGELOG | A directory with one member that duplicates another app's file was the bug; a second API that duplicates the first is the same bug with an endpoint surface; a second `environment.yaml` describing the same variables in a second schema was the same bug again; and a bundled `templates/` that duplicated three published repositories was the same bug with a publisher and a parity gate attached (D60) |
 | `examples/` | Third-party reference clones (Cordis at its tag, a scaffold). Gitignored | Reference material is not project source |
 | *nowhere tracked* | A generated provider hostname (D47) | An environment's endpoints are configuration: `vars.PLATFOLIO_URL`, or `--url=` when opening an install PR |
 

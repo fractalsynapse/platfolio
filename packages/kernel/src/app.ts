@@ -10,6 +10,9 @@ import { ScmService, ScmConfigSchema } from './scm.ts';
 import { ExtensionService, type ExtensionDescriptor } from './extension.ts';
 import { InfraService, ProviderConfigSchema } from './infra-provider.ts';
 import type { IdentityConfig, Jwk, VariablePort, RedactionSinks } from '@platfolio/contracts';
+// D59: the default required contract range is derived, so this must import the generated value as a
+// runtime value -- a type-only import cannot carry it.
+import { CONTRACT_VERSION } from '@platfolio/contracts';
 
 export interface KernelOptions {
   /** Email transport selection (D46). Absent means no email capability is installed at all. */
@@ -69,7 +72,7 @@ export async function createKernel(options: KernelOptions = {}): Promise<Context
 async function install(ctx: Context, options: KernelOptions): Promise<Context> {
   const config = ProviderConfigSchema.parse({
     provider: options.provider ?? 'fake',
-    contract: options.contract ?? '^1.0.0',
+    contract: options.contract ?? `^${CONTRACT_VERSION}`, // derived default, D59
     features: [],
   });
   const custody = CustodyConfigSchema.parse({ mode: options.custody ?? 'strict', delivery: options.delivery ?? 'relay-sealed' });

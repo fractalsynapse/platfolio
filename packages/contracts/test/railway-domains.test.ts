@@ -93,7 +93,7 @@ test('a domain binds to the environment’s own service, not to the first servic
 
   const production = [...mock.environments.values()].find((e) => e.name === 'production')!;
   const staging = [...mock.environments.values()].find((e) => e.name === 'staging')!;
-  const api = [...mock.services.values()].find((s) => s.name === 'api')!;
+  const api = [...mock.services.values()].find((s) => s.name === 'api-production')!;
   const apiStaging = [...mock.services.values()].find((s) => s.name === 'api-staging')!;
   const boundTo = (host: string) => [...mock.instances.entries()].filter(([, i]) => i.domains.includes(host)).map(([k]) => k).sort();
   assert.deepEqual(boundTo('api.example.com'), [`${production.id}:${api.id}`], 'production’s host is on production’s service');
@@ -101,7 +101,7 @@ test('a domain binds to the environment’s own service, not to the first servic
   // Reported back the same way: a domain's targetService is the provider's name for the service it is bound to,
   // so a tenant reading the state can tell the two environments' hosts apart.
   const custom = applied.domains.filter((d) => !d.host.endsWith('.up.railway.app')).map((d) => `${d.host}<-${d.targetService}`).sort();
-  assert.deepEqual(custom, ['api.example.com<-api', 'staging.example.com<-api-staging'], JSON.stringify(applied.domains));
+  assert.deepEqual(custom, ['api.example.com<-api-production', 'staging.example.com<-api-staging'], JSON.stringify(applied.domains));
 });
 
 test('a failed private-registry deployment carries the tenant-only next action', async () => {
