@@ -25114,7 +25114,6 @@ var DomainPlanSchema = external_exports.object({
 });
 var EnvironmentPlanSchema = external_exports.object({
   name: NameSchema,
-  cloneFrom: NameSchema.optional(),
   services: external_exports.array(ServicePlanSchema).min(1),
   domains: external_exports.array(DomainPlanSchema),
   databases: external_exports.array(external_exports.object({ name: NameSchema, kind: external_exports.enum(["postgres", "redis", "mysql"]) })),
@@ -25277,9 +25276,6 @@ function planIssues(plan) {
       if (!services.has(d.service)) {
         issues.push({ path: ["environments", env.name, "domains", d.host], code: "unknown-service", message: `domain targets service "${d.service}" which is not in environment "${env.name}"` });
       }
-    }
-    if (env.cloneFrom && !data.environments.some((e) => e.name === env.cloneFrom)) {
-      issues.push({ path: ["environments", env.name, "cloneFrom"], code: "unknown-environment", message: `cloneFrom "${env.cloneFrom}" does not name an environment in this plan` });
     }
     for (const s of env.services) {
       for (const pair of s.env) {
@@ -25658,6 +25654,28 @@ function registryPullHint(image) {
   return `"${image}" is pulled from ${host}, which routinely holds private repositories. If the deployment failed to start, the likely cause is that this Railway project cannot pull the image: attach a read-only registry credential for ${host} in the project's settings. platfolio cannot do this for you and does not hold such a credential -- it is yours to grant, and is never stored here.`;
 }
 var IN_FLIGHT = /* @__PURE__ */ new Set(["pending", "building", "deploying"]);
+function physicalServiceName(logical, environment, observed) {
+  if (!observed.projectHas) return logical;
+  if (observed.placedInEnvironment) return logical;
+  return `${logical}-${environment.toLowerCase()}`;
+}
+function resolvePlacement(environment, logicalNames, placement) {
+  const out = /* @__PURE__ */ new Map();
+  for (const logical of logicalNames) {
+    out.set(logical, physicalServiceName(logical, environment, {
+      projectHas: placement.projectHas.has(logical),
+      placedInEnvironment: placement.placed.has(logical)
+    }));
+  }
+  return out;
+}
+function placementCollisions(resolution) {
+  const byPhysical = /* @__PURE__ */ new Map();
+  for (const [logical, physical] of resolution) {
+    byPhysical.set(physical, [...byPhysical.get(physical) ?? [], logical]);
+  }
+  return [...byPhysical.entries()].filter(([, logicals]) => logicals.length > 1).map(([physical, logicals]) => ({ physical, logicals }));
+}
 var RailwayInfraProvider = class {
   // Annotated with the literal type on purpose: `readonly contract = CONTRACT_VERSION` infers
   // `string`, which widens a public field consumers narrow on -- a tightening for them even though it reads
@@ -25697,7 +25715,9 @@ var RailwayInfraProvider = class {
       // OPERATIONS is a readonly tuple, and a driver must not be able to mutate the shared list.
       operations: [...OPERATIONS],
       // What is actually supported. Ceilings and databases/buckets are absent from this list on purpose.
-      features: ["service-domains", "custom-domains", "literal-configuration", "preserve-secret-references", "per-environment-tokens", "deploy-waiting", "environment-cloning"]
+      // `per-environment-provisioning` replaced `environment-cloning`: every environment is created from its own
+      // declaration, because a duplicated environment inherits the source's database configuration (D57).
+      features: ["service-domains", "custom-domains", "literal-configuration", "preserve-secret-references", "per-environment-tokens", "deploy-waiting", "per-environment-provisioning"]
     };
   }
   validatePlan(plan) {
@@ -25715,7 +25735,6 @@ var RailwayInfraProvider = class {
         }
       }
       if (env.name.length > 64) issues.push({ path: ["environments", env.name], code: "provider-name-limit", message: "environment names are limited to 64 characters" });
-      if (env.cloneFrom && env.cloneFrom === env.name) issues.push({ path: ["environments", env.name, "cloneFrom"], code: "self-clone", message: "an environment cannot clone itself" });
       for (const d of env.domains) {
         const labels = d.host.split(".");
         if (labels.length < 2) issues.push({ path: ["environments", env.name, "domains", d.host], code: "host-form", message: "host must include a domain suffix" });
@@ -25772,20 +25791,49 @@ var RailwayInfraProvider = class {
       });
     }
     for (const environment of parsed.data.environments) {
-      const environmentId = await this.ensureEnvironment(projectId, environment.name, environment.cloneFrom, workspaceCredential);
+      const environmentId = await this.ensureEnvironment(projectId, environment.name, workspaceCredential);
       const token = await this.credentials.forEnvironment(projectId, environment.name);
       const placed = await this.environmentInstances(projectId, environmentId, token);
+      const projectServices = await this.listServices(projectId, workspaceCredential);
+      const physical = resolvePlacement(
+        environment.name,
+        [...environment.services.map((s) => s.name), ...environment.databases.map((d) => d.name)],
+        { projectHas: new Set(projectServices.map((s) => s.name)), placed: new Set(projectServices.filter((s) => placed.has(s.id)).map((s) => s.name)) }
+      );
+      const collided = new Map(placementCollisions(physical).map((c) => [c.physical, c.logicals]));
+      const skipped = /* @__PURE__ */ new Set();
+      for (const [name2, logicals] of collided) {
+        failures.push({
+          step: `environments.${environment.name}.services`,
+          code: "service-name-collision",
+          message: `${logicals.map((l) => `"${l}"`).join(" and ")} both resolve to the Railway service "${name2}" in "${environment.name}"; creating one service for two declared services would merge them, so neither was provisioned (D57)`
+        });
+        for (const logical of logicals) skipped.add(logical);
+      }
       for (const service of environment.services) {
-        const known = (await this.listServices(projectId, workspaceCredential)).find((s) => s.name === service.name);
-        if (known && !placed.has(known.id)) {
-          failures.push({
-            step: `services.${service.name}@${environment.name}`,
-            code: "instance-missing-in-environment",
-            message: `"${service.name}" has no instance in "${environment.name}"; Railway places services into a new environment only when that environment is duplicated, so this environment must be recreated from a source that already contains the service`
-          });
-          continue;
+        if (skipped.has(service.name)) continue;
+        const name2 = physical.get(service.name) ?? service.name;
+        let known = projectServices.find((s) => s.name === name2);
+        let placedHere = known !== void 0 && placed.has(known.id);
+        if (known && !placedHere) {
+          if (await this.reclaimUnplacedService(projectId, environmentId, known, workspaceCredential)) {
+            notes.push({
+              step: `services.${name2}@${environment.name}`,
+              code: "service-row-reclaimed",
+              message: `"${name2}" existed in the project with no instance in any environment; the row was deleted so "${environment.name}" could be provisioned its own service (D57)`
+            });
+            known = void 0;
+            placedHere = false;
+          } else {
+            failures.push({
+              step: `services.${service.name}@${environment.name}`,
+              code: "instance-missing-in-environment",
+              message: `"${service.name}" resolves to "${known.name}" in "${environment.name}", which exists in this project but has no instance here; Railway creates an instance only as part of serviceCreate, and serviceCreate refuses a name the project already holds, so the service has to be deleted from the environment that is not using it or given a different name in the plan (D57)`
+            });
+            continue;
+          }
         }
-        const serviceId = await this.ensureService(projectId, environmentId, service, token, workspaceCredential, notes);
+        const serviceId = await this.ensureService(projectId, environmentId, service, name2, known, placedHere, token, notes);
         serviceIds.set(`${environment.name}/${service.name}`, serviceId);
         for (const entry of service.env) {
           if (entry.literal === void 0) continue;
@@ -25816,7 +25864,10 @@ var RailwayInfraProvider = class {
           }
         }
         services.push({
-          name: service.name,
+          // The PHYSICAL name (D57), because this list is compared against `readState`, and readState can only
+          // report what the provider calls the service. Reporting the plan's logical name here would give one
+          // service two identities depending on which method produced the row.
+          name: physical.get(service.name) ?? service.name,
           environment: environment.name,
           externalId: outcome.instanceId,
           status: outcome.status,
@@ -25826,7 +25877,8 @@ var RailwayInfraProvider = class {
       }
       for (const domain2 of environment.domains) {
         const targetServiceId = serviceIds.get(`${environment.name}/${domain2.service}`);
-        const target = services.find((s) => s.name === domain2.service && s.environment === environment.name);
+        const domainServiceName = physical.get(domain2.service) ?? domain2.service;
+        const target = services.find((s) => s.name === domainServiceName && s.environment === environment.name);
         if (!target || !targetServiceId) {
           failures.push({ step: `domains.${domain2.host}`, code: "unknown-service", message: `domain targets "${domain2.service}", which this plan does not define in "${environment.name}"` });
           continue;
@@ -25841,11 +25893,12 @@ var RailwayInfraProvider = class {
           dnsStatus: state?.dnsStatus ?? placed2.dnsStatus,
           certificateStatus: state?.certificateStatus ?? "pending",
           ...settled?.domainRecords[placed2.host] ? { records: settled.domainRecords[placed2.host] } : {},
-          targetService: domain2.service
+          targetService: domainServiceName
         });
       }
       for (const database of environment.databases) {
-        await this.provisionDatabase(projectId, environmentId, environment.name, database, environment, token, serviceIds, failures, notes);
+        if (skipped.has(database.name)) continue;
+        await this.provisionDatabase(projectId, environmentId, environment.name, database, environment, physical, token, serviceIds, failures, notes);
       }
       for (const volume of environment.volumes ?? []) {
         await this.provisionVolume(projectId, environmentId, volume, environment.name, serviceIds, workspaceCredential, failures, notes);
@@ -25915,12 +25968,21 @@ var RailwayInfraProvider = class {
     const deleteFailures = [];
     const environments = await this.environments(project.id, credential);
     const services = await this.listServices(project.id, credential);
+    const placedHere = /* @__PURE__ */ new Map();
+    for (const environment of environments) {
+      const token = await this.credentials.forEnvironment(project.id, environment.name).catch(() => credential);
+      try {
+        placedHere.set(environment.id, new Set((await this.environmentInstances(project.id, environment.id, token)).keys()));
+      } catch {
+        placedHere.set(environment.id, null);
+      }
+    }
     const volumesAtStart = await this.listVolumes(project.id, credential);
     const bucketsAtStart = await this.buckets(project.id, credential);
     const expected = /* @__PURE__ */ new Set([
       ...volumesAtStart.map((v) => `volume:${v.name}`),
       ...bucketsAtStart.map((b) => `bucket:${b}`),
-      ...environments.flatMap((e) => services.map((s) => `service:${e.name}/${s.name}`))
+      ...environments.flatMap((e) => services.filter((s) => placedHere.get(e.id) === null || placedHere.get(e.id).has(s.id)).map((s) => `service:${e.name}/${s.name}`))
     ]);
     const instancesByVolume = /* @__PURE__ */ new Map();
     for (const environment of environments) {
@@ -25944,19 +26006,14 @@ var RailwayInfraProvider = class {
       });
     }
     for (const environment of environments) {
+      const placed = placedHere.get(environment.id);
       for (const service of services) {
+        if (placed && !placed.has(service.id)) continue;
         try {
           await this.deleteServiceWithRetry(project.id, environment, service, credential);
           removed.push(`service:${environment.name}/${service.name}`);
         } catch (error62) {
-          let placed = true;
-          try {
-            const envToken = await this.credentials.forEnvironment(project.id, environment.name);
-            placed = await this.instanceStatus(project.id, environment.id, service.id, envToken);
-          } catch {
-            placed = true;
-          }
-          if (!placed) continue;
+          if (placed && !placed.has(service.id)) continue;
           deleteFailures.push({ step: `service:${environment.name}/${service.name}`, code: "service-delete-failed", message: error62.message.slice(0, 200) });
         }
       }
@@ -26004,12 +26061,10 @@ var RailwayInfraProvider = class {
     const project = await this.findProject(this.projectName({ instanceId: input2.instanceId }));
     if (!project) return { ok: false, code: "not-found", reason: `no provider project for instance "${input2.instanceId}" -- it has never been applied` };
     const workspace = await this.credentials.workspace();
-    const envList = await this.environments(project.id, workspace);
-    const env = envList.find((e) => e.name === input2.environment);
+    const env = (await this.environments(project.id, workspace)).find((e) => e.name === input2.environment);
     if (!env) return { ok: false, code: "not-found", reason: `environment "${input2.environment}" does not exist in this instance -- create it by applying a plan that enables it` };
-    const services = await this.listServices(project.id, workspace);
-    const svc = services.find((s) => s.name === input2.service);
-    if (!svc) return { ok: false, code: "not-found", reason: `no service "${input2.service}" in project ${project.name}; services are named by the platform description` };
+    const svc = await this.serviceInEnvironment(project.id, env, input2.service, workspace);
+    if (!svc) return { ok: false, code: "not-found", reason: `no service "${input2.service}" in the environment "${input2.environment}" of project ${project.name}; services are named by the platform description, and each environment gets its own (D57)` };
     const token = await this.credentials.forEnvironment(project.id, env.name);
     const shared = input2.source === "shared-variable";
     try {
@@ -26034,7 +26089,7 @@ var RailwayInfraProvider = class {
     }
     const workspace = await this.credentials.workspace();
     const env = (await this.environments(project.id, workspace)).find((e) => e.name === input2.environment);
-    const svc = env ? (await this.listServices(project.id, workspace)).find((s) => s.name === input2.service) : void 0;
+    const svc = env ? await this.serviceInEnvironment(project.id, env, input2.service, workspace) : void 0;
     if (!env || !svc) {
       for (const n of input2.names) out[n] = "unverifiable";
       return out;
@@ -26095,29 +26150,29 @@ var RailwayInfraProvider = class {
     });
     return data.project.environments.edges.map((e) => e.node);
   }
-  async ensureEnvironment(projectId, environment, cloneFrom, credential) {
+  /**
+   * Create one environment, empty. It arrives with NO services: every resource in it is provisioned from this
+   * plan by the caller, which is the point of D57 -- an environment that inherits another environment's services
+   * inherits their database configuration too, and staging then reads production's DSN.
+   *
+   * `isPrivate` is not sent: introspection says `EnvironmentCreateInput` has no such field, which is how E25
+   * found it (a single-environment run never creates a second environment, so the bug was invisible to the
+   * passing suite). `skipInitialDeploys` stays on: the tenant's daily deploy ceiling is shared and finite, and
+   * nothing here is a decision to deploy.
+   */
+  async ensureEnvironment(projectId, environment, credential) {
     const found = await this.environments(projectId, credential);
     const existing = found.find((e) => e.name === environment);
     if (existing) return existing.id;
-    const source = cloneFrom ? found.find((e) => e.name === cloneFrom) : void 0;
     const data = await this.transport.graphql({
       operation: "environmentCreate",
       credential,
       query: "mutation ($input: EnvironmentCreateInput!) { environmentCreate(input: $input) { id } }",
-      // Introspected `EnvironmentCreateInput` has NO isPrivate field -- sending one fails validation,
-      // which is exactly how E25 found this: a single-environment run never creates a second
-      // environment, so the bug was invisible to the passing suite. skipInitialDeploys keeps a clone
-      // from deploying the world without the controller deciding to; the tenant's daily ceiling is
-      // shared and finite. Cloning carries configuration, and sealed values are documented NOT to be
-      // copied -- which is why the secrets checklist is expected to report red on a fresh staging.
-      variables: {
-        input: {
-          projectId,
-          name: environment,
-          skipInitialDeploys: true,
-          ...source ? { sourceEnvironmentId: source.id } : {}
-        }
-      }
+      // No `sourceEnvironmentId` is ever sent, and this is not a formatting choice: measured on the live API,
+      // creating an environment from a source gave the new environment the source's service ids, and its api
+      // failed with `connect ETIMEDOUT` against a database it does not own. The field stays in the input
+      // allowlist of the test double precisely so that nobody reintroduces it here unnoticed.
+      variables: { input: { projectId, name: environment, skipInitialDeploys: true } }
     });
     return data.environmentCreate.id;
   }
@@ -26132,18 +26187,77 @@ var RailwayInfraProvider = class {
     return data.project.services.edges.map((e) => e.node);
   }
   /**
-   * Place a service in one environment. A Railway service is project-level while what runs is the
-   * per-environment **instance**, so an existing service still needs its instance created or updated for
-   * each environment in the plan.
+   * Delete a service ROW that runs nothing anywhere, so the environment asking for that name can provision its
+   * own service. Returns whether the row is gone.
    *
-   * The order here is deliberate and is what E25 must confirm against a live project: update first (the
-   * plausible upsert), and if the provider says there is no instance, create the service in that
-   * environment. Which branch the real API takes is not something I will assert from a mock, so both are
-   * exercised and the fallback is reported rather than hidden.
+   * This exists because the naming rule (D57) and the coverage resume (D55) meet: an interrupted apply can leave
+   * `api-staging` as a project row with no instance, and every later apply then resolves staging's `api` to that
+   * same dead name and is refused by `serviceCreate` (measured: a duplicate name is rejected). Without reclaiming,
+   * "resume the apply" would be a promise this state cannot keep.
+   *
+   * The guard is the whole method: an instance in ANY other environment means the row is somebody's running
+   * service -- a legacy shared one from the cloning era -- and deleting it would take that environment's compute
+   * (and, for a database, its only connection) with it. Those are reported instead.
+   *
+   * A surviving VOLUME is not what this checks. Measured: `serviceDelete` leaves volumes intact, so reclaiming a
+   * database row that had one orphans the disk -- which is why the caller says so in a note rather than calling
+   * the recreate a restoration.
    */
-  async ensureService(projectId, environmentId, service, token, workspaceCredential, notes) {
-    const known = (await this.listServices(projectId, workspaceCredential)).find((s) => s.name === service.name);
-    if (!known) return this.createService(projectId, environmentId, service, token);
+  async reclaimUnplacedService(projectId, environmentId, row, workspaceCredential) {
+    const environments = await this.environments(projectId, workspaceCredential);
+    for (const other of environments) {
+      if (other.id === environmentId) continue;
+      const token = await this.credentials.forEnvironment(projectId, other.name).catch(() => workspaceCredential);
+      if (await this.instanceStatus(projectId, other.id, row.id, token).catch(() => null)) return false;
+    }
+    try {
+      await this.transport.graphql({
+        operation: "serviceDelete",
+        credential: workspaceCredential,
+        query: "mutation ($environmentId: String!, $id: String!) { serviceDelete(environmentId: $environmentId, id: $id) }",
+        variables: { environmentId, id: row.id }
+      });
+    } catch {
+      return false;
+    }
+    return true;
+  }
+  /**
+   * The service that a plan's logical name refers to IN ONE environment (D57).
+   *
+   * Callers outside `applyPlan` -- secret delivery and its read-back -- are addressed by the name the tenant
+   * declared. After the first environment that name belongs to a different service in each one, so resolving it
+   * here with the same rule the apply provisions by is what stops `PUT …/secrets/{name}` from writing a
+   * credential onto production's service while reporting it against staging's.
+   *
+   * A legacy project whose service is genuinely shared -- the name exists AND has an instance here -- resolves
+   * to that bare name, because that is what the rule says and what the provider will then read back.
+   */
+  async serviceInEnvironment(projectId, environment, logical, workspaceCredential) {
+    const [projectServices, token] = await Promise.all([
+      this.listServices(projectId, workspaceCredential),
+      this.credentials.forEnvironment(projectId, environment.name)
+    ]);
+    const placed = await this.environmentInstances(projectId, environment.id, token);
+    const resolution = resolvePlacement(environment.name, [logical], {
+      projectHas: new Set(projectServices.map((s) => s.name)),
+      placed: new Set(projectServices.filter((s) => placed.has(s.id)).map((s) => s.name))
+    });
+    return projectServices.find((s) => s.name === (resolution.get(logical) ?? logical));
+  }
+  /**
+   * Create-or-update ONE instance, in ONE environment, under the physical name this environment resolved to
+   * (D57) — which is why the name is a parameter and not read off the plan: the plan's `api` is the project's
+   * `api` in production and `api-staging` in staging, and both are the same declaration. A Railway service is
+   * project-level while what runs is the per-environment **instance**, so this is where the two meet.
+   *
+   * An existing service placed HERE is updated (its instance is the per-environment thing). Anything else is
+   * created with `serviceCreate`, the only mutation that places a service in an environment — `serviceInstanceUpdate`
+   * against an environment with no instance there returns true and changes nothing (measured in E25), so an
+   * update is never a way to place one.
+   */
+  async ensureService(projectId, environmentId, service, physicalName, known, placedHere, token, notes) {
+    if (!known || !placedHere) return this.createService(projectId, environmentId, service, physicalName, token);
     try {
       await this.updateService(known.id, environmentId, service, token);
       return known.id;
@@ -26151,14 +26265,14 @@ var RailwayInfraProvider = class {
       const message = error62.message;
       if (!/NOT_FOUND|no instance/i.test(message)) throw error62;
       notes.push({
-        step: `services.${service.name}@${environmentId}`,
+        step: `services.${physicalName}@${environmentId}`,
         code: "instance-created-by-fallback",
-        message: "serviceInstanceUpdate reported no instance for this environment; the service was created in it instead (E25 must confirm which shape the real API uses)"
+        message: "serviceInstanceUpdate reported no instance for this environment although the placement read said otherwise; the service was created in it instead"
       });
-      return this.createService(projectId, environmentId, service, token);
+      return this.createService(projectId, environmentId, service, physicalName, token);
     }
   }
-  async createService(projectId, environmentId, service, credential) {
+  async createService(projectId, environmentId, service, physicalName, credential) {
     const data = await this.transport.graphql({
       operation: "serviceCreate",
       credential,
@@ -26167,8 +26281,10 @@ var RailwayInfraProvider = class {
         input: {
           projectId,
           environmentId,
-          name: service.name,
-          // Measured: a workspace grant is refused here. The environment-scoped token is required.
+          name: physicalName,
+          // Measured: a workspace grant is refused here. The environment-scoped token is required. Measured
+          // differently, and just as load-bearing: a name the project already holds is refused outright, which
+          // is why this call gets the resolved name and never the plan's (D57).
           source: { image: `${service.image}@${service.digest}` }
         }
       }
@@ -26510,42 +26626,54 @@ var RailwayInfraProvider = class {
    * never "cannot be done".
    *
    * The input has no services field and the deploy arrives under the template's own service name, so the
-   * config is fetched, renamed to the plan's name, and sent back. Provisioning is asynchronous
-   * (operationId/workflowId), so success is observed by reading the deployment back, not by the mutation
-   * returning. A database that does not reach SUCCESS fails the apply: a service reported healthy without
-   * its database is the worst outcome this contract can produce.
+   * config is fetched, renamed to the name THIS environment resolved to, and sent back. Provisioning is
+   * asynchronous (operationId/workflowId), so success is observed by reading the deployment back, not by the
+   * mutation returning. A database that does not reach SUCCESS fails the apply: a service reported healthy
+   * without its database is the worst outcome this contract can produce.
+   *
+   * The name matters more than it looks: this is the service whose DSN ends up inside every referencing
+   * service, and a database shared between two environments is two environments writing one dataset.
    */
-  async provisionDatabase(projectId, environmentId, envName, database, environment, token, serviceIds, failures, notes) {
-    const step = `databases.${database.name}`;
+  async provisionDatabase(projectId, environmentId, envName, database, environment, physical, token, serviceIds, failures, notes) {
+    const step = `databases.${database.name}@${envName}`;
+    const databaseName = physical.get(database.name) ?? database.name;
     const templateCode = this.databaseTemplates[database.kind];
     if (!templateCode) {
       failures.push({ step, code: "unknown-database-kind", message: `${database.kind} has no template code configured on this provider` });
       return;
     }
     const workspaceForLookup = await this.credentials.workspace();
-    const existing = (await this.listServices(projectId, workspaceForLookup)).find((s) => s.name === database.name);
+    const existing = (await this.listServices(projectId, workspaceForLookup)).find((s) => s.name === databaseName);
     if (existing) {
-      serviceIds.set(`${envName}/${database.name}`, existing.id);
       const placed = await this.instanceStatus(projectId, environmentId, existing.id, token);
-      if (!placed) {
+      if (placed) {
+        serviceIds.set(`${envName}/${database.name}`, existing.id);
+        if (placed.status !== "live") {
+          const started = placed.rawStatus == null ? await this.deploy(existing.id, environmentId, token, failures) : true;
+          if (started) {
+            const outcome = await this.awaitDeployment(projectId, environmentId, existing.id, token, failures, notes);
+            if (outcome.status !== "live") {
+              failures.push({ step, code: "database-not-deployed", message: `${database.kind} reached ${outcome.status} instead of live` });
+            }
+          }
+        }
+        await this.wireReferences(projectId, environmentId, database, databaseName, envName, environment, serviceIds, token, failures, notes);
+        return;
+      }
+      if (await this.reclaimUnplacedService(projectId, environmentId, existing, workspaceForLookup)) {
+        notes.push({
+          step,
+          code: "database-row-reclaimed",
+          message: `the ${database.kind} row "${databaseName}" had no instance in any environment, so it was deleted and this environment is being provisioned its own. Measured: serviceDelete leaves volumes intact -- any disk that database had is NOT attached to the new one, and its data is unreachable until someone re-attaches it (D57)`
+        });
+      } else {
         failures.push({
           step,
           code: "database-instance-missing-in-environment",
-          message: `${database.kind} exists in this project but has no instance in "${envName}"; recreate the environment duplicate so it is placed`
+          message: `the ${database.kind} service "${databaseName}" exists in this project but has no instance in "${envName}", and it is running in another environment -- deleting it would destroy THAT environment's database, which is not this plan's to do. Delete the service that is not deployed in "${envName}", or give this environment a different name (D57)`
         });
         return;
       }
-      if (placed.status !== "live") {
-        const started = placed.rawStatus == null ? await this.deploy(existing.id, environmentId, token, failures) : true;
-        if (started) {
-          const outcome = await this.awaitDeployment(projectId, environmentId, existing.id, token, failures, notes);
-          if (outcome.status !== "live") {
-            failures.push({ step, code: "database-not-deployed", message: `${database.kind} reached ${outcome.status} instead of live` });
-          }
-        }
-      }
-      await this.wireReferences(projectId, environmentId, database, envName, environment, serviceIds, token, failures, notes);
-      return;
     }
     try {
       const workspaceCredential = await this.credentials.workspace();
@@ -26568,7 +26696,7 @@ var RailwayInfraProvider = class {
         return;
       }
       const key = keys[0];
-      const composedConfig = { ...config2, services: { [key]: { ...services[key], name: database.name } } };
+      const composedConfig = { ...config2, services: { [key]: { ...services[key], name: databaseName } } };
       const deployed = await this.transport.graphql({
         operation: "templateDeployV2",
         credential: workspaceCredential,
@@ -26581,7 +26709,7 @@ var RailwayInfraProvider = class {
       let created;
       for (; ; ) {
         const listed = await this.listServices(projectId, workspaceCredential);
-        const candidates = listed.filter((s) => s.name === database.name || (s.name ?? "").toLowerCase().includes(database.kind));
+        const candidates = listed.filter((s) => s.name === databaseName || (s.name ?? "").toLowerCase().includes(database.kind));
         for (const candidate of candidates) {
           if (await this.instanceStatus(projectId, environmentId, candidate.id, token)) {
             created = candidate;
@@ -26606,7 +26734,7 @@ var RailwayInfraProvider = class {
         failures.push({ step, code: "database-not-deployed", message: `${database.kind} reached ${outcome.status} instead of success` });
         return;
       }
-      await this.wireReferences(projectId, environmentId, database, envName, environment, serviceIds, token, failures, notes);
+      await this.wireReferences(projectId, environmentId, database, databaseName, envName, environment, serviceIds, token, failures, notes);
     } catch (error62) {
       failures.push({ step, code: "database-provision-failed", message: error62.message.slice(0, 240) });
     }
@@ -26620,8 +26748,13 @@ var RailwayInfraProvider = class {
    * it does not make reading safe, and it must not be described to a tenant as "we cannot see your secret".
    * The custody guarantee comes from never reading variable values anywhere in this provider
    * (`configVariableNames` takes keys only) and from the D24 tier choice, not from the expression syntax.
+   *
+   * `databaseName` is the physical service name this environment resolved to, and the expression has to spell
+   * THAT, not the plan's logical name: `${{app-db.DATABASE_URL}}` written into staging points at production's
+   * database by name, which is the same leak the duplicated environment had, arrived at by a different route
+   * (D57).
    */
-  async wireReferences(projectId, environmentId, database, envName, environment, serviceIds, credential, failures, notes) {
+  async wireReferences(projectId, environmentId, database, databaseName, envName, environment, serviceIds, credential, failures, notes) {
     for (const service of environment.services) {
       for (const reference of service.references ?? []) {
         if (reference.database !== database.name) continue;
@@ -26634,7 +26767,7 @@ var RailwayInfraProvider = class {
           failures.push({
             step: `references.${service.name}.${reference.variable}`,
             code: "reference-output-missing",
-            message: `database "${database.name}" exposes no variable named "${output2}"; available: ${[...new Set(available)].sort().slice(0, 12).join(", ")} (names only -- values are redacted by the provider)`
+            message: `database "${database.name}" (service "${databaseName}") exposes no variable named "${output2}"; available: ${[...new Set(available)].sort().slice(0, 12).join(", ")} (names only -- values are redacted by the provider)`
           });
           continue;
         }
@@ -26645,7 +26778,7 @@ var RailwayInfraProvider = class {
             message: `the database service's variable list could not be read, so "${output2}" was written without checking it exists`
           });
         }
-        const expression = `\${{${database.name}.${output2}}}`;
+        const expression = `\${{${databaseName}.${output2}}}`;
         await this.upsertVariable(projectId, environmentId, target, reference.variable, expression, credential);
       }
     }
@@ -26804,15 +26937,27 @@ var RailwayInfraProvider = class {
       }
       const token = await this.credentials.forEnvironment(projectId, env.name);
       const placed = await this.environmentInstances(projectId, env.id, token);
-      for (const service of environment.services) {
-        const known = projectServices.find((s) => s.name === service.name);
-        if (!known) missing.push(`service "${service.name}" (project level)`);
-        else if (!placed.has(known.id)) missing.push(`service "${service.name}" is not placed in "${environment.name}"`);
+      const physical = resolvePlacement(
+        environment.name,
+        [...environment.services.map((s) => s.name), ...(environment.databases ?? []).map((d) => d.name)],
+        {
+          projectHas: new Set(projectServices.map((s) => s.name)),
+          placed: new Set(projectServices.filter((s) => placed.has(s.id)).map((s) => s.name))
+        }
+      );
+      for (const kind of ["service", "database"]) {
+        const declared = kind === "service" ? environment.services : environment.databases ?? [];
+        for (const resource of declared) {
+          const name = physical.get(resource.name) ?? resource.name;
+          const known = projectServices.find((s) => s.name === name);
+          if (!known) missing.push(`${kind} "${name}" (project level) for "${environment.name}"`);
+          else if (!placed.has(known.id)) missing.push(`${kind} "${name}" is not placed in "${environment.name}"`);
+        }
       }
       for (const domain2 of environment.domains ?? []) {
         const assigned = /\.up\.railway\.app$/.test(domain2.host);
         if (assigned) {
-          const target = projectServices.find((s) => s.name === domain2.service);
+          const target = projectServices.find((s) => s.name === (physical.get(domain2.service) ?? domain2.service));
           const info = target ? placed.get(target.id) : void 0;
           if (!info || (info.domainHosts ?? []).length === 0) missing.push(`no domain bound to "${domain2.service}" in "${environment.name}" (plan asserted the generated host "${domain2.host}")`);
           continue;
