@@ -67,7 +67,7 @@ surface: overlays, signals and drafts move data, never code.
 | `apps/control-plane/openapi.yaml` | real — 31 paths, 36 operations (re-measured 2026-11-15; the previous revision said 34, which is exactly the drift the rules doc prices), validated both directions by `api:check`; **no** SSE/WebSocket/event path, no ETag/304 cache semantics declared anywhere in it |
 | `packages/api-contract/src/generated/types.ts` | real, 894 lines (re-measured 2026-11-15; 830 last revision) — exports `Instance`, `Attestation`, `Error`, `OperationId`, `ParamsOf`, `RequestBodyOf`, `ResponseOf`, `SuccessOf`; byte-for-byte gated by `api:types:check` |
 | `packages/page-schema` | real — `page.ts`, `secrets-panel.ts` (`buildSecretsPanel`, `findValueBearingProps`), `binding-panel.ts` (`buildBindingPanel`), `project-text.ts` (`projectToText`), with tests |
-| `packages/ui` (per D63, 2026-11-15: all reusable components **and** design tokens as CSS custom properties — no separate tokens package), `packages/api-client`, `apps/site`, any web UI | **do not exist** — everything in §§1–8 that names them is `specified`. D63 decided what `packages/ui` will contain; it did not make it exist |
+| `packages/ui` (per D63: all reusable components **and** design tokens as CSS custom properties — no separate tokens package) — **exists since 2026-11-15** with contracts, tokens, primitives, signals, the SDK seam and gates, **and no screens**; `packages/api-client`, `apps/site`, any web UI | **do not exist** — everything in §§1–8 that names them is `specified`. D63 decided what `packages/ui` will contain; it did not make it exist |
 | a UI service in `compose.yaml`; `platfolio.dev` / `preview.platfolio.dev` resolving | **absent** — D62 has decided the hosts, the DNS records, certificate and service do not yet exist; the API side is already prepared (`PLATFOLIO_ALLOWED_ORIGINS` feeds CORS and the `platfolio-web` PKCE client's `<origin>/callback` redirect URIs) |
 
 So the honest baseline is: **the contract exists, the panel builders exist, the UI does not.** That is the
@@ -79,7 +79,7 @@ A component is a **registered contract**, not a file that returns JSX. The regis
 checks; the JSX is incidental.
 
 ```ts
-// packages/ui/src/contract.ts — SPECIFIED. The package does not exist yet.
+// packages/ui/src/contract.ts — SHIPPED 2026-11-15 (the package exists; no screens do yet).
 import type { StandardSchemaV1 } from '@standard-schema/spec';
 import type { OperationId } from '@platfolio/api-contract/generated/types';
 import type { SignalId } from './signals.ts';           // §3
@@ -150,7 +150,7 @@ mechanism, specified continuation).
 their tracks; components query that container:
 
 ```css
-/* packages/ui/src/layout.css — SPECIFIED. The primitive owns the container. */
+/* packages/ui/src/layout/layout.css — SHIPPED 2026-11-15, generated from primitives.ts and byte-checked by `ui:css:check`. The primitive owns the container. */
 .ui-layout { container-type: inline-size; }
 @container (min-width: 48rem) { .ui-split { display: grid; grid-template-columns: 24rem 1fr; } }
 ```
@@ -201,7 +201,7 @@ panel reloads) without importing each other. That is a **typed signal table**, h
 processes no tenant data to the server, and is emphatically not an event bus of strings:
 
 ```ts
-// packages/ui/src/signals.ts — SPECIFIED.
+// packages/ui/src/signals.ts — SHIPPED 2026-11-15 (no screens yet).
 import type { OperationId } from '@platfolio/api-contract/generated/types';
 
 export type Retention = 'replay' | 'transient';
