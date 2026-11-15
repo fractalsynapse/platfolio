@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { createRequire } from 'node:module';
 import { test } from 'node:test';
 
 /**
@@ -44,21 +43,34 @@ test('no module in api-contract or scripts imports zod', () => {
     `zod resolves here only via the maintainer's home directory; these files would break in CI:\n${offenders.join('\n')}`);
 });
 
-test('the hazard is real: zod does NOT resolve from this package on its own', () => {
-  // The other half of the guard. If `zod` ever DID resolve from api-contract, the rule above would be
-  // protecting nothing and this assertion would say so -- a lint whose premise is false is worse than no lint.
-  const req = createRequire(path.join(SRC, 'index.ts'));
-  const fromScript = createRequire(path.join(SCRIPTS, 'check-api.ts'));
-  for (const [where, resolve] of [['packages/api-contract/src', req], ['scripts', fromScript]] as const) {
-    let target: string;
-    try {
-      target = resolve.resolve('zod/package.json');
-    } catch {
-      continue; // Unresolvable at all is the CI answer, and equally fine.
+test('zod is not a declared dependency, so any import of it would be ambient', () => {
+  // The other half of the guard, stated as a fact about the repository rather than about a machine.
+  //
+  // This test previously asserted something else: that `require.resolve('zod/package.json')` from this package
+  // escaped the repository root. That was measuring MY laptop -- where a stray /home/adrian/node_modules/zod
+  // exists -- and CI, which has no such directory, resolves zod inside the repo instead. The assertion therefore
+  // failed for a reason that had nothing to do with the rule it was protecting: an environment-dependent check
+  // dressed up as an invariant, the same class of mistake as the signature flip that only forged a token
+  // sometimes, and the test double that disclaimed an operation it still performed.
+  //
+  // What actually makes the no-import rule load-bearing is the dependency graph: zod is not declared here at
+  // all, so nothing can import it and still install cleanly. If someone adds the dependency deliberately, this
+  // test fails and says why, and the first test becomes enforceable by the lockfile rather than by luck.
+  const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'packages/api-contract/package.json'), 'utf8')) as {
+    dependencies?: Record<string, string>; devDependencies?: Record<string, string>; peerDependencies?: Record<string, string>;
+  };
+  const fields = ['dependencies', 'devDependencies', 'peerDependencies'];
+  const declared: string[] = [];
+  for (const field of fields) {
+    const deps = (pkg as Record<string, Record<string, string> | undefined>)[field] ?? {};
+    for (const name of Object.keys(deps)) {
+      if (name === 'zod' || name.startsWith('zod/')) declared.push(`${field}: ${name}`);
     }
-    assert.ok(!target.startsWith(ROOT + path.sep),
-      `${where} resolves zod to ${target} -- outside the repository. That is the leak: it works on this machine and nowhere else. Declare it through pnpm, or keep taking it from the schema values, which already carry toJSONSchema/extend/array.`);
   }
+  assert.deepEqual(declared, [],
+    'zod is now declared by @platfolio/api-contract. Either delete the declaration and keep taking toJSONSchema/'
+    + `extend/array from the schema values, or delete the no-import rule above -- but do not keep both, because `
+    + `a rule enforced by an absent dependency and a dependency that is present are different claims. Found: ${declared.join(', ')}`);
 });
 
 test('the composition works without it: extend and array are methods on the values', () => {
