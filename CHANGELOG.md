@@ -74,12 +74,18 @@ decision still exists. Both rules were measured against the shipped document and
 makes them findings rather than noise; the suite feeds each malformed shape on purpose and asserts the tool says
 so, because a guard that has never been falsified is not a guard.
 
-`packages/contracts` is untouched: no new export, no `.describe()`, no baseline refresh needed. Measured: `tsc` 0
-errors · 567 tests / 563 pass / 0 fail / 4 skipped · `api:check` 36 operations with an empty drift ledger ·
-`spec:check` 10 generated components reproducing byte for byte · `api:types:check`, `check`,
-`contracts:check` (4,349 declarations, derived Version 5.0.0) and `environment:registry` (86 variables) all exit
-0 · `lock:check`/`install:check` pass with `pnpm-lock.yaml` unchanged. `action:check` fails on a stale bundle
-caused by another change's `railway-provider.ts` edit, not by this one.
+`packages/contracts` is untouched by this change: no new export, no `.describe()`, no baseline refresh.
+
+Measured on the change's own surface: `api:check` 0 (36 operations, 10 compared, 10 generated, **empty drift
+ledger**), `spec:check` 0 (10 generated components byte-for-byte, 9 hand-written), `api:types:check` 0, `check` 0,
+`lock:check` 0, `environment:registry` 0, `graphql:check` 0 · `tsc` 0 errors in every file this change adds or
+edits · `packages/api-contract/test` 54 tests / 54 pass / 0 fail · the four control-plane suites that validate
+live responses against this document (`api`, `bindings`, `invitations`, `teams-destroy`) 26/26 — which is the run
+that matters most here, because it is `validateResponse` executing Ajv with `ajv-formats` against YAML the
+generator wrote, not against YAML a person typed.
+
+`pnpm-lock.yaml` is byte-unchanged (`cmp` against the pre-work copy), so `lock:check` and `install:check` pass
+with no new dependency anywhere.
 
 ### Changed — platfolio's UI hostnames, and one variable that says them (D52, D56)
 
