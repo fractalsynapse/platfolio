@@ -1,5 +1,6 @@
 import { createSign, randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import { CONTRACT_VERSION } from './generated/contract-version.ts';
 
 /**
  * The source-control seam (D22). GitHub Apps and personal tokens differ in *custody*, not in the
@@ -147,7 +148,7 @@ export class GithubAppProvider implements ScmProvider {
   describe(): ScmDescriptor {
     return {
       kind: 'github-app',
-      contract: '1.0.0',
+      contract: CONTRACT_VERSION,
       // Only the credential-free operations are advertised until a real installation exists.
       operations: ['appManifest', 'registrationUrl', 'consumeRegistrationCallback', 'installUrl'],
     };
@@ -211,7 +212,7 @@ export class GithubAppProvider implements ScmProvider {
 /** Self-hosters who will not install an App: same interface, personal credential, fewer operations. */
 export class GithubPatProvider implements ScmProvider {
   describe(): ScmDescriptor {
-    return { kind: 'github-pat', contract: '1.0.0', operations: ['installUrl'] };
+    return { kind: 'github-pat', contract: CONTRACT_VERSION, operations: ['installUrl'] };
   }
   installUrl(): string {
     throw new Error('a personal token has no app to install; use the App path for installation consent');

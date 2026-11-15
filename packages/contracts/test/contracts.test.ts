@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import { test } from 'node:test';
 import { FakeInfraProvider, RailwayInfraProvider, runConformance, samplePlan, satisfiesRange, CONTRACT_VERSION, OPERATIONS } from '../src/index.ts';
 import { applyBump } from '../../../scripts/check-contracts.ts';
@@ -103,6 +105,27 @@ test('railway rejects an invalid region and accepts a valid one', () => {
   const issues = railwayProvider().validatePlan(bad);
   assert.ok(issues.some((i) => i.code === 'region-form'), JSON.stringify(issues));
 });
+
+test('no contracts source states a semver literal -- the version is derived, everywhere (D59)', () => {
+  // The rule is "we should never specify a version on contracts". An earlier sweep removed the named constants
+  // and left four inline `contract: '1.0.0'` values in provider describe() methods, which no comparison read
+  // and so no gate saw: right shape, wrong authority, invisible for exactly as long as nothing looked. This
+  // walks the sources instead of trusting that whoever edits next will remember.
+  const dir = path.resolve(import.meta.dirname, '../src');
+  const offenders: string[] = [];
+  for (const entry of fs.readdirSync(dir)) {
+    if (!entry.endsWith('.ts') || entry.startsWith('generated/')) continue;
+    const text = fs.readFileSync(path.join(dir, entry), 'utf8');
+    const lines = text.split('\n');
+    lines.forEach((line, i) => {
+      if (/['`]\d+\.\d+\.\d+['`]/.test(line) && /contract/i.test(line)) {
+        offenders.push(`${entry}:${String(i + 1)}: ${line.trim().slice(0, 80)}`);
+      }
+    });
+  }
+  assert.deepEqual(offenders, [], `semver literals claiming to be a contract version:\n${offenders.join('\n')}`);
+});
+
 
 test('operations list is the contract surface, and both providers stay inside it', () => {
   for (const provider of [new FakeInfraProvider(), railwayProvider()]) {

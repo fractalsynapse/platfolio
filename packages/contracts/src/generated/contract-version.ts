@@ -8,7 +8,7 @@
  * surface, so every version bump would classify as a REMOVED declaration and the drift gate would
  * demand a breaking ack for its own arithmetic.
  *
- * Derived from the baseline digest `448cfa1167a4e06d`.
- * NONE 3.0.0 -> 3.0.0 (surface diff: 0 removed, 0 widened, 0 added, 0 reordered)
+ * Derived from the baseline digest `1205421bad81b8c2`.
+ * MAJOR 3.0.0 -> 4.0.0 (surface diff: 4 removed, 0 widened, 4 added, 0 reordered); acknowledged: D59 finished properly: five provider version literals (two stores, two SCM describes, EMAIL_CONTRACT.version) now derive from the generated contract version. EMAIL_CONTRACT was an `as const` literal type, so retiring it reads as a removed declaration -- the same self-flagging-arithmetic trap D59 documented twice. No external implementer exists.
  */
-export const CONTRACT_VERSION: string = '3.0.0';
+export const CONTRACT_VERSION: string = '4.0.0';
