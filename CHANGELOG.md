@@ -4,6 +4,87 @@ Notable changes to the platfolio project. One human-readable entry per user- or 
 change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
+## [Unreleased]
+
+### Added — #259: `.tsx` is type-checked in CI, and the first screens land in `packages/ui`
+
+Two changes, deliberately separate, because the first is what made the second honest.
+
+**The wiring.** `packages/ui/tsconfig.json` now exists, carrying `jsx: react-jsx` and `lib` with `DOM`, and
+`pnpm run typecheck` runs **two** explicit `tsc --noEmit -p` projects: the root one (the server tree, still
+`lib: ["ES2023"]`, still no `DOM`) and the UI one. `packages/ui` and the three `scripts/` files that audit it
+(`check-ui.ts`, `gen-ui-css.ts`, `ui-source-scan.ts`) are excluded from the root project by file list, not by
+flag, because TypeScript follows imports out of an `exclude`d directory — measured as TS6142
+(`--jsx is not set`) once a `.tsx` was reachable from a gate script, and the tempting fix (adding `jsx` and
+`DOM` to the root config) is the trade #259 refuses to make: a stray `document` in `packages/contracts` or
+`apps/control-plane` stays a compile error, re-measured as TS2584/TS2304. `tsc -b` with `composite` was tried
+first and rejected on measurement: a composite `packages/ui` refuses its own
+`test/source-scan.test.ts` for importing `scripts/ui-source-scan.ts` outside its rootDir (TS6059 + TS6307),
+which would have meant moving a gate's source into the package or leaving a file unchecked. So: two
+invocations, no emitted artifacts, no build order.
+
+**The coverage rule.** A split like that rots quietly, so `scripts/check-project.ts` gained
+`checkTypecheckCoverage`: every per-package `tsconfig.json` on disk must be named by the `typecheck` script
+and every named project must exist and parse; every source file under `scripts/`,
+`packages/*/src|test`, `apps/*/src|test` must be claimed by exactly one project's include list; a `.tsx` must
+be claimed by a project that declares `jsx`; and the root project must still resolve no `DOM` and claim no
+`.tsx`. It reads the **disk**, not `git ls-files` — the first falsification run showed the difference: an
+uncommitted `packages/contracts/src/probe.tsx` was invisible to a tracked-files rule, so the gate reported a
+clean tree over a file that was compiling as nothing. `packages/ui/test/typecheck-coverage.test.ts` mutates
+seven ways (a type error in a screen, `document` in the server tree, a missing project config, an unclaimed
+`.tsx`, a `.tsx` in a `jsx`-free project, an unwired `tsconfig.json`) and each must bite.
+
+**The screens.** Six registered components (`context.switcher`, `freshness.label`, `instance.detail`,
+`instance.list`, `instance.row`, `instance.state`) in `packages/ui/src/components/instances.tsx`, one screen
+document and its container in `packages/ui/src/screens/`, a `SignalsProvider`/`useSignalValue`/`useEmit` seam
+(`signals-context.ts`) so context selection reaches a render without an ambient bus, and a generated
+`components.css` whose only job is to reference the 44/24/8 px tokens so 11 §8's hit-target floor is a
+stylesheet fact. Data arrives only through the SDK seam; `reads` names four real generated operations
+(`listInstances`, `listTeams`, `getInstance`, `getLatestAttestation`). No site, no service, no `apps/*`
+change: UI-OD1 (Astro islands vs a plain React mount) is still the maintainer's, and nothing mounts these.
+
+**§9.11 became runnable by promoting 11 §2's prose to data.** Each layout primitive now declares
+`floorSlots` — where its content lands when the container is at the floor width (`split` → stack or pushed
+sheet, `popout-sidebar` → sheet). The parity gate walks each `ScreenDocument`'s placements against each
+component's declared `slots` and compares the `OperationId` sets at the two widths, so "a capability that
+exists only when wide" is a build failure that names the component and the operation. `instance.detail`
+appears twice in the document, once in the wide detail track and once as the pushed sheet: one component, two
+homes, no fork.
+
+**Two gate defects found by the new gates' own falsification, both recorded rather than smoothed over.**
+§9.2's source filter still read `rel.endsWith('.ts')` after the walk was widened to `.tsx`, so a `fetch`
+planted in a screen was invisible to the gate whose job is to find it — the mutation said PASS, and that is the
+finding, not the failure of the test. And gate §R5's state-word search fired on `aria-live`, the attribute
+11 §8 mandates for a signal-driven region: the pattern now refuses the word in copy and permits that attribute,
+and `test/gates-falsify.test.ts` asserts **both** directions (a `"live"` label still fails). Neither widening
+accommodates a violation; one is a hole closed, the other a false positive on the compliant case.
+
+**Three shipped-code defects the first components exposed.** `contract.ts` seeded its known signal ids from
+`src/index.ts`, on the stated belief that importing `signals.ts` would close a cycle — it does not, and the
+first component declaring `consumes` threw `ContractViolation` for naming a signal that was in the registry all
+along, because `scripts/check-ui.ts` imports `registry.ts` directly and never runs the barrel.
+`AnyComponentContract = ComponentContract<object>` could not have held a single real component: `render` is a
+property, so `strictFunctionTypes` checks its parameter contravariantly and every concrete contract failed with
+TS2375 (measured) — an empty registry could never discover that, which is the general lesson. And zod cannot
+represent `z.custom` in JSON Schema, so a `z.custom` field poisons `jsonSchema.input()` for the whole object —
+which is exactly the view 11 §8's derived labels and rule 4's `draftable` check read.
+
+**Three spec questions this change raises and did not decide (D41).** (1) No team-scoped list operation:
+`GET /api/v1/instances` takes no `teamId`, so `team/name` scoping is a client-side join against
+`listTeams`, and the screen says so out loud; the operation is the owner's call. (2) The contract's
+`environment` is an unbounded string (and `redeployInstance` accepts `preview`) while 11 §3's
+`context.switched` payload enumerates three, so a preview environment is one the context cannot name;
+`unservedEnvironments()` reports it and `enums.ts` derives the selector's list from the signal instead of
+restating it. (3) Enumerated fields validate their *kind*, not their membership, because the authoritative
+runtime enumerations live in `@platfolio/contracts` (a workspace edge this package does not declare) and one
+state token collides with rule 5's grep; gate §9.5 names the two prop sets that are accepted and wrong.
+
+**Measured on this tree:** `npm run typecheck` 0 (both projects); `ui:check` 20 gates — 17 passed, 0 failed,
+3 NOT RUN (§9.7 browser containers, §9.8 axe + layout engine, §9.9 no draft store); `check-project` 0;
+`spec:check`/`api:check`/`api:types:check`/`contracts:check`/`ui:css:check` all 0; full suite 796 tests —
+792 pass, 0 fail, 4 skipped (live-forge and `PLATFOLIO_DB_URL`-gated, unchanged in kind and in number). No commit, no push,
+no live mutation; `pnpm-lock.yaml` untouched.
+
 
 ### Changed — three maintainer decisions recorded: one UI package (D63), a required real-time capability (D64), and the admin-rotation runbook he asked for
 

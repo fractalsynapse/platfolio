@@ -20,6 +20,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { renderTokensCss } from '../packages/ui/src/tokens.ts';
 import { renderLayoutCss } from '../packages/ui/src/layout/primitives.ts';
+import { renderComponentCss } from '../packages/ui/src/components/style.ts';
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 
@@ -27,6 +28,7 @@ const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
 const TARGETS = [
   { out: 'packages/ui/src/tokens.css', source: 'packages/ui/src/tokens.ts', render: renderTokensCss },
   { out: 'packages/ui/src/layout/layout.css', source: 'packages/ui/src/layout/primitives.ts', render: renderLayoutCss },
+  { out: 'packages/ui/src/components/components.css', source: 'packages/ui/src/components/style.ts', render: renderComponentCss },
 ] as const;
 
 const write = process.argv.includes('--write');

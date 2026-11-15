@@ -2,7 +2,7 @@ import type { StandardSchemaV1 } from '@standard-schema/spec';
 import type { OperationId } from '@platfolio/api-contract/generated/types';
 import { isValueBearingKey } from '@platfolio/page-schema';
 import type { LayoutSlot } from './layout/index.ts';
-import type { SignalId } from './signals.ts';
+import { SIGNAL_IDS, type SignalId } from './signals.ts';
 
 /**
  * The component contract (11 §1, rules 1/3/4/6). A component is a *registered contract*, not a file that
@@ -54,8 +54,29 @@ export interface ComponentContract<P extends object = object> {
   readonly render: (props: P) => React.ReactNode;
 }
 
-/** The erased form, for a table that holds heterogeneous components. */
-export type AnyComponentContract = ComponentContract<object>;
+/**
+ * The erased form, for a table that holds heterogeneous components.
+ *
+ * It used to say `ComponentContract<object>`. That does not work, and the reason is the kind of claim an empty
+ * registry can never discover: `render` is a *property* whose type is a function, so under
+ * `strictFunctionTypes` its parameter is checked contravariantly, and a concrete
+ * `(props: { instances: readonly InstanceRow[] }) => ReactNode` is assignable to `(props: object) => ReactNode`
+ * and to nothing else of that shape. Measured as TS2375 on the first table with components in it; an index
+ * signature (`{ [field: string]: any }`) fails the same way, because "has every key" and "has these keys" are
+ * different claims to the compiler.
+ *
+ * So the erased props are `any`, which is the one type that is bivariant in both directions, and the loss is
+ * bounded and deliberate: this is the view `contractProblems`, `documentProblems` and the registry walk, and all
+ * three validate through the component's own StandardSchema at run time. Concrete callers still go through
+ * `ComponentContract<P>` -- which is why `defineComponent` is generic and screens take typed props.
+ *
+ * The alternative that would keep the type honest is a second generic parameter for the erased view, and the
+ * alternative that would keep it *simple* is declaring `render` as a method (`render(props: P): ReactNode`),
+ * which TypeScript treats bivariantly. Neither is a change a UI branch makes on its own: 11 §1 writes this
+ * interface as the contract, so the shape is its owners' call. Reported, with the failing form left in this
+ * comment so nobody re-invents it.
+ */
+export type AnyComponentContract = ComponentContract<any>;
 
 /** Props a registered contract accepts, so a fixture never writes a prop object out by hand. */
 export type PropsOf<C> = C extends ComponentContract<infer P> ? P : never;
@@ -186,13 +207,23 @@ function propertyNames(schema: StandardSchemaV1<unknown, unknown> | undefined): 
 }
 
 /**
- * The ids `consumes`/`produces` may name. Seeded once from the registry at module load rather than imported,
- * because `signals.ts` reaches into nothing here and a static import would close a cycle.
+ * The ids `consumes`/`produces` may name.
  *
- * Named `declareKnownSignalIds`, not `register…`: gate §9.6 refuses a mutator-looking export on a registry,
- * and a name that reads like one would either trip the gate or teach the next reviewer to widen it.
+ * This used to be an empty set that `src/index.ts` filled at module load, on the stated belief that importing
+ * `signals.ts` here would close a cycle. It would not: `signals.ts` imports `@standard-schema/spec`, `zod` and
+ * `isValueBearingKey`, and nothing from the contract layer -- the cycle was assumed, never checked, and the first
+ * components that declared `consumes` proved it. Measured failure: `scripts/check-ui.ts` imports
+ * `packages/ui/src/registry.ts` directly (it has to -- gate §9.5 reads the live table), so `index.ts` never ran,
+ * `KNOWN_SIGNAL_IDS` stayed empty, and every component with a signal list threw `ContractViolation` at
+ * registration for naming a signal that was in the registry all along. A gate that cannot load its own subject
+ * reports nothing, which is the failure this repository keeps naming.
+ *
+ * `declareKnownSignalIds` stays, so a caller outside the package graph can still describe a platform's own signal
+ * ids; it is no longer the only thing that makes the check work. Named `declare…` rather than `register…` for the
+ * reason gate §9.6 gives: a mutator-looking export on a registry either trips the gate or teaches the next
+ * reviewer to widen it.
  */
-const KNOWN_SIGNAL_IDS = new Set<string>();
+const KNOWN_SIGNAL_IDS = new Set<string>(SIGNAL_IDS);
 export function declareKnownSignalIds(ids: readonly string[]): void {
   for (const id of ids) KNOWN_SIGNAL_IDS.add(id);
 }

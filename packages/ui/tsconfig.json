@@ -1,0 +1,53 @@
+{
+  "$comment": [
+    "The one type-check project allowed to know a browser exists (#259). Two things are overridden here and",
+    "nothing else: `lib` gains `DOM`, `jsx` gains `react-jsx`. Every strictness flag comes from the root config",
+    "through `extends`, so the UI tree is not quietly held to a laxer standard than the server tree, and a",
+    "tightening landed in the root file tightens this one the same day.",
+    "",
+    "Why this file exists: the root program's include globs are `.ts`-only and it declares no `jsx`, so the",
+    "first `.tsx` screen would have been transpiled by `tsx` at run time and never type-checked in CI. Why it is",
+    "scoped to one package: the root program's `lib` is [\"ES2023\"] with no `DOM` precisely so a stray `document`",
+    "in packages/contracts or apps/control-plane is a COMPILE error. Adding `DOM` tree-wide would trade that",
+    "compiler guarantee for a grep, and that is the trade this issue refuses to make.",
+    "",
+    "Why the three scripts below belong to THIS project and not the root one: `check-ui.ts` and `gen-ui-css.ts`",
+    "import this package's modules, and TypeScript follows imports out of an `exclude`d directory. Left in the",
+    "root program they drag every `.tsx` screen into a config with no `jsx` and fail with TS6142 (measured on",
+    "this tree), and the tempting fix -- `jsx` plus `DOM` in the root file -- is the trade above. So the gate",
+    "scripts are checked here, where JSX and DOM exist. The price is stated rather than hidden: inside those",
+    "three files a stray `window.` is no longer a compile error. Gate TS0 in scripts/check-ui.ts is the grep that",
+    "keeps paying on their behalf, and it is falsified by test like every other gate in this package.",
+    "",
+    "Why not `composite` + `tsc -b`, which would have cost nothing: measured on this tree, a composite",
+    "packages/ui refuses `packages/ui/test/source-scan.test.ts` for importing `scripts/ui-source-scan.ts` outside",
+    "its rootDir -- TS6059 and TS6307 together. Making that legal means moving a gate's own source into this",
+    "package or leaving a file unchecked, and a coverage hole is worse than a grep. So: two explicit",
+    "`tsc --noEmit -p` invocations in the `typecheck` script, no emitted artifacts, no build order to get wrong.",
+    "",
+    "`exclude` keeps the negative fixtures out, exactly as the root config does. Those four files must NOT",
+    "compile; scripts/check-ui.ts compiles each one standalone and reads the compiler's answer.",
+    "",
+    "Screens under `apps/*` later (the open UI-OD1 shell) are not forbidden by accident: give that app a",
+    "tsconfig.json with `jsx`, add one `tsc --noEmit -p apps/<name>` to the `typecheck` script, and",
+    "scripts/check-project.ts's typecheck-coverage rule holds the lists in step -- it fails a tracked",
+    "`.ts`/`.tsx` that no project claims, a `.tsx` claimed by a project that does not declare `jsx`, a",
+    "tsconfig the `typecheck` script never runs, and a `test` glob that matches nothing.",
+    ""
+  ],
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx"
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "test/**/*.ts",
+    "test/**/*.tsx",
+    "../../scripts/check-ui.ts",
+    "../../scripts/gen-ui-css.ts",
+    "../../scripts/ui-source-scan.ts"
+  ],
+  "exclude": ["test/fixtures/*.negative.ts"]
+}

@@ -10,5 +10,27 @@
   },
   "include": ["scripts/**/*.ts", "packages/*/src/**/*.ts", "packages/*/test/**/*.ts",
     "apps/*/src/**/*.ts", "apps/*/test/**/*.ts"],
-  "exclude": ["packages/*/test/fixtures/*.negative.ts"]
+  "$comment": [
+    "#259. `packages/ui` and the three scripts that audit it are excluded HERE rather than simply un-listed,",
+    "and the reason is a measured behaviour of tsc, not tidiness: TypeScript follows imports out of an",
+    "`exclude`d directory. This program is the one that makes a stray `document` in packages/contracts or",
+    "apps/control-plane a COMPILE error: `lib` is `[\"ES2023\"]`, `types` is `[\"node\"]`, there is no `DOM` and no",
+    "`jsx`. `scripts/check-ui.ts` imports packages/ui modules, so leaving it here would drag every `.tsx`",
+    "screen into a program that has no `jsx` and fail with TS6142 (measured), and the tempting fix -- adding",
+    "`jsx` and `DOM` to this file -- is the trade this issue refuses to make. So the UI tree, and the gate",
+    "scripts that read it, are checked by packages/ui/tsconfig.json instead, which owns `jsx` and `DOM`.",
+    "",
+    "That exclusion is only safe if nothing escapes checking. scripts/check-project.ts enforces it: the union",
+    "of every `typecheck` project's include list must equal the `.ts`/`.tsx` set on disk, in both directions --",
+    "a file in no program is unchecked (fails), a file in two programs is two sets of lib/jsx answers for one file",
+    "(fails). So neither a UI source nor a stray `.tsx` can become invisible by editing this list.",
+    "",
+    "Adding a screen-bearing app later (the UI-OD1 shell under apps/) is legal and is NOT forbidden by",
+    "accident: give that app its own tsconfig.json with `jsx`, add one explicit",
+    "`tsc --noEmit -p apps/<name>` invocation to the `typecheck` script, and the coverage gate does the rest.",
+    "It is not done here because the shell's shape is the maintainer's open decision, not this change's.",
+    ""
+  ],
+  "exclude": ["packages/*/test/fixtures/*.negative.ts", "packages/ui",
+    "scripts/check-ui.ts", "scripts/gen-ui-css.ts", "scripts/ui-source-scan.ts"]
 }

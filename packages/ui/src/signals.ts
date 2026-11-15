@@ -209,6 +209,22 @@ export interface SignalBus {
   /** A late subscriber is handed the stored value first — iff the signal's declared retention is `'replay'`. */
   subscribe<I extends SignalId>(id: I, handler: (payload: PayloadOf<I>, meta: SignalMeta) => void): () => void;
   retentionOf<I extends SignalId>(id: I): RetentionOf<I>;
+  /**
+   * The store read that `subscribe`'s synchronous replay is built from, exposed so a render can be honest on its
+   * **first** frame: the last value for a `replay` signal, `null` for a `transient` one, which has nothing stored.
+   *
+   * **This is an addition to 11 §3's `SignalBus` shape, recorded as a deviation, not a silent one.** §3
+   * acceptance (d) requires that a component mounted after the context changed shows the selected context on its
+   * first render. An effect-registered subscription cannot do that — the first render has already happened, so a
+   * server render shows a list with no selected row for one frame, and the honest reading of (d) is that the
+   * frame is the defect. Every alternative that avoids this method is worse: subscribing during render leaks a
+   * second registration under React's double-invocation, and a module-level "last context" variable is the
+   * ambient state 11 §3 exists to refuse.
+   *
+   * What it does not change: cost 1 still holds — a replayed value is a stale value with confidence, it answers
+   * *which query to run*, and anything about the server still comes from the SDK.
+   */
+  peek<I extends SignalId>(id: I): PayloadOf<I> | null;
 }
 
 export class UnknownSignalError extends Error {
@@ -287,6 +303,26 @@ export function createSignalBus(): SignalBus {
       // The cast erases a per-id literal for a union the caller then re-narrows by `id`. The value itself comes
       // from the frozen declaration, so no default is involved: this is the table, read back.
       return signal.retention as RetentionOf<typeof id>;
+    },
+
+    peek(id) {
+      const signal = SIGNAL_TABLE[id];
+      // Refused, not `null`: a caller asking for a signal the table does not hold has a stale id, and answering
+      // "nothing stored" would let that typo read as an empty context forever (11 §3 acceptance (b)).
+      if (!signal) throw new UnknownSignalError(String(id));
+      // The retention decides, not the call site. A `transient` signal's last value may well be in the map -- it
+      // is not, because emit only stores on replay -- and reading through the declaration means a future edit
+      // that stores more cannot start handing side effects to late renders.
+      if (signal.retention !== 'replay') return null;
+      // Named apart from the store it reads: `const stored = stored.get(id)` would be a temporal-dead-zone
+      // reference to the Map itself, and the shadowing is exactly the kind of thing a reviewer should not have to
+      // notice at 400 lines.
+      const remembered = stored.get(id);
+      if (remembered === undefined) return null;
+      // Validated on the way out, exactly as `subscribe`'s replay does it: the store holds a reference that a
+      // caller holding a non-frozen payload could still have mutated, and a peek that skips the check is a second
+      // answer to "what is the context" that the emit path does not give.
+      return validate(signal, remembered) as PayloadOf<typeof id>;
     },
   };
 }

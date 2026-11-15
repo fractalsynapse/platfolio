@@ -21,11 +21,17 @@
  *
  * ## The limit, stated rather than hidden
  *
- * This is a character scanner, not a parser. A division operator that begins what looks like a `//` comment,
- * or a regex literal containing an unmatched quote, can shift the mode. The failure direction is deliberate:
- * a lost mode turns *code into spaces*, which drops coverage on the affected lines, and `test/gates-falsify`
- * catches that by planting a violation at the end of a real file and requiring it still be found. The scanner
- * never gains coverage by inventing a token that was not there.
+ * This is a character scanner with one piece of context, not a parser. It now distinguishes a regular-expression
+ * literal from a division by the character that precedes it -- the same question a parser asks, answered from the
+ * text it has already emitted -- because the cost of NOT asking was measured, not theorised: `['"]` inside a
+ * pattern opened string mode and swallowed the remainder of the file, so a gate read the gate's own source as
+ * code it had blanked. Both directions of that call are pinned in `test/source-scan.test.ts`.
+ *
+ * What is still out of reach: a `/` whose position this heuristic reads wrongly inside an expression too exotic
+ * to name here. The failure direction is what matters and it is asymmetric on purpose -- a lost mode used to turn
+ * *code into spaces*, which drops coverage in silence, and `test/gates-falsify.test.ts` is what catches that by
+ * planting a violation at the end of a real file and requiring it still be found. The scanner never gains
+ * coverage by inventing a token that was not there.
  */
 
 /**
@@ -42,6 +48,52 @@ export function stripComments(text: string, keepStrings = false): string {
   const out: string[] = [];
   let i = 0;
 
+  /**
+   * Would a `/` at this point begin a regular-expression literal rather than a division?
+   *
+   * Decided from what has already been emitted, which is the same question a JS parser asks: strip the trailing
+   * whitespace, look at the last character. An identifier or `)`/`]` closes a value, so `/` divides. Anything
+   * else -- `=`, `(`, `[`, `,`, `:`, `return`, `=>` -- is a value position, so `/` starts a literal.
+   */
+  const regexPosition = (): boolean => {
+    const before = out.join('').replace(/\s+$/, '');
+    if (before.length === 0) return true;
+    const last = before[before.length - 1] as string;
+    if (last === ')' || last === ']') return false;
+    if (/[\w$]/.test(last)) {
+      // `return /re/`, `typeof /re/`: the keyword is part of the value position, not an operand before it.
+      return /(?:^|[^\w$])(?:return|typeof|instanceof|in|of|new|delete|void|case|do|else|yield|await|=>)$/.test(before.slice(-24));
+    }
+    return true;
+  };
+
+  /**
+   * Consume a regex literal, or refuse and treat the `/` as division.
+   *
+   * A literal cannot span a line, so hitting a newline (or the end of the text) before the closing slash means
+   * this was not a regex after all and the caller re-reads the character as ordinary code. That fallback is the
+   * whole reason this heuristic is safe to apply: the wrong guess costs one character of misread division, the
+   * old behaviour cost the rest of the file.
+   */
+  const readRegex = (): string | null => {
+    let j = i + 1;
+    let inClass = false;
+    while (j < text.length) {
+      const c = text[j] as string;
+      if (c === '\n') return null;
+      if (c === '\\') { j += 2; continue; }
+      if (inClass) { if (c === ']') inClass = false; j += 1; continue; }
+      if (c === '[') { inClass = true; j += 1; continue; }
+      if (c === '/') {
+        j += 1;
+        while (j < text.length && /[a-z]/i.test(text[j] as string)) j += 1;
+        return text.slice(i, j);
+      }
+      j += 1;
+    }
+    return null;
+  };
+
   while (i < text.length) {
     const mode = top();
     const two = text.slice(i, i + 2);
@@ -54,6 +106,15 @@ export function stripComments(text: string, keepStrings = false): string {
       if (ch === '"') { stack.push('dq'); out.push(ch); i += 1; continue; }
       if (ch === '`') { stack.push('template'); out.push(ch); i += 1; continue; }
       if (mode === 'interp' && ch === '}') { stack.pop(); out.push(ch); i += 1; continue; }
+      // A regex literal is code, and it may contain quote characters: `['"]` is a character class, not the
+      // start of a string. Without this branch the scanner used to open `sq` mode inside its own patterns and
+      // swallow the rest of the file -- measured, and the reason gate TS0 in check-ui.ts reported the gate's
+      // own pattern table as a violation. Emitting the literal verbatim keeps its text visible (it is real
+      // code) without letting a quote inside it move the mode.
+      if (ch === '/' && regexPosition()) {
+        const literal = readRegex();
+        if (literal !== null) { out.push(literal); i += literal.length; continue; }
+      }
       out.push(ch); i += 1; continue;
     }
 

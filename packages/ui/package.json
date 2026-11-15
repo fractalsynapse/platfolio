@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "The UI foundation: the component contract, design tokens as CSS custom properties, the five layout primitives, the typed signal registry and the SDK seam. No screens -- this package is what the UI gates in docs/design/11 SS9 can bite on.",
+  "description": "The platfolio UI framework: component contracts, design tokens, layout primitives, the signals registry, the SDK seam, and the first screens (instance list). Gates are enforced by scripts/check-ui.ts (`ui:check`), not by this description.",
   "license": "Apache-2.0",
   "main": "./src/index.ts",
   "exports": {

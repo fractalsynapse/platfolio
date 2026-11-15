@@ -199,23 +199,35 @@ Normative statements are [docs/ui-architecture.md](docs/ui-architecture.md); rat
 eleven CI gates are [11](docs/design/11-ui-components-and-page-model.md). Build or review any UI through the
 [ui-architecture skill](.agents/skills/ui-architecture/SKILL.md). `packages/ui` **now exists** (2026-11-15: the
 component contract, design tokens as CSS custom properties per D63, the five layout primitives, the signals
-registry, the SDK seam, and 19 gates) — **with no screens in it yet**, which is the point of that ordering.
+registry, the SDK seam, and 19 gates) and **now has its first screens**: six registered components in
+`.tsx`, one screen document, and 20 gates of which 17 pass and 3 report NOT RUN. #259 is closed:
+`packages/ui/tsconfig.json` carries `jsx: react-jsx` plus `lib: [..., "DOM"]`, and `pnpm run typecheck` runs
+**both** projects — so a `.tsx` is compiled by CI, while `document` in `packages/contracts` or
+`apps/control-plane` is still TS2584. `scripts/check-project.ts` now fails the build unless the union of the
+type-check projects' file lists equals the source tree on disk, so an exclude list cannot become a silent skip.
 `packages/api-client` and `apps/site` **do not exist** — a UI gate that audits them is *not run*, not passed.
 
 | # | Rule (one line) | What enforces it |
 | --- | --- | --- |
 | 1 | Components reach the API only through the SDK, with types generated from `apps/control-plane/openapi.yaml`; a hand-written client or a hand-copied DTO is forbidden (#247 at a higher altitude) | `spec:check`, `api:check`, `api:types:check` — all real and green today |
-| 2 | Responsive comes from the **container**, not the window: five layout primitives with a containment matrix, no width `@media`, no `isMobile` prop; every capability reachable at 360 px, desktop adds simultaneity not features | `ui:check` §9.3 runs today (no width `@media`, no `isMobile`-shaped props, `container-type` declared on every primitive); §9.7 is NOT RUN until a browser and real components exist |
+| 2 | Responsive comes from the **container**, not the window: five layout primitives with a containment matrix, no width `@media`, no `isMobile` prop; every capability reachable at 360 px, desktop adds simultaneity not features | `ui:check` §9.3 runs today over `.ts` **and** `.tsx` and over all three generated sheets; §9.11 runs today per screen (the degradation is a `floorSlots` field on each primitive, so parity is arithmetic over declarations); §9.7 is NOT RUN — the components exist, the 320/1280 px containers do not exist without a browser |
 | 3 | Signals are typed and each declares `retention: 'replay' \| 'transient'` with **no default**; side-effecting or credential-shaped payloads are transient by rule; late-mount tested both ways | `ui:check` §9.4 runs today (`packages/ui/src/signals.ts`, retention required with no default; credential-shaped payloads refused as `replay`). No stringly-typed bus, ever |
 | 4 | Drafts are client-only, allowlisted per field, TTL'd, wiped on sign-out and submit, **never synced**, and never able to hold a secret value (D4/D53) | one exported `isValueBearingKey`/`findValueBearingProps` + `packages/page-schema/test/secrets-panel.test.ts` — real today and it now catches credential-shaped names (`token`, `apiKey`, `clientSecret`) it previously missed; the residual limit is that a name test cannot see a secret under a neutral key, stated in [the rules doc](docs/ui-architecture.md#open-gaps-this-file-refuses-to-paper-over) |
 | 5 | Real-time is honest **and now a required capability (D64)**: one SDK freshness primitive whose transport is swappable at build time — `poll` today, `events` when §4's operations land in the spec — and since no push channel exists today, no `EventSource`/`WebSocket`/"live" pill; every render shows its age; polling is never styled as push | `api:check` (the operation cannot hide) + 11 §9.10 — specified; the push operations are **required work** (D64), designed first in `openapi.yaml` (D41) by whoever owns it, and absent until a live check says otherwise |
-| 6 | **Pluggable means build-time, never runtime-loaded**: no dynamic import of UI code, no server-supplied component registry. [10's Tier 2 boundary](docs/design/10-cordis-kernel-and-extension-seams.md#the-collision-and-the-resolution) is a security property (D13/D14) | closed component union + strict `PageSchema` (`packages/page-schema`) — real today; `ui:check` §9.6 runs today (build-time registry, immutability proved by *attempting* the widening after `Object.freeze` was shown to be theatre); §9.5 is NOT RUN while the registry is intentionally empty |
+| 6 | **Pluggable means build-time, never runtime-loaded**: no dynamic import of UI code, no server-supplied component registry. [10's Tier 2 boundary](docs/design/10-cordis-kernel-and-extension-seams.md#the-collision-and-the-resolution) is a security property (D13/D14) | closed component union + strict `PageSchema` (`packages/page-schema`) — real today; `ui:check` §9.6 runs today (build-time registry, immutability proved by *attempting* the widening after `Object.freeze` was shown to be theatre); §9.5 runs today: 6 ids resolve, each with a props schema, a stored document re-validates and invalid prop sets are refused at validation (with 2 named-accepted, because props validation checks kind and not enumeration membership) |
 
 The first `packages/ui` commit is the **contract package and its gates, not a screen**: a gate added after four
 screens exist audits nothing (11 § Consequences for the plan). Five `UI-OD` decisions remain open and belong to
 the maintainer — an agent does not settle one in code; two were answered on 2026-11-15 (UI-OD6 → D63, UI-OD2 →
 D64) and are recorded, with his reasons, in [11 § Closed UI-OD decisions](docs/design/11-ui-components-and-page-model.md#closed-ui-od-decisions)
 rather than deleted.
+
+**Two gate fixes came out of the screens, and are recorded rather than buried.** §9.2's source filter read
+`rel.endsWith('.ts')` while the walk had been widened, so a `fetch` planted in a screen was invisible to the gate
+whose job is to find it — the mutation said PASS and that was the finding. And gate §R5's state-word search fired
+on `aria-live`, the attribute 11 §8 *mandates*; it now refuses the word in copy and permits that attribute, and
+both directions are falsified. Neither was widened to accommodate a violation: the first was a hole, the second a
+false positive on the compliant case.
 
 ## Authority and scope
 

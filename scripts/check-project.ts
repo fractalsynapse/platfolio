@@ -10,6 +10,9 @@
  *   2. every cross-file `#anchor` targets a heading that exists in the target document
  *   3. every skill has frontmatter whose `name` matches its directory and a non-empty `description`
  *   4. every reference inside a skill resolves
+ *   5. every tracked TypeScript file is claimed by exactly one type-check project, and every `.tsx` by a
+ *      project that declares `jsx` (#259 -- see `checkTypecheckCoverage` below for why that is a gate and
+ *      not a note in a README)
  *
  * Scope excludes dependency and scratch trees: node_modules, .cache, .research, and the vendored
  * framework's own documentation (which is upstream's to validate).
@@ -19,6 +22,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import { parse as parseYaml } from 'yaml';
 import path from 'node:path';
+import ts from 'typescript';
 import { checkDecisionRegister } from './check-decision-register.ts';
 
 const argv = process.argv.slice(2);
@@ -692,10 +696,265 @@ async function checkNoPython(): Promise<string[]> {
   return problems;
 }
 
+/**
+ * The files the type-check projects are responsible for, read off the disk.
+ *
+ * Deliberately not `git ls-files`: this started as a tracked-files rule, like the Python one beside it, and the
+ * first falsification run showed what that costs. A new `packages/contracts/src/probe.tsx` that nobody had
+ * `git add`ed yet was invisible to the gate, so the gate reported the tree clean while the file sat there
+ * compiling as nothing. An uncommitted screen is still a screen -- which is also true of the compiler, whose own
+ * include lists are disk reads -- so the coverage rule reads the disk and skips the ignored trees the way every
+ * other walker in this file does.
+ */
+const UNIVERSE_DIRS = ['scripts', 'packages', 'apps'];
+async function typecheckUniverse(): Promise<string[]> {
+  const found: string[] = [];
+  const walk = async (dir: string): Promise<void> => {
+    let entries;
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (entry.name === 'node_modules' || entry.name === 'dist' || entry.name.startsWith('.')) continue;
+      const abs = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        await walk(abs);
+        continue;
+      }
+      if (!entry.isFile() || !/\.(ts|tsx)$/.test(entry.name)) continue;
+      found.push(path.relative(ROOT, abs).split(path.sep).join('/'));
+    }
+  };
+  for (const dir of UNIVERSE_DIRS) await walk(path.join(ROOT, dir));
+  return found.sort();
+}
+
+/**
+ * Every per-package type-check project on disk, by the same rule the include lists use: a directory beside
+ * `packages/ui/tsconfig.json` is a project whether or not anyone has wired it.
+ *
+ * `typecheckUniverse()` cannot answer this -- it collects `.ts`/`.tsx`, and a config is neither. Found by the
+ * falsification run: the rule "a tsconfig exists that `typecheck` never runs" passed with an empty list, which
+ * is a gate that reports the clean result because it looked at nothing.
+ */
+async function projectConfigs(): Promise<string[]> {
+  const found: string[] = [];
+  for (const dir of ['packages', 'apps']) {
+    let entries;
+    try {
+      entries = await fs.readdir(path.join(ROOT, dir), { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      let inside;
+      try {
+        inside = await fs.readdir(path.join(ROOT, dir, entry.name));
+      } catch {
+        continue;
+      }
+      for (const file of inside) {
+        if (DISCOVERED_CONFIG.test(`${dir}/${entry.name}/${file}`)) found.push(`${dir}/${entry.name}/${file}`);
+      }
+    }
+  }
+  return found.sort();
+}
+
+/**
+ * #259: every tracked TypeScript file is type-checked by exactly one project, and every `.tsx` by a project
+ * that declares `jsx`.
+ *
+ * This gate is what makes the split honest. `tsconfig.json` now excludes `packages/ui` and the three scripts
+ * that audit it, and `packages/ui/tsconfig.json` claims them with `jsx: react-jsx` plus `lib: DOM` -- the only
+ * way a `.tsx` screen gets type-checked in CI while a stray `document` in `packages/contracts` stays a compile
+ * error. An exclude list is also the easiest thing in the repository to get wrong quietly: drop a path, add a
+ * glob, forget to wire the second project into `typecheck`, and the files simply stop being checked while
+ * every command still exits 0. That is this project's named defect -- green that means nothing -- so the
+ * answer is not a comment asking people to be careful. Four claims, all mechanical:
+ *
+ *  1. every project config that exists under `packages/*` or `apps/*` is run by the `typecheck` script, and
+ *     every config the script names exists and parses. (`tsc` fails on a missing path itself, with TS5058;
+ *     this says *which* wiring is missing even when someone runs `pnpm run check` alone, and it fails a
+ *     tsconfig that was added and never wired -- the direction `tsc` cannot see.)
+ *  2. every tracked `.ts`/`.tsx` under `scripts/`, `packages/<name>/src` and `/test`,
+ *     `apps/<name>/src` and `/test` is claimed by at
+ *     least one project. An unclaimed file is transpiled by `tsx` at run time and never type-checked -- the
+ *     defect #259 was opened for.
+ *  3. no file is claimed by two projects. Two programs with different `lib` and `jsx` settings reaching one
+ *     file is two answers to one question, and the disagreement is invisible until someone changes a flag.
+ *  4. every tracked `.tsx` is claimed by a project that declares `jsx`, and the root project claims no `.tsx`
+ *     at all. That is the point of the split, and the half this gate cannot see is left to the compiler: if a
+ *     DOM-free program ever *reaches* a `.tsx` through an import -- TypeScript follows imports out of an
+ *     `exclude`d directory -- `tsc` answers TS6142 (`--jsx is not set`), measured on this tree before the
+ *     split existed. That is why the three scripts that audit `packages/ui` are listed in the UI project
+ *     rather than left here, and why scripts/check-ui.ts gate TS0 refuses browser globals inside them.
+ *
+ * The exemption is one pattern and it is stated, not inferred: `packages/ui/test/fixtures/*.negative.ts` --
+ * four files that MUST NOT compile. `scripts/check-ui.ts` runs the compiler over each one and requires the
+ * refusal to arrive at the fixture itself, and TS6059/TS6307 is what a `composite` project said about this
+ * package's own test tree, which is why the wiring is two explicit invocations. A `.negative.ts` outside that
+ * pattern is a violation, not an exemption.
+ *
+ * Note what "claimed" means here, because getting it wrong would make rule 3 fire on half the repository: it
+ * is the project's own expanded `include` list, not its transitive closure. `packages/page-schema/src/page.ts`
+ * is *reached* by both programs (the UI imports it) and owned by one, and that is exactly right.
+ *
+ * Residual limit, in the same words as everywhere else in this file: this proves *coverage*, not correctness.
+ * A project can claim every file and still be configured wrongly -- which is why `lib: ["ES2023"]` with no
+ * `DOM` in the root config is asserted below too, since that absence is the guarantee the split protects.
+ */
+const TYPECHECK_UNIVERSE = /^(?:scripts\/|packages\/[^/]+\/(?:src|test)\/|apps\/[^/]+\/(?:src|test)\/).*\.(?:ts|tsx)$/;
+const DELIBERATELY_UNCHECKED = /^packages\/ui\/test\/fixtures\/.*\.negative\.ts$/;
+const DISCOVERED_CONFIG = /^(?:packages|apps)\/[^/]+\/tsconfig(?:\..*)?\.json$/;
+
+interface Project {
+  readonly config: string;
+  readonly jsx: boolean;
+  /** True when the *resolved* lib names DOM -- inherited through `extends` included, because the question is
+   *  what the compiler sees, not what one file spells out. */
+  readonly dom: boolean;
+  readonly libDeclared: boolean;
+  readonly files: ReadonlySet<string>;
+}
+
+/** The repo-relative path of a resolved file, or `null` when it is outside the working tree. */
+function relOr(absolute: string): string | null {
+  const rel = path.relative(ROOT, absolute).split(path.sep).join('/');
+  return rel.startsWith('..') || path.isAbsolute(rel) ? null : rel;
+}
+
+function readProject(config: string): { project?: Project; problems: string[] } {
+  const problems: string[] = [];
+  const abs = path.join(ROOT, config);
+  const read = ts.readConfigFile(abs, ts.sys.readFile);
+  if (read.error !== undefined || read.config === undefined) {
+    problems.push(`${config}: cannot be read (${read.error === undefined ? 'no config' : ts.flattenDiagnosticMessageText(read.error.messageText, ' ')}) -- the \`typecheck\` script names it, so a missing or broken project must fail here rather than be skipped`);
+    return { problems };
+  }
+  const parsed = ts.parseJsonConfigFileContent(read.config, ts.sys, path.dirname(abs));
+  for (const error of parsed.errors) {
+    // TS6059/TS6307 are the two shapes a file that belongs to no project takes; everything else is a real
+    // configuration error, and none of it may pass through this gate unnoticed.
+    problems.push(`${config}: ${ts.flattenDiagnosticMessageText(error.messageText, ' ')}`);
+  }
+  const files = new Set(parsed.fileNames.map(relOr).filter((r): r is string => r !== null));
+  const lib = (parsed.options.lib ?? []).map((entry) => entry.toLowerCase());
+  return {
+    project: {
+      config,
+      // `jsx` is read off the *resolved* options, so a project that inherits it through `extends` counts: the
+      // question this gate asks is "does the compiler that sees this file know what JSX is", not "is the word
+      // written in this particular file".
+      jsx: parsed.options.jsx !== undefined && parsed.options.jsx !== ts.JsxEmit.None,
+      dom: lib.some((entry) => entry.includes('dom')),
+      libDeclared: lib.length > 0,
+      files,
+    },
+    problems,
+  };
+}
+
+async function checkTypecheckCoverage(): Promise<{ problems: string[]; summary: string }> {
+  const problems: string[] = [];
+  const manifest = JSON.parse(await fs.readFile(path.join(ROOT, 'package.json'), 'utf8')) as { scripts?: Record<string, string> };
+  const script = manifest.scripts?.['typecheck'] ?? '';
+  const named = [...script.matchAll(/-p\s+(\S+)/g)].map((m) => m[1] as string);
+  if (named.length === 0) {
+    problems.push('package.json `typecheck` runs no `tsc -p <project>` at all, so nothing is type-checked and every gate downstream is decoration');
+    return { problems, summary: 'no projects' };
+  }
+  if (!script.includes('-p tsconfig.json') && !script.includes('-p ./tsconfig.json')) {
+    problems.push('package.json `typecheck` does not run the root tsconfig.json -- the program that keeps `DOM` out of the server tree (#259)');
+  }
+
+  const sources = await typecheckUniverse();
+
+  const projects: Project[] = [];
+  for (const config of named) {
+    const { project, problems: readProblems } = readProject(config);
+    problems.push(...readProblems);
+    if (project) projects.push(project);
+  }
+
+
+  // (1) every project config that exists is actually run.
+  const discoveredConfigs = await projectConfigs();
+  for (const config of discoveredConfigs) {
+    if (!named.includes(config)) {
+      problems.push(`${config} exists but no \`tsc -p\` in the \`typecheck\` script runs it -- a project nobody checks is a project that looks checked (add "tsc --noEmit -p ${config}")`);
+    }
+  }
+
+  const owner = new Map<string, string[]>();
+  for (const project of projects) {
+    for (const file of project.files) owner.set(file, [...(owner.get(file) ?? []), project.config]);
+  }
+
+  // (2) and (3): claimed once, claimed by someone.
+  const unclaimed: string[] = [];
+  const twice: string[] = [];
+  for (const file of sources) {
+    if (!TYPECHECK_UNIVERSE.test(file)) continue;
+    if (DELIBERATELY_UNCHECKED.test(file)) {
+      if (owner.has(file)) problems.push(`${file} is a negative fixture and must NOT be in any project's file list -- it is compiled standalone by scripts/check-ui.ts, which requires the compiler to refuse it`);
+      continue;
+    }
+    const owners = owner.get(file) ?? [];
+    if (owners.length === 0) unclaimed.push(file);
+    else if (owners.length > 1) twice.push(`${file} (${owners.join(', ')})`);
+  }
+  for (const file of unclaimed) {
+    problems.push(`${file} is type-checked by no project: it would be transpiled by \`tsx\` at run time and never compiled (#259 -- add it to a tsconfig include, or to packages/ui/tsconfig.json if it is UI code)`);
+  }
+  for (const file of twice) {
+    problems.push(`${file} is claimed by two projects' include lists: two sets of \`lib\`/\`jsx\` answers for one file is two descriptions of one fact -- split the includes so each file has exactly one owner`);
+  }
+
+  // (4) the reason the split exists. Same disk read as (2) and (3): the file that escapes checking is exactly
+  // the one nobody has staged yet.
+  const jsxOwners = projects.filter((p) => p.jsx);
+  for (const file of sources) {
+    if (!/\.(?:tsx|jsx)$/.test(file)) continue;
+    if (!TYPECHECK_UNIVERSE.test(file)) {
+      problems.push(`${file} is a JSX file outside every type-check project's reach (scripts/, packages/*/src|test, apps/*/src|test): nothing would ever compile it. Screens live under packages/ui, or under an apps/* project that carries its own tsconfig.json with \`jsx\` and is named in the \`typecheck\` script -- which is the UI-OD1 shell, still the maintainer's call (#259)`);
+      continue;
+    }
+    const owners = owner.get(file) ?? [];
+    if (owners.length === 0) continue; // already reported as unclaimed
+    if (!owners.some((config) => jsxOwners.some((p) => p.config === config))) {
+      problems.push(`${file} is claimed by ${owners.join(', ')}, none of which declares \`jsx\` -- a .tsx in a program without \`jsx\` is TS6142, and the tempting fix (adding \`jsx\` and \`DOM\` to the root config) is the trade #259 refuses to make`);
+    }
+  }
+
+  // (5) the guarantee the whole arrangement protects.
+  const root = projects.find((p) => p.config === 'tsconfig.json' || p.config === './tsconfig.json');
+  if (root) {
+    if (root.dom) {
+      problems.push('the root tsconfig.json now resolves a `DOM` lib: that is the compiler guarantee #259 exists to keep -- `document` in packages/contracts or apps/control-plane must be a TYPE error, not a grep. Move the browser-facing code into the project that declares `DOM` (packages/ui today, an apps/* shell when UI-OD1 is answered)');
+    }
+    if (!root.libDeclared) {
+      problems.push('the root tsconfig.json declares no `lib` at all, so the target\'s default is in force -- and every ES target default includes DOM, so the server tree gains browser globals without anyone editing a config');
+    }
+    for (const f of root.files) {
+      if (f.endsWith('.tsx')) problems.push(`the root program claims a .tsx (${f}) while the UI tree is excluded from it -- screens belong to packages/ui/tsconfig.json, not to the DOM-free program (rule 1 and gate §9.2 refuse browser globals in presentational sources)`);
+    }
+  }
+
+  return {
+    problems,
+    summary: `${String(projects.length)} project(s): ${projects.map((p) => `${p.config}${p.jsx ? ' [jsx]' : ''}${p.dom ? ' [DOM]' : ' [no DOM]'}=${String(p.files.size)} file(s)`).join('; ')} -- ${String(sources.filter((f) => TYPECHECK_UNIVERSE.test(f) && !DELIBERATELY_UNCHECKED.test(f)).length)} source file(s) in the universe, ${String(owner.size)} claimed, ${String(sources.filter((f) => /\.(tsx|jsx)$/.test(f)).length)} JSX file(s)`,
+  };
+}
+
 const pythonProblems = await checkNoPython();
+const coverage = await checkTypecheckCoverage();
 const registerProblems = checkDecisionRegister(ROOT);
 
-const all = [...registerProblems, ...docProblems, ...skillProblems, ...workflowProblems, ...actionProblems, ...hygieneProblems, ...endpointProblems, ...projectProblems, ...overlayProblems, ...registryProblems, ...pythonProblems];
+const all = [...registerProblems, ...docProblems, ...skillProblems, ...workflowProblems, ...actionProblems, ...hygieneProblems, ...endpointProblems, ...projectProblems, ...overlayProblems, ...registryProblems, ...pythonProblems, ...coverage.problems];
 say(`skills checked: ${skills.length} (${skills.map((s) => s.name).join(', ')})`);
 say(`workflows linted: ${workflowProblems.length === 0 ? 'clean' : `${workflowProblems.length} problem(s)`}`);
 say(`action manifests checked: ${actionProblems.length === 0 ? 'clean' : `${actionProblems.length} problem(s)`}`);
@@ -704,6 +963,7 @@ say(`test targets (D49): ${projectProblems.length === 0 ? 'only the real project
 say(`dev overlays (D50): ${overlayProblems.length === 0 ? 'every platform service has a dev entry; extras are declared' : `${overlayProblems.length} problem(s)`}`);
 say(`template registries (D58): ${registryProblems.length === 0 ? 'one environment.yaml per platform, no retired path shipped' : `${registryProblems.length} problem(s)`}`);
 say(`toolchain (TypeScript only): ${pythonProblems.length === 0 ? 'no tracked Python, no tracked file invokes python/pip' : `${pythonProblems.length} problem(s)`}`);
+say(`type-check coverage (#259): ${coverage.problems.length === 0 ? coverage.summary : `${coverage.problems.length} problem(s) -- ${coverage.summary}`}`);
 
 if (all.length) {
   console.error(`\n${all.length} problem(s):`);

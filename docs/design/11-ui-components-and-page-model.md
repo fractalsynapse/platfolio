@@ -67,7 +67,7 @@ surface: overlays, signals and drafts move data, never code.
 | `apps/control-plane/openapi.yaml` | real — 31 paths, 36 operations (re-measured 2026-11-15; the previous revision said 34, which is exactly the drift the rules doc prices), validated both directions by `api:check`; **no** SSE/WebSocket/event path, no ETag/304 cache semantics declared anywhere in it |
 | `packages/api-contract/src/generated/types.ts` | real, 894 lines (re-measured 2026-11-15; 830 last revision) — exports `Instance`, `Attestation`, `Error`, `OperationId`, `ParamsOf`, `RequestBodyOf`, `ResponseOf`, `SuccessOf`; byte-for-byte gated by `api:types:check` |
 | `packages/page-schema` | real — `page.ts`, `secrets-panel.ts` (`buildSecretsPanel`, `findValueBearingProps`), `binding-panel.ts` (`buildBindingPanel`), `project-text.ts` (`projectToText`), with tests |
-| `packages/ui` (per D63: all reusable components **and** design tokens as CSS custom properties — no separate tokens package) — **exists since 2026-11-15** with contracts, tokens, primitives, signals, the SDK seam and gates, **and no screens**; `packages/api-client`, `apps/site`, any web UI | **do not exist** — everything in §§1–8 that names them is `specified`. D63 decided what `packages/ui` will contain; it did not make it exist |
+| `packages/ui` (per D63: all reusable components **and** design tokens as CSS custom properties — no separate tokens package) — **exists since 2026-11-15** with contracts, tokens, primitives, signals, the SDK seam and gates, and **since #259 its first screens**: six registered `.tsx` components and one screen document (§§1–3 audited by `ui:check`, 20 gates: 17 pass, 3 NOT RUN). What it is *not* is a runnable site — nothing mounts the screens. `packages/api-client`, `apps/site`, any web UI | **do not exist** — everything in §§1–8 that names them is `specified`. D63 decided what `packages/ui` will contain; it did not make it exist |
 | a UI service in `compose.yaml`; `platfolio.dev` / `preview.platfolio.dev` resolving | **absent** — D62 has decided the hosts, the DNS records, certificate and service do not yet exist; the API side is already prepared (`PLATFOLIO_ALLOWED_ORIGINS` feeds CORS and the `platfolio-web` PKCE client's `<origin>/callback` redirect URIs) |
 
 So the honest baseline is: **the contract exists, the panel builders exist, the UI does not.** That is the
@@ -79,7 +79,7 @@ A component is a **registered contract**, not a file that returns JSX. The regis
 checks; the JSX is incidental.
 
 ```ts
-// packages/ui/src/contract.ts — SHIPPED 2026-11-15 (the package exists; no screens do yet).
+// packages/ui/src/contract.ts — SHIPPED 2026-11-15; the first components registered against it on #259.
 import type { StandardSchemaV1 } from '@standard-schema/spec';
 import type { OperationId } from '@platfolio/api-contract/generated/types';
 import type { SignalId } from './signals.ts';           // §3
@@ -190,9 +190,11 @@ sources — `prefers-*` media queries (motion, color, contrast) are the only win
 may read (gate §9.3). (b) No prop named `isMobile`, `compact`, `desktop` or sibling: width behavior comes
 from container queries only (gate §9.3). (c) The *same-slot test*: every registered component renders in
 every slot its contract lists, at 320 px and 1280 px container widths, in one Playwright matrix, with no
-variant fork in its source. (d) Capability parity: for every screen, the set of API operations reachable
+variant fork in its source. **NOT RUN** as of #259: the six registered components and their declared slots
+exist, the containers do not, and no browser harness was smuggled in beside a config nobody reviewed. (d) Capability parity: for every screen, the set of API operations reachable
 from its components at 360 px viewport equals the set reachable at 1920 px (derived from `reads`
-declarations; gate §9.11).
+declarations; gate §9.11, which runs today over `ScreenDocument`s and each primitive's `floorSlots`, and which
+therefore compares *declared reachability* -- not rendered geometry, which is (c) and stays NOT RUN).
 
 ## 3. Signals registry
 
@@ -508,6 +510,12 @@ CI gates (mechanical, block merge) and the reviewer pass (one screen, ten questi
 5. **Registration.** Every export used by a page document resolves in the component registry with a props
    schema; rendering a stored page document with an unknown component id or an invalid prop set fails
    *loudly*, at validation, not as an empty div. *Method: fixture that re-renders yesterday's document.*
+   **Runs today** (`ui:check` §9.5, since #259 registered six components and `test/fixtures/page-documents.ts`
+   supplies the stored document, the valid props per id and five invalid prop sets). Two named exceptions are
+   reported rather than hidden: a stored document naming a *state* or *result* the spec does not carry validates,
+   because props validation checks the kind of an enumerated field and not its membership — see the note in
+   `packages/ui/src/components/props.ts` for the two changes that would close it (a workspace edge to
+   `@platfolio/contracts`, or a values export beside the type export in `gen-api-types`).
 6. **No runtime-loaded code.** The registry is build-time; `packages/ui` has no dynamic import of
    non-first-party URLs; page documents contain data, never expressions-that-evaluate. *Method: grep + the
    page-schema validation that already refuses value-bearing keys.* (This is gate #247 for the security
@@ -526,9 +534,12 @@ CI gates (mechanical, block merge) and the reviewer pass (one screen, ten questi
     components' declared `reads` (§2 acceptance (d)) — not from a screenshot, and not from a reviewer's
     impression. A capability that exists only on wide layouts is the failure this gate exists to make
     unfashionable: it means someone forked a component or built a screen desktop-first, and mobile users
-    silently get a smaller product. *Specified, cannot run today: needs `packages/ui`, so like gates 2–5 and
-    7–9 it is **not run**, never **passed**. Adding it after screens exist audits nothing, which is the same
-    reason gate 1 must land with the first commit.*
+    silently get a smaller product. **Runs structurally today** (`ui:check` §9.11, since #259): a screen's
+    composition is a `ScreenDocument` -- data, not JSX -- and the degradation the comparison reads through is
+    `floorSlots` on each primitive, which is this document's own mobile column ("never two-up; it degrades to a
+    stack plus a push", "becomes a bottom sheet") promoted from prose to a required field. A gate cannot read a
+    table, and a parity check over prose is a reviewer's impression with a number on it. What is **not** proven
+    is what a browser paints at either width: that remains gate 7's NOT RUN, and the gate's own output says so.
 
 ### The reviewer pass — look at one screen, fail it on these
 
