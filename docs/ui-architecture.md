@@ -260,7 +260,7 @@ Condensed from 11 §§1–3, 5–6. 11 is the authority on the full shape; this 
 diff against. **Every file named here is specified — none exists.**
 
 ```ts
-// packages/ui/src/contract.ts — SPECIFIED (11 §1)
+// packages/ui/src/contract.ts — SHIPPED 2026-11-15 (11 §1)
 import type { StandardSchemaV1 } from '@standard-schema/spec';
 import type { OperationId } from '@platfolio/api-contract/generated/types'; // rule 1: generated, never copied
 import type { SignalId } from './signals.ts';                               // rule 3
@@ -291,7 +291,7 @@ export type LayoutSlot = 'stack' | 'split' | 'popout-sidebar' | 'overlay-sheet' 
 ```
 
 ```ts
-// packages/ui/src/signals.ts — SPECIFIED (11 §3)
+// packages/ui/src/signals.ts — SHIPPED 2026-11-15 (11 §3)
 export type Retention = 'replay' | 'transient';
 
 export interface PlatformSignals {

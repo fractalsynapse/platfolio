@@ -201,7 +201,7 @@ panel reloads) without importing each other. That is a **typed signal table**, h
 processes no tenant data to the server, and is emphatically not an event bus of strings:
 
 ```ts
-// packages/ui/src/signals.ts — SPECIFIED.
+// packages/ui/src/signals.ts — SHIPPED 2026-11-15 (no screens yet).
 import type { OperationId } from '@platfolio/api-contract/generated/types';
 
 export type Retention = 'replay' | 'transient';
