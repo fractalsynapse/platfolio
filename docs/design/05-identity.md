@@ -144,3 +144,181 @@ See the decision log in [01](01-product-and-decisions.md).
 - **OI3 — Realm-per-team, client-per-instance.** That is what "the team's applications share one user
   system" means, it keeps the Keycloak service count at one per team, and it makes SSO across platforms
   the default rather than a migration.
+
+## Rotating the temporary Keycloak admin (runbook)
+
+Recorded 2026-11-15, on the maintainer's answer to the standing question about the hosted stack's master
+realm — *"Leave it alone for now, but tell me what I need to do to update it, since I get the feeling that
+is something I will need to do."* The temporary admin stays in place. This section is the procedure for
+when he decides to replace it, written as a checklist to follow under stress: every step's evidence tier is
+named, and the tier of the mutation steps is **"specified, not exercised"** — nobody has run this sequence
+on a live host, and the first person to run it re-labels each step as measured only for the parts that
+actually answered as written.
+
+### Current state (measured 2026-11-15, read-only, against `https://auth.platfolio.dev`)
+
+| Fact | Evidence tier and probe |
+| --- | --- |
+| The credential in `.secrets/platfolio-keycloak-admin` still authenticates as the master-realm admin | **measured**: `POST /realms/master/protocol/openid-connect/token` (admin-cli grant) → **200**. The account **works**; #248's "unreachable admin" was three scripts silently using the loopback default `platfolio-dev-only` against a live host, and `scripts/identity-credentials.ts` now *refuses* that combination, printing the file and variable names, never a value |
+| The master realm's only user is `platfolio-admin`, enabled, `attributes.is_temporary_admin = ["true"]`, created 2026-11-12T08:30:25Z | **measured**: `GET /admin/realms/master/users` → **200**, count 1; detail `GET` → **200**. (compose.yaml carried the same reading from its own probe; today agrees) |
+| The hosted realms are `master`, `platfolio`, `platfolio-staging`, all enabled | **measured**: `GET /admin/realms` → **200**, three realms |
+| The admin's authority is the **realm role `admin`** (composite) on master, held beside `default-roles-master`; master's management client is `master-realm` — there is no `realm-management` client in master (`GET …/role-mappings/clients/{realm-management}` → 404 for master) | **measured**: `GET /admin/realms/master/roles/admin` → **200**; `GET /admin/realms/master/users/{id}/role-mappings/realm` → **200**; `GET /admin/realms/master/clients` → **200** |
+| Keycloak 26.8.2's `POST …/users/{id}/reset-password` answers **404** through the admin-cli grant, so the credential mechanism is a user write carrying the `credentials` array | **measured, recorded**: `scripts/seed-identity.ts:297` states the 404 and converges with `PUT /admin/realms/{realm}/users/{id}` including `credentials: [{ type: "password", value: …, temporary: false }]`, asserting **204**. Scope honestly: the script's measurement is against *seeded-realm* users through the master-realm admin grant — the same grant and version, but not a master-realm user; the runbook treats it as version behavior and tells you to watch the status. My read-only re-check today could only GET that path (**404**, weak evidence — GET is not the recorded method); the strong record is the script |
+| `platfolio-web` is configured with the D62 UI origins in both hosted realms | **measured**: `GET /admin/realms/platfolio/clients?clientId=platfolio-web` → **200**, redirect URI `https://platfolio.dev/callback`; the same request against `platfolio-staging` → **200**, `https://preview.platfolio.dev/callback`. Configured and read back — see "the DNS half" below |
+| `KC_BOOTSTRAP_ADMIN_*` on a running realm means nothing | **upstream (keycloak.org/server/bootstrap-admin-recovery, 26.8)**: the start options create the bootstrap admin "only during the initial start… when the master realm doesn't exist yet"; compose.yaml's own comment says the same and refuses the tempting reading |
+
+### Path 1 — replace it without an outage (what to actually do)
+
+The order is not a preference. **Never delete or disable the temporary admin before the permanent one is
+verified working.** A failed rotation with no working admin means Path 2, and Path 2 means stopping the
+service. Do every step in sequence, and stop at the first non-matching status — stopping costs nothing
+while the old admin is still in place.
+
+- [ ] **0. Read the current credential from the secrets file; never print it.** Export it into the shell
+  variables the operator scripts already use (`KC_ADMIN_USER`, `KC_ADMIN_PASSWORD`) rather than typing it
+  anywhere visible. **Never** put the password on a command line: use `--password:env`-style forms or a
+  read of the file, so it stays out of shell history and out of process listings. *(measured: the file and
+  variables are what `scripts/identity-credentials.ts` and the seed script already resolve; the discipline
+  is D4 applied to our own operations)*
+- [ ] **1. Authenticate with the existing admin** — `POST /realms/master/protocol/openid-connect/token`,
+  `client_id=admin-cli`, `grant_type=password`. Expect **200**. *(measured today)*
+- [ ] **2. Create a permanent admin user with the password inside the create call** — Keycloak's
+  `credentials` array is part of `UserRepresentation`, which is also why this step, and not a
+  `reset-password`, is the mechanism on this version (the 404 row above):
+
+  ```
+  POST /admin/realms/master/users
+    Content-Type: application/json
+  {
+    "username": "platfolio-admin-2",          # a DIFFERENT name; do not reuse `platfolio-admin`
+    "enabled": true,
+    "emailVerified": true,
+    "firstName": "…", "lastName": "…",
+    "credentials": [{ "type": "password", "value": "<from the password manager, never a terminal>",
+                      "temporary": false }]
+  }
+  ```
+
+  Expect **201**, no body; re-read the id with `GET /admin/realms/master/users?username=platfolio-admin-2`.
+  Do **not** set `attributes.is_temporary_admin` — that attribute is the bootstrap marker, and the whole
+  point is to stop carrying it. *(**specified, not exercised**: the shape is measured against
+  `seed-identity.ts`, which creates realm users this way and asserts them; nobody has created a
+  master-realm admin on this host)*
+- [ ] **3. Grant it the admin authority** — a realm-role mapping of `admin`, exactly what the temporary
+  admin holds (measured above):
+
+  ```
+  POST /admin/realms/master/users/{newUserId}/role-mappings/realm
+  [ { "id": "<adminRoleUuid>", "name": "admin", "description": "${role_admin}",
+      "composite": true, "clientRole": false, "containerId": "<masterRealmId>" } ]
+  ```
+
+  (fetch the role object from `GET /admin/realms/master/roles/admin` and post it back rather than
+  hand-typing ids). Expect **204**. Then `GET …/role-mappings/realm` and see `admin` in the list — read it
+  back, because the seed script's own lesson at role assignment is that a silent 404 leaves a user who
+  cannot reach anything. *(**specified, not exercised**; the GET halves are measured)*
+- [ ] **4. Verify a token from the NEW account before touching the old one.** `POST
+  /realms/master/protocol/openid-connect/token` with the new username and password → **200**, and then
+  use *that* token for one real admin call: `GET /admin/realms` → **200**. A token alone proves
+  authentication; the admin call proves the grant. *(the two checks are shapes measured today; the
+  new-account run is specified, not exercised)*
+- [ ] **5. Update where the credential lives** (see "Where the credential lives afterwards" below):
+  `.secrets/platfolio-keycloak-admin` gets the new username and password, and the session's
+  `KC_ADMIN_USER`/`KC_ADMIN_PASSWORD` exports get re-sourced from it. Verify the *tooling* by repeating
+  steps 1→4 with the new account rather than trusting a smoke test — **`identity:smoke` deliberately does
+  not use the master-realm admin credential at all**: `scripts/smoke-identity.ts` records why (the
+  cross-issuer check was rewritten off the admin token onto the peer realm's own client secret, because
+  "a D4 proof that depends on an operator credential we might not be able to mint is a proof that depends
+  on sand"). The credential's ordinary consumer is `identity:seed`, which authenticates in the master
+  realm through the admin-cli grant (measured in code: `seed-identity.ts:225`); its next routine run fails
+  loudly if the updated file is wrong, and running the seed now, purely as a check, would be a realm-wide
+  convergence — a mutation, not a verification. *(specified: the resolution path is measured code, the
+  post-rotation re-run is not exercised)*
+- [ ] **6. Only now remove the temporary admin:** `DELETE /admin/realms/master/users/{oldUserId}` → expect
+  **204**. *(**specified, not exercised** — deliberately not run today; this is the step that has no
+  undo short of Path 2)*
+- [ ] **7. Close the record:** `GET /admin/realms/master/users` shows one user, without
+  `is_temporary_admin`; update compose.yaml's `KC_BOOTSTRAP_ADMIN_USERNAME` comment block only to correct
+  the history (the value itself describes *new* deployments, not this realm's live admin); update the
+  AGENTS.md status paragraph sentence this runbook replaced; date everything. *(specified)*
+
+**Why ordered this way:** steps 2–5 are all recoverable by deleting the half-made new user; after step 6
+the only remaining admin is the one verified in step 4. Skipping ahead turns a fumble into the next section.
+
+### Path 2 — recovery, if lockout ever happens (this one has downtime)
+
+Upstream-documented ([keycloak.org/server/bootstrap-admin-recovery](https://www.keycloak.org/server/bootstrap-admin-recovery),
+26.8), **not exercised on this host**:
+
+- [ ] Recovery on an existing master realm is `kc.sh bootstrap-admin user` (or `bootstrap-admin service`
+  for a service account). It creates **another temporary admin** — recovery, not an end state; run Path 1
+  from it once it works, including deleting it.
+- [ ] **All Keycloak nodes must be stopped before the command runs.** On Railway that means stopping the
+  `identity` service: there is downtime — the issuer is unreachable, so every fresh login and every
+  token-mint fails while it is down (existing bearer tokens keep verifying until expiry against cached
+  keys only as far as each relying party does that; do not count on it). Say plainly: **Path 1's ordering
+  exists so that Path 2 never becomes necessary.**
+- [ ] On Railway "stop the node" means the managed service, so the command has to run with server access
+  the hosted service may not offer; if it does not, the practical recovery is a database-level decision
+  the maintainer makes deliberately, not an agent improvising. *(unverified whether Railway's shell access
+  reaches this container — nobody has needed it, and this runbook will not invent the answer)*
+
+### Never — even under stress (D4 is the reason)
+
+- **Never print a credential value** into a terminal, log, issue, PR or commit — including this file's own
+  examples, which use placeholders for exactly that reason. `seed-identity.ts`'s failure paths print the
+  first 160 chars of an *error response*, never a request body; keep that convention when writing the next
+  operator tool.
+- **If a command's error might echo the request body, redact before reporting it.** `curl -v` on a failing
+  `POST …/users` prints the body, and that body contains the password. Strip it before it reaches a
+  paste, a ticket, or CI logs; if you cannot be sure it did not land somewhere, treat the credential as
+  burned and rotate it again through Path 1.
+- **Never commit or paste `.secrets/` content** (gitignored at `.secrets/`; `check-project.ts` also fails
+  on committed credential patterns — do not route around a gate that is doing its job).
+- Never re-use the username `platfolio-admin` for the permanent account while the temporary one still
+  exists — one name, one account, ambiguity about which answered a call.
+
+### Where the credential lives afterwards
+
+- **Operator copy:** `.secrets/platfolio-keycloak-admin`, keys `KEYCLOAK_ADMIN` and
+  `KEYCLOAK_ADMIN_PASSWORD`, mode 0600. **Footgun, stated because it is real:** those are the **25.x-style
+  names**, kept because that is what this local file has always used — while the *composition*
+  (`compose.yaml`) correctly declares the 26.x pair `KC_BOOTSTRAP_ADMIN_USERNAME` /
+  `KC_BOOTSTRAP_ADMIN_PASSWORD`, names 26.8 reads at first boot only. The file's names have no runtime
+  consumer; they are labels in a secrets file. If a rotation makes you touch this file, rename the keys to
+  match what 26.x-era tooling expects *then*, in the same change, and say why. *(measured today: file
+  exists, mode 0600, exactly those two keys — names read, values not printed)*
+- **Railway / the plan:** the bootstrap password is delivered as the shared-variable secret
+  `KC_BOOTSTRAP_ADMIN_PASSWORD` (environment.yaml declares it: `kind: secret`, `rotate: on-demand`) —
+  through `PUT …/secrets/{name}` (D53) or `platform-deploy --deliver-secrets`, which write it through and
+  keep nothing. **platfolio holds no secret values** (D4/D53): after a rotation the control plane's view is
+  *presence*, never content, and there is no platfolio-side read-back of this credential at all — the
+  operator's secrets file is the only local copy by design.
+- **environment.yaml names that scripts resolve:** `KC_ADMIN_USER` / `KC_ADMIN_PASSWORD` (development
+  host:shell, with the loopback-default refusal), `KC_BOOTSTRAP_ADMIN_USERNAME` /
+  `KC_BOOTSTRAP_ADMIN_PASSWORD` (deployment obligations, the password `rotate: on-demand`).
+
+### The DNS half of this decision, recorded here because it is waiting on the same day
+
+`platfolio.dev` (production UI) and `preview.platfolio.dev` (staging UI) **are configured as origins** —
+the identity side of that is measured above (both realms' `platfolio-web` redirect URIs read back at 200),
+and `PLATFOLIO_ALLOWED_ORIGINS` feeds the CORS allow-list from the same list — but they **do not resolve
+today**: `getent hosts platfolio.dev` and `getent hosts preview.platfolio.dev` return nothing from this
+machine (no record), while `auth.platfolio.dev` resolves — a positive control that the check was working,
+not a claim about the wider internet. The maintainer will add the DNS records when there are real services
+to link, and the concrete precondition for "ready for DNS" is defined by D62: **a UI service in
+`compose.yaml` with a declared domain** — today there is no UI service in the composition at all (only
+`api` and `identity`), so there is nothing to point a record at. When that service lands: add it with its
+domain, re-run `identity:seed` per realm (it reads origins from the composition), then the DNS record,
+then a browser-auth smoke against the live UI becomes possible — which is the step that turns
+"configured and read back" into "exercised" (see the D62 row and MAINTAINING's "Two realms, one
+Keycloak"). Until then, no document may describe browser auth as exercised.
+
+### What is *not* in this runbook
+
+The `admin` realm role is the whole admin grant today (measured above) — if a rotation ever needs a
+*narrower* admin (e.g. view-only for a support window), that is a different decision, not a step here.
+The realm-admin users in `platfolio`/`platfolio-staging` are tenant-plane records seeded by
+`identity:seed`; this runbook is about the master realm of our own hosted Keycloak only. And nothing here
+changes the answer of 2026-11-15: **the temporary admin is not touched until the maintainer opens this
+checklist deliberately, in daylight, with Path 1 completed in order.**

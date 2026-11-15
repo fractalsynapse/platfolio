@@ -105,7 +105,12 @@ if (unscoped) {
 // boundary, not a claim the requester can name.
 //
 // What it used to present: a master-realm ADMIN token. That was always a weak proxy for the invariant, and it
-// broke when the master admin credential became unrecoverable (#248). The 26.8 docs are explicit that
+// broke for a reason that was our own tooling rather than the platform: the (#248) claim that the master
+  // admin credential became unrecoverable was measured FALSE -- it authenticates (token endpoint 200, read-only
+  // re-check 2026-11-15, still the realm is only user, still flagged temporary); the 400 came from operator
+  // scripts defaulting KC_ADMIN_PASSWORD to the loopback value against a live host, which
+  // scripts/identity-credentials.ts now refuses outright. The reasoning about the credential remains true, and the
+  // 26.8 docs remain explicit that
 // `KC_BOOTSTRAP_ADMIN_*` creates the admin "only during the initial start of the Keycloak server when the master
 // realm doesn't exist yet" -- so declaring the pair and rebooting cannot fix a lost admin; recovery is
 // `kc.sh bootstrap-admin user` with all nodes stopped, and it yields a TEMPORARY account. A D4 proof that depends

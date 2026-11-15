@@ -16,9 +16,10 @@ file restates the other.
 | Procedure for an agent building or reviewing a screen | [ui-architecture skill](../.agents/skills/ui-architecture/SKILL.md) |
 | The HTTP contract every UI data path resolves to | [apps/control-plane/openapi.yaml](../apps/control-plane/openapi.yaml) — spec first, then the handler (D41) |
 
-The six rules are not invented here. They are the maintainer's decisions — D10, D13, D14, D41, D47, D53, D62 —
-restated as rules an agent meets before writing UI code, because the implementation must not be allowed to
-drift back into an architecture that breaks them.
+The six rules are not invented here. They are the maintainer's decisions — D10, D13, D14, D41, D47, D53, D62,
+and since 2026-11-15 **D63** (one `packages/ui` owns components and design tokens) and **D64** (the UI is
+built to be real-time-capable, polling first) — restated as rules an agent meets before writing UI code,
+because the implementation must not be allowed to drift back into an architecture that breaks them.
 
 ## What exists (measured, this revision)
 
@@ -32,7 +33,7 @@ table for long.
 | `packages/api-contract/src/generated/types.ts` | **real** — generated from that spec, byte-for-byte gated by `api:types:check` |
 | `packages/page-schema/` (`page.ts`, `secrets-panel.ts`, `binding-panel.ts`, `project-text.ts`) | **real** — pages as data, the build-time component registry, `findValueBearingProps`, with tests |
 | browser-auth plumbing beside the API | **real** — `PLATFOLIO_ALLOWED_ORIGINS` feeds CORS and the `platfolio-web` PKCE client's `<origin>/callback` redirect URIs, tested by `apps/control-plane/test/cors.test.ts`. So rule 1's "the endpoint is configuration, not a literal" already has a gate on the server half |
-| `packages/ui`, `packages/tokens`, `packages/api-client`, `apps/site`, any web UI | **do not exist.** Everything in this file that names them is **specified**, not delivered |
+| `packages/ui` (which per D63, 2026-11-15, will hold all reusable components **and** design tokens as CSS custom properties — there is no separate `packages/tokens`), `packages/api-client`, `apps/site`, any web UI | **do not exist.** Everything in this file that names them is **specified**, not delivered. D63 decided what `packages/ui` will contain, not that it exists |
 | the layout, signal, draft and freshness gates (11 §9.2–§9.10) | **specified, and unrunnable today** — there is no UI source for them to audit. They must land *with* the first `packages/ui` commit, not after it |
 
 So the enforcement story per rule is always two halves: the gate that bites today, and the gate that is
@@ -179,20 +180,29 @@ in its userinfo, which is why D52 refuses to let a name be a custody claim.
 ## Rule 5 — Real-time is honest about what exists
 
 **Invariant.** The UI shows what it knows, where it got it, and how old it is; it never implies a liveness the
-contract cannot serve.
+contract cannot serve. D64 (2026-11-15, answering UI-OD2) makes the *capability* a requirement: the design must
+be real-time-capable — a single SDK freshness primitive whose transport is swappable at build time, `poll`
+today, `events` when the operations land — while **polling remains an acceptable way to ship it**, so long as
+no surface presents polled data as live.
 
 - **MUST** render every server-derived state with its source and age (`lastKnownAt`), per 11 §4 acceptance (a)
   and 07's offline posture ("last-known attested state with an age indicator, never a stale healthy").
 - **MUST** obtain freshness from exactly one primitive in the SDK (`subscribe`/`poll`, transport-chosen), so a
-  component never owns a timer.
+  component never owns a timer. The transport swap is the point of D64: `poll` → `events` changes the SDK
+  transport driver and no component.
 - **MUST** label what the user is looking at as polled/aged while the push operations are absent — the age
   label is the honesty mechanism, not decoration.
 - **MUST NOT** ship or style a push-backed UX (`EventSource`, a WebSocket, a "live" pill, an unlabelled
   spinner, a fabricated optimistic success) until the event entity and its operations exist in
   `openapi.yaml` and pass `api:check`. **MUST NOT** describe polling as push in copy, a component name, or a
   commit message.
-- **MUST** design the push channel as API operations first (D41, D48), by the sessions that own the spec —
-  11 §4 names them and labels them absent; this file does not add them.
+- **MUST** design the push channel as API operations first (D41, D48), by the sessions that own
+  `openapi.yaml` and `packages/contracts` — under D64 this is **required work, not an option to weigh**:
+  today the control plane has **no** push channel (measured 2026-11-15: `grep -n
+  "text/event-stream\|websocket\|EventSource\|WebSocket" apps/control-plane/openapi.yaml` → no matches;
+  36 operations, all request/response), and 11 §4 names what must be added there — a team-scoped event
+  stream and a short-lived ticketed connection, because a browser cannot put a bearer token in an
+  `EventSource` URL — as a contracts MINOR bump. This file implements none of it and adds no operation.
 
 **Enforced by.** Today, mechanically: `api:check` validates the spec both directions, so a "push operation"
 cannot exist undocumented, and the honest negative check is one command:
@@ -390,7 +400,7 @@ moved while this file was being written, and it is worth keeping as evidence for
 | `pnpm run verify` | 1, **before running any gate** | `ERR_PNPM_STORE_DIR_OPEN_OPERATION_LOCK … Read-only file system` — the wrapper cannot lock its engine store in this sandbox, so each gate above was executed directly instead. [MAINTAINING § If `pnpm run <script>` fails before running anything](MAINTAINING.md#if-pnpm-run-script-fails-before-running-anything) records this and says CI is unaffected. Reporting it as a failed gate would be the wrong honesty |
 
 Rules 2, 3, 4's UI half, and 5–6's UI half have **no gate that runs today**, because `packages/ui`,
-`packages/tokens`, `packages/api-client` and `apps/site` do not exist. 11's consequence is the actual
+`packages/api-client` and `apps/site` do not exist. 11's consequence is the actual
 enforcement for now, and it is worth repeating here because it is the one thing that stops the drift: **the
 first `packages/ui` commit is the contract package — `contract.ts`, `layout.ts`, `signals.ts` and gates
 §9.2–§9.6 — not a screen**, because a gate added after four screens exist audits nothing.
@@ -406,20 +416,28 @@ first `packages/ui` commit is the contract package — `contract.ts`, `layout.ts
 
 ## Open decisions — do not resolve silently
 
-The seven [open decisions in 11](design/11-ui-components-and-page-model.md#open-decisions) belong to the
-maintainer. An agent who picks one quietly has written a
+Five UI-OD decisions are open in [11 § Open decisions](design/11-ui-components-and-page-model.md#open-decisions);
+they belong to the maintainer. An agent who picks one quietly has written a
 second description of a decision the project has not made — and the diff will not look like a decision, it
-will look like code.
+will look like code. **Two were answered on 2026-11-15 — UI-OD2 (D64: design the push capability, ship
+polling first) and UI-OD6 (D63: one `packages/ui` owns components and design tokens) — recorded in
+[11 § Closed UI-OD decisions](design/11-ui-components-and-page-model.md#closed-ui-od-decisions) with the
+maintainer's reasons. Do not re-open either in code; equally, do not treat D64 as a license to implement
+the push channel — what it requires is the endpoint work 11 §4 names, owned elsewhere (D41).**
 
 | ID | Blocked question | What an agent must do instead |
 | --- | --- | --- |
 | UI-OD1 | Astro islands vs a plain React mount for the dashboard shell | Build to the contract; ask. It changes only the `apps/site` build (which does not exist) |
-| UI-OD2 | Adopt 11 §4's SSE operations, or ship on conditional-GET + age labels | Ship on what exists (rule 5). Do not design the endpoint in a UI branch — D41 |
 | UI-OD3 | Native vehicle: RN / Capacitor / Tauri / web-only | Decide nothing; keep R9 honest so all four stay affordable |
 | UI-OD4 | Draft retention rule (7-day TTL, local-only, sign-out wipe, never secrets) | Implement the mechanics; leave the retention numbers as the open question they are |
 | UI-OD5 | Replay-from-store as the pattern for context signals, transient-by-rule elsewhere | Enforce "no default"; ask before choosing per-signal values beyond 11 §3's table |
-| UI-OD6 | Where design tokens live, and what the native theme maps onto | **Blocks the first `packages/ui` commit.** Ask before committing a token file |
 | UI-OD7 | Where per-platform screens live: generated from the manifest, or page documents in the template repository (D60) | Ask. It decides where a template's screens are versioned |
+
+The answered ones, restated only as routing: **UI-OD2 → D64, rule 5.** Build one freshness primitive with a
+swappable transport; ship `poll`; never style polled data as live; the event operations are designed in
+`openapi.yaml` first by the sessions that own it. **UI-OD6 → D63.** Design tokens are CSS custom properties
+inside `packages/ui`; no separate token package, and `packages/ui` itself still does not exist — ask before
+scaffolding it.
 
 ## Open gaps this file refuses to paper over
 
@@ -457,15 +475,16 @@ against this file.
    stated it. So §9 now carries an eleventh gate saying exactly that, labelled *Specified, cannot run today*
    beside gates 2–5 and 7–9 rather than counted as enforcement. A dangling section number is not cosmetic: a
    reader who cannot find the gate concludes the requirement is optional.
-4. **11's "measured this revision" numbers have already drifted,** which is why this file cites commands
-   instead of counts. 11 records `openapi.yaml` as "34 paths, 36 operations" and the generated type file as
-   "830 lines"; measured on this tree — `grep -c '^  /' apps/control-plane/openapi.yaml` → 31, `grep -c
-   operationId: apps/control-plane/openapi.yaml` → 36, `wc -l
-   packages/api-contract/src/generated/types.ts` → 894 (the gate reports 895) — the paths and the line count
-   are stale. The drift changes no rule: still no push channel, still no cache validator, the gate is still
-   byte-for-byte. But a number written into prose goes stale within a day, and a stale measurement in a
-   specification reads as a claim about the present. Re-measure with those commands rather than editing either
-   document's counts to match each other.
+4. **11's "measured this revision" numbers drift — which is why this file cites commands instead of
+   counts.** 11 used to record `openapi.yaml` as "34 paths, 36 operations" and the generated type file as
+   "830 lines"; they had drifted, and when D63/D64 were recorded the file was re-measured on 2026-11-15 —
+   `grep -c '^  /' apps/control-plane/openapi.yaml` → 31, `grep -c operationId:
+   apps/control-plane/openapi.yaml` → 36, `wc -l packages/api-contract/src/generated/types.ts` → 894
+   (the gate reports 895) — and 11 now carries that reading with its date. The drift changes no rule:
+   still no push channel, still no cache validator, the gate is still byte-for-byte. But a number written
+   into prose goes stale within a day, and a stale measurement in a specification reads as a claim about
+   the present. Re-measure with those commands rather than editing either document's counts to match each
+   other.
 5. **The emitter is not a field of 11 §3's signal table.** The request that produced this file described each
    signal as carrying "a name, payload schema, emitter and a mandatory retention declaration"; 11 §3's
    `PlatformSignals` holds name, payload and retention, and puts the emitter on the *component contract* as

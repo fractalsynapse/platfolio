@@ -11,11 +11,11 @@ the check before implementing and 01 as the record of what was decided.
 | # | Document | Answers |
 | --- | --- | --- |
 | [00](00-target-architecture.md) | **Target architecture and invariants** | The end-state capability list, the rules that are never traded, deferrals with their build conditions, and what is out of the goal entirely. Capabilities only — no business or commercial material |
-| [01](01-product-and-decisions.md) | Product definition and decision register | What platfolio is, who it is for, the tenancy model, MVP scope, non-goals, the accepted decisions D1–D11, open decisions OD1–OD5 |
+| [01](01-product-and-decisions.md) | Product definition and decision register | What platfolio is, who it is for, the tenancy model, MVP scope, non-goals, and the register of accepted decisions (the D-series — cite it, do not copy its count, the numbers age) plus the previously-open OD items as they closed |
 | [02](02-architecture.md) | Architecture | The three planes and their asymmetric privileges, control-plane layout, the controller loop, data model, trust boundaries |
 | [03](03-manifest-spec.md) | Platform Manifest specification | The contract every artifact is rendered from; the secret `value_source` enum; rendering targets; versioning; how a platform is added |
 | [04](04-execution-plane-github-workflows.md) | Execution plane | GitHub App + install PR + pinned action + attestation; token custody; failure modes; bring-your-own-CD |
-| [05](05-identity.md) | Identity | Three identity planes and the six invariants that keep platfolio users away from tenant users; the identity host; TreeDX/ArcNexus specifics |
+| [05](05-identity.md) | Identity | Three identity planes and the six invariants that keep platfolio users away from tenant users; the identity host; TreeDX/ArcNexus specifics; and the runbook for rotating the hosted Keycloak's temporary master-realm admin when the maintainer decides to |
 | [06](06-billing-and-lifecycle.md) | Billing and lifecycle | Entitlements, the state machine with Stripe's verified numbers, suspend/delete/eject, abuse, merchant of record, data-protection posture |
 | [07](07-interfaces-api-mcp-mobile.md) | Interfaces | API-first rules, auth grants, the MCP surface, and what makes the mobile app cheap instead of a rewrite |
 | [08](08-distribution-and-licensing.md) | Distribution and licensing | Artifacts that ship, the reframed binaries promise, provenance, the D18 license decision and what remains under it, self-hosted support policy |
