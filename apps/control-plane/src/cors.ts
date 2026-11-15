@@ -6,7 +6,15 @@ import { redactCredentialShaped } from '@platfolio/contracts';
  *
  * Format: a comma-separated list of origins, each one `scheme://host[:port]` and nothing more.
  *
- *   PLATFOLIO_ALLOWED_ORIGINS=https://app.platfolio.dev,https://staging.platfolio.dev
+ *   production   PLATFOLIO_ALLOWED_ORIGINS=https://platfolio.dev
+ *   staging      PLATFOLIO_ALLOWED_ORIGINS=https://preview.platfolio.dev
+ *   development  PLATFOLIO_ALLOWED_ORIGINS=http://localhost:5173
+ *
+ * Those three values are declared once, in the platform description -- `compose.yaml` (base, and
+ * `x-platfolio.environmentValues.staging`) and `compose.dev.yaml`. This file is not where they live; it is where
+ * the shape is enforced. The same name is the one `scripts/seed-identity.ts` writes into the realm as the public
+ * `platfolio-web` client's exact redirect URIs and `webOrigins`, because "where the UI is served from" is one
+ * fact and two spellings of it drift.
  *
  * Default: **unset, which enables no cross-origin request at all.** The control plane answers same-origin traffic
  * exactly as it did before this variable existed, and a browser on any other origin is refused. A deployment that

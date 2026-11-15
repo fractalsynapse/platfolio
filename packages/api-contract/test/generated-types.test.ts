@@ -88,7 +88,25 @@ test('what the shapes come out as -- the cases a UI actually reads', () => {
   // A map with a constrained value range becomes a Record over a union, never an index signature over anything.
   assert.match(output, / {2}detail: Record<string, string \| number \| boolean>;/);
   // An array of objects is `Array<{…}>`; an array of a union is parenthesised or the suffix binds wrong.
-  assert.match(output, / {2}environments\?: Array<\{/);
+  //
+  // REQUIRED, and that is the point of #247 rather than a side effect of it. The document used to declare
+  // `environments` optional on a component named `Instance` that was the stored row everywhere else in the
+  // code, and the drift ledger filed the disagreement. Both operations that return it build
+  // `{ ...record, environments: await store.listInstanceEnvironments(id) }` unconditionally
+  // (apps/control-plane/src/capabilities.ts:259, :348), so the response always carries the rows -- and the
+  // shape is now GENERATED from that composition, as `InstanceResponse`, instead of being hand-written beside
+  // it. An optional marker on a field the server always sends is a client written against a lie.
+  assert.match(output, / {2}environments: Array<\{/);
+  // `Instance` is the record and has no rows of its own; the assembled response is a different name. One
+  // shape, one definition -- and the two definitions are checked to be genuinely different shapes.
+  const record = /export interface Instance \{[\s\S]*?\n\}/.exec(output)?.[0] ?? '';
+  assert.ok(record.length > 0, 'the record interface was not emitted at all');
+  // A MEMBER named `environments`, not the word anywhere: the record's `state` description legitimately says
+  // "`InstanceResponse.environments` is what actually happened per place", and prose is not a field.
+  assert.ok(!/^ {2}environments:/m.test(record), 'Instance is InstanceSchema: a stored row, no environment rows');
+  const response = /export interface InstanceResponse \{[\s\S]*?\n\}/.exec(output)?.[0] ?? '';
+  assert.ok(/^ {2}environments:/m.test(response), 'InstanceResponse is the assembled response: it carries them');
+  assert.notEqual(record, response, 'one name, two shapes -- the defect #247 was raised about');
   assert.match(output, / {2}scope: string\[\];/);
   // A 204 is `void`: the spec says there is no body, which is a claim, not a gap.
   assert.match(output, / {2}putSecret: \{\n {4}'204': void;/);

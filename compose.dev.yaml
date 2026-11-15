@@ -54,6 +54,17 @@ services:
       PLATFOLIO_IDENTITY_ISSUER: http://localhost:8081/realms/platfolio
       PLATFOLIO_IDENTITY_AUDIENCE: platfolio-api
       PLATFOLIO_IDENTITY_JWKS_URI: http://identity:8080/realms/platfolio/protocol/openid-connect/certs
+      # The platform file's value is a hosted UI origin; locally there is no hosted UI, and the browser that
+      # does the calling is Vite on :5173 talking to this container published on :8082. That pair is
+      # cross-origin by the browser's own definition -- different port, different origin -- so the local stack
+      # has to name its UI origin too, or the preflight gets refused and the local UI cannot sign anybody in.
+      # One variable, three environments, three values (D52/D56): this is the same NAME the platform file and
+      # `identity:seed` read, and it is the loopback default `scripts/seed-identity.ts` uses when it seeds a
+      # realm on a loopback issuer, so the local realm and the local API agree without anyone typing it twice.
+      # `docker compose` merges this map over the platform file's, so the hosted origin does not survive here --
+      # and `x-platfolio.environmentValues.staging` never reaches this stack at all, because the local runtime
+      # has no environments.
+      PLATFOLIO_ALLOWED_ORIGINS: http://localhost:5173
       PLATFOLIO_DB_URL: postgresql://postgres:platfolio-dev-only@main:5432/platfolio
       PLATFOLIO_DB_SCHEMA: platfolio
       # Migrate-on-boot is a local convenience. Production runs `pnpm run db:migrate` as a separate step,

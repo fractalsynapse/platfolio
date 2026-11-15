@@ -64,7 +64,12 @@ export const TEMPLATE_DATABASE_VARIABLES = [
   'RUNTIME_LOCK_WAIT_SECONDS', 'SSL_CA_CERT_DAYS', 'SSL_CERT_DAYS', 'SSL_REQUIRE',
 ] as const;
 
-interface MockInstance { instanceId: string; limits?: { cpu: number; memoryMB: number }; settledDomains?: boolean | undefined; verifiedDomains?: boolean | undefined; status: string | null; image: string; numReplicas: number; domains: string[]; polls: number; variables: Set<string> }
+/**
+ * `deploymentId` is the identity the double hands back for `latestDeployment { id }`. The provider compares it
+ * before and after a redeploy to answer `verified` from observation instead of from the mutations own boolean,
+ * so a double without an identity would make every redeploy assertion vacuous.
+ */
+interface MockInstance { instanceId: string; limits?: { cpu: number; memoryMB: number }; settledDomains?: boolean | undefined; verifiedDomains?: boolean | undefined; status: string | null; image: string; numReplicas: number; domains: string[]; polls: number; variables: Set<string>; deploymentId?: string }
 
 export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
   readonly endpoint = RAILWAY_ENDPOINT;
@@ -79,6 +84,16 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
    * credential the declaring service cannot read.
    */
   readonly sharedVariables = new Map<string, string>();
+  /**
+   * Service variable values, kept so a later write can be compared against them.
+   *
+   * This is a deliberate, bounded breach of the rule platfolio enforces on ITSELF: the real provider holds
+   * the value and diffs against it, and a double that cannot do that cannot be used to test the claim "the
+   * provider decides whether a value changed". It is confined here -- in the transport fake, in memory, never
+   * serialised, never reachable from `environment.config` (which stays value-redacted) or from
+   * `variables()` (which still throws). The provider under test never reads it back; it only writes.
+   */
+  readonly variableValues = new Map<string, string>();
   /** Which services see each environment-scoped variable: `${environmentId}:${name}` -> serviceIds. */
   readonly sharedAttachments = new Map<string, Set<string>>();
   readonly tokens = new Map<string, { id: string; projectId: string; environmentId: string; name: string }>;
@@ -129,7 +144,7 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
    * `serviceUpdate` and a `variableUpsert` is an assertion a test has to be able to make, not a property it
    * has to infer from two separately ordered arrays.
    */
-  readonly writtenVariables: { name: string; value: string; environmentId: string; serviceId?: string; at: number }[] = [];
+  readonly writtenVariables: { name: string; value: string; environmentId: string; serviceId?: string; skipDeploys?: boolean; at: number }[] = [];
   readonly denied: string[] = [];
   private sequence = 0;
 
@@ -178,6 +193,37 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
   }
 
   // --- transport -----------------------------------------------------------------------------
+
+  /**
+   * The measured deployment semantics of a variable write.
+   *
+   * Evidence: docs/research/railway-variable-value-redeploy-2026-11-15.md (our own api-staging).
+   *   A  skipDeploys:true, value changed  -> no deployment in 120s
+   *   B  skipDeploys omitted, changed    -> Railway started one on its own
+   *   D  skipDeploys omitted, identical  -> no deployment
+   * So the restart is the PROVIDER'S decision, made against the value it holds. The double reproduces that
+   * decision rule, not a constant: always-deploy would let a suppressing provider look correct, and
+   * never-deploy would make the refresh path untestable.
+   */
+  private applyMeasuredDeploySemantics(
+    environmentId: string,
+    serviceId: string,
+    name: string,
+    value: string,
+    skipDeploys: boolean,
+  ): void {
+    const key = `${environmentId}:${serviceId}:${name}`;
+    const prior = this.variableValues.get(key);
+    const changed = prior !== undefined && prior !== value;
+    this.variableValues.set(key, value);
+    if (skipDeploys || !changed) return;
+    const instance = this.instances.get(`${environmentId}:${serviceId}`);
+    if (!instance) return;
+    this.deploys += 1;
+    instance.deploymentId = `dep-${String(this.deploys)}`;
+    instance.status = 'DEPLOYING';
+    instance.polls = 0;
+  }
 
   async graphql<T>(args: { query: string; variables?: Record<string, unknown>; credential: RailwayCredential; operation: string }): Promise<T> {
     const { operation, credential } = args;
@@ -545,18 +591,25 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
         return { customDomainIssueCertificate: true } as T;
       }
       case 'variableUpsert': {
-        const input = v.input as { environmentId: string; serviceId?: string; name: string; value: string };
+        const input = v.input as { environmentId: string; serviceId?: string; name: string; value: string; skipDeploys?: boolean };
+        // Railway defaults this to false, and the default is the whole story (see
+        // applyMeasuredDeploySemantics): an UNSUPPRESSED write whose value differs starts a deployment, and
+        // an unsuppressed write of the identical value does not. Measured 2026-11-15 against our own
+        // api-staging, arms A/B/D. A double that ignored the flag would let the provider be tested against
+        // a fiction.
+        const skip = input.skipDeploys === true;
         // Omitting serviceId is exactly how Railway distinguishes a shared variable from a service one.
         if (!input.serviceId) {
           if (!this.environments.has(input.environmentId)) throw new Error('railway variableUpsert: no environment [NOT_FOUND]');
           this.sharedVariables.set(`${input.environmentId}:${input.name}`, input.value);
-          this.writtenVariables.push({ name: input.name, value: input.value, environmentId: input.environmentId, at: this.operations.length });
+          this.writtenVariables.push({ name: input.name, value: input.value, environmentId: input.environmentId, skipDeploys: skip, at: this.operations.length });
           return { variableUpsert: true } as T;
         }
         const instance = this.instances.get(`${input.environmentId}:${input.serviceId}`);
         if (!instance) throw new Error('railway variableUpsert: no instance [NOT_FOUND]');
         instance.variables.add(input.name);
-        this.writtenVariables.push({ name: input.name, value: input.value, environmentId: input.environmentId, serviceId: input.serviceId, at: this.operations.length });
+        this.writtenVariables.push({ name: input.name, value: input.value, environmentId: input.environmentId, serviceId: input.serviceId, skipDeploys: skip, at: this.operations.length });
+        this.applyMeasuredDeploySemantics(input.environmentId, input.serviceId, input.name, input.value, skip);
         return { variableUpsert: true } as T;
       }
       case 'sharedVariableConfigure': {
@@ -597,6 +650,12 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
         if (!instance) throw new Error('railway serviceInstanceDeploy: no instance [NOT_FOUND]');
         this.deploys += 1;
         instance.polls = 0;
+        // A fresh deployment identity per deploy, as the real API gives one (measured against our own staging
+        // service on 2026-11-15: `deployments(input:)` returns a distinct id and createdAt per restart).
+        // Without it, a provider that verifies a restart by comparing deployment identity could never see
+        // movement and would answer `verified: false` for a restart that did happen -- the mirror image of the
+        // failure that matters more, which is answering `true` for one that did not.
+        instance.deploymentId = `dep-${String(this.deploys)}`;
         instance.status = 'DEPLOYING';
         return { serviceInstanceDeploy: true } as T;
       }
@@ -622,7 +681,7 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
               serviceId: key.split(':')[1],
               numReplicas: instance.numReplicas,
               source: { image: instance.image },
-              latestDeployment: { status: instance.status },
+              latestDeployment: { status: instance.status, id: instance.deploymentId },
               // What is actually RUNNING. The real API returns this (measured 2026-11-12 on our own
               // deployment: a service whose process had exited still showed an older SUCCESS deployment as
               // active), and a mock that always invented an active deployment would let the provider keep

@@ -20,8 +20,8 @@ import { ALLOWED_ORIGINS_ENV, CorsOriginsRefused, parseAllowedOrigins, describeA
  */
 
 const fixture = createIdentityFixture();
-const UI = 'https://app.platfolio.dev';
-const STAGING_UI = 'https://staging.platfolio.dev';
+const UI = 'https://platfolio.dev';
+const STAGING_UI = 'https://preview.platfolio.dev';
 const STRANGER = 'https://not-authorized.example.net';
 const build = { version: '9.9.9', commit: 'a'.repeat(40), buildTime: '2026-11-14T00:00:00.000Z' };
 

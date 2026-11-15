@@ -30,6 +30,18 @@ info:
     author: this API authenticates with `Authorization: Bearer` and never with cookies, so
     `Access-Control-Allow-Credentials` is not sent and a UI must present its own token; and which browser origins
     may call at all is deployment configuration — `PLATFOLIO_ALLOWED_ORIGINS`, unset meaning same-origin only.
+
+    **Shared shapes are generated, not typed here.** The components marked `# GENERATED` in
+    `components.schemas` are written by `pnpm run spec:gen` from the StandardSchema definitions in
+    `packages/contracts` (#247), so the document is a build artifact for those shapes: changing one means
+    changing the definition, and `pnpm run spec:check` fails the build if the committed text is not what the
+    schemas produce. The prose a schema cannot state -- field descriptions, `format: date-time`, examples --
+    lives in `packages/api-contract/src/spec-annotations.ts`, keyed by component and property path, which is
+    the only place it can be edited without being undone. `paths:`, security, responses and the components
+    with no code-side definition (`Slug`, `CurrentPerson`, `Health`, `Ready`, `ReadinessCheck`,
+    `TeamWithRole`, `Version`, `Whoami`, `Error`) stay hand-written, and are listed with a reason in
+    `UNMATCHED_COMPONENTS`.
+
   contact:
     name: platfolio
 servers:
@@ -433,7 +445,7 @@ paths:
             application/json:
               schema:
                 type: array
-                items: { $ref: '#/components/schemas/Instance' }
+                items: { $ref: '#/components/schemas/InstanceResponse' }
         '401':
           $ref: '#/components/responses/Unauthenticated'
     post:
@@ -545,10 +557,10 @@ paths:
         - bearerJwt: []
       responses:
         '200':
-          description: The instance.
+          description: The instance, with one state row per environment (#179).
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Instance' }
+              schema: { $ref: '#/components/schemas/InstanceResponse' }
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '404':
@@ -1040,6 +1052,20 @@ paths:
                   minLength: 1
                   maxLength: 8192
                   description: The credential. Never returned by any endpoint; never written to the audit record.
+                refresh:
+                  type: string
+                  enum: [suppress, auto]
+                  description: |
+                    What the write does to the RUNNING service. The default, `suppress`, writes the variable and
+                    leaves the container alone -- the behaviour every delivery had before this field existed, and
+                    still the default, because a platform that cannot read a value back (D4) must not silently
+                    restart things on a write that changed nothing.
+
+                    `auto` sends the write without Railway's `skipDeploys` suppression and lets the provider's own
+                    comparison decide. Measured 2026-11-15 in docs/research/: a changed value started a new
+                    deployment on its own; an identical value started nothing. So the restart is triggered by the
+                    party that holds the value, and platfolio never stores, reads, or hashes one -- which is the
+                    tradeoff this design accepts in exchange for keeping D4 intact.
       responses:
         '204':
           description: Delivered to the provider. No body, because there is nothing platfolio is allowed to say back.
@@ -1527,6 +1553,140 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  # ---------------------------------------------------------------- redeploy
+  # Added as a PATH ONLY, with every schema inline: component generation in this document is owned by another
+  # change in flight, so a second writer touching `components:` would be a merge nobody would notice until the
+  # generated types disagreed with the spec. If this operation survives review, its response body belongs in
+  # components beside the other instance-scoped results, and the inline shape should be replaced then.
+  /api/v1/instances/{instanceId}/redeploy:
+    parameters:
+      - name: instanceId
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+    post:
+      operationId: redeployInstance
+      summary: Restart a running service so it picks up configuration it does not hold
+      description: |
+        The capability this API did not have: a way to say "redeploy", separately from "apply this
+        description". Measured on Railway, 2026-11-15 (`docs/research/railway-variable-value-redeploy-2026-11-15.md`,
+        arms A-D against our own `api-staging`):
+
+        - a variable written with `skipDeploys: true` started NO deployment in 120s;
+        - a variable whose VALUE changed, written without that suppression, started one on its own;
+        - writing the SAME value again started nothing -- the provider diffs values server-side;
+        - an explicit `serviceInstanceDeploy` was visible in the deployment list, which is what makes the
+          other three observations trustworthy rather than inferred.
+
+        Two consequences, and they are why this endpoint exists in this shape.
+
+        **1. Composition changes already work, and this is not for them.** A variable name added or removed
+        moves `planHash`, and `applyPlan` deploys deliberately afterwards. That is a normal software deployment,
+        exactly as intended.
+
+        **2. A VALUE change is not detectable by platfolio, and never will be.** D4 forbids reading configuration
+        back: `variables()` returns values and is refused, and `environment.config` answers names with values
+        redacted. So the platform cannot answer "did this change" -- and the measurement says it does not have
+        to, because the provider already knows. What platfolio can and must provide is the verb for whoever does
+        know: the operator who just rotated a credential, or the `PUT …/secrets/{name}` call that wrote a new
+        value and left the running container holding the old one, because Railway resolves `${{…}}` references
+        at WRITE time. The gap that started this (`api-staging` booting with an empty `PLATFOLIO_DB_URL` until a
+        human redeployed it, #242) is that gap.
+
+        The tradeoff accepted, stated rather than buried: a refresh asked for when nothing actually changed still
+        costs a container bounce, and the response cannot say whether it was needed. The alternative -- platfolio
+        keeping a digest of every delivered value so it could diff them itself -- would store secret-derived
+        material in our database, which is the D4 line this design refuses to cross. A needless restart is
+        cheaper than a credential shadow.
+
+        `service` is the LOGICAL name from the platform description (`api`), not the provider's row
+        (`api-production`): the physical name is derived by the same rule everywhere (D57), and making a tenant
+        name a provider artifact would leak an implementation detail into the contract. Omitted, the whole named
+        environment is refreshed. Environments are never inferred from each other, and a staging name cannot
+        touch a production row -- asserted in `packages/contracts/test/railway-redeploy.test.ts`.
+
+        202, not 200: a restart is asynchronous and this call returns the REQUEST, not a settled state.
+        `verified` therefore means "a new deployment was observed for every service asked about" -- read back from
+        the provider's deployment identity, not from the mutation's own boolean, which is measured to be `true`
+        for a call that produced no new deployment. Where it is false, `refused` and `budgetSkipped` say which
+        names did not move: a refresh that restarted half an environment must not read as success.
+
+        Member-level authority, not owner-level: a member may already deploy the platform (D43), and a restart
+        grants nothing new. Writing the VALUE stays owner-only and lives at `PUT …/secrets/{name}`.
+      security:
+        - bearerJwt: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [environment]
+              properties:
+                environment: { type: string, minLength: 1, enum: [production, staging, preview] }
+                service: { type: string, minLength: 1, maxLength: 120 }
+      responses:
+        '202':
+          description: Restart requested for the named environment; per-service outcome reported by physical name.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [instanceId, environment, services, refused, budgetSkipped, verified]
+                properties:
+                  instanceId: { type: string }
+                  environment: { type: string }
+                  services:
+                    type: array
+                    description: Physical names the provider was asked to redeploy, in the order it acted.
+                    items: { type: string }
+                  refused:
+                    type: array
+                    description: Names it could not act on -- no such service, no instance here, or a deploy the provider accepted without starting.
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [service, code, reason]
+                      properties:
+                        service: { type: string }
+                        code:
+                          type: string
+                          enum: [no-project, no-environment, no-service, not-in-environment, deployment-unchanged]
+                        reason: { type: string }
+                  budgetSkipped:
+                    type: array
+                    description: 'Names suppressed because the provider''s deploy ceiling was already spent. Distinct from `refused`: this is "not allowed to", not "nothing there".'
+                    items: { type: string }
+                  verified:
+                    type: boolean
+                    description: True only when every service asked about was observed to have a NEW deployment id.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '501':
+          description: The selected provider cannot restart a service; the operation is absent from its advertised set.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [error, message]
+                properties:
+                  error: { type: string, const: provider-cannot-redeploy }
+                  message: { type: string }
+        '502':
+          description: The provider refused. Its words are forwarded, redacted -- the only evidence available.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
 
 components:
   securitySchemes:
@@ -1596,23 +1756,27 @@ components:
         role: { type: string, enum: [owner, member] }
 
     Invitation:
+      # GENERATED by scripts/gen-api-spec.ts from InvitationSchema (packages/contracts). Do not hand-edit: pnpm run spec:check fails on a difference, and the prose lives in packages/api-contract/src/spec-annotations.ts.
       type: object
-      additionalProperties: false
       required: [id, teamId, email, role, state, invitedBy, createdAt, expiresAt]
       properties:
         id: { type: string, minLength: 1 }
         teamId: { type: string, minLength: 1 }
-        email: { type: string, minLength: 3, maxLength: 320, description: Normalised (trimmed and case-folded) on write. }
+        email: { type: string, description: 'Normalised (trimmed and case-folded) on write.', minLength: 3, maxLength: 320 }
         role: { type: string, enum: [owner, member] }
-        state: { type: string, enum: [pending, accepted, revoked, expired] }
+        state: { type: string, enum: [pending, accepted, revoked, expired], default: pending }
         invitedBy: { type: string, minLength: 1 }
-        createdAt: { type: string, format: date-time }
-        expiresAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time, minLength: 1 }
+        expiresAt: { type: string, format: date-time, minLength: 1 }
         acceptedBy: { type: string }
         acceptedAt: { type: string, format: date-time }
         revokedAt: { type: string, format: date-time }
-        emailReceipt: { type: string, maxLength: 200, description: "The transport's receipt, so delivery is a fact about the row (D46)." }
+        emailReceipt:
+          type: string
+          description: 'The transport''s receipt, so delivery is a fact about the row (D46).'
+          maxLength: 200
         emailError: { type: string, maxLength: 300 }
+      additionalProperties: false
 
     CurrentPerson:
       type: object
@@ -1642,213 +1806,320 @@ components:
               role: { type: string, enum: [owner, member] }
 
     CapabilityOffer:
+      # GENERATED by scripts/gen-api-spec.ts from CapabilityOfferSchema (packages/contracts). Do not hand-edit: pnpm run spec:check fails on a difference, and the prose lives in packages/api-contract/src/spec-annotations.ts.
       type: object
-      additionalProperties: false
       required: [instanceId, teamId, capability, outputs, publishedAt]
       properties:
-        instanceId: { type: string }
-        teamId: { type: string }
-        capability: { type: string, maxLength: 60 }
+        instanceId: { type: string, minLength: 1 }
+        teamId: { type: string, minLength: 1 }
+        capability: { type: string, minLength: 1, maxLength: 60 }
         outputs:
           type: array
+          default: []
           items:
             type: object
-            additionalProperties: false
             required: [output, kind, state]
             properties:
-              output: { type: string }
+              output: { type: string, minLength: 1, maxLength: 80 }
               kind: { type: string, enum: [url, value, secret] }
-              state: { type: string, enum: [not-issued, issued-and-placed, placement-unknown, re-issue-required] }
-        publishedAt: { type: string, format: date-time }
+              state:
+                type: string
+                enum: [not-issued, issued-and-placed, placement-unknown, re-issue-required]
+                default: not-issued
+            additionalProperties: false
+        publishedAt: { type: string, format: date-time, minLength: 1 }
+      additionalProperties: false
 
     CapabilityShare:
+      # GENERATED by scripts/gen-api-spec.ts from CapabilityShareSchema (packages/contracts). Do not hand-edit: pnpm run spec:check fails on a difference, and the prose lives in packages/api-contract/src/spec-annotations.ts.
       type: object
-      additionalProperties: false
       required: [instanceId, capability, toTeamId, sharedAt, sharedBy]
       properties:
-        instanceId: { type: string }
-        capability: { type: string, maxLength: 60 }
-        toTeamId: { type: string, maxLength: 120 }
-        sharedAt: { type: string, format: date-time }
-        sharedBy: { type: string, maxLength: 200 }
+        instanceId: { type: string, minLength: 1 }
+        capability: { type: string, minLength: 1, maxLength: 60 }
+        toTeamId: { type: string, minLength: 1, maxLength: 120 }
+        sharedAt: { type: string, format: date-time, minLength: 1 }
+        sharedBy: { type: string, minLength: 1, maxLength: 200 }
+      additionalProperties: false
 
     BindingRecord:
+      # GENERATED by scripts/gen-api-spec.ts from BindingRecordSchema (packages/contracts). Do not hand-edit: pnpm run spec:check fails on a difference, and the prose lives in packages/api-contract/src/spec-annotations.ts.
       type: object
-      additionalProperties: false
       required: [consumerInstanceId, capability, providerInstanceId, destinations, state, boundAt, boundBy]
       properties:
-        consumerInstanceId: { type: string }
-        capability: { type: string, maxLength: 60 }
-        providerInstanceId: { type: string }
+        consumerInstanceId: { type: string, minLength: 1 }
+        capability: { type: string, minLength: 1, maxLength: 60 }
+        providerInstanceId: { type: string, minLength: 1 }
         destinations:
           type: array
+          default: []
           items:
             type: object
-            additionalProperties: false
             required: [output, into]
             properties:
-              output: { type: string }
-              into: { type: array, items: { type: string } }
-        state: { type: string, enum: [bound, stale] }
-        boundAt: { type: string, format: date-time }
-        boundBy: { type: string, maxLength: 200 }
+              output: { type: string, minLength: 1, maxLength: 80 }
+              into:
+                type: array
+                minItems: 1
+                items: { type: string, minLength: 1, maxLength: 120 }
+            additionalProperties: false
+        state: { type: string, enum: [bound, stale], default: bound }
+        boundAt: { type: string, format: date-time, minLength: 1 }
+        boundBy: { type: string, minLength: 1, maxLength: 200 }
+      additionalProperties: false
 
     Instance:
+      # GENERATED by scripts/gen-api-spec.ts from InstanceSchema (packages/contracts). Do not hand-edit: pnpm run spec:check fails on a difference, and the prose lives in packages/api-contract/src/spec-annotations.ts.
       type: object
-      additionalProperties: false
       required: [id, teamId, name, template, state, provider, createdAt, updatedAt]
       properties:
         id: { type: string, minLength: 1 }
         teamId: { type: string, minLength: 1 }
         name:
           type: string
+          description: >-
+            The half of `team/name` a person types (D45). Slug rules, enforced in the schema and the
+            database: a name needing escapes or a disambiguating id is a name that will break in a
+            URL, a CLI argument, or a shell.
+          pattern: '^[a-z0-9]([a-z0-9-]{0,39}[a-z0-9])?$'
           minLength: 1
-          maxLength: 80
-          pattern: '^[a-z0-9]([a-z0-9-]{0,78}[a-z0-9])?$'
-          description: |
-            The half of `team/name` a person types (D45). Slug rules, enforced in the schema and the database:
-            a name needing escapes or a disambiguating id is a name that will break in a URL, a CLI argument,
-            or a shell.
-        template: { type: string, minLength: 1, description: 'The template this instance was created from. Formerly the field `platform`, which stored a template id -- D45.' }
+          maxLength: 40
+        template:
+          type: string
+          description: >-
+            The template this instance was created from. Formerly the field `platform`, which stored
+            a template id -- D45.
+          minLength: 1
         templateRef:
           type: object
-          additionalProperties: false
           required: [repo, commitSha]
           properties:
             repo: { type: string, minLength: 3, maxLength: 200 }
-            commitSha: { type: string, pattern: '^[0-9a-f]{40}$', description: 'Pinned by commit, never by a movable tag (D30 law 3).' }
+            commitSha:
+              type: string
+              description: 'Pinned by commit, never by a movable tag (D30 law 3).'
+              pattern: '^[0-9a-f]{40}$'
+          additionalProperties: false
         state:
           type: string
+          description: >-
+            The rollup, not the truth: production's state when a production environment exists,
+            otherwise the worst among the environments (#179). `InstanceResponse.environments` is
+            what actually happened per place.
           enum: [pending, provisioning, live, degraded, paused, failed, deprovisioning, removed]
-          description: |
-            The rollup, not the truth: production's state when a production environment exists, otherwise the
-            worst among the environments (#179). `environments` below is what actually happened per place.
-        environments:
-          type: array
-          description: One row per environment the instance has. Absent until the first reconcile.
-          items:
-            type: object
-            additionalProperties: false
-            required: [instanceId, environment, state, updatedAt]
-            properties:
-              instanceId: { type: string }
-              environment: { type: string, minLength: 1, maxLength: 60 }
-              state: { type: string, enum: [pending, provisioning, live, degraded, paused, failed, deprovisioning, removed] }
-              appliedPlanHash: { type: string }
-              attestationId: { type: string }
-              updatedAt: { type: string, format: date-time }
-        provider: { type: string, enum: [railway, fake] }
+        provider: { type: string, enum: [railway, fake], default: railway }
         desiredPlanHash: { type: string, pattern: '^[0-9a-f]{64}$' }
         lastAppliedPlanHash: { type: string, pattern: '^[0-9a-f]{64}$' }
-        createdAt: { type: string, format: date-time }
-        updatedAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time, minLength: 1 }
+        updatedAt: { type: string, format: date-time, minLength: 1 }
+      additionalProperties: false
+
+    InstanceResponse:
+      # GENERATED by scripts/gen-api-spec.ts from InstanceSchema + InstanceEnvironmentStateSchema (packages/contracts). Do not hand-edit: pnpm run spec:check fails on a difference, and the prose lives in packages/api-contract/src/spec-annotations.ts.
+      type: object
+      required: [id, teamId, name, template, state, provider, createdAt, updatedAt, environments]
+      properties:
+        id: { type: string, minLength: 1 }
+        teamId: { type: string, minLength: 1 }
+        name:
+          type: string
+          description: >-
+            The half of `team/name` a person types (D45). Slug rules, enforced in the schema and the
+            database: a name needing escapes or a disambiguating id is a name that will break in a
+            URL, a CLI argument, or a shell.
+          pattern: '^[a-z0-9]([a-z0-9-]{0,39}[a-z0-9])?$'
+          minLength: 1
+          maxLength: 40
+        template:
+          type: string
+          description: >-
+            The template this instance was created from. Formerly the field `platform`, which stored
+            a template id -- D45.
+          minLength: 1
+        templateRef:
+          type: object
+          required: [repo, commitSha]
+          properties:
+            repo: { type: string, minLength: 3, maxLength: 200 }
+            commitSha:
+              type: string
+              description: 'Pinned by commit, never by a movable tag (D30 law 3).'
+              pattern: '^[0-9a-f]{40}$'
+          additionalProperties: false
+        state:
+          type: string
+          description: >-
+            The rollup, not the truth: production's state when a production environment exists,
+            otherwise the worst among the environments (#179). `InstanceResponse.environments` is
+            what actually happened per place.
+          enum: [pending, provisioning, live, degraded, paused, failed, deprovisioning, removed]
+        provider: { type: string, enum: [railway, fake], default: railway }
+        desiredPlanHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        lastAppliedPlanHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        createdAt: { type: string, format: date-time, minLength: 1 }
+        updatedAt: { type: string, format: date-time, minLength: 1 }
+        environments:
+          type: array
+          description: >-
+            One row per environment the instance has. The assembled response always carries it; it
+            is empty until the first reconcile.
+          items:
+            type: object
+            required: [instanceId, environment, state, updatedAt]
+            properties:
+              instanceId: { type: string, minLength: 1 }
+              environment: { type: string, minLength: 1, maxLength: 60 }
+              state:
+                type: string
+                description: >-
+                  What the controller last verified for this environment, which is the only sense in which
+                  `live` means anything (#179).
+                enum: [pending, provisioning, live, degraded, paused, failed, deprovisioning, removed]
+              appliedPlanHash: { type: string }
+              attestationId: { type: string }
+              updatedAt: { type: string, format: date-time, minLength: 1 }
+            additionalProperties: false
+      additionalProperties: false
 
     DispatchIntent:
+      # GENERATED by scripts/gen-api-spec.ts from DispatchIntentSchema (packages/contracts). Do not hand-edit: pnpm run spec:check fails on a difference, and the prose lives in packages/api-contract/src/spec-annotations.ts.
+      # The dispatch as the runner reads it, not the row: `nonce` and `planHash` are what the workflow carries
+      # back, and the intent expires -- `expiresAt` is enforced at the boundary, not documented.
       type: object
-      additionalProperties: false
       required: [instanceId, teamId, dispatchId, nonce, planHash, action, environment, issuedAt, expiresAt]
       properties:
-        instanceId: { type: string }
-        teamId: { type: string }
-        dispatchId: { type: string }
+        instanceId: { type: string, minLength: 1 }
+        teamId: { type: string, minLength: 1 }
+        dispatchId: { type: string, minLength: 1 }
         nonce: { type: string, minLength: 16, maxLength: 64 }
-        planHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        planHash: { type: string, pattern: '^[a-f0-9]{16,64}$' }
         action: { type: string, enum: [apply, check, drift, suspend, export] }
         environment: { type: string, minLength: 1 }
-        issuedAt: { type: string, format: date-time }
-        expiresAt: { type: string, format: date-time }
+        issuedAt: { type: string, format: date-time, minLength: 1 }
+        expiresAt: { type: string, format: date-time, minLength: 1 }
+      additionalProperties: false
 
     Attestation:
+      # GENERATED by scripts/gen-api-spec.ts from AttestationSchema (packages/contracts). Do not hand-edit: pnpm run spec:check fails on a difference, and the prose lives in packages/api-contract/src/spec-annotations.ts.
+      # The attestation a runner reports, before it is stored. `receivedAt` and the actor appear on
+      # `AttestationRecord`, because when the control plane heard about it is a fact about this service, not
+      # a fact the runner gets to assert.
       type: object
-      additionalProperties: false
-      required: [dispatchId, instanceId, nonce, planHash, action, environment, result, resources, durationMs, finishedAt]
+      required: [dispatchId, nonce, planHash, instanceId, environment, action, result, resources, durationMs, finishedAt]
       properties:
-        dispatchId: { type: string }
-        instanceId: { type: string }
+        dispatchId: { type: string, minLength: 1 }
         nonce: { type: string, minLength: 16 }
-        planHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        planHash: { type: string, pattern: '^[a-f0-9]{16,64}$' }
+        instanceId: { type: string, minLength: 1 }
+        environment: { type: string, minLength: 1 }
         action: { type: string, enum: [apply, check, drift, suspend, export] }
-        environment: { type: string }
         result: { type: string, enum: [ok, partial, failed, noop] }
+        errorCode: { type: string, minLength: 1 }
         resources:
           type: array
+          maxItems: 200
           items:
             type: object
-            additionalProperties: false
             required: [kind, name, externalId, status]
             properties:
-              kind: { type: string }
-              name: { type: string }
-              externalId: { type: string }
-              status: { type: string }
-        errorCode: { type: string, maxLength: 200 }
+              kind: { type: string, enum: [service, database, bucket, volume, domain, environment] }
+              name: { type: string, minLength: 1 }
+              externalId: { type: string, minLength: 1 }
+              status:
+                type: string
+                enum: [pending, building, deploying, live, failed, crashed, sleeping, awaiting-approval, removed]
+            additionalProperties: false
         release:
           type: object
-          additionalProperties: false
           required: [version, commitSha, imageDigest]
           properties:
-            version: { type: string }
-            commitSha: { type: string, pattern: '^[0-9a-f]{7,40}$' }
+            version: { type: string, minLength: 1 }
+            commitSha:
+              type: string
+              description: >-
+                The commit the release was built from. Seven to forty hex characters: a short SHA is a
+                display form, a full one is an anchor.
+              minLength: 40
+              maxLength: 40
             imageDigest: { type: string, pattern: '^sha256:[0-9a-f]{64}$' }
-        durationMs: { type: integer, minimum: 0 }
-        finishedAt: { type: string, format: date-time }
+          additionalProperties: false
+        durationMs: { type: integer, minimum: 0, maximum: 9007199254740991 }
+        finishedAt: { type: string, format: date-time, minLength: 1 }
+      additionalProperties: false
 
     AttestationRecord:
+      # GENERATED by scripts/gen-api-spec.ts from AttestationRecordSchema (packages/contracts). Do not hand-edit: pnpm run spec:check fails on a difference, and the prose lives in packages/api-contract/src/spec-annotations.ts.
       # Written out rather than composed with allOf: `additionalProperties: false` inside one allOf member
       # rejects the fields declared only in the other member, so a correct response fails validation. The
-      # duplication is deliberate and the comment is the maintenance note -- a generated client would otherwise
-      # receive a type it cannot satisfy.
+      # duplication is what the definition produces -- `AttestationRecordSchema` extends `AttestationSchema` --
+      # and a generated client would otherwise receive a type it cannot satisfy.
       type: object
-      additionalProperties: false
-      required: [dispatchId, instanceId, nonce, planHash, action, environment, result, resources, durationMs, finishedAt, receivedAt, actorKind]
+      required: [dispatchId, nonce, planHash, instanceId, environment, action, result, resources, durationMs, finishedAt, receivedAt, actorKind]
       properties:
-        dispatchId: { type: string }
-        instanceId: { type: string }
+        dispatchId: { type: string, minLength: 1 }
         nonce: { type: string, minLength: 16 }
-        planHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        planHash: { type: string, pattern: '^[a-f0-9]{16,64}$' }
+        instanceId: { type: string, minLength: 1 }
+        environment: { type: string, minLength: 1 }
         action: { type: string, enum: [apply, check, drift, suspend, export] }
-        environment: { type: string }
         result: { type: string, enum: [ok, partial, failed, noop] }
+        errorCode: { type: string, minLength: 1 }
         resources:
           type: array
+          maxItems: 200
           items:
             type: object
-            additionalProperties: false
             required: [kind, name, externalId, status]
             properties:
-              kind: { type: string }
-              name: { type: string }
-              externalId: { type: string }
-              status: { type: string }
-        errorCode: { type: string, maxLength: 200 }
+              kind: { type: string, enum: [service, database, bucket, volume, domain, environment] }
+              name: { type: string, minLength: 1 }
+              externalId: { type: string, minLength: 1 }
+              status:
+                type: string
+                enum: [pending, building, deploying, live, failed, crashed, sleeping, awaiting-approval, removed]
+            additionalProperties: false
         release:
           type: object
-          additionalProperties: false
           required: [version, commitSha, imageDigest]
           properties:
-            version: { type: string }
-            commitSha: { type: string, pattern: '^[0-9a-f]{7,40}$' }
+            version: { type: string, minLength: 1 }
+            commitSha:
+              type: string
+              description: >-
+                The commit the release was built from. Seven to forty hex characters: a short SHA is a
+                display form, a full one is an anchor.
+              minLength: 40
+              maxLength: 40
             imageDigest: { type: string, pattern: '^sha256:[0-9a-f]{64}$' }
-        durationMs: { type: integer, minimum: 0 }
-        finishedAt: { type: string, format: date-time }
-        receivedAt: { type: string, format: date-time }
-        actorKind: { type: string, enum: [runner, operator, shared-secret] }
+          additionalProperties: false
+        durationMs: { type: integer, minimum: 0, maximum: 9007199254740991 }
+        finishedAt: { type: string, format: date-time, minLength: 1 }
+        receivedAt: { type: string, format: date-time, minLength: 1 }
+        actorKind: { type: string, enum: [runner, operator, shared-secret], default: shared-secret }
         actorRef: { type: string, maxLength: 200 }
+      additionalProperties: false
 
     AuditEntry:
+      # GENERATED by scripts/gen-api-spec.ts from AuditEntrySchema (packages/contracts). Do not hand-edit: pnpm run spec:check fails on a difference, and the prose lives in packages/api-contract/src/spec-annotations.ts.
       type: object
-      additionalProperties: false
       required: [id, at, actorKind, actorRef, action, target, detail]
       properties:
-        id: { type: string }
-        at: { type: string, format: date-time }
+        id: { type: string, minLength: 1 }
+        at: { type: string, format: date-time, minLength: 1 }
         actorKind: { type: string, enum: [user, runner, controller, system] }
         actorRef: { type: string, maxLength: 200 }
-        action: { type: string, maxLength: 120 }
-        target: { type: string, maxLength: 200 }
+        action: { type: string, minLength: 1, maxLength: 120 }
+        target: { type: string, minLength: 1, maxLength: 200 }
         detail:
           type: object
-          additionalProperties: { type: [string, number, boolean] }
+          description: 'Structured, bounded, and never a credential: reason codes and ids, not payloads (D4).'
+          default: {}
+          additionalProperties:
+            anyOf:
+                - { type: string, maxLength: 300 }
+                - { type: number }
+                - { type: boolean }
+      additionalProperties: false
 
     Health:
       type: object

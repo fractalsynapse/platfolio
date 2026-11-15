@@ -19,27 +19,32 @@ import {
   API_CLIENT_ID,
   AUDIT_DETAIL_KEYS_ALLOWLIST,
   CALLBACK_PATH,
+  LOOPBACK_UI_ORIGIN,
   PKCE_CHALLENGE_ATTRIBUTE,
   PKCE_METHOD,
   RECOMMENDED_STORE,
   REQUIRED_SCOPE,
   TOKEN_STORAGE,
+  UI_ORIGIN_VARIABLE,
   WEB_CLIENT_ID,
   browserClientMappers,
   browserClientShape,
   codeChallenge,
   createPkcePair,
+  declaredEnvironmentsFrom,
+  declaredUiOrigins,
   endSessionUrl,
   isPkceVerifier,
   isTokenShapedName,
   normalizeUiOrigins,
+  realmOfIssuer,
   refreshAt,
   refreshSkewSeconds,
 } from '../../../scripts/browser-auth.ts';
 import { redactCredentialShaped } from '../src/managed-action.ts';
 
 const root = path.resolve(import.meta.dirname, '../../..');
-const shape = browserClientShape(['https://app.platfolio.dev', 'http://localhost:5173/']);
+const shape = browserClientShape(['https://platfolio.dev', 'http://localhost:5173/']);
 
 test('the browser client is a DIFFERENT client from the service client, and that separation is the point', () => {
   assert.notEqual(WEB_CLIENT_ID, API_CLIENT_ID);
@@ -78,8 +83,8 @@ test('PKCE is MANDATORY, as a client attribute named exactly as Keycloak stores 
 });
 
 test('redirect URIs are exact, webOrigins match them, and no wildcard survives', () => {
-  assert.deepEqual(shape.redirectUris, [`https://app.platfolio.dev${CALLBACK_PATH}`, `http://localhost:5173${CALLBACK_PATH}`]);
-  assert.deepEqual(shape.webOrigins, ['https://app.platfolio.dev', 'http://localhost:5173']);
+  assert.deepEqual(shape.redirectUris, [`https://platfolio.dev${CALLBACK_PATH}`, `http://localhost:5173${CALLBACK_PATH}`]);
+  assert.deepEqual(shape.webOrigins, ['https://platfolio.dev', 'http://localhost:5173']);
   for (const uri of shape.redirectUris) assert.ok(!uri.includes('*'), `wildcard redirect URI: ${uri}`);
   for (const uri of shape.redirectUris) assert.ok(shape.webOrigins.some((o) => uri.startsWith(`${o}/`)), `${uri} is outside every declared origin`);
   // Trailing slashes and duplicates are the same origin said twice; one spelling, one entry.
@@ -87,9 +92,9 @@ test('redirect URIs are exact, webOrigins match them, and no wildcard survives',
 });
 
 test('an origin that cannot carry a code securely is refused, not warned about', () => {
-  assert.throws(() => normalizeUiOrigins(['http://app.platfolio.dev']), /neither https nor loopback http/);
-  assert.throws(() => normalizeUiOrigins(['https://app.platfolio.dev/ui?next=1']), /must be an origin/);
-  assert.throws(() => normalizeUiOrigins(['ftp://app.platfolio.dev']), /neither https nor loopback http/);
+  assert.throws(() => normalizeUiOrigins(['http://platfolio.dev']), /neither https nor loopback http/);
+  assert.throws(() => normalizeUiOrigins(['https://platfolio.dev/ui?next=1']), /must be an origin/);
+  assert.throws(() => normalizeUiOrigins(['ftp://platfolio.dev']), /neither https nor loopback http/);
   // Loopback http stays legal: this is the development stack, and refusing it would stop the local smoke.
   assert.deepEqual(normalizeUiOrigins(['http://localhost:5173', 'http://127.0.0.1:4173']), ['http://localhost:5173', 'http://127.0.0.1:4173']);
   assert.deepEqual(normalizeUiOrigins([]), [], 'no origins is a legal (and useless) input -- the caller decides whether to proceed');
@@ -188,12 +193,12 @@ test('logout is an OIDC end-session call, and it names the session it is ending'
   const url = endSessionUrl({
     endSessionEndpoint: 'https://auth.platfolio.dev/realms/platfolio/protocol/openid-connect/logout',
     idToken: 'a.b.c',
-    postLogoutRedirectUri: 'https://app.platfolio.dev/callback',
+    postLogoutRedirectUri: 'https://platfolio.dev/callback',
     clientId: WEB_CLIENT_ID,
   });
   const parsed = new URL(url);
   assert.equal(parsed.searchParams.get('id_token_hint'), 'a.b.c', 'without id_token_hint the call cannot name a session');
-  assert.equal(parsed.searchParams.get('post_logout_redirect_uri'), 'https://app.platfolio.dev/callback');
+  assert.equal(parsed.searchParams.get('post_logout_redirect_uri'), 'https://platfolio.dev/callback');
   assert.equal(parsed.searchParams.get('client_id'), WEB_CLIENT_ID);
   assert.ok(!url.includes('refresh_token'), 'the deprecated refresh_token+client_id logout is not the contract');
 });
@@ -271,4 +276,100 @@ test('the smoke script exists and its header carries the lifecycle claims this f
     assert.ok(prose.includes(topic), `the lifecycle header no longer mentions "${topic}" -- either the contract changed or the documentation fell out of step with it`);
   }
   assert.ok(!/grant_type=password[^\n]*\bfor the browser\b/.test(header), 'the header must not describe ROPC as the browser path');
+});
+
+/* ------------------------------------------------------------------ which realm, which UI origin */
+
+/**
+ * A platform description in miniature: one realm per environment on one issuer host (D56), each environment
+ * naming the origin its own UI is served from. `.test` is the documentation TLD -- these hosts resolve nowhere,
+ * which is the point: this fixture is about the reading rule, not about platfolio's own DNS.
+ */
+const DESCRIPTION = `
+services:
+  api:
+    environment:
+      PLATFOLIO_IDENTITY_ISSUER: https://auth.test/realms/platfolio
+      PLATFOLIO_IDENTITY_AUDIENCE: platfolio-api
+      PLATFOLIO_ALLOWED_ORIGINS: https://platfolio.test
+    x-platfolio:
+      environmentValues:
+        staging:
+          PLATFOLIO_IDENTITY_ISSUER: https://auth.test/realms/platfolio-staging
+          PLATFOLIO_ALLOWED_ORIGINS: https://preview.platfolio.test
+  identity:
+    environment:
+      KC_HOSTNAME: auth.test
+`;
+
+test('the realm a service authenticates against is read out of its issuer URL', () => {
+  // The issuer path is the only thing that separates platfolio's two environments (D56), so a seed that wants
+  // to know which environment it is writing has to read it rather than pattern-match a name.
+  assert.equal(realmOfIssuer('https://auth.test/realms/platfolio'), 'platfolio');
+  assert.equal(realmOfIssuer('http://localhost:8081/realms/platfolio/protocol/openid-connect/certs'), 'platfolio', 'a trailing protocol path is not part of the realm');
+  assert.equal(realmOfIssuer('https://auth.test'), undefined, 'an issuer with no realm segment addresses no realm');
+  assert.equal(realmOfIssuer(undefined), undefined, 'and a service that declares no issuer is not a parse error');
+  assert.equal(realmOfIssuer('not a url'), undefined);
+});
+
+test('a hosted realm is seeded with the UI origin the platform description declares for it -- and with nothing else', () => {
+  const declared = declaredEnvironmentsFrom(DESCRIPTION);
+  // Three environment spellings: api's base, api's staging override, identity's base. The reader composes each
+  // override over the base rather than replacing it, because a partial override that dropped the untouched
+  // variables would make "what does staging run with" unanswerable from the file.
+  assert.equal(declared.length, 3, JSON.stringify(declared.map((d) => d.declaredIn)));
+  const staging = declared.find((d) => d.environment === 'staging');
+  assert.ok(staging, 'the staging override must be one of the declared environments');
+  assert.equal(staging.vars.PLATFOLIO_IDENTITY_AUDIENCE, 'platfolio-api', 'an override inherits the entries it does not name (D56)');
+
+  assert.deepEqual(declaredUiOrigins(declared, 'platfolio'), {
+    environment: '',
+    declaredIn: 'services.api environment',
+    origins: ['https://platfolio.test'],
+  }, 'the production realm reads the base map');
+  assert.deepEqual(declaredUiOrigins(declared, 'platfolio-staging')?.origins, ['https://preview.platfolio.test'],
+    'and the staging realm reads staging -- two environments whose UI origins are identical are one environment said twice');
+
+  // Absent is a refusal, not a default. This is the assertion that keeps `identity:seed` from inventing an
+  // origin for a realm it was not told about: an invented redirect URI is a wildcard with better typography.
+  assert.equal(declaredUiOrigins(declared, 'tenant-acme'), undefined, 'a realm the description does not place has no UI origin');
+  const silent = DESCRIPTION.replace(/^ *PLATFOLIO_ALLOWED_ORIGINS: https:\/\/platfolio\.test\n/m, '');
+  assert.equal(declaredUiOrigins(declaredEnvironmentsFrom(silent), 'platfolio'), undefined,
+    'a realm whose issuer is declared but whose origin is not, is a gap in the description -- not an empty list to seed');
+
+  const doubled = `${DESCRIPTION}  worker:\n    environment:\n      PLATFOLIO_IDENTITY_ISSUER: https://auth.test/realms/platfolio\n      PLATFOLIO_ALLOWED_ORIGINS: https://other.test\n`;
+  assert.throws(() => declaredUiOrigins(declaredEnvironmentsFrom(doubled), 'platfolio'), /one realm, one UI origin list/,
+    'two services naming two origins for one realm is a description defect; picking one silently picks wrong');
+});
+
+test('platfolio\'s own description answers for its own realms -- production, staging, and the development overlay', () => {
+  // The maintainers chose the UI hostnames; `compose.yaml` is where they are written, so this reads them back
+  // out of the file instead of restating them here. Mutating either hostname in the composition fails this test
+  // by name -- which is the whole reason the composition, and not a script constant, is the owner of the fact.
+  const own = declaredEnvironmentsFrom(fs.readFileSync(path.join(root, 'compose.yaml'), 'utf8'));
+  const production = declaredUiOrigins(own, 'platfolio');
+  const staging = declaredUiOrigins(own, 'platfolio-staging');
+  assert.deepEqual(production?.origins, ['https://platfolio.dev'], 'the production UI origin compose.yaml declares');
+  assert.deepEqual(staging?.origins, ['https://preview.platfolio.dev'], 'the staging UI origin, declared inside the platform description (D56)');
+  assert.ok(production !== undefined && staging !== undefined && production.origins[0] !== staging.origins[0],
+    'staging and production must differ inside the description, not in what a deploy script patches afterwards');
+
+  // The UI is a third host, not a relabelling of the API or identity hosts: those two appear in the composition
+  // as domains, and neither may have been renamed to the UI hostname by accident.
+  const hosts = fs.readFileSync(path.join(root, 'compose.yaml'), 'utf8').match(/domains: \[([^\]]+)\]/g)?.join(' ') ?? '';
+  assert.ok(hosts.includes('api.platfolio.dev'), `api.platfolio.dev must stay declared as the API's domain, got "${hosts}"`);
+  assert.ok(hosts.includes('auth.platfolio.dev'), `auth.platfolio.dev must stay declared as the identity domain, got "${hosts}"`);
+  for (const retired of ['app.platfolio.dev', 'staging-app.platfolio.dev', 'staging.platfolio.dev']) {
+    for (const f of ['compose.yaml', 'compose.dev.yaml', 'apps/control-plane/src/cors.ts', 'scripts/seed-identity.ts']) {
+      assert.ok(!fs.readFileSync(path.join(root, f), 'utf8').includes(retired), `${f} still names the retired UI host ${retired}`);
+    }
+  }
+
+  // Development is a localhost origin in the overlay, read with the same reader as everywhere else. It is not a
+  // second environment of the platform description -- `platform:plan` never reads this file -- but the local
+  // realm and the local API still have to agree on one origin, which is what the shared constant is for.
+  const overlay = fs.readFileSync(path.join(root, 'compose.dev.yaml'), 'utf8');
+  const dev = declaredEnvironmentsFrom(overlay).find((d) => d.declaredIn === 'services.api environment');
+  assert.equal(dev?.vars[UI_ORIGIN_VARIABLE], LOOPBACK_UI_ORIGIN,
+    'compose.dev.yaml must name the loopback origin the seed and the smoke fall back to, or local logins redirect somewhere nothing listens on');
 });

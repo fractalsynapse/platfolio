@@ -4,7 +4,7 @@
  * hand, because every line reproduces from the specification.
  *
  * Source: apps/control-plane/openapi.yaml (OpenAPI 3.1.0, info.version 0.1.0)
- * Input digest: sha256/560652e48371c5ec
+ * Input digest: sha256/0488c298e6c8ebeb
  *
  * Reproduce it with `pnpm run api:types`. `pnpm run api:types:check` fails when this file stops matching
  * what the committed spec produces, which is the only way a generated type deserves to be trusted.
@@ -21,21 +21,22 @@
 
 export interface Attestation {
   dispatchId: string;
-  instanceId: string;
   nonce: string;
   planHash: string;
-  action: 'apply' | 'check' | 'drift' | 'suspend' | 'export';
+  instanceId: string;
   environment: string;
+  action: 'apply' | 'check' | 'drift' | 'suspend' | 'export';
   result: 'ok' | 'partial' | 'failed' | 'noop';
+  errorCode?: string;
   resources: Array<{
-    kind: string;
+    kind: 'service' | 'database' | 'bucket' | 'volume' | 'domain' | 'environment';
     name: string;
     externalId: string;
-    status: string;
+    status: 'pending' | 'building' | 'deploying' | 'live' | 'failed' | 'crashed' | 'sleeping' | 'awaiting-approval' | 'removed';
   }>;
-  errorCode?: string;
   release?: {
     version: string;
+    /** The commit the release was built from. Seven to forty hex characters: a short SHA is a display form, a full one is an anchor. */
     commitSha: string;
     imageDigest: string;
   };
@@ -45,21 +46,22 @@ export interface Attestation {
 
 export interface AttestationRecord {
   dispatchId: string;
-  instanceId: string;
   nonce: string;
   planHash: string;
-  action: 'apply' | 'check' | 'drift' | 'suspend' | 'export';
+  instanceId: string;
   environment: string;
+  action: 'apply' | 'check' | 'drift' | 'suspend' | 'export';
   result: 'ok' | 'partial' | 'failed' | 'noop';
+  errorCode?: string;
   resources: Array<{
-    kind: string;
+    kind: 'service' | 'database' | 'bucket' | 'volume' | 'domain' | 'environment';
     name: string;
     externalId: string;
-    status: string;
+    status: 'pending' | 'building' | 'deploying' | 'live' | 'failed' | 'crashed' | 'sleeping' | 'awaiting-approval' | 'removed';
   }>;
-  errorCode?: string;
   release?: {
     version: string;
+    /** The commit the release was built from. Seven to forty hex characters: a short SHA is a display form, a full one is an anchor. */
     commitSha: string;
     imageDigest: string;
   };
@@ -77,6 +79,7 @@ export interface AuditEntry {
   actorRef: string;
   action: string;
   target: string;
+  /** Structured, bounded, and never a credential: reason codes and ids, not payloads (D4). */
   detail: Record<string, string | number | boolean>;
 }
 
@@ -164,22 +167,44 @@ export interface Instance {
     /** Pinned by commit, never by a movable tag (D30 law 3). */
     commitSha: string;
   };
-  /** The rollup, not the truth: production's state when a production environment exists, otherwise the worst among the environments (#179). `environments` below is what actually happened per place. */
+  /** The rollup, not the truth: production's state when a production environment exists, otherwise the worst among the environments (#179). `InstanceResponse.environments` is what actually happened per place. */
   state: 'pending' | 'provisioning' | 'live' | 'degraded' | 'paused' | 'failed' | 'deprovisioning' | 'removed';
-  /** One row per environment the instance has. Absent until the first reconcile. */
-  environments?: Array<{
-    instanceId: string;
-    environment: string;
-    state: 'pending' | 'provisioning' | 'live' | 'degraded' | 'paused' | 'failed' | 'deprovisioning' | 'removed';
-    appliedPlanHash?: string;
-    attestationId?: string;
-    updatedAt: string;
-  }>;
   provider: 'railway' | 'fake';
   desiredPlanHash?: string;
   lastAppliedPlanHash?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface InstanceResponse {
+  id: string;
+  teamId: string;
+  /** The half of `team/name` a person types (D45). Slug rules, enforced in the schema and the database: a name needing escapes or a disambiguating id is a name that will break in a URL, a CLI argument, or a shell. */
+  name: string;
+  /** The template this instance was created from. Formerly the field `platform`, which stored a template id -- D45. */
+  template: string;
+  templateRef?: {
+    repo: string;
+    /** Pinned by commit, never by a movable tag (D30 law 3). */
+    commitSha: string;
+  };
+  /** The rollup, not the truth: production's state when a production environment exists, otherwise the worst among the environments (#179). `InstanceResponse.environments` is what actually happened per place. */
+  state: 'pending' | 'provisioning' | 'live' | 'degraded' | 'paused' | 'failed' | 'deprovisioning' | 'removed';
+  provider: 'railway' | 'fake';
+  desiredPlanHash?: string;
+  lastAppliedPlanHash?: string;
+  createdAt: string;
+  updatedAt: string;
+  /** One row per environment the instance has. The assembled response always carries it; it is empty until the first reconcile. */
+  environments: Array<{
+    instanceId: string;
+    environment: string;
+    /** What the controller last verified for this environment, which is the only sense in which `live` means anything (#179). */
+    state: 'pending' | 'provisioning' | 'live' | 'degraded' | 'paused' | 'failed' | 'deprovisioning' | 'removed';
+    appliedPlanHash?: string;
+    attestationId?: string;
+    updatedAt: string;
+  }>;
 }
 
 export interface Invitation {
@@ -351,6 +376,10 @@ export interface ApiParameters {
     instanceId: string;
     name: string;
   };
+  /** POST /api/v1/instances/{instanceId}/redeploy */
+  redeployInstance: {
+    instanceId: string;
+  };
   /** POST /api/v1/instances/{instanceId}/plan/from-repository */
   registerPlanFromRepository: {
     instanceId: string;
@@ -452,6 +481,13 @@ export interface ApiRequestBodies {
     environment: string;
     /** The credential. Never returned by any endpoint; never written to the audit record. */
     value: string;
+    /** What the write does to the RUNNING service. The default, `suppress`, writes the variable and leaves the container alone -- the behaviour every delivery had before this field existed, and still the default, because a platform that cannot read a value back (D4) must not silently restart things on a write that changed nothing. `auto` sends the write without Railway's `skipDeploys` suppression and lets the provider's own comparison decide. Measured 2026-11-15 in docs/research/: a changed value started a new deployment on its own; an identical value started nothing. So the restart is triggered by the party that holds the value, and platfolio never stores, reads, or hashes one -- which is the tradeoff this design accepts in exchange for keeping D4 intact. */
+    refresh?: 'suppress' | 'auto';
+  };
+  /** POST /api/v1/instances/{instanceId}/redeploy */
+  redeployInstance: {
+    environment: 'production' | 'staging' | 'preview';
+    service?: string;
   };
   /** POST /api/v1/instances/{instanceId}/plan/from-repository */
   registerPlanFromRepository: {
@@ -585,7 +621,7 @@ export interface ApiResponses {
   };
   /** GET /api/v1/instances/{instanceId} */
   getInstance: {
-    '200': Instance;
+    '200': InstanceResponse;
     '401': Error;
     '404': Error;
   };
@@ -635,7 +671,7 @@ export interface ApiResponses {
   };
   /** GET /api/v1/instances */
   listInstances: {
-    '200': Instance[];
+    '200': InstanceResponse[];
     '401': Error;
   };
   /** GET /api/v1/teams/{teamId}/invitations */
@@ -713,6 +749,34 @@ export interface ApiResponses {
     '403': Error;
     '404': Error;
     '501': Error;
+    '502': Error;
+  };
+  /** POST /api/v1/instances/{instanceId}/redeploy */
+  redeployInstance: {
+    '202': {
+      instanceId: string;
+      environment: string;
+      /** Physical names the provider was asked to redeploy, in the order it acted. */
+      services: string[];
+      /** Names it could not act on -- no such service, no instance here, or a deploy the provider accepted without starting. */
+      refused: Array<{
+        service: string;
+        code: 'no-project' | 'no-environment' | 'no-service' | 'not-in-environment' | 'deployment-unchanged';
+        reason: string;
+      }>;
+      /** Names suppressed because the provider's deploy ceiling was already spent. Distinct from `refused`: this is "not allowed to", not "nothing there". */
+      budgetSkipped: string[];
+      /** True only when every service asked about was observed to have a NEW deployment id. */
+      verified: boolean;
+    };
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '501': {
+      error: 'provider-cannot-redeploy';
+      message: string;
+    };
     '502': Error;
   };
   /** POST /api/v1/instances/{instanceId}/plan/from-repository */

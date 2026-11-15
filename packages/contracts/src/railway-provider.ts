@@ -2,7 +2,7 @@ import {
   InfraPlanSchema, OPERATIONS, planIssues,
   CONTRACT_VERSION,
   type ApplyResult, type CapabilityInfo, type DeleteResult, type InfraPlan, type InfraProvider,
-  type Issue, type SecretPresence, type SecretWriteResult, type ServicePlan, type StateSnapshot,
+  type Issue, type RedeployResult, type SecretPresence, type SecretWriteResult, type ServicePlan, type StateSnapshot,
 } from './infra.ts';
 import {
   HttpRailwayTransport, type RailwayCredential, type RailwayCredentialSource, type RailwayTransport,
@@ -648,7 +648,10 @@ export class RailwayInfraProvider implements InfraProvider {
    * presence check, never a value read: the provider redacts values on read, so the strongest claim available
    * is "the variable now exists", which is also the only claim worth making.
    */
-  async putSecretValue(input: { instanceId: string; environment: string; service: string; name: string; value: string; source?: 'service' | 'shared-variable' }): Promise<SecretWriteResult> {
+  async putSecretValue(input: {
+    instanceId: string; environment: string; service: string; name: string; value: string;
+    source?: 'service' | 'shared-variable'; refresh?: 'suppress' | 'auto';
+  }): Promise<SecretWriteResult> {
     if (typeof input.value !== 'string' || input.value.length === 0) {
       return { ok: false, code: 'invalid-value', reason: 'a secret value must be a non-empty string; an empty value is a deletion the tenant did not ask for' };
     }
@@ -667,6 +670,13 @@ export class RailwayInfraProvider implements InfraProvider {
     }
     const token = await this.credentials.forEnvironment(project.id, env.name);
     const shared = input.source === 'shared-variable';
+    // `suppress` is the default and is what every caller asked for before the maintainer raised the
+    // question. `auto` lets the provider's own value diff decide -- see the method comment above.
+    const skipDeploys = input.refresh !== 'auto';
+    // Deployment identity BEFORE the write, so the answer afterwards is an observation of a new deployment and
+    // not an inference from a mutation that returned true. A read that fails is `undefined`, which distinguishes
+    // "we looked and nothing moved" from "we could not look" -- three states, because they are three facts.
+    const stampBefore = skipDeploys ? undefined : await this.deploymentStamps(project.id, env.id, token).then((m) => m.get(svc.id)).catch(() => undefined);
     try {
       if (shared) {
         // Two calls, one meaning, both read off the captured provider schema rather than assumed.
@@ -674,10 +684,10 @@ export class RailwayInfraProvider implements InfraProvider {
         // calls a shared variable. `sharedVariableConfigure`, whose input carries only the enable/disable service
         // lists and NO value field, is what attaches it to the service that has to read it. Calling only the
         // first would write a credential the service cannot see and then verify the wrong thing.
-        await this.upsertSharedVariable(project.id, env.id, input.name, input.value, token);
+        await this.upsertSharedVariable(project.id, env.id, input.name, input.value, token, skipDeploys);
         await this.attachSharedVariable(project.id, env.id, input.name, svc.id, token);
       } else {
-        await this.upsertVariable(project.id, env.id, svc.id, input.name, input.value, token);
+        await this.upsertVariable(project.id, env.id, svc.id, input.name, input.value, token, skipDeploys);
       }
     } catch (error) {
       // The provider's words, redacted: a rejected write is worth reading, and a credential must never be in it.
@@ -686,7 +696,15 @@ export class RailwayInfraProvider implements InfraProvider {
     // Presence is read for the DECLARING service, not for the environment, so a shared variable that was written
     // but never attached reports verified:false -- the failure the second call exists to prevent.
     const present = (await this.configVariableNames(project.id, env.id, svc.id).catch(() => [] as string[])).includes(input.name);
-    return { ok: true, verified: present };
+    if (skipDeploys) return { ok: true, verified: present };
+    // Refresh asked for: what did the provider make of the value? `unchanged` is the measured behaviour of arm D
+    // -- Railway compares what it holds with what arrived and starts nothing -- so re-delivering an identical
+    // credential is free, and we say so rather than claiming a restart.
+    const stampAfter = await this.deploymentStamps(project.id, env.id, token).then((m) => m.get(svc.id)).catch(() => undefined);
+    const refresh = stampBefore === undefined || stampAfter === undefined
+      ? 'unknown'
+      : stampAfter !== stampBefore ? 'redeployed' : 'unchanged';
+    return { ok: true, verified: present, refresh };
   }
 
   async secretPresence(input: { instanceId: string; environment: string; service: string; names: string[] }): Promise<Record<string, SecretPresence>> {
@@ -710,6 +728,142 @@ export class RailwayInfraProvider implements InfraProvider {
     }
     const set = new Set(names);
     for (const n of input.names) out[n] = set.has(n) ? 'set' : 'missing';
+    return out;
+  }
+
+  /**
+   * Redeploy one service, or every service in one environment, on an operator's decision.
+   *
+   * The thing this exists to make impossible: a service that was CONFIGURED correctly and is RUNNING an old
+   * value, with no record of the gap. On Railway a variable write resolves `${{…}}` references at write time
+   * (measured, and the reason `platform-deploy --redeploy` was added), so the container's environment is a
+   * snapshot of the moment it was deployed, not a live view of the variable store. `applyPlan` handles its own
+   * case -- it writes, then deploys deliberately, under the budget. This is the verb for everything else: a
+   * secret delivered out of band, a variable changed in the provider console, a reference that only resolved
+   * after the first boot.
+   *
+   * Deliberately NOT a value comparison. We may not read values back (D4: `variables()` is refused, and
+   * `environment.config` answers names with values redacted), so the provider cannot answer "did the value
+   * change" -- and measurement says we do not need to: Railway already diffs values on the write side and
+   * starts a deployment only for a real change. What we CAN answer honestly is "was a restart asked for, and
+   * did one start", which is exactly what this reports. The tradeoff accepted here: a redeploy is a restart, so
+   * a refresh asked for when nothing changed costs a container bounce and buys nothing. That is the operator's
+   * decision to make, which is why it is an operation with an audit row rather than an automatic consequence of
+   * a write.
+   */
+  async redeploy(input: { instanceId: string; environment: string; service?: string }): Promise<RedeployResult> {
+    const project = await this.findProject(this.projectName({ instanceId: input.instanceId }));
+    if (!project) {
+      return {
+        instanceId: input.instanceId, environment: input.environment, services: [],
+        refused: input.service ? [{ service: input.service, code: 'no-project', reason: `no provider project "${this.projectName({ instanceId: input.instanceId })}" -- the instance has never been applied` }] : [],
+        budgetSkipped: [], verified: false,
+      };
+    }
+    const workspace = await this.credentials.workspace();
+    const env = (await this.environments(project.id, workspace)).find((e) => e.name === input.environment);
+    if (!env) {
+      return {
+        instanceId: input.instanceId, environment: input.environment, services: [],
+        refused: [{ service: input.service ?? '*', code: 'no-environment', reason: `environment "${input.environment}" does not exist in this instance` }],
+        budgetSkipped: [], verified: false,
+      };
+    }
+    const token = await this.credentials.forEnvironment(project.id, env.name);
+    const placed = await this.environmentInstances(project.id, env.id, token);
+    const projectServices = await this.listServices(project.id, workspace);
+
+    // Which services to act on: one named service, or everything the ENVIRONMENT holds. The physical name rule
+    // (D57) is applied to the caller's argument, because a tenant says `api` and lives at `api-production`;
+    // asking them for the provider's row name would leak an implementation detail into the contract.
+    const wanted = input.service === undefined
+      ? [...placed.keys()]
+      : (() => {
+        const physical = physicalServiceName(input.service!, input.environment);
+        const row = projectServices.find((s) => s.name === physical);
+        return row === undefined ? [] : [row.id];
+      })();
+
+    if (input.service !== undefined && wanted.length === 0) {
+      const physical = physicalServiceName(input.service, input.environment);
+      const bare = projectServices.find((s) => s.name === input.service);
+      return {
+        instanceId: input.instanceId, environment: input.environment, services: [],
+        refused: [{
+          service: input.service,
+          code: bare && !placed.has(bare.id) ? 'not-in-environment' : 'no-service',
+          reason: bare && !placed.has(bare.id)
+            ? `"${physical}" exists in the project but has no instance in "${input.environment}"`
+            : `no service named "${physical}" in this project${bare ? ` (a row "${input.service}" exists but is not this environment's -- pre-D57 shape; apply the plan to rename it)` : ''}`,
+        }],
+        budgetSkipped: [], verified: false,
+      };
+    }
+
+    // Snapshot each service's CURRENT deployment identity before asking for a new one, so `verified` is an
+    // observation ("a different deployment exists now") rather than a restatement of our own call. Railway's
+    // `serviceInstanceDeploy` answers a bare boolean; believing that alone is how a script once reported a
+    // restart that had not happened. This is a separate small read rather than a widening of
+    // `environmentInstances`' query, because that one serves domains, replicas and status for the whole apply
+    // path and every field added to it is a field every other test must keep answering.
+    const before = await this.deploymentStamps(project.id, env.id, token);
+
+    const services: string[] = [];
+    const budgetSkipped: string[] = [];
+    for (const serviceId of wanted) {
+      const row = projectServices.find((s) => s.id === serviceId);
+      const label = row?.name ?? serviceId;
+      if (this.deploymentsUsed >= this.deployBudget) {
+        budgetSkipped.push(label);
+        continue;
+      }
+      this.deploymentsUsed += 1;
+      services.push(label);
+      await this.transport.graphql({
+        operation: 'serviceInstanceDeploy',
+        credential: token,
+        query: 'mutation ($environmentId: String!, $serviceId: String!) { serviceInstanceDeploy(environmentId: $environmentId, serviceId: $serviceId, latestCommit: true) }',
+        variables: { environmentId: env.id, serviceId },
+      });
+    }
+
+    // Read back only for the services we actually asked about. A deployment whose id did not move is reported,
+    // not assumed: the provider can accept a deploy call and coalesce it into an in-flight one, and "we asked
+    // and it happened" must not be claimed when the identity is unchanged.
+    const after = await this.deploymentStamps(project.id, env.id, token);
+    const acted = new Set<string>();
+    const refused: RedeployResult['refused'] = [];
+    for (const serviceId of wanted) {
+      const label = projectServices.find((s) => s.id === serviceId)?.name ?? serviceId;
+      if (!services.includes(label)) continue;   // budget-skipped is its own answer, already listed
+      acted.add(label);
+      if (before.get(serviceId) === after.get(serviceId)) {
+        refused.push({ service: label, code: 'deployment-unchanged', reason: `the provider accepted the deploy but the service's latest deployment id did not change (${String(before.get(serviceId) ?? 'none')} -> ${String(after.get(serviceId) ?? 'none')})` });
+      }
+    }
+    // The same rule the double states: a refresh is verified only when EVERYTHING asked for was restarted and
+    // nothing was refused or suppressed. A partial restart is a real outcome and must not read as success --
+    // `budgetSkipped` and `refused` are where the remainder lives, so no name is ever dropped silently.
+    const verified = acted.size > 0 && refused.length === 0 && budgetSkipped.length === 0;
+
+    return { instanceId: input.instanceId, environment: input.environment, services, refused, budgetSkipped, verified };
+  }
+
+  /**
+   * `serviceId -> latest deployment id`, for the redeploy read-back.
+   *
+   * Identity only -- no status, no configuration, no variables. Nothing in this method could carry a value,
+   * which is what keeps the D4 rule intact on a path that exists to react to values.
+   */
+  private async deploymentStamps(projectId: string, environmentId: string, credential: RailwayCredential): Promise<Map<string, string | undefined>> {
+    const data = await this.transport.graphql<{ environment: { serviceInstances: { edges: { node: { serviceId: string; latestDeployment?: { id?: string } | null } }[] } | null } | null }>({
+      operation: 'environment.serviceInstances',
+      credential,
+      query: 'query ($projectId: String!, $environmentId: String!) { environment(projectId: $projectId, id: $environmentId) { serviceInstances { edges { node { serviceId latestDeployment { id } } } } } }',
+      variables: { projectId, environmentId },
+    });
+    const out = new Map<string, string | undefined>();
+    for (const edge of data.environment?.serviceInstances?.edges ?? []) out.set(edge.node.serviceId, edge.node.latestDeployment?.id);
     return out;
   }
 
@@ -1100,13 +1254,14 @@ export class RailwayInfraProvider implements InfraProvider {
     });
   }
 
-  private async upsertVariable(projectId: string, environmentId: string, serviceId: string, name: string, value: string, credential: RailwayCredential): Promise<void> {
+  private async upsertVariable(projectId: string, environmentId: string, serviceId: string, name: string, value: string, credential: RailwayCredential, skipDeploys = true): Promise<void> {
     await this.transport.graphql({
       operation: 'variableUpsert',
       credential,
       query: 'mutation ($input: VariableUpsertInput!) { variableUpsert(input: $input) }',
-      // skipDeploys: a configuration write must not trigger a redeploy we did not decide on.
-      variables: { input: { projectId, environmentId, serviceId, name, value, skipDeploys: true } },
+      // skipDeploys defaults to true: a configuration write must not trigger a redeploy we did not decide on.
+      // `false` is the deliberate exception, and only the refresh path passes it (see putSecretValue).
+      variables: { input: { projectId, environmentId, serviceId, name, value, skipDeploys } },
     });
   }
 
@@ -1115,14 +1270,14 @@ export class RailwayInfraProvider implements InfraProvider {
    * omitting `serviceId` is exactly what distinguishes a shared variable from a service variable: the value
    * belongs to the environment, and services opt in to reading it.
    */
-  private async upsertSharedVariable(projectId: string, environmentId: string, name: string, value: string, credential: RailwayCredential): Promise<void> {
+  private async upsertSharedVariable(projectId: string, environmentId: string, name: string, value: string, credential: RailwayCredential, skipDeploys = true): Promise<void> {
     await this.transport.graphql({
       operation: 'variableUpsert',
       credential,
       query: 'mutation ($input: VariableUpsertInput!) { variableUpsert(input: $input) }',
       // No serviceId: environment scope. skipDeploys for the same reason as the service-scoped write -- a
       // credential arriving is not a decision to redeploy.
-      variables: { input: { projectId, environmentId, name, value, skipDeploys: true } },
+      variables: { input: { projectId, environmentId, name, value, skipDeploys } },
     });
   }
 

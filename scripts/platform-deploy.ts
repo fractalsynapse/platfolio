@@ -86,14 +86,21 @@ function describePlan(plan: InfraPlan): void {
 }
 
 if (arg('bootstrap-vars')) {
-  // An operator step, not a platform capability: platfolio must never hold a TENANT's secret values (D4), and
-  // the provider deliberately refuses to create a declared secret it cannot find. This first-party deployment
-  // is the other side of that rule -- platfolio's own credentials, supplied by whoever runs the deploy, read
-  // from the local environment and written to Railway. Names go in logs; values never do.
-  const supplied: Record<string, string | undefined> = {
-    KEYCLOAK_ADMIN: process.env.KEYCLOAK_ADMIN,
-    KEYCLOAK_ADMIN_PASSWORD: process.env.KEYCLOAK_ADMIN_PASSWORD,
-  };
+  // Names come from the composition, never from this script. The two entries hard-coded here used to be
+  // `KEYCLOAK_ADMIN` / `KEYCLOAK_ADMIN_PASSWORD` -- the Keycloak 25.x names -- and that is how the drift in
+  // #248 survived: the composition said one pair, this operator step delivered another, and both files were
+  // internally consistent, so no check in this repository could see the disagreement. Reading the plan's own
+  // declared secrets means an operator step can no longer hold a private vocabulary of credential names.
+  const secretPlan = buildPlan(loadManifest(), { instanceId: 'selfhost', teamId: 'platfolio' });
+  const declaredSecrets = secretPlan.environments
+    .flatMap((e) => e.services.flatMap((s) => s.secrets.map((sec) => ({ service: s.name, name: sec.name, environment: e.name, source: sec.source }))))
+    .filter((x) => x.environment === 'production');
+  const supplied: Record<string, string | undefined> = Object.fromEntries(declaredSecrets.map((x) => [x.name, process.env[x.name]]));
+  if (declaredSecrets.length === 0) {
+    console.error('  --bootstrap-vars found no production secrets declared by the composition; nothing to deliver');
+    process.exit(1);
+  }
+  console.log(`  the composition declares ${String(declaredSecrets.length)} production secret name(s): ${declaredSecrets.map((x) => `${x.service}.${x.name}`).join(', ')}`);
   const project = await (await fetch('https://backboard.railway.com/graphql/v2', {
     method: 'POST', headers: { 'content-type': 'application/json', authorization: token },
     body: JSON.stringify({ query: 'query($w:String!){ projects(workspaceId:$w, first:50){ edges{ node{ id name } } } }', variables: { w: workspaceId } }),
@@ -134,23 +141,39 @@ if (arg('bootstrap-vars')) {
   // field that does not exist.
   const services = foundServices;
   const owner = (needle: string) => services.find((x) => x.node.name === needle)?.node.id;
-  const plan2: Array<{ service: string; variable: string }> = [
-    { service: 'identity', variable: 'KEYCLOAK_ADMIN' },
-    { service: 'identity', variable: 'KEYCLOAK_ADMIN_PASSWORD' },
-  ];
+  // One write per declared production secret, with the SERVICE it belongs to taken from the plan rather than
+  // from a table in this script. The shared-variable sources are written at environment scope, because that is
+  // what the plan's `source` claims and what `ensureSecrets` then finds attached; the service-scoped ones are
+  // written onto their own service row.
+  const plan2: Array<{ service: string; variable: string; shared: boolean }> = declaredSecrets.map((x) => ({ service: x.service, variable: x.name, shared: x.source === 'shared-variable' }));
   for (const entry of plan2) {
     const value = supplied[entry.variable];
-    if (value === undefined || value.length === 0) { console.error(`  ${entry.variable} is not set in the local environment`); process.exit(1); }
+    if (value === undefined || value.length === 0) { console.error(`  ${entry.variable} is not set in the local environment (declared by ${entry.service} in the composition)`); process.exit(1); }
     // Suffix first, bare second: this operator step has to work on a project that has not been migrated yet, and
     // writing onto the bare row is correct HERE because the row is the same service the apply is about to rename.
     const serviceId = owner(physicalServiceName(entry.service, 'production')) ?? owner(entry.service);
-    if (!serviceId) { console.error(`  no "${physicalServiceName(entry.service, 'production')}" service in this project yet -- run the apply first`); process.exit(1); }
+    if (!serviceId && !entry.shared) { console.error(`  no "${physicalServiceName(entry.service, 'production')}" service in this project yet -- run the apply first`); process.exit(1); }
+    const input: Record<string, unknown> = { projectId: target.node.id, environmentId: production.node.id, name: entry.variable, value, skipDeploys: true };
+    if (!entry.shared) input.serviceId = serviceId;
     const r = await (await fetch('https://backboard.railway.com/graphql/v2', {
       method: 'POST', headers: { 'content-type': 'application/json', authorization: token },
-      body: JSON.stringify({ query: 'mutation($input:VariableUpsertInput!){ variableUpsert(input:$input) }', variables: { input: { projectId: target.node.id, environmentId: production.node.id, serviceId, name: entry.variable, value, skipDeploys: true } } }),
+      body: JSON.stringify({ query: 'mutation($input:VariableUpsertInput!){ variableUpsert(input:$input) }', variables: { input } }),
     })).json() as { errors?: Array<{ message: string }> };
     if (r.errors) { console.error(`  ${entry.variable}: ${JSON.stringify(r.errors).slice(0, 140)}`); process.exit(1); }
-    console.log(`  set ${entry.service}.${entry.variable} (value withheld${entry.variable.includes('PASSWORD') ? ', marked secret' : ''})`);
+    console.log(`  set ${entry.shared ? '(shared)' : entry.service}.${entry.variable} (value withheld${entry.variable.includes('PASSWORD') ? ', marked secret' : ''})`);
+    // A shared variable exists in the environment but is invisible to a service until it is attached, and
+    // `sharedVariableConfigure` is the only call that attaches it -- `ensureSecrets` reads NAMES through
+    // `environment.config`, so skipping this would leave the delivered credential undeployable and the plan
+    // failing `secret-unavailable` with no clue as to why. Same two lists as the provider sends: Railway
+    // requires both, and the empty `disabledServiceIds` is not decoration.
+    if (entry.shared && serviceId) {
+      const attach = await (await fetch('https://backboard.railway.com/graphql/v2', {
+        method: 'POST', headers: { 'content-type': 'application/json', authorization: token },
+        body: JSON.stringify({ query: 'mutation($input:SharedVariableConfigureInput!){ sharedVariableConfigure(input:$input) { id } }', variables: { input: { projectId: target.node.id, environmentId: production.node.id, name: entry.variable, enabledServiceIds: [serviceId], disabledServiceIds: [] } } }),
+      })).json() as { errors?: Array<{ message: string }> };
+      if (attach.errors) { console.error(`  ${entry.variable}: attach failed ${JSON.stringify(attach.errors).slice(0, 140)}`); process.exit(1); }
+      console.log(`  attached ${entry.variable} to ${entry.service}`);
+    }
   }
   console.log(`  project ${target.node.id}, environment ${production.node.id} -- re-run the apply to let the plan find them`);
   process.exit(0);

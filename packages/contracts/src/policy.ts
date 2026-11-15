@@ -27,6 +27,12 @@ export const PolicyActionSchema = z.enum([
   'instance.secret.write',
   'instance.secret.read',
   'instance.dispatch',
+  // Restarting a running service (D48). MEMBER, not owner, and the reasoning is D43's applied to the new verb:
+  // a member may deploy this platform already, and a restart grants no authority a deploy does not already
+  // carry. The credential VALUE stays owner-only at `instance.secret.write` -- what is split here is "put a
+  // different value in" from "ask the container to pick up what is there", and only the first can substitute
+  // what a service runs with.
+  'instance.redeploy',
   'instance.destroy',
   'capability.publish',
   'capability.share',
@@ -60,6 +66,11 @@ export const POLICY: Record<PolicyAction, TeamRole> = {
   // seeing that grants nothing.
   'instance.secret.read': 'member',
   'instance.dispatch': 'member',
+  // The refresh verb (D48). Member for the reason `instance.plan.write` is member: restarting a service is a
+  // deployment, and a member may already cause one. It is deliberately NOT grouped with `secret.write`, because
+  // the two acts differ in exactly the way D43 cares about: one puts a different VALUE in, the other asks the
+  // running container to pick up the value that is already there. Only the first can substitute credentials.
+  'instance.redeploy': 'member',
   // D43: destroying the managed service is an owner decision. Deliberately the only destructive verb here --
   // a repository or a workflow is never destroyed by platfolio (D36).
   'instance.destroy': 'owner',

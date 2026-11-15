@@ -5,32 +5,57 @@ import { resolveNode, type SpecDocument } from './index.ts';
  *
  * The rule this file exists to make mechanical is AGENTS.md's: where a shape is shared with a capability
  * contract, the StandardSchema definition is the source and the spec is *generated or compared against it --
- * never re-invented*. Until now the comparison half of that sentence had no implementation, so the claim was
- * a paragraph. Fifteen of the eighteen components in `apps/control-plane/openapi.yaml` are DTOs whose shape
- * also exists as a zod definition in `packages/contracts`, and nothing between them was checked: a field
- * added to one side, or flipped from required to optional, moved the contract and the runtime type apart in
- * silence.
+ * never re-invented*. This file was the comparison half, written when the generation half did not exist: nine
+ * of the eighteen components in `apps/control-plane/openapi.yaml` restated, by hand, a shape that also existed
+ * as a zod definition in `packages/contracts`, and nothing between them was checked. A field added to one side,
+ * or flipped from required to optional, moved the contract and the runtime type apart in silence.
  *
- * Three layers, deliberately separated, because the measured drift is not uniform:
+ * Those nine components are now GENERATED (`spec-components.ts`), which changes what this file is for without
+ * making it redundant. The two roles are different and both are needed:
+ *
+ *  - **This file is the independent check.** It compares the committed document against the definitions using
+ *    the derivation alone -- no annotations, no generator, no renderer. `spec:check` compares bytes the
+ *    generator wrote; if the renderer ever dropped a property or reordered a `required` list into a different
+ *    meaning, byte equality would still hold (both sides written by the same buggy code) and only this
+ *    comparison would see it. That is not hypothetical: the first drafts of the writer produced exactly that
+ *    class of mistake -- a `|-` block that folded prose into newlines, a splice that ate a blank line -- and
+ *    each was caught by re-parsing, which is the same muscle.
+ *  - **It is still the only check for a component that is compared but not generated.** `api:check` refuses one
+ *    outright, so the case is closed in the shipped tree; add a `Foo` component beside a `FooSchema` and the
+ *    plan must claim it or the build says why not.
+ *
+ * Three layers, deliberately separated, because the measured drift was never uniform:
  *
  *  - **Structure (fatal).** Property name sets and required-ness, recursing through nested objects and array
  *    items, in both directions. This is the property list a client is typed against: a field the spec declares
  *    and the schema does not produce is a field a UI reads as `undefined`; a field the schema requires and the
- *    spec leaves optional is a field that can be missing from a 200.
- *  - **Shape (reported, counted).** Property `type` and enum value sets. Measured today: eight differences, of
- *    which the sharpest is three components whose `action` the document restricts to `apply | destroy` while
- *    `AttestationSchema.action` restricts it to `apply | check | drift | suspend | export` -- two definitions of
- *    one vocabulary, neither a subset of the other. That is a finding for the maintainer, not for this gate to
- *    settle by choosing a side.
+ *    spec leaves optional is a field that can be missing from a 200. Measured on the shipped tree now: zero --
+ *    and it can only stay zero because the generator owns those blocks.
+ *  - **Shape (reported, counted).** Property `type` and enum value sets. It used to be eight differences, the
+ *    sharpest being three components whose `action` the document restricted to `apply | destroy` while
+ *    `AttestationSchema.action` said `apply | check | drift | suspend | export` -- two definitions of one
+ *    vocabulary, neither a subset of the other. That vocabulary has since been settled, and generation makes
+ *    the split unwritable: the document now carries the enum the definition has.
  *  - **Constraints (counted, never refused on).** `minLength`, `maxLength`, `pattern`, the numeric and item
- *    bounds. Measured today: 71 differences, 49 of which are `minLength: 1` written by the schema and nowhere
- *    in the document -- effort, not disagreement. Five are the two sides writing the same bound differently,
- *    and those are the reason the layer exists: `Instance.name` allows 80 characters in the spec and 40 in the
- *    definition, which is a form that validates and a server that refuses.
+ *    bounds. It used to be 71 differences, 49 of them `minLength: 1` written by the schema and nowhere in the
+ *    document -- effort, not disagreement -- and five the two sides writing one bound differently, of which
+ *    `Instance.name` was the live one: 80 characters in the document, 40 in the definition, a form that
+ *    validates and a server that refuses. The `unlike` figure is 0 now, because there is no longer a second
+ *    description to disagree with. What remains is 5, measured, and every one of them is `only-in-spec`:
+ *    `Instance.desiredPlanHash` and `.lastAppliedPlanHash` -- and the same two on `InstanceResponse`, which
+ *    inherits them -- carrying `^[0-9a-f]{64}$` where `InstanceSchema` says only `z.string()`, and
+ *    `DispatchIntent.nonce` carrying `maxLength: 64` where the definition says `min(16)`. Those are the
+ *    annotation sidecar speaking where the definition is silent: the API's promise, enforced by Ajv at the
+ *    boundary. (`format: date-time` is deliberately NOT in this layer -- it is an annotation, and OpenAPI and
+ *    JSON Schema do not owe each other the same text for those; what keeps a `description` from smuggling a
+ *    constraint into this layer is `ANNOTATION_KEYWORDS` in `spec-components.ts`.) The histogram is now a measurement of the sidecar's footprint: if it
+ *    grows, someone wrote a constraint into the document that no definition backs, and this number is what
+ *    makes that visible in review instead of in a client that disagrees with a server.
  *
- * Refusing on the third layer would bury the five structural findings under a list nobody reads, so the counts
- * are printed on every run and the numbers themselves are the signal: 49 is a shape-drawing gap, and `unlike: 5`
- * is a client disagreeing with a server.
+ * Refusing on the third layer would have buried the five structural findings under a list nobody reads, so the
+ * counts are printed on every run and the numbers themselves are the signal: 49 was a shape-drawing gap, and
+ * `unlike: 5` was a client disagreeing with a server. Both are now 0, and `unlike` going non-zero again is the
+ * finding worth reading.
  *
  * What this file refuses to do:
  *  - carry a hand-written list of field names. That would be a third copy of the same fact, which is the defect
@@ -38,9 +63,6 @@ import { resolveNode, type SpecDocument } from './index.ts';
  *    dialect, so it comes from the definition and not from a description of it.
  *  - pass `any` or a cast around a mismatch. `SchemaValue` is a narrow structural interface, not a cast.
  *  - let an exemption rot. Every tolerated finding and every unmatched component must be *named with a reason*,
- *    and a listed entry that no longer describes a real difference is itself a failure.
- */
-
 /** The narrow view this gate needs of a schema value: enough to emit JSON Schema, nothing more. */
 export interface SchemaValue {
   toJSONSchema(params: { target: string }): unknown;
@@ -424,16 +446,26 @@ function sorted(list: readonly string[]): string[] {
 }
 
 /**
- * Structural findings tolerated today, each with the reason it is tolerated and what would clear it.
+ * Structural findings tolerated today -- which, as of #247, is nothing: the list is empty.
  *
- * This is a ledger of measured drift, not a list of exceptions to a rule: `checkParityLedger` fails if an entry
- * stops matching a real finding, so clearing the drift in the spec or the schema forces the entry to be
- * deleted here. That is what keeps it from becoming the fossil `STORE_CONTRACT_VERSION` was.
+ * It used to hold one entry, `Instance|/properties/environments|in-spec-only`, and the drift it described was
+ * real: the spec's `Instance` was the assembled response (`{ ...record, environments }`) while
+ * `InstanceSchema` is the stored row. The fix was the one that entry itself named -- give the assembled
+ * response its own component -- and `InstanceResponse` is now generated as `InstanceSchema` plus the
+ * environment rows (`spec-annotations.ts` COMPONENT_COMPOSITIONS), so there is no difference left to
+ * tolerate. The entry is gone because `checkParityLedger` fails the build when a listed difference stops
+ * existing: that is what made the deletion forced rather than a favour.
  *
- * And it reads as the concession it is: `pnpm run api:check:strict` refuses these same differences. That is the
- * state the rule is heading towards, and the way the list gets to empty -- one entry at a time, each deletion
- * paid for by a change to the spec or to the schema, never by an edit to this file.
+ * The mechanism stays, because the condition it guards has not gone away in general. A component that shares
+ * its name with a definition is *generated*, and `api:check` refuses one that is compared but not generated;
+ * a tolerance can therefore only be granted to a shape the generator does not own. Adding an entry here is
+ * now a deliberate act of saying "this shape has two descriptions and I cannot fix it this week" -- so it
+ * needs the reason an outsider could act on, and it expires the moment the drift does.
+ *
+ * And it still reads as the concession it is: `pnpm run api:check:strict` refuses everything in this list.
+ * With the list empty the two modes agree, which is the state the flag was built to walk the tree toward.
  */
+
 export interface KnownDrift {
   /** Exactly the `Finding.key` this entry covers. */
   key: string;
@@ -441,18 +473,8 @@ export interface KnownDrift {
   reason: string;
 }
 
-export const KNOWN_DRIFT: KnownDrift[] = [
-  {
-    key: 'Instance|/properties/environments|in-spec-only',
-    reason: 'Measured, not excused. The spec\'s `Instance` is the response body; the handler builds it as '
-      + '`{ ...record, environments: await store.listInstanceEnvironments(id) }` '
-      + '(apps/control-plane/src/capabilities.ts:348, :257), while `InstanceSchema` (packages/contracts/src/persistence.ts:68) '
-      + 'is the stored row and never carries the environment rows. One name, two shapes -- which is exactly what '
-      + '#247 was raised about. The fix is a contract decision for whoever owns the spec: give the assembled response '
-      + 'its own component rather than adding a field to the store record (`InstanceSchema` is `.strict()` and the '
-      + 'Postgres driver projects it per row). Delete this entry when the spec stops declaring a field the record does not have.',
-  },
-];
+export const KNOWN_DRIFT: KnownDrift[] = [];
+
 
 export interface LedgerVerdict {
   /** Findings not covered by the ledger -- these are the ones that fail the build. */

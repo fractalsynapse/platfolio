@@ -6,7 +6,9 @@
  *    control plane verifies. It holds a secret, so no browser may ever be given its client id.
  *  - `platfolio-web`, public: the browser's authorization-code + PKCE client. No secret, no ROPC, no implicit
  *    flow, no service account, `attributes["pkce.code.challenge.method"] = "S256"` so PKCE is mandatory rather
- *    than offered, and exact (never wildcarded) redirect URIs derived from `--ui-origin`.
+ *    than offered, and exact (never wildcarded) redirect URIs derived from the UI origins -- `--ui-origin` /
+ *    `PLATFOLIO_ALLOWED_ORIGINS`, the one variable that says where the UI is served from, or the per-environment
+ *    value the platform description declares (D56).
  *    Shape and lifecycle: `scripts/browser-auth.ts`; proof: `pnpm run identity:pkce:smoke`.
  *
  * Idempotent by design: every step treats 409/already-exists as success and then READS BACK what the server
@@ -14,17 +16,22 @@
  * drifted client is repaired rather than reported as fine. The read-back is not ceremony -- this API answers
  * 204 to updates that change nothing, including an attribute removal (measured: omitting
  * `pkce.code.challenge.method` from a client PUT leaves `S256` in place; blanking it with `""` is what removes
- * it). The alternative (a realm file) is documented in docker-compose.yml and in #168 -- Keycloak 26.8.2's
+ * it). The alternative (a realm file) is documented in compose.dev.yaml and in #168 -- Keycloak 26.8.2's
  * import format rejected each shape of role assignment I tried, and `--import-realm` on an existing realm logs
  * "Import finished successfully" while seeding nothing.
  *
  * Dev-only credentials are hard-coded for the local stack. Against a non-loopback host the script refuses
- * without `--allow-remote`, and then refuses without its own strong `--client-secret` / `--user-password` /
- * `--ui-origin` -- so the development values are unusable against production by construction, and production's
- * browser origin is a fact the operator supplies rather than one this script invents.
+ * without `--allow-remote`, and then refuses without its own strong `--client-secret` / `--user-password` -- so
+ * the development values are unusable against production by construction. The browser origin a hosted realm is
+ * seeded with is not invented here either: it is the value the deployment itself carries
+ * (`PLATFOLIO_ALLOWED_ORIGINS`, one variable for the CORS policy and this client), or the value the platform
+ * description declares for the environment that authenticates against that realm. If neither answers, the run
+ * stops -- because an origin this script made up is an origin nobody chose.
  */
+import fs from 'node:fs';
+import path from 'node:path';
 import { parseArgs } from 'node:util';
-import { API_CLIENT_ID, PKCE_CHALLENGE_ATTRIBUTE, PKCE_METHOD, REQUIRED_SCOPE, WEB_CLIENT_ID, browserClientMappers, browserClientShape, normalizeUiOrigins } from './browser-auth.ts';
+import { API_CLIENT_ID, LOOPBACK_UI_ORIGIN, PKCE_CHALLENGE_ATTRIBUTE, PKCE_METHOD, REQUIRED_SCOPE, UI_ORIGIN_VARIABLE, WEB_CLIENT_ID, browserClientMappers, browserClientShape, declaredEnvironmentsFrom, declaredUiOrigins, normalizeUiOrigins, type DeclaredEnvironment } from './browser-auth.ts';
 
 const { values: flags } = parseArgs({
   options: {
@@ -49,16 +56,22 @@ const { values: flags } = parseArgs({
      */
     realm: { type: 'string', default: process.env.PLATFOLIO_IDENTITY_REALM ?? 'platfolio' },
     /**
-     * The browser origin that signs the user in -- `platfolio-web`, the public PKCE client. It is a SEPARATE
+     * The browser origins that sign the user in -- `platfolio-web`, the public PKCE client. It is a SEPARATE
      * client from `platfolio-api` and that separation is the security property, not a tidy-up: the service
      * client is confidential and may hold a secret, the browser client is public and must never be given one.
      *
-     * There is no default for a hosted realm, deliberately. `https://app.platfolio.dev` is not a fact anyone
-     * has established; inventing one here is how a wildcard redirect URI reaches production, and [05 § Security
-     * controls](../docs/design/05-identity.md) already forbids wildcard redirect URIs. So a hosted run either
-     * names the origin or does not get a browser client at all.
+     * The name read here is `PLATFOLIO_ALLOWED_ORIGINS`, the same variable the control plane's CORS policy reads
+     * at boot -- one variable, both consumers (D52). It used to be `PLATFOLIO_UI_ORIGIN`, a second spelling of
+     * the same list, and the drift that allowed -- a realm redirecting to an origin the API refuses, or an API
+     * admitting an origin the realm will not send a code to -- is the reason it is gone.
+     *
+     * When the value is not supplied for a hosted realm it is not invented either: it is looked up in
+     * `compose.yaml`, which is where the per-environment UI origins live (D56), and the run says which line it
+     * came from. A realm the description does not place is a refusal, not a guess --
+     * [05 § Security controls](../docs/design/05-identity.md) forbids wildcard redirect URIs, and inventing an
+     * exact one is the same mistake with better typography.
      */
-    'ui-origin': { type: 'string', default: process.env.PLATFOLIO_UI_ORIGIN ?? '' },
+    'ui-origin': { type: 'string', default: process.env.PLATFOLIO_ALLOWED_ORIGINS ?? '' },
     /** Print the read-back client representation even when nothing changed (it is the evidence a reviewer asks for). */
     'show-shape': { type: 'boolean', default: false },
   },
@@ -81,14 +94,21 @@ if (remote && (apiSecret.length < 32 || userPassword.length < 24)) {
   console.error(`identity:seed refuses a remote run without strong credentials: --client-secret needs >=32 characters and --user-password >=24 (got ${String(apiSecret.length)} and ${String(userPassword.length)}). Values are never printed.`);
   process.exit(1);
 }
+
 const realm = flags.realm as string;
 // Client id, audience and role names are deliberately UNCHANGED between realms. Keycloak scopes them per
 // realm, so `platfolio-api` in `platfolio-staging` is a different client from `platfolio-api` in `platfolio` --
 // suffixing them would be naming the same thing twice. What separates the two environments is the ISSUER, which
 // carries the realm in its path, and the control plane validates issuer and audience together.
 //
-// The staging realm's own control plane is a different host, so its web origins differ. Stated from the realm
-// rather than from a flag someone has to remember.
+// These are the API hosts -- the origin the control plane itself answers on, per realm. They are the
+// `platfolio-api` client's own origins (a confidential client is never handed to a browser, so what is listed
+// here is the deployment's address, not a place a code may land).
+//
+// The UI is a THIRD host, and its origins are deliberately not written here: `compose.yaml` already says them
+// per environment (D56) and the API admits exactly that list at boot, so `--ui-origin` /
+// `PLATFOLIO_ALLOWED_ORIGINS` is the same fact the deployment carries. A hostname table in this script would be
+// a second answer to "where is staging's UI", and the two answers drifting is what a browser notices.
 const realmHosts: Record<string, string[]> = {
   platfolio: ['https://api.platfolio.dev'],
   'platfolio-staging': ['https://staging-api.platfolio.dev'],
@@ -116,6 +136,17 @@ const users: Array<{ username: string; email: string; scoped: boolean }> = [
 ];
 
 /**
+ * This repository's own platform description. The reading rule lives in `scripts/browser-auth.ts` --
+ * `declaredEnvironmentsFrom` -- because the contract test checks the same two lines the seed reads, and a
+ * second parser would be a second answer about what the description says.
+ */
+function environmentsOfPlatformDescription(): DeclaredEnvironment[] {
+  const file = path.join(path.resolve(import.meta.dirname, '..'), 'compose.yaml');
+  if (!fs.existsSync(file)) throw new Error(`${file} is not there, and the platform description is where a hosted realm's UI origin is declared (D56)`);
+  return declaredEnvironmentsFrom(fs.readFileSync(file, 'utf8'));
+}
+
+/**
  * The browser client (public, PKCE, authorization code only).
  *
  * Redirect URIs are EXACT, one per configured UI origin, and there is no wildcard. Keycloak matches a
@@ -125,10 +156,38 @@ const users: Array<{ username: string; email: string; scoped: boolean }> = [
  * authorization-code delivery oracle for any path on the host.
  */
 const webClientId = WEB_CLIENT_ID;
-/** The declared UI origins. Loopback gets the Vite dev origin; a hosted realm is told, never guessed at. */
-const uiOriginsRaw = loopback && !flags['ui-origin'] ? 'http://localhost:5173' : (flags['ui-origin'] as string);
-if (!loopback && !uiOriginsRaw.trim()) {
-  console.error(`identity:seed: realm "${realm}" is remote and --ui-origin / PLATFOLIO_UI_ORIGIN is empty.\n  Refusing to create ${webClientId} rather than seeding a browser client with no redirect URI -- and refusing to invent a production origin for you.\n  Pass the deployed UI origin, e.g. --ui-origin=https://app.platfolio.dev (comma-separated for more than one).`);
+
+/**
+ * Where the UI origins for this run come from, in the order an operator can reason about:
+ *
+ *  1. `--ui-origin=`, or the environment the deployment itself carries (`PLATFOLIO_ALLOWED_ORIGINS` -- the same
+ *     variable the control plane reads at boot, which is the point: the seed and the API are given one list);
+ *  2. on loopback, the Vite dev origin, because the local stack has no hosted UI to name;
+ *  3. against a hosted realm, the platform description: `compose.yaml` declares each environment's origin (D56)
+ *     and the environment whose issuer names this realm is the one being seeded;
+ *  4. otherwise a refusal. An authorization-code redirect URI is a security control, and guessing one is the
+ *     same mistake as wildcarding it with better typography.
+ */
+let uiOriginsRaw = (flags['ui-origin'] as string).trim();
+let uiOriginSource = uiOriginsRaw.length > 0 ? `--ui-origin / ${UI_ORIGIN_VARIABLE}` : '';
+if (!uiOriginsRaw && loopback) {
+  uiOriginsRaw = LOOPBACK_UI_ORIGIN;
+  uiOriginSource = 'the loopback default (compose.dev.yaml declares the same origin for the local API)';
+}
+let descriptionProblem = '';
+if (!uiOriginsRaw && remote) {
+  try {
+    const declared = declaredUiOrigins(environmentsOfPlatformDescription(), realm);
+    if (declared !== undefined) {
+      uiOriginsRaw = declared.origins.join(',');
+      uiOriginSource = `${declared.declaredIn} (${declared.environment.length > 0 ? `"${declared.environment}"` : 'base'} value in compose.yaml)`;
+    }
+  } catch (error) {
+    descriptionProblem = `\n  The platform description could not answer either: ${(error as Error).message}`;
+  }
+}
+if (!uiOriginsRaw) {
+  console.error(`identity:seed: realm "${realm}" is remote and no UI origin is configured.${descriptionProblem}\n  Refusing to create ${webClientId} rather than seeding a browser client with no redirect URI -- and refusing to invent a hosted origin for you.\n  Name it one of three ways: pass --ui-origin=<origin> (comma-separated for more than one), set ${UI_ORIGIN_VARIABLE} to the value the API is deployed with, or declare it for this realm's environment in compose.yaml -- services.api.x-platfolio.environmentValues.<environment>.${UI_ORIGIN_VARIABLE}.`);
   process.exit(1);
 }
 let webOrigins: string[];
@@ -146,6 +205,10 @@ if (webOrigins.length === 0) {
 const log = (message: string): void => {
   process.stdout.write(`I ${message}\n`);
 };
+
+// Stated before anything is written, because "which origins did you just bless with a redirect URI" is the
+// question a reviewer asks first, and the answer must not depend on reading the realm back.
+log(`UI origins for realm "${realm}": ${webOrigins.join(', ')} -- from ${uiOriginSource}`);
 
 async function req<T = unknown>(path: string, init: RequestInit = {}, token?: string): Promise<{ status: number; body: T | undefined; text: string }> {
   const response = await fetch(`${base}${path}`, {

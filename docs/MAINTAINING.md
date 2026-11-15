@@ -106,14 +106,42 @@ the plan check correctly reported `secret-unavailable` for both environments -- 
 platfolio's production and staging control planes share the hosted identity service -- one container, one
 database, one certificate, `auth.platfolio.dev` -- and are separated by **realm**:
 
-| Environment | Realm | Seeded with |
-| --- | --- | --- |
-| production | `platfolio` | `pnpm run identity:seed` (default) |
-| staging | `platfolio-staging` | `pnpm run identity:seed --realm=platfolio-staging` |
+| Environment | Realm | UI origin | Seeded with |
+| --- | --- | --- | --- |
+| production | `platfolio` | `https://platfolio.dev` | `pnpm run identity:seed` (default) |
+| staging | `platfolio-staging` | `https://preview.platfolio.dev` | `pnpm run identity:seed --realm=platfolio-staging` |
+| development | `platfolio` (local container) | `http://localhost:5173` | `pnpm run identity:seed` against loopback |
 
 The issuer and JWKS URIs that express this are **per-environment values** in `compose.yaml`
-(`x-platfolio.services.api.environmentValues.staging`), so the difference is declared in the platform
-description and lands in the plan hash -- not patched in by a deploy script, and not silently identical.
+(`services.api.x-platfolio.environmentValues.staging` -- the key is a per-service `x-platfolio` extension; the
+renderer reports the same location as `spec.services.api.environmentValues.staging` because `x-platfolio` is
+where the hosting semantics enter the manifest), so the difference is declared in the platform description and
+lands in the plan hash -- not patched in by a deploy script, and not silently identical. The UI origin is a
+per-environment value in the same map, for the same reason.
+
+One word, three meanings, and it is an open item rather than a resolved one: `preview.platfolio.dev` is the
+**staging** UI host the maintainer chose, while `environments.preview` in the same file is **pull-request
+previews** (declared, `enabled: false`), and staging's API host is derived with the `staging-` prefix as
+`staging-api.platfolio.dev` -- which is the convention the UI hostname does not follow. Nothing here is wrong,
+but three senses of one word is a conflation waiting for its reader, and renaming a hostname is the maintainer's
+call, not a change an agent should make while correcting configuration. Until that decision is taken, read every
+`preview` in this repository as whichever of the two the sentence is about, and prefer naming the environment
+(`staging`) over the word when writing about either.
+
+One name carries it, `PLATFOLIO_ALLOWED_ORIGINS`, because "where the UI is served from" is one fact with two
+consumers: the control plane admits exactly that list as its CORS allow-list (unset means same-origin only, and a
+malformed entry is a boot failure rather than a warning), and `identity:seed` writes exactly that list into the
+public `platfolio-web` client as its `<origin>/callback` redirect URIs and `webOrigins`. There used to be a second
+variable for the second consumer, `PLATFOLIO_UI_ORIGIN`; it is gone, and the seed now resolves a hosted realm's
+origins out of `compose.yaml` by matching the realm against the issuer the description declares. So the procedure
+is: change the hostname in the composition, re-run the seed, and `pnpm run environment:registry` plus
+`packages/contracts/test/browser-auth.test.ts` tell you if anything else still believes the old one.
+
+`api.platfolio.dev` and `auth.platfolio.dev` are the API and identity hosts and are a different fact -- the UI is
+a **third** host, and as of this writing it is a host nothing here serves or has verified: no DNS record, no
+Railway domain, no certificate, and no UI service in `compose.yaml`. The configuration above is correct, not
+exercised. Whether the page becomes a fourth platform inside this plan (dogfooding it, the way `identity` is
+hosted) or a static host outside it is an open decision for the maintainer, not something this file may imply.
 
 Deliberately **not** duplicated: a second Keycloak for staging. The identity provider does not need a
 development instance (`mode: hosted` says so, D51), so staging borrows the production deployment and gets its
@@ -423,6 +451,7 @@ npx -y tsx scripts/check-project.ts           # check
 npx -y tsx scripts/vendor-cordis.ts verify    # vendor:verify   (note: vendor-cordis, not check-vendor)
 npx -y tsx scripts/check-graphql-schema.ts    # graphql:check
 npx -y tsx scripts/check-api.ts               # api:check
+npx -y tsx scripts/gen-api-spec.ts --check    # spec:check   (write with --write; see spec:gen)
 npx -y tsx scripts/bundle-action.ts --check   # action:check
 npx -y tsc --noEmit -p tsconfig.json          # typecheck
 npx -y tsx --test packages/*/test/*.test.ts apps/*/test/*.test.ts

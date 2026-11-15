@@ -13,8 +13,8 @@ import { canonicalOrigin, corsPolicyOf, describeCorsPolicy, requestOrigin, WILDC
  * through the composition root, because a rule proven only below the wiring does not prove the wiring.
  */
 
-const LISTED = 'https://app.platfolio.dev';
-const OTHER_UI = 'https://staging.platfolio.dev';
+const LISTED = 'https://platfolio.dev';
+const OTHER_UI = 'https://preview.platfolio.dev';
 const NOT_LISTED = 'https://evil.example.net';
 const listedCors = { allowedOrigins: [LISTED, OTHER_UI] };
 
@@ -36,15 +36,15 @@ async function serviceWith(cors: unknown): Promise<{ serve: ServerService; dispo
 }
 
 test('an origin is scheme://host[:port] or it is not an origin', () => {
-  assert.equal(canonicalOrigin('https://app.platfolio.dev'), 'https://app.platfolio.dev');
-  assert.equal(canonicalOrigin('https://app.platfolio.dev/'), 'https://app.platfolio.dev', 'a typed trailing slash is the same origin');
-  assert.equal(canonicalOrigin('HTTPS://APP.Platfolio.DEV'), 'https://app.platfolio.dev', 'scheme and host are case-insensitive');
-  assert.equal(canonicalOrigin('https://app.platfolio.dev:8443'), 'https://app.platfolio.dev:8443', 'a non-default port survives');
-  assert.equal(canonicalOrigin('https://app.platfolio.dev:443'), 'https://app.platfolio.dev', 'and a default port folds away, exactly as a browser sends it');
+  assert.equal(canonicalOrigin('https://platfolio.dev'), 'https://platfolio.dev');
+  assert.equal(canonicalOrigin('https://platfolio.dev/'), 'https://platfolio.dev', 'a typed trailing slash is the same origin');
+  assert.equal(canonicalOrigin('HTTPS://PLATFOLIO.DEV'), 'https://platfolio.dev', 'scheme and host are case-insensitive');
+  assert.equal(canonicalOrigin('https://platfolio.dev:8443'), 'https://platfolio.dev:8443', 'a non-default port survives');
+  assert.equal(canonicalOrigin('https://platfolio.dev:443'), 'https://platfolio.dev', 'and a default port folds away, exactly as a browser sends it');
   // Each of these is a different mistake an operator can make, and each one silently widens or narrows a policy
   // if accepted: a path means the list is not a list of origins, userinfo means a DSN was typed where an origin
   // was meant, and a scheme but http(s) means the value came from somewhere else entirely.
-  for (const bad of ['app.platfolio.dev', '//app.platfolio.dev', 'https://app.dev/path', 'https://app.dev/?a=1',
+  for (const bad of ['platfolio.dev', '//platfolio.dev', 'https://app.dev/path', 'https://app.dev/?a=1',
     'https://app.dev#frag', 'https://user:pass@app.dev', 'ftp://app.dev', 'chrome-extension://abcdef', 'null', '*', '']) {
     assert.equal(canonicalOrigin(bad), undefined, `${bad} must not read as an origin`);
   }
@@ -53,9 +53,9 @@ test('an origin is scheme://host[:port] or it is not an origin', () => {
 test('the request origin is canonicalized, and a listed origin matches however it was sent', async () => {
   const { serve, dispose } = await serviceWith(listedCors);
   try {
-    assert.equal(requestOrigin({ origin: 'https://App.Platfolio.DEV/' }), LISTED);
+    assert.equal(requestOrigin({ origin: 'https://Platfolio.Dev/' }), LISTED);
     assert.equal(requestOrigin({}), undefined);
-    const response = await serve.dispatch(request({ headers: { origin: 'HTTPS://APP.PLATFOLIO.DEV' } }));
+    const response = await serve.dispatch(request({ headers: { origin: 'HTTPS://PLATFOLIO.DEV' } }));
     assert.equal(response.headers?.['access-control-allow-origin'], LISTED, 'the canonical form is echoed, not the raw bytes');
   } finally {
     await dispose();
@@ -209,7 +209,7 @@ test('a response a handler threw on is still readable by the browser', async () 
 test('a malformed or wildcard origin list refuses to start, naming the entry', () => {
   // The transport is the second net: `configFromEnv` refuses the same shapes with the variable's name in the
   // message. Neither net may be permissive, because a partially-applied origin list is a policy nobody typed.
-  for (const bad of ['*', 'app.platfolio.dev', 'https://app.dev/path', 'https://user:pass@app.dev', 'chrome-extension://abc']) {
+  for (const bad of ['*', 'platfolio.dev', 'https://app.dev/path', 'https://user:pass@app.dev', 'chrome-extension://abc']) {
     assert.throws(() => corsPolicyOf({ allowedOrigins: [bad] }), /refused/, `${bad} must be refused`);
   }
   assert.throws(() => corsPolicyOf({ allowedOrigins: ['*'] }), new RegExp(WILDCARD_REFUSAL.slice(0, 24).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
@@ -224,7 +224,10 @@ test('a malformed or wildcard origin list refuses to start, naming the entry', (
 test('boot says the count and the shape, and says so when nothing is configured', () => {
   const enabled = describeCorsPolicy(corsPolicyOf(listedCors));
   assert.match(enabled, /cors: 2 allowed origin\(s\)/, enabled);
-  assert.match(enabled, /https:\/\/app\.platfolio\.dev/, 'the origins themselves are public URLs, and printing them is the point');
+  // Anchored on the list itself, not on a bare hostname substring: `https://preview.platfolio.dev` ENDS with
+  // `platfolio.dev`, so a loose match would pass on the staging origin alone and report production as printed
+  // when it was not. Both environments, in the order they were configured.
+  assert.match(enabled, /\[https:\/\/platfolio\.dev, https:\/\/preview\.platfolio\.dev\]/, 'the origins themselves are public URLs, and printing them is the point');
   assert.match(enabled, /no credentials/, 'and it states the credential decision rather than leaving it implicit');
   assert.ok(!enabled.includes('*'), 'never a wildcard-suppressing default in the line an operator reads');
   assert.match(describeCorsPolicy(corsPolicyOf({ allowedOrigins: [] })), /no allowed origins are configured/, 'unset is stated, not skipped');

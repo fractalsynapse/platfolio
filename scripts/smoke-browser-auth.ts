@@ -111,14 +111,18 @@
  * ============================================================================
  */
 import { parseArgs } from 'node:util';
-import { API_CLIENT_ID, PKCE_CHALLENGE_ATTRIBUTE, PKCE_METHOD, REQUIRED_SCOPE, WEB_CLIENT_ID, browserClientMappers, codeChallenge, createPkcePair, endSessionUrl, isPkceVerifier, refreshSkewSeconds } from './browser-auth.ts';
+import { API_CLIENT_ID, LOOPBACK_UI_ORIGIN, PKCE_CHALLENGE_ATTRIBUTE, PKCE_METHOD, REQUIRED_SCOPE, WEB_CLIENT_ID, browserClientMappers, codeChallenge, createPkcePair, endSessionUrl, isPkceVerifier, refreshSkewSeconds } from './browser-auth.ts';
 
 const { values: flags } = parseArgs({
   options: {
     base: { type: 'string', default: process.env.KC_BASE ?? 'http://localhost:8081' },
     realm: { type: 'string', default: process.env.KC_REALM ?? 'platfolio' },
     api: { type: 'string', default: process.env.CONTROL_PLANE_BASE ?? 'http://localhost:8082' },
-    'ui-origin': { type: 'string', default: process.env.PLATFOLIO_UI_ORIGIN ?? 'http://localhost:5173' },
+    // The same variable the seed writes the realm's redirect URIs from, and the same one the API admits at boot:
+    // one list, so this smoke cannot pass by testing an origin the realm was never told about. Loopback stays
+    // the default because the local stack's UI is Vite on :5173 -- see `scripts/seed-identity.ts` and
+    // `compose.dev.yaml`, which name the same origin.
+    'ui-origin': { type: 'string', default: process.env.PLATFOLIO_ALLOWED_ORIGINS ?? LOOPBACK_UI_ORIGIN },
     user: { type: 'string', default: process.env.KC_PKCE_USER ?? 'adrian' },
     password: { type: 'string', default: process.env.KC_USER_PASSWORD ?? 'platfolio-dev-only' },
     'admin-user': { type: 'string', default: process.env.KC_ADMIN_USER ?? 'platfolio-admin' },

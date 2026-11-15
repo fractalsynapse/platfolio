@@ -21,17 +21,20 @@ import path from 'node:path';
 import {
   checkRouteManifest,
   checkSpec,
-  loadSpec,
   operationsOf,
   type RouteManifestEntry,
+  type SpecDocument,
 } from '../packages/api-contract/src/index.ts';
+import { checkSpecSource, parseSpecSource } from '../packages/api-contract/src/spec-source.ts';
+import { contractSide, regenerate, specComponentNames } from '../packages/api-contract/src/spec-components.ts';
 import {
   checkParityLedger,
   checkSchemaParity,
   checkUnmatchedLedger,
-  deriveSchemas,
   KNOWN_DRIFT,
+  type DerivedSchema,
   type ParityReport,
+  type UndervisitableSchema,
   summariseConstraints,
 } from '../packages/api-contract/src/schema-parity.ts';
 
@@ -57,7 +60,22 @@ if (!existsSync(SPEC_PATH)) {
   process.exit(1);
 }
 
-const doc = loadSpec(await fs.readFile(SPEC_PATH, 'utf8'));
+const specText = await fs.readFile(SPEC_PATH, 'utf8');
+/** What the generator owns, reported here so `api:check` describes the same document `spec:check` gates. */
+let generatedNames: string[] = [];
+// A checker must fail with a finding, never crash. `loadSpec` throws -- correctly, for a server that must not
+// serve without a compiled validator -- and on 2026-11-15 an unquoted scalar turned `api:check` into a
+// YAMLParseError stack trace that hid every other finding in `verify` behind it. Reading the document as
+// *text* first also catches the two shapes that parse happily while meaning something else.
+const parsed = parseSpecSource<SpecDocument>(specText, path.relative(ROOT, SPEC_PATH));
+if (parsed.ok === false) {
+  console.error('api:check failed -- the specification cannot be read:');
+  for (const problem of parsed.problems) console.error(` - ${problem}`);
+  console.error(' - every other check in this script was skipped, because there is no document to check.');
+  process.exit(1);
+}
+const doc = parsed.doc;
+problems.push(...checkSpecSource(specText, path.relative(ROOT, SPEC_PATH)));
 problems.push(...checkSpec(doc));
 const ops = operationsOf(doc);
 console.log(`  spec: ${ops.length} operation(s), openapi ${String(doc.openapi)}`);
@@ -79,12 +97,20 @@ if (existsSync(ROUTES_MODULE)) {
 
 let parityState = 'SKIPPED';
 let parity: ParityReport | undefined;
+let derivedAll: DerivedSchema[] = [];
+let undervisitable: UndervisitableSchema[] = [];
 if (!existsSync(CONTRACTS_MODULE)) {
   console.log('  schemas: SKIPPED -- packages/contracts/src/index.ts is absent, so spec-vs-schema drift is unverified');
 } else {
   const exported = Object.entries(await import(CONTRACTS_MODULE));
-  const derivation = deriveSchemas(exported);
-  parity = checkSchemaParity(doc, derivation.derived);
+  const derivation = contractSide(exported);
+  // The composed response shapes join the derivation here, so the parity gate compares the document against
+  // the definitions rather than against the generator's own output. `InstanceResponse` is `InstanceSchema`
+  // plus the environment rows; without this it would be filed as a component with no counterpart, which is
+  // the exemption-shaped silence UNMATCHED_COMPONENTS exists to prevent.
+  derivedAll = derivation.all;
+  undervisitable = derivation.undervisitable;
+  parity = checkSchemaParity(doc, derivedAll);
   parityState = 'checked';
 
   const compared = new Set(parity.matched);
@@ -137,9 +163,30 @@ if (!existsSync(CONTRACTS_MODULE)) {
   }
 }
 
+if (derivedAll.length) {
+  // #247, the other half of the sentence: shared shapes are GENERATED from the definitions, so the document
+  // is a build artifact and a hand edit to a generated block is a finding, not a style choice. The byte
+  // comparison is `spec:check`'s job and it is run here too, against the same function, because `api:check`
+  // is the gate CI is documented to run -- two commands, one implementation, so neither can be greener than
+  // the other.
+  const fresh = regenerate(specText, specComponentNames(specText), derivedAll, undervisitable);
+  generatedNames = fresh.components.map((c) => c.name);
+  problems.push(...fresh.problems);
+  const handWritten = parity ? parity.unmatched : [];
+  console.log(`  generated: ${String(fresh.components.length)} component(s) written from packages/contracts -- ${generatedNames.join(', ')}`);
+  console.log(`             hand-written: ${String(handWritten.length)} -- ${handWritten.join(', ')}`);
+  // A component that matches a definition by name but is NOT generated is the defect this replaced: two
+  // descriptions of one shape, compared instead of derived. The parity ledger above still scores it; naming
+  // it here is what stops "compared" from quietly meaning "still hand-written".
+  const comparedButNotGenerated = (parity?.matched ?? []).filter((n) => !generatedNames.includes(n));
+  for (const name of comparedButNotGenerated) {
+    problems.push(`${name}: a definition of this name exists and the component is compared against it, but nothing generates it -- the shape is still hand-written beside the schema, which is the two-descriptions defect #247 was raised about. Add it to the generator's plan (\`generatedComponentNames\`) and run \`pnpm run spec:gen\`.`);
+  }
+}
+
 if (problems.length) {
   console.error(`\napi:check failed with ${String(problems.length)} problem(s):`);
   for (const p of problems) console.error(` - ${p}`);
   process.exit(1);
 }
-console.log(`  api:check passed (${String(ops.length)} operations, route manifest ${routeState}, schema parity ${parityState}${parity ? `: ${String(parity.matched.length)} compared` : ''})`);
+console.log(`  api:check passed (${String(ops.length)} operations, route manifest ${routeState}, schema parity ${parityState}${parity ? `: ${String(parity.matched.length)} compared` : ''}, ${String(generatedNames.length)} generated)`);

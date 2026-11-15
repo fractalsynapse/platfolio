@@ -15,6 +15,7 @@
  * says so in the direction that matters, by refusing any token-shaped key in the API's own audit vocabulary.
  */
 import { createHash, randomBytes } from 'node:crypto';
+import { parse as parseYaml } from 'yaml';
 
 export const WEB_CLIENT_ID = 'platfolio-web';
 export const API_CLIENT_ID = 'platfolio-api';
@@ -167,6 +168,118 @@ export function browserClientMappers(): ProtocolMapperShape[] {
       },
     },
   ];
+}
+
+/* ------------------------------------------------------------------ which realm, which UI */
+
+/** The variable a platform description uses to say which realm its service authenticates against. */
+export const ISSUER_VARIABLE = 'PLATFOLIO_IDENTITY_ISSUER';
+/**
+ * The variable that names the browser origins a deployment's UI is served from -- ONE name for two consumers:
+ * the control plane's CORS allow-list, and the redirect URIs and `webOrigins` this script writes into a realm.
+ *
+ * It is not called `PLATFOLIO_UI_ORIGIN`. That name used to exist beside this one, holding the same list for
+ * the second consumer, and the pair was one fact in two spellings: a UI could be admitted cross-origin while
+ * the realm refused to redirect to it, or the reverse, and every gate stayed green because each file was
+ * internally consistent. The API side keeps the name because it is the side that refuses to boot on a bad
+ * value, and the seed reads what the deployment says rather than what an operator remembers to type.
+ */
+export const UI_ORIGIN_VARIABLE = 'PLATFOLIO_ALLOWED_ORIGINS';
+
+/**
+ * The development UI origin: the Vite dev server on loopback, which is what `compose.dev.yaml` declares as this
+ * platform's `PLATFOLIO_ALLOWED_ORIGINS` locally, and what a seed or smoke run against a loopback issuer falls
+ * back to when nobody names one. One spelling of a string that is otherwise written in a YAML file and two
+ * scripts; the contract test checks the file against it, because a dev origin that drifts from the realm's
+ * redirect URI produces a local login that fails in the one place nobody monitors.
+ */
+export const LOOPBACK_UI_ORIGIN = 'http://localhost:5173';
+
+/**
+ * One spelling of a service's environment as a platform DESCRIPTION declares it: the base `environment:` map,
+ * and each `environmentValues.<env>` map that replaces entries in it (D56). `environment` is the empty string
+ * for the base map, because the base is not an environment -- it is what an environment inherits.
+ */
+export interface DeclaredEnvironment {
+  environment: string;
+  /** Where a human would go to change it: `services.api environment`, `…environmentValues.staging`. */
+  declaredIn: string;
+  vars: Readonly<Record<string, string>>;
+}
+
+/** The realm an issuer URL addresses, read out of its path; undefined when it addresses none. */
+export function realmOfIssuer(issuer: string | undefined): string | undefined {
+  if (!issuer) return undefined;
+  let pathname: string;
+  try { pathname = new URL(issuer).pathname; } catch { return undefined; }
+  return /\/realms\/([^/?#]+)/.exec(pathname)?.[1];
+}
+
+/**
+ * The environment maps a platform description declares, read from its Compose text: each service's base
+ * `environment:`, and each `x-platfolio.environmentValues.<env>` composed over it the way `buildPlan` composes
+ * them (D56).
+ *
+ * Two keys of one file, deliberately, and not a second renderer: `platform-deploy.ts` drives
+ * `parseCompose` -> `validateManifest` -> `buildPlan`, which needs the generated prod overlay for an image
+ * digest and has nothing to do with where a UI is served from. What lives here exists so the seed that writes a
+ * realm and the test that checks the realm agree on one reader of the same two lines.
+ */
+export function declaredEnvironmentsFrom(composeText: string): DeclaredEnvironment[] {
+  let doc: unknown;
+  try {
+    doc = parseYaml(composeText, { uniqueKeys: true });
+  } catch (error) {
+    throw new Error(`the platform description does not parse: ${(error as Error).message}`);
+  }
+  const services = asRecord(asRecord(doc)?.services);
+  const out: DeclaredEnvironment[] = [];
+  for (const [name, raw] of Object.entries(services)) {
+    const svc = asRecord(raw);
+    const vars: Record<string, string> = {};
+    for (const [key, value] of Object.entries(asRecord(svc?.environment))) vars[key] = String(value ?? '');
+    out.push({ environment: '', declaredIn: `services.${name} environment`, vars });
+    for (const [envName, rawOverrides] of Object.entries(asRecord(asRecord(svc?.['x-platfolio'])?.environmentValues))) {
+      const composed: Record<string, string> = { ...vars };
+      for (const [key, value] of Object.entries(asRecord(rawOverrides))) composed[key] = String(value ?? '');
+      out.push({ environment: envName, declaredIn: `services.${name} x-platfolio.environmentValues.${envName}`, vars: composed });
+    }
+  }
+  return out;
+}
+
+const asRecord = (value: unknown): Record<string, unknown> =>
+  (value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {});
+
+/**
+ * The browser origins the platform description declares for the environment that authenticates against
+ * `realm`, or undefined when the description says nothing usable about it.
+ *
+ * This exists so `identity:seed` can seed a hosted realm without carrying its own list of hostnames. The
+ * composition is where per-environment values live (D56) and where the deploy reads them from; a hostname table
+ * inside a script would be a second answer to "where is staging's UI", and those two answers drifting is
+ * precisely the failure that lets a staging code land on the production page. The seed is the consumer that can
+ * afford to look the value up, because what it writes must agree with what the API admits at boot -- which is
+ * the same string, read from the same file.
+ *
+ * Refuses rather than picks when the description says two different things about one realm. Which one wins is
+ * otherwise a detail of map order, and a seed that guesses has written a redirect URI nobody chose.
+ */
+export function declaredUiOrigins(
+  environments: readonly DeclaredEnvironment[],
+  realm: string,
+): { environment: string; declaredIn: string; origins: string[] } | undefined {
+  const matches = environments.filter((e) => realmOfIssuer(e.vars[ISSUER_VARIABLE]) === realm);
+  if (matches.length === 0) return undefined;
+  const spellings = new Set(matches.map((m) => (m.vars[UI_ORIGIN_VARIABLE] ?? '').trim()).filter((s) => s.length > 0));
+  if (spellings.size > 1) {
+    throw new Error(`the platform description declares different ${UI_ORIGIN_VARIABLE} values for realm "${realm}" (${matches.map((m) => `${m.declaredIn}="${m.vars[UI_ORIGIN_VARIABLE] ?? ''}"`).join(', ')}) -- one realm, one UI origin list: fix the description rather than letting a seed choose between them`);
+  }
+  const hit = matches.find((m) => ((m.vars[UI_ORIGIN_VARIABLE] ?? '').trim().length > 0));
+  // Absent is a real state of the composition, and inventing a value for it is not this function's job: the
+  // caller refuses, because a hosted realm with no declared UI origin is a gap in the description.
+  if (hit === undefined) return undefined;
+  return { environment: hit.environment, declaredIn: hit.declaredIn, origins: normalizeUiOrigins([hit.vars[UI_ORIGIN_VARIABLE] ?? '']) };
 }
 
 /* ------------------------------------------------------------------ PKCE primitives */
