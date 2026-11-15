@@ -25068,7 +25068,7 @@ function date4(params) {
 }
 
 // packages/contracts/src/generated/contract-version.ts
-var CONTRACT_VERSION = "3.0.0";
+var CONTRACT_VERSION = "4.0.0";
 
 // packages/contracts/src/infra.ts
 var OPERATIONS = [
