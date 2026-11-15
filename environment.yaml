@@ -48,15 +48,19 @@ variables:
   - name: KC_BOOTSTRAP_ADMIN_PASSWORD
     kind: secret
     secret: true
-    environments: [development]
-    deployedTo: local:compose-overlay
-    note: "referenced by compose.dev.yaml"
+    environments: all
+    service: identity
+    required: true
+    rotate: on-demand
+    deployedTo: railway:shared-variable
+    note: "the bootstrap admin password, declared by NAME in the composition and delivered through PUT …/secrets/{name} or platform-deploy --deliver-secrets; platfolio stores no value (D4). Read by 26.8 only when the master realm does not exist yet, so this obligates new deployments and recovers nothing on a running one (#248)"
   - name: KC_BOOTSTRAP_ADMIN_USERNAME
     kind: value
     secret: false
     environments: all
-    deployedTo: host:shell
-    note: "referenced by compose.dev.yaml"
+    service: identity
+    deployedTo: railway:variable
+    note: "the bootstrap admin username Keycloak 26.x reads at FIRST start only, when the master realm does not exist yet; a username is not a credential, so it is a composition literal -- the same shape the published shared-identity template uses (D50)"
   - name: KC_CLIENT_SECRET
     kind: secret
     secret: true
@@ -147,6 +151,12 @@ variables:
     environments: [development]
     deployedTo: host:shell
     note: "the peer realm's user password -- same: minted against the peer, never sent to this realm's verifier"
+  - name: KC_PKCE_USER
+    kind: value
+    secret: false
+    environments: [development]
+    deployedTo: host:shell
+    note: "referenced by scripts/smoke-browser-auth.ts"
   - name: KC_PROXY_HEADERS
     kind: value
     secret: false
@@ -165,18 +175,6 @@ variables:
     environments: [development]
     deployedTo: host:shell
     note: "referenced by scripts/seed-identity.ts, scripts/smoke-identity.ts"
-  - name: KEYCLOAK_ADMIN
-    kind: value
-    secret: false
-    environments: all
-    deployedTo: railway:variable
-    note: "a username is not a credential"
-  - name: KEYCLOAK_ADMIN_PASSWORD
-    kind: secret
-    secret: true
-    environments: all
-    deployedTo: railway:shared-variable
-    note: "the bootstrap admin of the hosted identity service, declared by name in the composition"
   - name: LIVE_DEPLOY_TIMEOUT_MS
     kind: value
     secret: false
@@ -267,6 +265,15 @@ variables:
     environments: [development]
     deployedTo: host:shell
     note: "referenced by apps/managed-action/src/runner.ts"
+  - name: PLATFOLIO_ALLOWED_ORIGINS
+    kind: value
+    secret: false
+    environments: all
+    service: api
+    required: false
+    default: ""
+    deployedTo: railway:variable
+    note: "comma-separated browser origins the UI is served from (scheme://host[:port] each). One list, both consumers: the API admits it as its CORS allow-list, and identity:seed writes it as the browser client's redirect URIs and webOrigins. Unset or empty means same-origin only -- the documented, safe default, and never `*`. A malformed entry is a boot failure, not a warning; the per-environment values belong in environmentValues (D56), in the platform description rather than in a script"
   - name: PLATFOLIO_API_ORIGIN
     kind: value
     secret: false

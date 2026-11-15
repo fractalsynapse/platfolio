@@ -234,7 +234,12 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
 
   const instances: ExtensionDescriptor = {
     id: 'instances',
-    requires: ['store', 'identity', 'scm'],
+    // `infra` joined this list for `redeployInstance`, which is the first operation the instances capability
+    // performs against a provider on an operator's word rather than through a dispatch. Declaring it is not
+    // bookkeeping: the kernel refuses to hand a capability a service it did not ask for, so an undeclared
+    // dependency surfaces as a runtime "cannot get property" 500 on the route -- which is how I found it, by
+    // writing the test before the wiring.
+    requires: ['store', 'identity', 'scm', 'infra'],
     routes: [
       {
         method: 'GET', path: '/api/v1/instances', operationId: 'listInstances',
@@ -339,6 +344,67 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
         if (moved.ok === false) return { status: moved.code === 'not-found' ? 404 : 400, body: { error: moved.code, message: reasonOf(moved) } };
         await scope.context.store.appendAudit({ actorKind: 'user', actorRef: scope.personId, action: 'instance.destroy', target: moved.value.id, detail: { from: scope.role, state: 'deprovisioning' } });
         return send('destroyInstance', 202, { instanceId: moved.value.id, state: 'deprovisioning', recorded: true });
+      }),
+      /**
+       * Restart a running service so it picks up configuration it does not hold (D48).
+       *
+       * A separate verb from `applyPlan`, and the reason is the gap this closes: a plan whose content has not
+       * changed is a NOOP *by design*. Asking the apply path for a refresh either does nothing or forces the
+       * issue by perturbing the plan hash -- faking a configuration change to obtain a restart. So the restart
+       * is said out loud, gets an audit row, and is answered with an observation.
+       *
+       * What this deliberately does NOT do is claim to know whether the value changed. platfolio may not read
+       * configuration values back (D4), so the question is unanswerable here; the measurement in
+       * docs/research/railway-variable-value-redeploy-2026-11-15.md says the provider already diffs values on the
+       * write side, and the design follows that instead of storing a digest of a credential we are forbidden to
+       * read. The tradeoff -- a needless bounce when nothing changed -- is the price of keeping that line.
+       */
+      scoped('POST', '/api/v1/instances/{instanceId}/redeploy', 'redeployInstance', 'instance.redeploy', async (scope, request, params) => {
+        const id = params.instanceId ?? '';
+        const found = await scope.context.store.getInstance(id);
+        if (found.ok === false) return notFound('instance', id);
+        const body = bodyOf<{ environment?: string; service?: string }>(request);
+        if (body.ok === false) return badRequest(body.error);
+        const environment = body.value?.environment;
+        if (!environment) return badRequest('environment is required: a refresh names WHICH environment, because the same service name exists in more than one (D57)');
+        const service = body.value?.service;
+        if (service !== undefined && service.trim() === '') return badRequest('service, when present, must not be blank -- omit it to refresh the whole environment');
+
+        // A provider that cannot restart is discoverable from its advertised operations, so this answers 501
+        // with the provider's name rather than attempting a call that throws inside a facade.
+        if (scope.context.infra.canRedeploy === false) {
+          return { status: 501, body: { error: 'provider-cannot-redeploy', message: `the selected provider (${scope.context.infra.describe().provider}) cannot redeploy a service; restart it in your own provider project` } };
+        }
+        const result = await scope.context.infra.redeploy({ instanceId: id, environment, ...(service === undefined ? {} : { service }) });
+        await scope.context.store.appendAudit({
+          actorKind: 'user', actorRef: scope.personId, action: 'instance.redeploy', target: id,
+          // Names, counts and codes only. Nothing here could carry a configuration value, and `verified:false`
+          // is recorded rather than smoothed over -- the audit row is where "we asked and it did not move" lives.
+          // Joined to strings because `AuditEntry.detail` is a scalar map by contract
+          // (packages/contracts/src/persistence.ts:185), and that restriction is not incidental: the
+          // token-shaped-string guard that keeps a credential out of an audit row inspects these values.
+          // Counting instead of listing would have thrown away the one fact an operator needs -- WHICH service
+          // did not restart.
+          detail: {
+            environment,
+            restarted: result.services.join(','),
+            refused: result.refused.map((r) => `${r.service}:${r.code}`).join(','),
+            budgetSkipped: result.budgetSkipped.join(','),
+            verified: result.verified,
+          },
+        });
+        // 202 even when verified is false: the request WAS accepted and the restart was asked for. `verified`
+        // carries the outcome, and a 2xx with an explicit "this did not move" is a truer answer than a 502 for a
+        // provider that accepted the call -- which is also the shape that keeps a caller from retrying into a
+        // second bounce.
+        return send('redeployInstance', 202, {
+          instanceId: id,
+          environment: result.environment,
+          services: result.services,
+          refused: result.refused,
+          budgetSkipped: result.budgetSkipped,
+          verified: result.verified,
+        });
       }),
       scoped('GET', '/api/v1/instances/{instanceId}', 'getInstance', 'instance.read', async (scope, _request, params) => {
         const found = await scope.context.store.getInstance(params.instanceId ?? '');
@@ -1024,7 +1090,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
         }
         const found = await scope.context.store.getInstance(id);
         if (found.ok === false) return notFound('instance', id);
-        const body = bodyOf<{ service?: string; environment?: string; value?: string }>(request);
+        const body = bodyOf<{ service?: string; environment?: string; value?: string; refresh?: string }>(request);
         if (body.ok === false) return badRequest(body.error);
         const service = body.value?.service;
         const environment = body.value?.environment;
@@ -1051,7 +1117,17 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
         if (source === undefined) {
           return { status: 400, body: { error: 'secret-not-declared', message: `"${name}" is not declared for service "${service}" in environment "${environment}" by the registered plan, and platfolio does not choose a custody location for a credential it was never told about (declare it in the platform description)` } };
         }
-        const delivered = await scope.context.infra.putSecretValue({ instanceId: id, environment, service, name, value, source });
+        // `refresh` is the maintainer's request made callable: writing a credential can also ask the provider to
+        // make the running container pick it up. The DEFAULT is the old behaviour, and the reason is D4 rather
+        // than conservatism -- platfolio cannot read the value back, so it cannot know a change happened, so
+        // restarting on every delivery would be an unobservable guess with downtime attached. With `auto` the
+        // provider does the comparing on the side that holds the value: measured to restart for a changed value
+        // and to start nothing for an identical one (docs/research/railway-variable-value-redeploy-2026-11-15.md).
+        const refresh = body.value?.refresh === 'auto' ? 'auto' : body.value?.refresh === 'suppress' || body.value?.refresh === undefined ? 'suppress' : undefined;
+        if (body.value?.refresh !== undefined && refresh === undefined) {
+          return badRequest(`refresh must be "suppress" or "auto"; got an unrecognised value`);
+        }
+        const delivered = await scope.context.infra.putSecretValue({ instanceId: id, environment, service, name, value, source, ...(refresh === 'auto' ? { refresh: 'auto' as const } : {}) });
         if (delivered.ok === false) {
           if (delivered.code === 'not-found') return notFound(delivered.reason.includes('environment') ? 'environment' : 'service', id);
           if (delivered.code === 'invalid-value') return badRequest(delivered.reason);
@@ -1061,7 +1137,9 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
           actorKind: 'user', actorRef: scope.personId, action: 'secret.deliver', target: id,
           // Names and destinations only. The value is never a candidate for an audit row, and `verified` is not
           // claimed here because presence is read separately, by name, through GET …/secrets.
-          detail: { name, service, environment },
+          // `refresh` is recorded because it is a fact about what the delivery DID to a running service, and
+          // it is a word -- redeployed / unchanged / unknown -- never a value and never a digest of one.
+          detail: { name, service, environment, ...(delivered.refresh === undefined ? {} : { refresh: delivered.refresh }) },
         });
         return { status: 204, body: undefined };
       }),

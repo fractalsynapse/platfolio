@@ -25068,7 +25068,7 @@ function date4(params) {
 }
 
 // packages/contracts/src/generated/contract-version.ts
-var CONTRACT_VERSION = "3.0.0";
+var CONTRACT_VERSION = "5.1.0";
 
 // packages/contracts/src/infra.ts
 var OPERATIONS = [
@@ -25080,7 +25080,10 @@ var OPERATIONS = [
   // Secret delivery (D53) and its presence read. Both are advertised, so a driver that lacks one is
   // discoverable from `describe()` instead of failing at the first attempt.
   "putSecretValue",
-  "secretPresence"
+  "secretPresence",
+  // The refresh verb (D48). Named here because a provider that cannot restart a service must be discoverable
+  // the same way: the API answers 501 from `describe()`, not from a failed attempt.
+  "redeploy"
 ];
 var HostSchema = external_exports.string().min(1).refine((host) => /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i.test(host), {
   message: "host must be a lowercase FQDN without scheme, port or wildcard"
@@ -25249,6 +25252,15 @@ var IssueSchema = external_exports.object({
   path: external_exports.array(external_exports.union([external_exports.string(), external_exports.number()])),
   code: external_exports.string().min(1),
   message: external_exports.string().min(1)
+});
+var RedeployResultSchema = external_exports.object({
+  instanceId: external_exports.string().min(1),
+  environment: external_exports.string().min(1),
+  services: external_exports.array(external_exports.string().min(1)),
+  refused: external_exports.array(external_exports.object({ service: external_exports.string().min(1), code: external_exports.string().min(1), reason: external_exports.string().min(1) }).strict()).default([]),
+  budgetSkipped: external_exports.array(external_exports.string().min(1)).default([]),
+  /** True when every named service was observed to have a fresh deployment after the calls. */
+  verified: external_exports.boolean()
 });
 function planIssues(plan) {
   const parsed = InfraPlanSchema.safeParse(plan);
@@ -26056,18 +26068,23 @@ var RailwayInfraProvider = class {
     }
     const token = await this.credentials.forEnvironment(project.id, env.name);
     const shared = input2.source === "shared-variable";
+    const skipDeploys = input2.refresh !== "auto";
+    const stampBefore = skipDeploys ? void 0 : await this.deploymentStamps(project.id, env.id, token).then((m) => m.get(svc.id)).catch(() => void 0);
     try {
       if (shared) {
-        await this.upsertSharedVariable(project.id, env.id, input2.name, input2.value, token);
+        await this.upsertSharedVariable(project.id, env.id, input2.name, input2.value, token, skipDeploys);
         await this.attachSharedVariable(project.id, env.id, input2.name, svc.id, token);
       } else {
-        await this.upsertVariable(project.id, env.id, svc.id, input2.name, input2.value, token);
+        await this.upsertVariable(project.id, env.id, svc.id, input2.name, input2.value, token, skipDeploys);
       }
     } catch (error62) {
       return { ok: false, code: "provider-refused", reason: redactCredentialShaped(String(error62.message)).slice(0, 240) };
     }
     const present = (await this.configVariableNames(project.id, env.id, svc.id).catch(() => [])).includes(input2.name);
-    return { ok: true, verified: present };
+    if (skipDeploys) return { ok: true, verified: present };
+    const stampAfter = await this.deploymentStamps(project.id, env.id, token).then((m) => m.get(svc.id)).catch(() => void 0);
+    const refresh = stampBefore === void 0 || stampAfter === void 0 ? "unknown" : stampAfter !== stampBefore ? "redeployed" : "unchanged";
+    return { ok: true, verified: present, refresh };
   }
   async secretPresence(input2) {
     const out = {};
@@ -26090,6 +26107,124 @@ var RailwayInfraProvider = class {
     }
     const set2 = new Set(names);
     for (const n of input2.names) out[n] = set2.has(n) ? "set" : "missing";
+    return out;
+  }
+  /**
+   * Redeploy one service, or every service in one environment, on an operator's decision.
+   *
+   * The thing this exists to make impossible: a service that was CONFIGURED correctly and is RUNNING an old
+   * value, with no record of the gap. On Railway a variable write resolves `${{…}}` references at write time
+   * (measured, and the reason `platform-deploy --redeploy` was added), so the container's environment is a
+   * snapshot of the moment it was deployed, not a live view of the variable store. `applyPlan` handles its own
+   * case -- it writes, then deploys deliberately, under the budget. This is the verb for everything else: a
+   * secret delivered out of band, a variable changed in the provider console, a reference that only resolved
+   * after the first boot.
+   *
+   * Deliberately NOT a value comparison. We may not read values back (D4: `variables()` is refused, and
+   * `environment.config` answers names with values redacted), so the provider cannot answer "did the value
+   * change" -- and measurement says we do not need to: Railway already diffs values on the write side and
+   * starts a deployment only for a real change. What we CAN answer honestly is "was a restart asked for, and
+   * did one start", which is exactly what this reports. The tradeoff accepted here: a redeploy is a restart, so
+   * a refresh asked for when nothing changed costs a container bounce and buys nothing. That is the operator's
+   * decision to make, which is why it is an operation with an audit row rather than an automatic consequence of
+   * a write.
+   */
+  async redeploy(input2) {
+    const project = await this.findProject(this.projectName({ instanceId: input2.instanceId }));
+    if (!project) {
+      return {
+        instanceId: input2.instanceId,
+        environment: input2.environment,
+        services: [],
+        refused: input2.service ? [{ service: input2.service, code: "no-project", reason: `no provider project "${this.projectName({ instanceId: input2.instanceId })}" -- the instance has never been applied` }] : [],
+        budgetSkipped: [],
+        verified: false
+      };
+    }
+    const workspace = await this.credentials.workspace();
+    const env = (await this.environments(project.id, workspace)).find((e) => e.name === input2.environment);
+    if (!env) {
+      return {
+        instanceId: input2.instanceId,
+        environment: input2.environment,
+        services: [],
+        refused: [{ service: input2.service ?? "*", code: "no-environment", reason: `environment "${input2.environment}" does not exist in this instance` }],
+        budgetSkipped: [],
+        verified: false
+      };
+    }
+    const token = await this.credentials.forEnvironment(project.id, env.name);
+    const placed = await this.environmentInstances(project.id, env.id, token);
+    const projectServices = await this.listServices(project.id, workspace);
+    const wanted = input2.service === void 0 ? [...placed.keys()] : (() => {
+      const physical = physicalServiceName(input2.service, input2.environment);
+      const row = projectServices.find((s) => s.name === physical);
+      return row === void 0 ? [] : [row.id];
+    })();
+    if (input2.service !== void 0 && wanted.length === 0) {
+      const physical = physicalServiceName(input2.service, input2.environment);
+      const bare = projectServices.find((s) => s.name === input2.service);
+      return {
+        instanceId: input2.instanceId,
+        environment: input2.environment,
+        services: [],
+        refused: [{
+          service: input2.service,
+          code: bare && !placed.has(bare.id) ? "not-in-environment" : "no-service",
+          reason: bare && !placed.has(bare.id) ? `"${physical}" exists in the project but has no instance in "${input2.environment}"` : `no service named "${physical}" in this project${bare ? ` (a row "${input2.service}" exists but is not this environment's -- pre-D57 shape; apply the plan to rename it)` : ""}`
+        }],
+        budgetSkipped: [],
+        verified: false
+      };
+    }
+    const before = await this.deploymentStamps(project.id, env.id, token);
+    const services = [];
+    const budgetSkipped = [];
+    for (const serviceId of wanted) {
+      const row = projectServices.find((s) => s.id === serviceId);
+      const label = row?.name ?? serviceId;
+      if (this.deploymentsUsed >= this.deployBudget) {
+        budgetSkipped.push(label);
+        continue;
+      }
+      this.deploymentsUsed += 1;
+      services.push(label);
+      await this.transport.graphql({
+        operation: "serviceInstanceDeploy",
+        credential: token,
+        query: "mutation ($environmentId: String!, $serviceId: String!) { serviceInstanceDeploy(environmentId: $environmentId, serviceId: $serviceId, latestCommit: true) }",
+        variables: { environmentId: env.id, serviceId }
+      });
+    }
+    const after = await this.deploymentStamps(project.id, env.id, token);
+    const acted = /* @__PURE__ */ new Set();
+    const refused = [];
+    for (const serviceId of wanted) {
+      const label = projectServices.find((s) => s.id === serviceId)?.name ?? serviceId;
+      if (!services.includes(label)) continue;
+      acted.add(label);
+      if (before.get(serviceId) === after.get(serviceId)) {
+        refused.push({ service: label, code: "deployment-unchanged", reason: `the provider accepted the deploy but the service's latest deployment id did not change (${String(before.get(serviceId) ?? "none")} -> ${String(after.get(serviceId) ?? "none")})` });
+      }
+    }
+    const verified = acted.size > 0 && refused.length === 0 && budgetSkipped.length === 0;
+    return { instanceId: input2.instanceId, environment: input2.environment, services, refused, budgetSkipped, verified };
+  }
+  /**
+   * `serviceId -> latest deployment id`, for the redeploy read-back.
+   *
+   * Identity only -- no status, no configuration, no variables. Nothing in this method could carry a value,
+   * which is what keeps the D4 rule intact on a path that exists to react to values.
+   */
+  async deploymentStamps(projectId, environmentId, credential) {
+    const data = await this.transport.graphql({
+      operation: "environment.serviceInstances",
+      credential,
+      query: "query ($projectId: String!, $environmentId: String!) { environment(projectId: $projectId, id: $environmentId) { serviceInstances { edges { node { serviceId latestDeployment { id } } } } } }",
+      variables: { projectId, environmentId }
+    });
+    const out = /* @__PURE__ */ new Map();
+    for (const edge of data.environment?.serviceInstances?.edges ?? []) out.set(edge.node.serviceId, edge.node.latestDeployment?.id);
     return out;
   }
   async findProject(name) {
@@ -26402,13 +26537,14 @@ var RailwayInfraProvider = class {
       variables: { environmentId, serviceId, input: input2 }
     });
   }
-  async upsertVariable(projectId, environmentId, serviceId, name, value, credential) {
+  async upsertVariable(projectId, environmentId, serviceId, name, value, credential, skipDeploys = true) {
     await this.transport.graphql({
       operation: "variableUpsert",
       credential,
       query: "mutation ($input: VariableUpsertInput!) { variableUpsert(input: $input) }",
-      // skipDeploys: a configuration write must not trigger a redeploy we did not decide on.
-      variables: { input: { projectId, environmentId, serviceId, name, value, skipDeploys: true } }
+      // skipDeploys defaults to true: a configuration write must not trigger a redeploy we did not decide on.
+      // `false` is the deliberate exception, and only the refresh path passes it (see putSecretValue).
+      variables: { input: { projectId, environmentId, serviceId, name, value, skipDeploys } }
     });
   }
   /**
@@ -26416,14 +26552,14 @@ var RailwayInfraProvider = class {
    * omitting `serviceId` is exactly what distinguishes a shared variable from a service variable: the value
    * belongs to the environment, and services opt in to reading it.
    */
-  async upsertSharedVariable(projectId, environmentId, name, value, credential) {
+  async upsertSharedVariable(projectId, environmentId, name, value, credential, skipDeploys = true) {
     await this.transport.graphql({
       operation: "variableUpsert",
       credential,
       query: "mutation ($input: VariableUpsertInput!) { variableUpsert(input: $input) }",
       // No serviceId: environment scope. skipDeploys for the same reason as the service-scoped write -- a
       // credential arriving is not a decision to redeploy.
-      variables: { input: { projectId, environmentId, name, value, skipDeploys: true } }
+      variables: { input: { projectId, environmentId, name, value, skipDeploys } }
     });
   }
   /**
@@ -27422,6 +27558,12 @@ var PolicyActionSchema = external_exports.enum([
   "instance.secret.write",
   "instance.secret.read",
   "instance.dispatch",
+  // Restarting a running service (D48). MEMBER, not owner, and the reasoning is D43's applied to the new verb:
+  // a member may deploy this platform already, and a restart grants no authority a deploy does not already
+  // carry. The credential VALUE stays owner-only at `instance.secret.write` -- what is split here is "put a
+  // different value in" from "ask the container to pick up what is there", and only the first can substitute
+  // what a service runs with.
+  "instance.redeploy",
   "instance.destroy",
   "capability.publish",
   "capability.share",

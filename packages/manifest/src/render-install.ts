@@ -143,6 +143,13 @@ export function renderInstallPullRequest(m: Manifest, opts: InstallOptions): Ins
     '',
     '  managed:',
     `    name: platfolio ${EXPR.action}`,
+    // A dispatch context is the only event that carries instance_id / dispatch_id / nonce / plan_hash.
+    // Without it the action refuses (and must: the nonce is what makes an attestation non-replayable), so
+    // running the job on a bare push or PR is a guaranteed 500ms failure with a message that reads like a
+    // misconfiguration. Skip with a visible reason instead. Push/PR-triggered deploys need the runner to
+    // request a dispatch from platfolio using its OIDC token -- see the issue linked in the file header --
+    // not a loosened guard here.
+    '    if: github.event_name == \'workflow_dispatch\' || inputs.instance_id != \'\'',
     '    needs: tests',
     `    runs-on: ${runner}`,
     '    timeout-minutes: 30',

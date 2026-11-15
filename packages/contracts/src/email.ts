@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { CONTRACT_VERSION } from './generated/contract-version.ts';
 
 /**
  * Sending email is a capability seam (D46), like storage and like the provider: one interface, several
@@ -87,7 +88,7 @@ export interface MailboxReader {
   listMessages(to?: string): Promise<MailboxMessage[]>;
 }
 
-export const EMAIL_CONTRACT = { name: 'email.transport', version: '1.0.0' } as const;
+export const EMAIL_CONTRACT: { name: string; version: string } = { name: 'email.transport', version: CONTRACT_VERSION };
 
 export function failureOf(result: EmailResult): EmailFailure | null {
   return result.accepted ? null : result;

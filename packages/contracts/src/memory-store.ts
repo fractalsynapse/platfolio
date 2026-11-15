@@ -6,6 +6,7 @@ import { AttestationRecordSchema, AuditEntrySchema, BindingRecordSchema, Capabil
 import { reasonOf } from './persistence.ts';
 import { normaliseEmail, normaliseName } from './persistence.ts';
 import { checkAttestationPolicy } from './dispatch-policy.ts';
+import { CONTRACT_VERSION } from './generated/contract-version.ts';
 
 /**
  * The in-memory implementation of `Store` -- the second implementation that makes the interface a claim
@@ -64,7 +65,7 @@ export class MemoryStore implements Store {
   }
 
   describe() {
-    return { driver: this.driver, contract: '1.0.0', schemaReady: !this.closed };
+    return { driver: this.driver, contract: CONTRACT_VERSION, schemaReady: !this.closed };
   }
 
   async ping(): Promise<boolean> {

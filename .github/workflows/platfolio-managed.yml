@@ -45,6 +45,7 @@ jobs:
 
   managed:
     name: platfolio ${{ inputs.action || (github.event_name == 'pull_request' && 'check' || 'apply') }}
+    if: github.event_name == 'workflow_dispatch' || inputs.instance_id != ''
     needs: tests
     runs-on: ubuntu-latest
     timeout-minutes: 30

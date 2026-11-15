@@ -5,6 +5,125 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+### Changed — the shared OpenAPI components are a build artifact (#247)
+
+`apps/control-plane/openapi.yaml` is now generated, for the shapes a capability contract already defines, from
+those definitions. `pnpm run spec:gen` writes them; `pnpm run spec:check` fails the build when the committed
+document is not what the schemas produce, naming the component and the first differing line. `verify` runs the
+gate between `api:check` and `api:types:check`, so a spec edit that was not generated now fails the way a stale
+generated type file does — which is the lesson that made `api:types:check` exist.
+
+The change is the one issue #247 was raised about: nine of the document's eighteen components restated, by hand,
+what a zod definition in `packages/contracts` already says, and a gate compared the two descriptions and filed
+what it found. Comparison was the intermediate step. Generation is the rule AGENTS.md states — *the StandardSchema
+definition stays the source and the spec is generated or compared against it, never re-invented* — and it turns
+the drift from a thing measured into a thing that cannot be written.
+
+**The ledger emptied itself.** `KNOWN_DRIFT` held one entry, `Instance.environments`: the spec's `Instance` was
+the assembled response (`{ ...record, environments }`, `apps/control-plane/src/capabilities.ts:259, :348`) while
+`InstanceSchema` is the stored row. Adding the column to the record would have made the store lie, so the
+response got its own component: **`InstanceResponse`**, composed from `InstanceSchema` plus
+`InstanceEnvironmentStateSchema` — its fields, its required list and its `additionalProperties: false` all come
+out of the two definitions, and the only hand-written fact is the property name the handler uses. Because the
+ledger fails the build when a listed difference stops existing, deleting the entry was forced rather than chosen.
+`api:check` now also refuses any component that matches a definition by name but is *not* generated, which closes
+the direction the drift escaped through. `createInstance` still returns `Instance` — measured, it sends
+`created.value`, a record with no environment rows — so the split is the document telling the truth about three
+operations that used to share one name.
+
+**Prose lives in code now: `packages/api-contract/src/spec-annotations.ts`, keyed by component and property
+path.** Not `.describe()` on the schemas, for two reasons measured before deciding. The API's prose is about the
+wire, not the row — `Instance.state` documented as "the rollup, not the truth" is a fact for whoever reads
+`GET /api/v1/instances`, and putting it in `packages/contracts` would drop hosting commentary into the module the
+database driver imports. And part of what the document knows cannot be expressed in zod at all:
+`format: date-time` sits on timestamp fields defined as `z.string().min(1)`, and it is *enforced*, because
+`validateResponse` runs Ajv with `ajv-formats` against this document — so switching those fields to
+`z.iso.datetime()` to carry the format would have changed what the store admits. One sidecar for both kinds, with
+the rule the generator enforces: **it may say what the definition does not, and may never contradict it.** An
+annotation whose path no longer exists is a refusal, the same design as the ledger. A composed response inherits
+its base's annotations rather than repeating them, so no sentence is written twice.
+
+**Nothing here imports `zod`, so the lockfile does not move.** `toJSONSchema` is a method on the schema value, and
+so are `extend` and `array`; the values arrive from `packages/contracts`, which declares `zod@^4.6.7` properly,
+reached by path the way `scripts/check-api.ts` has always reached it. A declared devDependency was tried first and
+rejected on measurement: a bare `zod` specifier resolves from `packages/api-contract` and `scripts/` only via
+`/home/adrian/node_modules/zod` — outside the repository — so it would pass on a laptop and fail in CI, and a
+dependency edge is exactly what makes that invisible. The guard test asserts both halves: no `zod` import appears
+in the package or in `scripts/`, AND that resolution genuinely does escape the repo today, so the rule cannot
+quietly become decoration.
+
+**What the document now says differently, which is the point of the change.** `Instance.name` allowed 80 characters
+and a 41-character pattern in the spec while `SLUG_PATTERN` and the database `CHECK` enforce 40 — the
+disagreement the parity layer had been counting as "a form that validates and a server that refuses". It now says
+40. `Attestation.resources[].kind` and `.status` declared no enum while the definitions do, so the document was
+quieter than the code it describes. `planHash` was `^[0-9a-f]{64}$` in the spec and `^[a-f0-9]{16,64}$` in the
+definition; the definition wins, because a response that satisfies the code must satisfy the document. `provider`
+gained `default: railway` and `Invitation.state` `default: pending`, because that is what the definitions emit.
+Where the schema states nothing and the API still promises something — the 64-hex plan-hash patterns,
+`DispatchIntent.nonce` bounded to 64 characters — the sidecar says it, and Ajv enforces it at the boundary.
+The measured count of constraint disagreements written two different ways went from 5 to 0, because there is no
+longer a second description to disagree with.
+
+**Two gates added against the failure class that bit twice in one day.** A malformed scalar in the document made
+`api:check` die with a `YAMLParseError` stack trace, hiding every other finding in `verify` behind it; and two
+quoting shapes parse *cleanly* while meaning something else — `description: Names # prose` yields `"Names"`, and
+`{ description: Names, because English, minLength: 3 }` yields a truncated description plus a new `because
+English` keyword that non-strict Ajv accepts. `spec-source.ts` now reports the first as a finding with a line and
+column instead of a crash, and flags the other two as hazards in the source text, the only layer where the quoting
+decision still exists. Both rules were measured against the shipped document and find nothing in it, which is what
+makes them findings rather than noise; the suite feeds each malformed shape on purpose and asserts the tool says
+so, because a guard that has never been falsified is not a guard.
+
+`packages/contracts` is untouched by this change: no new export, no `.describe()`, no baseline refresh.
+
+Measured on the change's own surface: `api:check` 0 (36 operations, 10 compared, 10 generated, **empty drift
+ledger**), `spec:check` 0 (10 generated components byte-for-byte, 9 hand-written), `api:types:check` 0, `check` 0,
+`lock:check` 0, `environment:registry` 0, `graphql:check` 0 · `tsc` 0 errors in every file this change adds or
+edits · `packages/api-contract/test` 54 tests / 54 pass / 0 fail · the four control-plane suites that validate
+live responses against this document (`api`, `bindings`, `invitations`, `teams-destroy`) 26/26 — which is the run
+that matters most here, because it is `validateResponse` executing Ajv with `ajv-formats` against YAML the
+generator wrote, not against YAML a person typed.
+
+`pnpm-lock.yaml` is byte-unchanged (`cmp` against the pre-work copy), so `lock:check` and `install:check` pass
+with no new dependency anywhere.
+
+### Changed — platfolio's UI hostnames, and one variable that says them (D52, D56)
+
+The maintainer settled the two UI hosts: **production is `https://platfolio.dev`, staging is
+`https://preview.platfolio.dev`**. The hostnames an earlier session proposed -- `app.platfolio.dev` and
+`staging-app.platfolio.dev` -- are retired and were removed wherever they were asserted, including the CORS and
+browser-auth tests that had been using them as their example origins. `api.platfolio.dev` and
+`auth.platfolio.dev` are untouched: they are the API and identity hosts (#199 verified and issued those two), and
+the UI is a third host, which is precisely why the API has to be *told* the UI's origin instead of deriving it.
+
+**One variable now feeds both consumers.** `PLATFOLIO_ALLOWED_ORIGINS` -- the CORS allow-list the control plane
+parses at boot -- is the single carrier of "the origins this environment's UI is served from", and
+`scripts/seed-identity.ts` reads that same name to write the public `platfolio-web` client's exact `<origin>/callback`
+redirect URIs and `webOrigins`. `PLATFOLIO_UI_ORIGIN` is deleted, and with it the registry row: a hosted realm's
+origins are looked up in `compose.yaml`, by matching the realm being seeded against the issuer that file declares
+per environment. The ownership went this way rather than the other because the value has to live in the platform
+description for staging to differ from production in the plan hash (D56), and the API side is the enforced side:
+it canonicalises the list, refuses `*`, and refuses to start on a malformed entry. Two names for one fact were the
+old shape, and each file was internally consistent while the pair could still disagree -- a realm redirecting to a
+page the API refuses to answer, or an API admitting a page no realm will send a code to. Nothing in this repository
+could see that.
+
+Values now declared: `compose.yaml` base `https://platfolio.dev`, `x-platfolio…environmentValues.staging`
+`https://preview.platfolio.dev` (the third name that changes with the issuer and JWKS URIs), and
+`compose.dev.yaml` `http://localhost:5173` -- the same string the seed and the PKCE smoke fall back to on loopback,
+which `packages/contracts/test/browser-auth.test.ts` now checks rather than trusts. The seed prints which origins
+it used and which line they came from, and still refuses to invent one for a realm the description does not place.
+
+**Correct, not exercised.** Neither hostname resolves: there is no DNS record, no Railway domain and no certificate
+for `platfolio.dev` or `preview.platfolio.dev`, and no UI service in this composition to serve either. Whether the
+page becomes a fourth platform inside this plan -- the way `identity` is hosted, which would be the honest
+dogfooding -- or a static host outside it is an open decision for the maintainer, and so is one naming question
+raised by this change rather than answered by it: `preview.platfolio.dev` is **staging**'s UI host, while
+`environments.preview` in the same file is **pull-request previews** (declared, disabled) and staging's API host
+follows the `staging-` prefix as `staging-api.platfolio.dev`. Three senses of one word, one of them new. The
+composition says which is which where it matters, and `docs/MAINTAINING.md` records the collision as unresolved;
+renaming a hostname is not something configuration work gets to decide quietly.
+
 ### Changed — the templates are repositories, and this repository reads them (D60); the toolchain is TypeScript (D61)
 
 **`templates/` is deleted.** The three published repositories are the source of a template now, and platfolio

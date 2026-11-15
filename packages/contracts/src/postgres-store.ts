@@ -8,6 +8,7 @@ import { reasonOf } from './persistence.ts';
 import { normaliseEmail, normaliseName } from './persistence.ts';
 import { checkAttestationPolicy } from './dispatch-policy.ts';
 import type { Attestation } from './attestation.ts';
+import { CONTRACT_VERSION } from './generated/contract-version.ts';
 
 /**
  * The Postgres implementation of `Store`. This is the case that decides whether the `Store` interface is real:
@@ -83,7 +84,7 @@ export class PostgresStore implements Store {
   }
 
   describe() {
-    return { driver: this.driver, contract: '1.0.0', schemaReady: this.ready };
+    return { driver: this.driver, contract: CONTRACT_VERSION, schemaReady: this.ready };
   }
 
   private ready = false;

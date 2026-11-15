@@ -80,6 +80,15 @@ export function operationsOf(doc: SpecDocument): SpecOperation[] {
   return out;
 }
 
+/**
+ * Public face of the `$ref` walker: the schema-parity gate (and the type generator) must resolve pointers
+ * exactly the way runtime response validation does, so there is one implementation of this in the package
+ * rather than a second one that agrees by luck.
+ */
+export function resolveNode(node: unknown, doc: SpecDocument): any {
+  return deref(node, doc);
+}
+
 /** Follows `#/components/...` pointers, inlining the target. A cycle is refused, not followed. */
 function deref(node: unknown, doc: SpecDocument, trail: string[] = []): any {
   if (Array.isArray(node)) return node.map((n) => deref(n, doc, trail));

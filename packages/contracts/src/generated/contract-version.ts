@@ -8,7 +8,7 @@
  * surface, so every version bump would classify as a REMOVED declaration and the drift gate would
  * demand a breaking ack for its own arithmetic.
  *
- * Derived from the baseline digest `448cfa1167a4e06d`.
- * NONE 3.0.0 -> 3.0.0 (surface diff: 0 removed, 0 widened, 0 added, 0 reordered)
+ * Derived from the baseline digest `2e13e5b3bc1d5d38`.
+ * MINOR 5.0.0 -> 5.1.0 (surface diff: 0 removed, 0 widened, 4 added, 0 reordered); acknowledged: Secret delivery gained the optional `refresh` field and its three-state answer (`redeployed` | `unchanged` | `unknown`). Purely additive: both new parameters are optional, so every existing caller compiles and behaves identically -- omitting `refresh` is the old `skipDeploys: true` path, which is asserted as a test rather than assumed. MINOR is what the classifier derives and it is right this time: no declaration disappeared and no tuple widened, so nothing an existing provider switches over changed shape. Measured motivation in docs/research/railway-variable-value-redeploy-2026-11-15.md (arms B and D on our own api-staging): the provider diffs values on the write side, which is the only side allowed to know them under D4.
  */
-export const CONTRACT_VERSION: string = '3.0.0';
+export const CONTRACT_VERSION: string = '5.1.0';

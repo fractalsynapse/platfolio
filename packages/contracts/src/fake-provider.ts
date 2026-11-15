@@ -1,4 +1,4 @@
-import { CONTRACT_VERSION, OPERATIONS, planIssues, type CapabilityInfo, type ApplyResult, type DeleteResult, type InfraPlan, type InfraProvider, type SecretPresence, type SecretWriteResult, type Issue, type StateSnapshot } from './infra.ts';
+import { CONTRACT_VERSION, OPERATIONS, planIssues, ProviderUnsupported, type CapabilityInfo, type Operation, type ApplyResult, type DeleteResult, type InfraPlan, type InfraProvider, type RedeployResult, type SecretPresence, type SecretWriteResult, type Issue, type StateSnapshot } from './infra.ts';
 import { samplePlan } from './conformance.ts';
 
 export interface FakeOptions {
@@ -9,6 +9,12 @@ export interface FakeOptions {
   /** Drop an operation from the advertised set, e.g. to model a partial provider. */
   without?: readonly string[];
   name?: string;
+  /**
+   * How many deployments this double may start before it reports `budgetSkipped`. Mirrors the Railway
+   * driver's own ceiling, so the budget path is testable against BOTH implementations rather than being a
+   * property only one of them can claim (docs/design/10: the second implementation is the proof).
+   */
+  deployBudget?: number;
 }
 
 /**
@@ -19,11 +25,26 @@ export interface FakeOptions {
  */
 export class FakeInfraProvider implements InfraProvider {
   private readonly secretNames = new Set<string>();
+  /**
+   * Delivered values, held in memory only, for the lifetime of this object.
+   *
+   * The one place the double keeps a value, and it is kept to mirror a property the REAL provider has:
+   * Railway holds what it was given and diffs the next write against it, which is why a changed value
+   * restarts a service and an identical one does not (measured arms B and D). Nothing here reaches
+   * platfolio's store -- the field is private, never serialised, and dies with the instance -- so a test
+   * can assert the OUTCOME without the contract acquiring a place to keep credentials (D4).
+   */
+  private readonly secretValues = new Map<string, string>();
   private readonly instances = new Map<string, { plan: InfraPlan; services: StateSnapshot['services']; domains: StateSnapshot['domains']; applied: string[] }>();
+  /** Deployment counter per instance/service, bumped by `redeploy` so a caller's read-back sees movement. */
+  private readonly deploymentStamps = new Map<string, number>();
+  private deploymentsUsed = 0;
+  private readonly deployBudget: number;
   private readonly opts: Required<Pick<FakeOptions, 'contract' | 'name'>> & FakeOptions;
 
   constructor(options: FakeOptions = {}) {
     this.opts = { contract: CONTRACT_VERSION, name: 'fake', ...options };
+    this.deployBudget = options.deployBudget ?? 4;;
   }
 
   describe(): CapabilityInfo {
@@ -33,6 +54,23 @@ export class FakeInfraProvider implements InfraProvider {
       operations: OPERATIONS.filter((op) => !this.opts.without?.includes(op)) as CapabilityInfo['operations'],
       features: ['volumes', 'preview-environments'],
     };
+  }
+
+  /**
+   * `without` has to remove the BEHAVIOUR, not only the advertised name.
+   *
+   * It used to filter `describe().operations` and leave the method working, which made the double a liar in
+   * precisely the way this contract cares about: it claimed not to support an operation and then performed it.
+   * A test written against that passes by exercising a capability the provider just said it lacked, and the
+   * 501 path -- the honest answer a partial provider gives -- becomes untestable. The check is consulted at each
+   * call site, so the claim and the behaviour cannot diverge.
+   */
+  private supports(operation: Operation): boolean {
+    return !this.opts.without?.includes(operation);
+  }
+
+  private refuse(operation: Operation): never {
+    throw new ProviderUnsupported(operation, `${this.opts.name} was configured without it`);
   }
 
   validatePlan(plan: InfraPlan): Issue[] {
@@ -108,7 +146,7 @@ export class FakeInfraProvider implements InfraProvider {
    * a test implementation that kept values would let the contract be satisfied by an implementation that
    * violates it.
    */
-  async putSecretValue(input: { instanceId: string; environment: string; service: string; name: string; value: string; source?: 'service' | 'shared-variable' }): Promise<SecretWriteResult> {
+  async putSecretValue(input: { instanceId: string; environment: string; service: string; name: string; value: string; source?: 'service' | 'shared-variable'; refresh?: 'suppress' | 'auto' }): Promise<SecretWriteResult> {
     if (!this.instances.has(input.instanceId)) return { ok: false, code: 'not-found', reason: `unknown instance ${input.instanceId}` };
     if (input.value.length === 0) return { ok: false, code: 'invalid-value', reason: 'a secret value must be a non-empty string' };
     // Two custody keys, because the contract distinguishes the scopes and a double that flattened them would
@@ -116,8 +154,16 @@ export class FakeInfraProvider implements InfraProvider {
     const custodyKey = input.source === 'shared-variable'
       ? `${input.instanceId}/${input.environment}/+shared/${input.name}#${input.service}`
       : `${input.instanceId}/${input.environment}/${input.service}/${input.name}`;
+    const prior = this.secretValues.get(custodyKey);
+    const changed = prior !== undefined && prior !== input.value;
     this.secretNames.add(custodyKey);
-    return { ok: true, verified: true };
+    this.secretValues.set(custodyKey, input.value);
+    if (input.refresh !== 'auto') return { ok: true, verified: true };
+    const placedHere = (this.instances.get(input.instanceId)!.plan.environments.find((e) => e.name === input.environment)?.services.some((s) => s.name === input.service)) ?? false;
+    if (!placedHere) return { ok: true, verified: true, refresh: 'unknown' };
+    if (prior !== undefined && !changed) return { ok: true, verified: true, refresh: 'unchanged' };
+    this.deploymentsUsed += 1;
+    return { ok: true, verified: true, refresh: 'redeployed' };
   }
 
   async secretPresence(input: { instanceId: string; environment: string; service: string; names: string[] }): Promise<Record<string, SecretPresence>> {
@@ -129,6 +175,63 @@ export class FakeInfraProvider implements InfraProvider {
       out[name] = this.secretNames.has(scoped) || this.secretNames.has(attached) ? 'set' : 'missing';
     }
     return out;
+  }
+
+  /**
+   * The restart verb, modelled as an observation, not as a boolean echo.
+   *
+   * Each call bumps a per-service deployment stamp so a caller's read-back has something real to compare, and a
+   * name that is not in this environment is REFUSED rather than quietly dropped -- the same shape the Railway
+   * driver has to produce, because "202 accepted" and "nothing restarted" must never be the same answer.
+   */
+  async redeploy(input: { instanceId: string; environment: string; service?: string }): Promise<RedeployResult> {
+    if (!this.supports('redeploy')) this.refuse('redeploy');
+    const found = this.instances.get(input.instanceId);
+    if (!found) {
+      return { instanceId: input.instanceId, environment: input.environment, services: [], refused: [{ service: input.service ?? '*', code: 'no-project', reason: `no provider project for instance "${input.instanceId}" -- it has never been applied` }], budgetSkipped: [], verified: false };
+    }
+    // Scoped to the named environment, because `api` EXISTS in both of them and a double that flattened the two
+    // would let a production refresh restart staging -- the wrong answer, and one the flattened
+    // `StateSnapshot.services` read cannot express on its own. The environment has to come from the plan this
+    // instance was applied with, which is what makes this the same question the Railway driver answers by
+    // looking at which instances are placed in which environment.
+    const envPlan = found.plan.environments.find((e) => e.name === input.environment);
+    if (!envPlan) {
+      return {
+        instanceId: input.instanceId, environment: input.environment, services: [],
+        refused: [{ service: input.service ?? '*', code: 'no-environment', reason: `environment "${input.environment}" is not in the plan this instance was applied with` }],
+        budgetSkipped: [], verified: false,
+      };
+    }
+    // The TARGETS come from the plan's environment, not from the flattened state read. `StateSnapshot.services`
+    // holds one row per environment and does NOT carry the environment name, so filtering it by name matches
+    // `api` in production AND `api` in staging at once -- a double that did that would restart a service in an
+    // environment the caller did not name, and report it as one that did. The plan is the only place in this
+    // object where "which services live in which environment" is still true.
+    const planned = envPlan.services.filter((s) => input.service === undefined || s.name === input.service);
+    const deployed = new Set(found.services.map((s) => s.name));
+    const targets = planned.filter((s) => deployed.has(s.name));
+    if (targets.length === 0) {
+      return {
+        instanceId: input.instanceId, environment: input.environment, services: [],
+        refused: [{ service: input.service ?? '*', code: 'no-service', reason: `nothing named "${input.service ?? '(any)'}" is deployed in environment "${input.environment}" of this instance` }],
+        budgetSkipped: [], verified: false,
+      };
+    }
+    const services: string[] = [];
+    const budgetSkipped: string[] = [];
+    for (const s of targets) {
+      if (this.deploymentsUsed >= this.deployBudget) { budgetSkipped.push(s.name); continue; }
+      this.deploymentsUsed += 1;
+      services.push(s.name);
+      this.deploymentStamps.set(`${input.instanceId}/${input.environment}/${s.name}`, (this.deploymentStamps.get(`${input.instanceId}/${input.environment}/${s.name}`) ?? 0) + 1);
+    }
+    // A refresh that was asked for and could not be started because of the ceiling is NOT a success, and it is
+    // not a `no-service` refusal either -- those are different facts and collapsing them is how an operator
+    // goes looking for a service that is there. `verified` therefore means "everything asked for was restarted",
+    // with `budgetSkipped` naming what was not; nothing was ever silently dropped.
+    const verified = services.length > 0 && budgetSkipped.length === 0;
+    return { instanceId: input.instanceId, environment: input.environment, services, refused: [], budgetSkipped, verified };
   }
 
   async deleteInstance(instanceId: string): Promise<DeleteResult> {

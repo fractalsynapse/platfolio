@@ -32,6 +32,9 @@ export const OPERATIONS = [
   // discoverable from `describe()` instead of failing at the first attempt.
   'putSecretValue',
   'secretPresence',
+  // The refresh verb (D48). Named here because a provider that cannot restart a service must be discoverable
+  // the same way: the API answers 501 from `describe()`, not from a failed attempt.
+  'redeploy',
 ] as const;
 
 export type Operation = (typeof OPERATIONS)[number];
@@ -311,16 +314,87 @@ export interface InfraProvider {
    *
    * Optional on the interface because a provider that cannot write configuration must say so through
    * `describe().operations` rather than pretend; the API answers 501 when the verb is absent.
+   *
+   * `refresh` answers the maintainer's actual question -- "updating secret values should update the services as
+   * well" -- and its default is `suppress`, which is what every caller did before the question was asked. That
+   * default is deliberate and is the honest one: the platform cannot know whether the VALUE differed (D4 forbids
+   * reading it back), so it must not silently start restarting things on a write that changes nothing. With
+   * `auto`, the write is sent WITHOUT `skipDeploys`, and the provider's own value diff decides: measured arm B
+   * started a deployment for a changed value, arm D started nothing for an identical one. The platform does not
+   * detect the change -- the provider does, on the side that holds the value -- and reports what happened.
    */
-  putSecretValue?(input: { instanceId: string; environment: string; service: string; name: string; value: string; source?: 'service' | 'shared-variable' }): Promise<SecretWriteResult>;
+  putSecretValue?(input: {
+    instanceId: string;
+    environment: string;
+    service: string;
+    name: string;
+    value: string;
+    source?: 'service' | 'shared-variable';
+    refresh?: 'suppress' | 'auto';
+  }): Promise<SecretWriteResult>;
+
   /**
    * Presence only -- never the value. The provider itself redacts secret values on read (measured for
    * Railway: `{ value: null }` even moments after a write), which is why presence is the only honest read.
    */
   secretPresence?(input: { instanceId: string; environment: string; service: string; names: string[] }): Promise<Record<string, SecretPresence>>;
+  /**
+   * Redeploy one service, or every service in one environment, on an operator's decision (D48).
+   *
+   * This is NOT a re-run of `applyPlan`, and the distinction is the reason it exists. A plan whose content has
+   * not changed is a NOOP by design -- the planHash matches the marker, coverage is complete, and the provider
+   * correctly refuses to redeploy the world. Asking the apply path for a refresh would therefore either do
+   * nothing or, worse, be made to do something by perturbing the plan hash, which is faking a configuration
+   * change to get a restart.
+   *
+   * What the provider cannot answer is "did the value change?". Measured 2026-11-15
+   * (docs/research/railway-variable-value-redeploy-2026-11-15.md): Railway starts a new deployment for a
+   * variable VALUE change only when the write is not suppressed with `skipDeploys`, and an identical value does
+   * not start one at all -- the diffing happens on their side, against the value they hold and we may never
+   * read (D4). So `applyPlan` is already correct (it writes with `skipDeploys: true` and then deploys
+   * deliberately, budgeted); the paths that write configuration WITHOUT a plan -- secret delivery, and any
+   * variable an operator sets in the provider console -- are the ones that can leave a running container
+   * holding an old value. This operation is how those cases are closed: not by detecting the change, but by
+   * letting whoever knows about it ask for the restart.
+   */
+  redeploy?(input: { instanceId: string; environment: string; service?: string }): Promise<RedeployResult>;
 }
 
-export type SecretWriteResult = { ok: true; verified: boolean } | { ok: false; code: string; reason: string };
+export type SecretWriteResult =
+  | {
+      ok: true;
+      verified: boolean;
+      /**
+       * What the write did to the running service, when the caller asked for a refresh.
+       *
+       * `redeployed` is an OBSERVATION of a new deployment identity, never an inference from the write having
+       * succeeded. `unchanged` is the measured behaviour worth naming: Railway compares the value it already
+       * holds and starts nothing when the delivered value is identical, so re-delivering a credential is free
+       * (docs/research/railway-variable-value-redeploy-2026-11-15.md, arm D). `unknown` means the read-back did
+       * not answer -- an observation we could not make is reported as such rather than rounded to either
+       * outcome, because a false "unchanged" would let a stale container look up to date.
+       */
+      refresh?: 'redeployed' | 'unchanged' | 'unknown';
+    }
+  | { ok: false; code: string; reason: string };
+
+/**
+ * The redeploy answer. `services` are PHYSICAL names (D57) in the order the provider acted on them, so the
+ * result says which container was restarted rather than which logical service somebody named. `refused` and
+ * `budgetSkipped` are separate because they are separate facts: "there is nothing there by that name" and "I
+ * was not allowed to spend another deploy" must not collapse into one silent omission.
+ */
+export const RedeployResultSchema = z.object({
+  instanceId: z.string().min(1),
+  environment: z.string().min(1),
+  services: z.array(z.string().min(1)),
+  refused: z.array(z.object({ service: z.string().min(1), code: z.string().min(1), reason: z.string().min(1) }).strict()).default([]),
+  budgetSkipped: z.array(z.string().min(1)).default([]),
+  /** True when every named service was observed to have a fresh deployment after the calls. */
+  verified: z.boolean(),
+});
+export type RedeployResult = z.infer<typeof RedeployResultSchema>;
+
 // `SecretPresence` is imported, not re-declared: 'set' | 'missing' | 'unverifiable' already has one home in
 // secret-writer.ts, and a second definition of the same three states is how two modules start disagreeing
 // about what "we could not check" means.

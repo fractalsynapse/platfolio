@@ -2,8 +2,10 @@ import { createKernel, disposeKernel } from '@platfolio/kernel';
 import { EndpointKeySource, IdentityConfigSchema, redactCredentialShaped } from '@platfolio/contracts';
 import { ROUTE_MANIFEST } from './routes.ts';
 import { buildCapabilities } from './capabilities.ts';
+import { describeAllowedOriginsConfig, parseAllowedOrigins, type CorsBootConfig } from './cors.ts';
 
 export { ROUTE_MANIFEST };
+export { ALLOWED_ORIGINS_ENV, describeAllowedOriginsConfig, parseAllowedOrigins, type CorsBootConfig } from './cors.ts';
 
 export interface BootConfig {
   issuer: string;
@@ -12,6 +14,12 @@ export interface BootConfig {
   host: string;
   port: number;
   build: { version: string; commit: string; buildTime: string };
+  /**
+   * Browser origins allowed to call this API cross-origin (see `cors.ts` for the contract). Absent or empty
+   * means cross-origin use is **not enabled**: the safe default, and the reason a UI on another host needs its
+   * origin named in the composition rather than inferred at runtime.
+   */
+  cors?: CorsBootConfig;
   /** Absent unless PLATFOLIO_EMAIL_DRIVER names one. There is no default: an unconfigured control plane has
    *  no sender at all, rather than one that mails people under an identity no operator chose. */
   email?: import('@platfolio/kernel').EmailConfigInput;
@@ -26,12 +34,23 @@ export interface BootConfig {
 export function configFromEnv(env: NodeJS.ProcessEnv): BootConfig {
   const missing = ['PLATFOLIO_IDENTITY_ISSUER', 'PLATFOLIO_IDENTITY_AUDIENCE'].filter((k) => !env[k]);
   if (missing.length > 0) throw new Error(`control-plane cannot start: ${missing.join(', ')} is not set (Slice 1 has no default issuer)`);
+  // Cross-origin policy (see `cors.ts`). Parsed here, so a malformed list is a configuration error the operator
+  // sees before anything is listening, rather than a policy that quietly means something else. An unset
+  // variable yields the empty list, which the transport reads as "cross-origin is not enabled".
+  // Read as a literal `env.NAME` rather than through `ALLOWED_ORIGINS_ENV`: the environment registry discovers
+  // variables by scanning configuration for that shape, and a name that only ever appears as a constant is a
+  // name the registry cannot see. The constant and this spelling are kept identical by the test that uses both.
+  const allowedOrigins = parseAllowedOrigins(env.PLATFOLIO_ALLOWED_ORIGINS);
   return {
     issuer: env.PLATFOLIO_IDENTITY_ISSUER as string,
     audience: env.PLATFOLIO_IDENTITY_AUDIENCE as string,
     ...(env.PLATFOLIO_IDENTITY_JWKS_URI ? { jwksUri: env.PLATFOLIO_IDENTITY_JWKS_URI } : {}),
     host: env.HOST ?? '0.0.0.0',
     port: Number(env.PORT ?? 8080),
+    // The cross-origin decision, forwarded always. `cors` absent from a BootConfig assembled by hand means the
+    // same thing as an empty list -- cross-origin is not enabled -- so there is no second spelling of "no list"
+    // for a caller to get wrong, and nothing here re-reads process.env.
+    cors: { allowedOrigins },
     build: {
       version: env.PLATFOLIO_VERSION ?? '0.0.0-dev',
       commit: env.PLATFOLIO_COMMIT ?? '0'.repeat(40),
@@ -138,8 +157,8 @@ export function describeBootFailure(error: unknown): string {
 export async function boot(config: BootConfig, fetchImpl: typeof fetch = fetch) {
   // Checked before anything starts: refusing after the listener is open would leave a half-booted control plane
   // holding a port, which is worse than not starting.
-
   if (!config.jwksUri) throw new Error('control-plane cannot start: PLATFOLIO_IDENTITY_JWKS_URI is not set -- identity would refuse every token, and starting in order to refuse everything is not the same as being able to serve');
+
   const identity = IdentityConfigSchema.parse({
     issuer: config.issuer,
     audience: config.audience,
@@ -169,11 +188,19 @@ export async function boot(config: BootConfig, fetchImpl: typeof fetch = fetch) 
     // and the operations answered 503. Found by running them against a live control plane, not by reading the
     // code -- which is the argument for running things.
     ...(config.scm === undefined ? {} : { scm: config.scm }),
-    server: { host: config.host, port: config.port },
+    // The cross-origin decision is forwarded the same way `email` and `scm` are -- and for the same reason the
+    // scm forwarding bug happened: a choice computed by configuration that never reaches the runtime is a choice
+    // that exists only in the operator's head. An empty list is passed through rather than dropped, so "no list"
+    // has one spelling all the way down to the transport.
+    server: { host: config.host, port: config.port, cors: { allowedOrigins: [...config.cors?.allowedOrigins ?? []] } },
     extensions: buildCapabilities({ build: config.build }),
     requiredServices: ['identity', 'server', 'store', 'extensions'],
   });
   ctx.identity.attachKeySource(new EndpointKeySource(identity, fetchImpl, config.jwksUri));
+  // The transport logs the policy it will enforce; this line names the *source*, because "0 origins" reads
+  // differently when you know whether the operator chose that or never set the variable. Stated on every boot:
+  // a same-origin-only control plane is the default, and a default nobody can see is a default people trip over.
+  ctx.logger.info(describeAllowedOriginsConfig(config.cors?.allowedOrigins ?? []));
   return {
     ctx,
     address: ctx.server.address,

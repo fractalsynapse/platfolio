@@ -235,6 +235,24 @@ test('credentials are secret expressions; provider configuration is a literal, a
   }
 });
 
+test('the managed job runs only where a dispatch context exists, and says so instead of failing', () => {
+  // The regression this pins: push and pull_request triggers were added so `pnpm run verify` gates PRs, but the
+  // managed job reads inputs.instance_id / dispatch_id / nonce / plan_hash, and a bare push supplies NONE of
+  // them. The action correctly refused and the job died in ~500ms with a message that read like a broken
+  // tenant, on both platfolio's own branch checks and every tenant's. The nonce is per-dispatch precisely
+  // because it makes an attestation non-replayable, so loosening the inputs is not the fix -- the guard is.
+  // A deploy on push needs the runner to REQUEST a dispatch (OIDC-authenticated): a separate design, filed.
+  const out = renderInstallPullRequest(manifest('packages/manifest/test/fixtures/web-app-manifest.yaml'), OPTS);
+  const text = out.files[WORKFLOW_PATH];
+  assert.ok(text, 'the renderer must emit the workflow file itself');
+  const doc = yamlParse(text) as { on: Record<string, unknown>; jobs: Record<string, { if?: string } | undefined> };
+  const managed = doc.jobs['managed'];
+  assert.ok(managed, 'the generated workflow must contain a managed job to gate');
+  assert.ok(doc.on.push && doc.on.pull_request, 'the developer surface must still run on push and PR');
+  assert.ok(typeof managed.if === 'string' && managed.if.includes('workflow_dispatch'),
+    `the managed job must be conditional on a dispatch context, got ${JSON.stringify(managed.if)}`);
+  assert.ok(!doc.jobs['tests']?.if, 'and the tests job must NOT be, or PR verification quietly stops happening');
+});
 test('the tenant document names every secret the workflow resolves', () => {
   const m = manifest('packages/manifest/test/fixtures/web-app-manifest.yaml');
   const doc = renderInstallPullRequest(m, OPTS).files['PLATFOLIO.md']!;

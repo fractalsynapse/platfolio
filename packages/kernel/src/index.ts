@@ -3,6 +3,11 @@ export { InfraService, ProviderConfigSchema } from './infra-provider.ts';
 export { CustodyService, CustodyConfigSchema } from './custody.ts';
 export { IdentityService } from './identity.ts';
 export { ServerService, ServerConfigSchema, matchPath, type RouteDefinition, type Request, type Response_ } from './server.ts';
+export {
+  applyCors, canonicalOrigin, CorsConfigSchema, corsPolicyOf, corsPreflightResponse, corsResponseHeaders,
+  describeCorsPolicy, isCorsPreflight, requestOrigin, WILDCARD_REFUSAL,
+  type CorsConfig, type CorsPolicy,
+} from './cors.ts';
 export { requireServices } from './startup.ts';
 export { StoreService, StoreConfigSchema } from './store.ts';
 export { ExtensionService, type ExtensionDescriptor, type KernelContext, type BootResult } from './extension.ts';

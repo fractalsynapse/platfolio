@@ -232,7 +232,25 @@ const HUMAN: Record<string, Partial<Entry>> = {
   RAILWAY_TOKEN: { note: 'the provider grant. Exactly one per managed instance (D24), held as a GitHub environment secret so platfolio never stores it' },
   PLATFOLIO_GIT_TOKEN: { secret: true, environments: ['development'], deployedTo: 'host:shell', note: 'the git driver\'s HTTPS token, operator-supplied; production uses the App installation' },
   PLATFOLIO_SCM_DRIVER: { note: 'which driver is live: git | github-app | none (D51/D50)' },
-  KEYCLOAK_ADMIN: { secret: false, note: 'a username is not a credential' },
+  // Keycloak 26.x's bootstrap admin pair, spelled the way the published `shared-identity` template spells it.
+  // These two REPLACED `KEYCLOAK_ADMIN` / `KEYCLOAK_ADMIN_PASSWORD` (#248) -- the 25.x names, which 26.8 does
+  // not read at all, so the registry was carrying custody obligations for variables no consumer exists to
+  // honour. The username is not a credential: it is a `value`, and it lives in the composition as a literal,
+  // exactly as the template does it. The password is the custody claim (D4: declared by name, delivered, never
+  // stored) and `railway:shared-variable` is where the provider puts it.
+  //
+  // The scope of the claim is stated here because the tempting over-reading is "we fixed the admin": 26.8
+  // creates the bootstrap admin only during the initial start, when the master realm does not exist yet. So
+  // these rows obligate a NEW hosted-identity deployment. They change nothing about a realm that already runs.
+  KC_BOOTSTRAP_ADMIN_USERNAME: {
+    kind: 'value', secret: false, environments: 'all', service: 'identity', deployedTo: 'railway:variable',
+    note: 'the bootstrap admin username Keycloak 26.x reads at FIRST start only, when the master realm does not exist yet; a username is not a credential, so it is a composition literal -- the same shape the published shared-identity template uses (D50)',
+  },
+  KC_BOOTSTRAP_ADMIN_PASSWORD: {
+    kind: 'secret', secret: true, required: true, rotate: 'on-demand', environments: 'all', service: 'identity',
+    deployedTo: 'railway:shared-variable',
+    note: 'the bootstrap admin password, declared by NAME in the composition and delivered through PUT …/secrets/{name} or platform-deploy --deliver-secrets; platfolio stores no value (D4). Read by 26.8 only when the master realm does not exist yet, so this obligates new deployments and recovers nothing on a running one (#248)',
+  },
   // A GitHub Packages push token. It is a credential even though the workflow reads it through `secrets.`, and
   // the emitter cannot know that from the name alone -- which is precisely why this table exists.
   CR_PAT: { secret: true, environments: 'all', deployedTo: 'ci:secret', note: 'GitHub Packages push token used by the image workflow' },
@@ -250,7 +268,13 @@ const HUMAN: Record<string, Partial<Entry>> = {
   KC_PEER_USER_PASSWORD: { secret: true, environments: ['development'], deployedTo: 'host:shell', note: 'the peer realm\'s user password -- same: minted against the peer, never sent to this realm\'s verifier' },
   OIDC_CLIENT_SECRET: { note: 'template placeholder: a tenant app that keeps its own OIDC client secret' },
   STRIPE_WEBHOOK_SECRET: { note: 'template placeholder: a tenant app verifying Stripe webhooks itself' },
-  KEYCLOAK_ADMIN_PASSWORD: { note: 'the bootstrap admin of the hosted identity service, declared by name in the composition' },
+  // `KEYCLOAK_ADMIN_PASSWORD` used to be judged here as "the bootstrap admin of the hosted identity service,
+  // declared by name in the composition". It was none of that in Keycloak 26.x: that name is not read, and the
+  // registry asserting it was the bootstrap admin is how a variable nobody consumes came to look load-bearing
+  // in writing (#248). The judgement now lives on the names 26.8 actually reads -- see
+  // KC_BOOTSTRAP_ADMIN_USERNAME / KC_BOOTSTRAP_ADMIN_PASSWORD above. Deleting an entry is not a silence: a name
+  // that is still referenced somewhere reappears from the derivation, so this row could only be dropped once
+  // the composition stopped naming it.
   // ---- obligations carried over from the retired platform inventory (D33 folded into D52). These were the
   // only facts that file held which the derived registry could not know: which service reads a name, whether
   // it is required, its default, and the wiring that resolves it. They live here rather than in the generated
@@ -271,6 +295,26 @@ const HUMAN: Record<string, Partial<Entry>> = {
   PLATFOLIO_SMTP_USER: { kind: 'value', required: false, service: 'api' },
   PLATFOLIO_SMTP_PASSWORD: { kind: 'secret', required: false, service: 'api' },
   PLATFOLIO_MAILPIT_URL: { kind: 'value', required: false, service: 'api', note: 'the local mailbox reader; absent in production (D46)' },
+  // Cross-origin policy for the control plane's HTTP layer, and the browser origin the realm is seeded with.
+  // Configuration, not a credential: an origin is a public URL the browser already sends, so it is safe in a
+  // composition, safe in the registry and safe in the boot log -- which is exactly why it may be
+  // `environments: all` rather than per-deployment secret material.
+  // `all` is deliberate and is not the derivation's guess: the local stack needs it too (a UI on
+  // http://localhost:5173 calling http://localhost:8080 is cross-origin by browser definition), and staging's UI
+  // origin is not production's, so the *value* varies per environment while the *name* applies everywhere --
+  // that is D56's `environmentValues`, not a second variable.
+  //
+  // ONE name for two consumers (D52). `apps/control-plane/src/cors.ts` admits exactly this list at boot, and
+  // `scripts/seed-identity.ts` writes exactly this list into the public `platfolio-web` client as its redirect
+  // URIs and `webOrigins`. The second consumer used to have its own variable -- `PLATFOLIO_UI_ORIGIN` -- and
+  // that pair was one fact in two spellings, which is the shape this registry exists to refuse: each file stayed
+  // internally consistent while the two could disagree about where platfolio's own UI is served from, and a
+  // disagreement there is a login that redirects to a page the API will not answer. The values themselves are
+  // written once, in `compose.yaml` / `compose.dev.yaml`, and the seed looks them up there.
+  PLATFOLIO_ALLOWED_ORIGINS: {
+    kind: 'value', required: false, default: '', environments: 'all', service: 'api', deployedTo: 'railway:variable',
+    note: 'comma-separated browser origins the UI is served from (scheme://host[:port] each). One list, both consumers: the API admits it as its CORS allow-list, and identity:seed writes it as the browser client\'s redirect URIs and webOrigins. Unset or empty means same-origin only -- the documented, safe default, and never `*`. A malformed entry is a boot failure, not a warning; the per-environment values belong in environmentValues (D56), in the platform description rather than in a script',
+  },
 };
 
 function guess(name: string, places: Set<string>): Entry {
@@ -324,7 +368,25 @@ function guess(name: string, places: Set<string>): Entry {
   // field with four synonyms for one meaning comes back.
   environments = applies.size === ENVIRONMENTS.length ? 'all' : ENVIRONMENTS.filter((e) => applies.has(e));
   const over = HUMAN[name] ?? {};
-  return { name, secret: over.secret ?? secret, environments: over.environments ?? environments, deployedTo: over.deployedTo ?? deployedTo, note: over.note ?? `referenced by ${[...new Set(hosts.map((h) => h.split(':')[0]!))].slice(0, 4).join(', ')}` };
+  // Every judgement field, not four of them. This used to merge only `secret`, `environments`, `deployedTo` and
+  // `note`, so a `kind`, `service`, `required`, `default` or `enum` written into HUMAN was thrown away by `--emit`
+  // for any name not already in the file -- the exact "a hand-edit is silently lost on the next emit" failure this
+  // table exists to prevent, running in reverse: the judgement was written in the right place and still did not
+  // arrive. Rows that already exist take their fields from the file (`existing ?? guess(...)`), so this changes the
+  // derivation only for a newly declared variable -- which is precisely when a HUMAN entry is load-bearing.
+  // `name` is dropped from the judgement copy first: the table is keyed by name, so an entry that set one would be
+  // a second spelling of its own key, and the derivation must not let that through. (Writing `name` twice in the
+  // literal is not an option -- TypeScript refuses a duplicate property in an object literal.)
+  const judgement: Partial<Entry> = { ...over };
+  delete judgement.name;
+  return {
+    name,
+    secret,
+    environments,
+    deployedTo,
+    note: `referenced by ${[...new Set(hosts.map((h) => h.split(':')[0]!))].slice(0, 4).join(', ')}`,
+    ...judgement,
+  };
 }
 
 /**

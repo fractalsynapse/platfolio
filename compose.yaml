@@ -28,6 +28,18 @@ services:
       # here so the inventory and the plan agree about which names this service needs.
       PLATFOLIO_IDENTITY_ISSUER: https://auth.platfolio.dev/realms/platfolio
       PLATFOLIO_IDENTITY_JWKS_URI: https://auth.platfolio.dev/realms/platfolio/protocol/openid-connect/certs
+      # Where platfolio's own UI is served from, said ONCE (D52). Two consumers read this one name: the API's
+      # CORS policy (`apps/control-plane/src/cors.ts`, which refuses to boot on a malformed entry), and
+      # `pnpm run identity:seed`, which turns the same origins into the public `platfolio-web` client's exact
+      # redirect URIs (`<origin>/callback`) and `webOrigins`. There used to be a second variable for the second
+      # consumer -- `PLATFOLIO_UI_ORIGIN` -- and that pair was one fact in two spellings: a UI could be admitted
+      # cross-origin while the realm refused to redirect to it, or the reverse, and no gate in this repository
+      # could see the disagreement because each file was internally consistent.
+      # `platfolio.dev` is the UI host; `api.platfolio.dev` below and `auth.platfolio.dev` on `identity` are the
+      # API and identity hosts (#199 verified and certificate-issued those two). The UI is a third host, and it
+      # is not a host this composition describes -- which is exactly why the API has to be told its origin
+      # instead of deriving it: nothing here can look up a hostname it does not itself host.
+      PLATFOLIO_ALLOWED_ORIGINS: https://platfolio.dev
       # Its own schema, not `public`: the identity provider shares this database instance (see `identity`), and
       # two applications writing migrations into one schema is a collision waiting for its first upgrade.
       PLATFOLIO_DB_SCHEMA: platfolio
@@ -63,7 +75,8 @@ services:
       secrets:
         # Names, never values (D4). The GitHub App's id, installation and signing key are what the two
         # repository operations need (#172's middle); they live as variables in the tenant's own Railway
-        # project, which is the same custody shape as KEYCLOAK_ADMIN. Declaring them here also means
+        # project, which is the same custody shape as KC_BOOTSTRAP_ADMIN_PASSWORD below -- `shared-variable`,
+        # environment-scoped, attached to the service that reads it. Declaring them here also means
         # `platform-deploy --apply` FAILS until they exist -- the composition says out loud what the
         # service requires instead of discovering the gap at the first API call.
         - { name: PLATFOLIO_GITHUB_APP_ID, source: shared-variable }
@@ -84,12 +97,18 @@ services:
       # Staging is the same deployment against its OWN realm (D56). The issuer host is deliberately shared --
       # one Keycloak, one database, one certificate, no second copy of a service that does not need a
       # development instance -- but the realm is not shared, so a staging token can never be accepted by
-      # production or the reverse. Two names change here and they change together: the realm appears inside
-      # both the issuer and the JWKS path, and a value map is the honest place to say so.
+      # production or the reverse. Three names change here and they change together: the realm appears inside
+      # both the issuer and the JWKS path, and staging's UI is served from its own host, so its browser origin
+      # is not production's either. A value map is the honest place to say so.
       environmentValues:
         staging:
           PLATFOLIO_IDENTITY_ISSUER: https://auth.platfolio.dev/realms/platfolio-staging
           PLATFOLIO_IDENTITY_JWKS_URI: https://auth.platfolio.dev/realms/platfolio-staging/protocol/openid-connect/certs
+          # The staging UI host is `preview.platfolio.dev`. Do not read that as the `preview` environment below
+          # (which is pull-request previews, and disabled): it is the hostname the maintainer chose for the
+          # staging page. What matters to this file is that the two environments answer different origins,
+          # because the same string decides both which page may call this API and where its code may land.
+          PLATFOLIO_ALLOWED_ORIGINS: https://preview.platfolio.dev
 
 
   identity:
@@ -128,6 +147,28 @@ services:
       # is refused -- which is the correct failure, and one worth being explicit about in the file that sets it.
       KC_HOSTNAME: auth.platfolio.dev
       KC_HEALTH_ENABLED: 'true'
+      # The bootstrap admin pair Keycloak 26.x actually reads, spelled the way the published `shared-identity`
+      # template spells it: the USERNAME is a composition literal here, and the PASSWORD is a declared secret
+      # obligation that appears nowhere in this file. What used to be declared was `KEYCLOAK_ADMIN` /
+      # `KEYCLOAK_ADMIN_PASSWORD` -- the 25.x names, which 26.8 does not read at all -- so the composition was
+      # claiming custody obligations over variables whose only consumer was nothing.
+      #
+      # Scope this change honestly, because it is narrow and the tempting reading is wrong: 26.8 creates the
+      # bootstrap admin "only during the initial start of the Keycloak server when the master realm doesn't
+      # exist yet" (https://www.keycloak.org/server/bootstrap-admin-recovery). The master realm of
+      # `identity-production` already exists, so renaming these names neither creates, repairs nor recovers an
+      # admin there. This is DECLARATION CORRECTNESS for every deployment made from this description from now
+      # on -- a newly hosted identity service gets a working admin on its first boot -- and it is not, and must
+      # never be reported as, the fix to a credential problem on the running box. What #248 recorded as
+      # "production's admin answers 400 invalid_grant" measured out as our own scripts defaulting
+      # `KC_ADMIN_PASSWORD` to the loopback value and then authenticating with it against a live host.
+      #
+      # `platfolio-admin`, not the template's `admin`, because that is the account this realm actually holds:
+      # measured 2026-11-15 against `/admin/realms/master/users`, the one master-realm user is `platfolio-admin`
+      # (`is_temporary_admin=true`, created 2026-11-12T08:30:25Z). The NAME is aligned with the template; the
+      # VALUE is a per-deployment fact, and copying the template's value here would describe a user that does
+      # not exist on this host.
+      KC_BOOTSTRAP_ADMIN_USERNAME: platfolio-admin
     # Keycloak 26 builds its runtime configuration on first start when the config changed, and that build phase
     # was OOM-killed at Railway's default memory ceiling (`kc.sh: line 170: 82 Killed 'java'`) before the
     # server ever got to the schema error. 2 GB is what the JVM needs to survive its own start.
@@ -155,10 +196,18 @@ services:
         - { variable: KC_DB_USERNAME, database: main, output: POSTGRES_USER }
         - { variable: KC_DB_PASSWORD, database: main, output: POSTGRES_PASSWORD }
       secrets:
-        # Keycloak's initial admin, by name. The seed script reads the same variable from the environment it is
-        # run with; platfolio stores no secret values (D4).
-        - { name: KEYCLOAK_ADMIN, source: shared-variable }
-        - { name: KEYCLOAK_ADMIN_PASSWORD, source: shared-variable }
+        # The bootstrap admin's credential, declared by NAME (D4) and by the name 26.8 reads. The username is
+        # not here: it is a composition literal above, because a username is not a credential and declaring it
+        # as one was the second half of the old pair's mislabelling. This matches the published
+        # `shared-identity` template, where `KC_BOOTSTRAP_ADMIN_USERNAME` sits in `environment:` and only
+        # `KC_BOOTSTRAP_ADMIN_PASSWORD` is an obligation on whoever deploys it.
+        #
+        # `source: shared-variable` keeps the custody shape this deployment already uses: the value lives in
+        # the tenant's own Railway project as an environment-scoped variable, delivered through
+        # `PUT …/secrets/{name}` (D53) or `platform-deploy --deliver-secrets`, and platfolio stores none of it.
+        # A plan that names a secret nobody delivered fails `secret-unavailable` -- which is the point: the
+        # composition says out loud what the service requires rather than discovering the gap at first boot.
+        - { name: KC_BOOTSTRAP_ADMIN_PASSWORD, source: shared-variable }
       public: true
       domains: [auth.platfolio.dev]
       ownership: external
