@@ -279,7 +279,7 @@ export interface ComponentContract<P extends object> {
 ```
 
 ```ts
-// packages/ui/src/layout.ts — SPECIFIED (11 §2). Five primitives; the matrix is the contract.
+// packages/ui/src/layout/primitives.ts — SHIPPED 2026-11-15 (11 §2). Five primitives; the matrix is data, not comment.
 export type LayoutSlot = 'stack' | 'split' | 'popout-sidebar' | 'overlay-sheet' | 'full-page';
 // stack            -> any component; never an embedded overlay-sheet
 // split            -> a stack per track, or a popout-sidebar as the detail track; never a second split

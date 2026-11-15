@@ -150,7 +150,7 @@ mechanism, specified continuation).
 their tracks; components query that container:
 
 ```css
-/* packages/ui/src/layout.css — SPECIFIED. The primitive owns the container. */
+/* packages/ui/src/layout/layout.css — SHIPPED 2026-11-15, generated from primitives.ts and byte-checked by `ui:css:check`. The primitive owns the container. */
 .ui-layout { container-type: inline-size; }
 @container (min-width: 48rem) { .ui-split { display: grid; grid-template-columns: 24rem 1fr; } }
 ```
