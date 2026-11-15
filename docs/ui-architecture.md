@@ -33,7 +33,7 @@ table for long.
 | `packages/api-contract/src/generated/types.ts` | **real** — generated from that spec, byte-for-byte gated by `api:types:check` |
 | `packages/page-schema/` (`page.ts`, `secrets-panel.ts`, `binding-panel.ts`, `project-text.ts`) | **real** — pages as data, the build-time component registry, `findValueBearingProps`, with tests |
 | browser-auth plumbing beside the API | **real** — `PLATFOLIO_ALLOWED_ORIGINS` feeds CORS and the `platfolio-web` PKCE client's `<origin>/callback` redirect URIs, tested by `apps/control-plane/test/cors.test.ts`. So rule 1's "the endpoint is configuration, not a literal" already has a gate on the server half |
-| `packages/ui` (which per D63, 2026-11-15, will hold all reusable components **and** design tokens as CSS custom properties — there is no separate `packages/tokens`), `packages/api-client`, `apps/site`, any web UI | **do not exist.** Everything in this file that names them is **specified**, not delivered. D63 decided what `packages/ui` will contain, not that it exists |
+| `packages/ui` — **exists since 2026-11-15** (component contract, design tokens per D63 as CSS custom properties with `tokens.css` generated from `tokens.ts`, the five layout primitives, the signals registry, the SDK seam, 19 gates) and holds **no screens**; `packages/api-client`, `apps/site`, any web UI | **do not exist.** Everything in this file that names them is **specified**, not delivered. D63 decided what `packages/ui` will contain, not that it exists |
 | the layout, signal, draft and freshness gates (11 §9.2–§9.10) | **specified, and unrunnable today** — there is no UI source for them to audit. They must land *with* the first `packages/ui` commit, not after it |
 
 So the enforcement story per rule is always two halves: the gate that bites today, and the gate that is
@@ -127,7 +127,7 @@ loud whether a late subscriber is handed its last value.
 **Enforced by.** Specified as 11 §9.4 (lint rule: no raw event mechanism outside `signals.ts`; every signal
 has an explicit retention; every `replay` payload passes the value-bearing walk) plus the registry unit tests
 in 11 §3 acceptance (a)–(e), including the negative fixture: `emit('context.switched', { teamSlug: 1 })` must
-fail to compile. **Nothing runs today** — `packages/ui/src/signals.ts` does not exist. What exists today and
+fail to compile. **The registry and its gates run today** (`packages/ui/src/signals.ts`, `ui:check` §9.4); what does not run is anything needing a rendered screen. What exists today and
 must keep passing is the type-level discipline the registry will inherit: `api:types:check` and
 `packages/api-contract/test/generated-types.test.ts`.
 
@@ -399,7 +399,7 @@ moved while this file was being written, and it is worth keeping as evidence for
 | `npx -y tsc --noEmit -p tsconfig.json` | 0 | the tree type-checks (it exited 2 earlier in this same session on another agent's in-flight test edit — see the note above, and [§ Open gaps](#open-gaps-this-file-refuses-to-paper-over) item 4 on why numbers age) |
 | `pnpm run verify` | 1, **before running any gate** | `ERR_PNPM_STORE_DIR_OPEN_OPERATION_LOCK … Read-only file system` — the wrapper cannot lock its engine store in this sandbox, so each gate above was executed directly instead. [MAINTAINING § If `pnpm run <script>` fails before running anything](MAINTAINING.md#if-pnpm-run-script-fails-before-running-anything) records this and says CI is unaffected. Reporting it as a failed gate would be the wrong honesty |
 
-Rules 2, 3, 4's UI half, and 5–6's UI half have **no gate that runs today**, because `packages/ui`,
+Rules 2, 3, 4's UI half, and 5–6's UI half gained their first runnable gates on 2026-11-15 (`ui:check`: 19 gates, 14 pass, 0 fail, 5 NOT RUN), because `packages/ui`,
 `packages/api-client` and `apps/site` do not exist. 11's consequence is the actual
 enforcement for now, and it is worth repeating here because it is the one thing that stops the drift: **the
 first `packages/ui` commit is the contract package — `contract.ts`, `layout.ts`, `signals.ts` and gates
@@ -436,7 +436,7 @@ the push channel — what it requires is the endpoint work 11 §4 names, owned e
 The answered ones, restated only as routing: **UI-OD2 → D64, rule 5.** Build one freshness primitive with a
 swappable transport; ship `poll`; never style polled data as live; the event operations are designed in
 `openapi.yaml` first by the sessions that own it. **UI-OD6 → D63.** Design tokens are CSS custom properties
-inside `packages/ui`; no separate token package, and `packages/ui` itself still does not exist — ask before
+inside `packages/ui`; no separate token package; `packages/ui` exists (contracts, tokens, primitives, signals, SDK seam, gates) but has no screens — ask before
 scaffolding it.
 
 ## Open gaps this file refuses to paper over

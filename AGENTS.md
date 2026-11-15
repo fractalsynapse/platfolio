@@ -197,18 +197,19 @@ whose value is pluggability needs the contract to be the thing that is checked.
 
 Normative statements are [docs/ui-architecture.md](docs/ui-architecture.md); rationale, full contracts and the
 eleven CI gates are [11](docs/design/11-ui-components-and-page-model.md). Build or review any UI through the
-[ui-architecture skill](.agents/skills/ui-architecture/SKILL.md). `packages/ui` (which per D63 will own all
-reusable components **and** design tokens as CSS custom properties — there is no `packages/tokens`),
+[ui-architecture skill](.agents/skills/ui-architecture/SKILL.md). `packages/ui` **now exists** (2026-11-15: the
+component contract, design tokens as CSS custom properties per D63, the five layout primitives, the signals
+registry, the SDK seam, and 19 gates) — **with no screens in it yet**, which is the point of that ordering.
 `packages/api-client` and `apps/site` **do not exist** — a UI gate that audits them is *not run*, not passed.
 
 | # | Rule (one line) | What enforces it |
 | --- | --- | --- |
 | 1 | Components reach the API only through the SDK, with types generated from `apps/control-plane/openapi.yaml`; a hand-written client or a hand-copied DTO is forbidden (#247 at a higher altitude) | `spec:check`, `api:check`, `api:types:check` — all real and green today |
-| 2 | Responsive comes from the **container**, not the window: five layout primitives with a containment matrix, no width `@media`, no `isMobile` prop; every capability reachable at 360 px, desktop adds simultaneity not features | 11 §9.3/§9.7 + parity on `reads` — specified, needs `packages/ui` |
-| 3 | Signals are typed and each declares `retention: 'replay' \| 'transient'` with **no default**; side-effecting or credential-shaped payloads are transient by rule; late-mount tested both ways | 11 §9.4 + the registry tests — specified. No stringly-typed bus, ever |
+| 2 | Responsive comes from the **container**, not the window: five layout primitives with a containment matrix, no width `@media`, no `isMobile` prop; every capability reachable at 360 px, desktop adds simultaneity not features | `ui:check` §9.3 runs today (no width `@media`, no `isMobile`-shaped props, `container-type` declared on every primitive); §9.7 is NOT RUN until a browser and real components exist |
+| 3 | Signals are typed and each declares `retention: 'replay' \| 'transient'` with **no default**; side-effecting or credential-shaped payloads are transient by rule; late-mount tested both ways | `ui:check` §9.4 runs today (`packages/ui/src/signals.ts`, retention required with no default; credential-shaped payloads refused as `replay`). No stringly-typed bus, ever |
 | 4 | Drafts are client-only, allowlisted per field, TTL'd, wiped on sign-out and submit, **never synced**, and never able to hold a secret value (D4/D53) | one exported `isValueBearingKey`/`findValueBearingProps` + `packages/page-schema/test/secrets-panel.test.ts` — real today and it now catches credential-shaped names (`token`, `apiKey`, `clientSecret`) it previously missed; the residual limit is that a name test cannot see a secret under a neutral key, stated in [the rules doc](docs/ui-architecture.md#open-gaps-this-file-refuses-to-paper-over) |
 | 5 | Real-time is honest **and now a required capability (D64)**: one SDK freshness primitive whose transport is swappable at build time — `poll` today, `events` when §4's operations land in the spec — and since no push channel exists today, no `EventSource`/`WebSocket`/"live" pill; every render shows its age; polling is never styled as push | `api:check` (the operation cannot hide) + 11 §9.10 — specified; the push operations are **required work** (D64), designed first in `openapi.yaml` (D41) by whoever owns it, and absent until a live check says otherwise |
-| 6 | **Pluggable means build-time, never runtime-loaded**: no dynamic import of UI code, no server-supplied component registry. [10's Tier 2 boundary](docs/design/10-cordis-kernel-and-extension-seams.md#the-collision-and-the-resolution) is a security property (D13/D14) | closed component union + strict `PageSchema` (`packages/page-schema`) — real today; 11 §9.5/§9.6 when the registry lands |
+| 6 | **Pluggable means build-time, never runtime-loaded**: no dynamic import of UI code, no server-supplied component registry. [10's Tier 2 boundary](docs/design/10-cordis-kernel-and-extension-seams.md#the-collision-and-the-resolution) is a security property (D13/D14) | closed component union + strict `PageSchema` (`packages/page-schema`) — real today; `ui:check` §9.6 runs today (build-time registry, immutability proved by *attempting* the widening after `Object.freeze` was shown to be theatre); §9.5 is NOT RUN while the registry is intentionally empty |
 
 The first `packages/ui` commit is the **contract package and its gates, not a screen**: a gate added after four
 screens exist audits nothing (11 § Consequences for the plan). Five `UI-OD` decisions remain open and belong to

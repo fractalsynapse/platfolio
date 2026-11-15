@@ -14,7 +14,7 @@ auth posture are [07](../../../docs/design/07-interfaces-api-mcp-mobile.md); the
 ## What exists before you start (measured)
 
 `packages/ui` (D63, 2026-11-15: it will hold ALL reusable components **and** design tokens as CSS custom
-properties — there is no `packages/tokens`), `packages/api-client` and `apps/site` **do not exist**. Real
+properties — there is no `packages/tokens`) **now exists** with contracts, tokens, layout primitives, signals, the SDK seam and `ui:check` (19 gates; 5 report NOT RUN), **and no screens**; `packages/api-client` and `apps/site` **do not exist**. Real
 today: `apps/control-plane/openapi.yaml` (request/response only, no push channel — re-check with the grep
 below; D64 makes building toward push *required*, shipping on `poll` *current*), `packages/api-contract`'s
 generated types, and `packages/page-schema` (pages as data, `buildSecretsPanel`, `findValueBearingProps`).
