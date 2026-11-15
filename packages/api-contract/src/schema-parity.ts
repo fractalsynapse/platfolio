@@ -452,35 +452,6 @@ export const KNOWN_DRIFT: KnownDrift[] = [
       + 'its own component rather than adding a field to the store record (`InstanceSchema` is `.strict()` and the '
       + 'Postgres driver projects it per row). Delete this entry when the spec stops declaring a field the record does not have.',
   },
-  {
-    key: 'Attestation|/required/release|required-in-spec-optional-in-code',
-    reason: 'Measured, and it reaches a client. `AttestationSchema.release` is `.optional()` and its superRefine rules '
-      + 'do not require a release for a failed apply; the spec declares `release` required in the same component, which '
-      + '`respond.ts` compiles with Ajv for `getLatestAttestation`. A row without a release therefore answers 500 '
-      + 'response-violates-spec: proved by running `validateResponse(spec, \'getLatestAttestation\', 200, <row with no release>)` '
-      + '-- zod accepts it, the spec refuses it with "must have required property \'release\'". Either the spec drops '
-      + '`release` from `required`, or every attestation must name a release and the schema changes (with '
-      + '`check-contracts --update` following it). Not this gate\'s call; delete this entry when either side moves.',
-  },
-  {
-    key: 'AttestationRecord|/required/release|required-in-spec-optional-in-code',
-    reason: 'The same drift seen through the record component: `AttestationRecordSchema` extends `AttestationSchema`, so '
-      + 'the release stays optional while the spec\'s `AttestationRecord` requires it. Listed separately because the '
-      + 'ledger keys on components and the response path that 500s is this one.',
-  },
-  {
-    key: 'Attestation|/properties/resources/items/required/externalId|optional-in-spec-required-in-code',
-    reason: 'Measured. `AttestationResourceSchema.externalId` is `z.string().min(1)` (attestation.ts:27) -- required -- '
-      + 'and the spec declares it optional. Harmless at runtime and wrong for a generated client: a UI typed from the '
-      + 'spec may omit a field the runner contract demands. The fix is one word in the spec\'s `required` list for '
-      + 'resources items; delete this entry when it lands.',
-  },
-  {
-    key: 'AttestationRecord|/properties/resources/items/required/externalId|optional-in-spec-required-in-code',
-    reason: 'The same `externalId` drift in the record copy of the resources array (the spec writes the component out '
-      + 'rather than composing it with allOf -- see the comment in openapi.yaml above AttestationRecord -- so both '
-      + 'copies carry it and both are listed).',
-  },
 ];
 
 export interface LedgerVerdict {

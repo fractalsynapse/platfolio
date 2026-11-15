@@ -4,7 +4,7 @@
  * hand, because every line reproduces from the specification.
  *
  * Source: apps/control-plane/openapi.yaml (OpenAPI 3.1.0, info.version 0.1.0)
- * Input digest: sha256/e9a3b77dac4c177d
+ * Input digest: sha256/560652e48371c5ec
  *
  * Reproduce it with `pnpm run api:types`. `pnpm run api:types:check` fails when this file stops matching
  * what the committed spec produces, which is the only way a generated type deserves to be trusted.
@@ -24,17 +24,17 @@ export interface Attestation {
   instanceId: string;
   nonce: string;
   planHash: string;
-  action: 'apply' | 'destroy';
+  action: 'apply' | 'check' | 'drift' | 'suspend' | 'export';
   environment: string;
   result: 'ok' | 'partial' | 'failed' | 'noop';
   resources: Array<{
     kind: string;
     name: string;
-    externalId?: string;
+    externalId: string;
     status: string;
   }>;
   errorCode?: string;
-  release: {
+  release?: {
     version: string;
     commitSha: string;
     imageDigest: string;
@@ -48,17 +48,17 @@ export interface AttestationRecord {
   instanceId: string;
   nonce: string;
   planHash: string;
-  action: 'apply' | 'destroy';
+  action: 'apply' | 'check' | 'drift' | 'suspend' | 'export';
   environment: string;
   result: 'ok' | 'partial' | 'failed' | 'noop';
   resources: Array<{
     kind: string;
     name: string;
-    externalId?: string;
+    externalId: string;
     status: string;
   }>;
   errorCode?: string;
-  release: {
+  release?: {
     version: string;
     commitSha: string;
     imageDigest: string;
@@ -133,7 +133,7 @@ export interface DispatchIntent {
   dispatchId: string;
   nonce: string;
   planHash: string;
-  action: 'apply' | 'destroy';
+  action: 'apply' | 'check' | 'drift' | 'suspend' | 'export';
   environment: string;
   issuedAt: string;
   expiresAt: string;
@@ -195,7 +195,7 @@ export interface Invitation {
   acceptedBy?: string;
   acceptedAt?: string;
   revokedAt?: string;
-  /** The transport's receipt */
+  /** The transport's receipt, so delivery is a fact about the row (D46). */
   emailReceipt?: string;
   emailError?: string;
 }
@@ -406,14 +406,14 @@ export interface ApiRequestBodies {
   };
   /** POST /api/v1/instances/{instanceId}/dispatches */
   createDispatch: {
-    action?: 'apply' | 'destroy';
+    action?: 'apply' | 'check' | 'drift' | 'suspend' | 'export';
     environment?: string;
   };
   /** POST /api/v1/instances */
   createInstance: {
     teamId: string;
     name: string;
-    /** Catalog identifier */
+    /** Catalog identifier, e.g. starter-web */
     template: string;
     templateRef?: {
       repo: string;

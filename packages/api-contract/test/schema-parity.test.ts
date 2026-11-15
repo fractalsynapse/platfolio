@@ -136,16 +136,23 @@ test('a property whose type disagrees is reported as a keyword difference', () =
   assert.match(difference.detail, /type: spec string vs schema integer/);
 });
 
-test('the keyword layer reports the drift the structural layer cannot see', () => {
+test('the action vocabulary agrees, and the enum comparison still bites', () => {
+  // This test asserted the OPPOSITE a moment ago: that the document offered `[apply, destroy]` while the
+  // definitions said `[apply, check, drift, suspend, export]`. That drift is now fixed, so leaving the assertion
+  // would have meant keeping the bug; asserting agreement alone would be weaker coverage, because the enum
+  // comparison would then be exercised by nothing real. So the mechanism is proved the honest way -- by
+  // re-introducing the disagreement in a copy and showing the report still catches it.
   const report = checkSchemaParity(spec, derivation.derived);
-  // Measured on the shipped pair: the action vocabulary in the document and in the definitions is not the same
-  // set. Refusing on it here would bury the structural findings; printing the count is what keeps it visible.
   const actions = report.semantic.filter((d) => d.pointer === '/properties/action');
-  assert.ok(actions.length >= 2, `expected the action enum drift to be reported, got ${JSON.stringify(report.semantic.map((d) => `${d.component}${d.pointer}`))}`);
-  for (const difference of actions) {
-    assert.match(difference.detail, /apply, destroy/);
-    assert.match(difference.detail, /check/);
-  }
+  assert.deepEqual(actions, [], `the action vocabulary should now agree, got ${JSON.stringify(actions)}`);
+
+  const reintroduced = structuredClone(spec) as SpecDocument;
+  const attestation = ((reintroduced.components as SpecDocument).schemas as Record<string, any>).Attestation;
+  attestation.properties.action.enum = ['apply', 'destroy'];
+  const drifted = checkSchemaParity(reintroduced, derivation.derived);
+  const caught = drifted.semantic.filter((d) => d.pointer === '/properties/action' && d.component === 'Attestation');
+  assert.ok(caught.length >= 1, 're-introducing the vocabulary split must be reported again');
+  assert.match(caught[0]!.detail, /apply, destroy/, 'and with both sides visible, not just "differs"');
 });
 
 test('deleting a schema definition does not quietly remove its component from comparison', () => {

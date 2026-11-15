@@ -184,18 +184,19 @@ test('a keyword the emitter does not read is reported, not swallowed', () => {
   assert.deepEqual(unexpressedKeywords(clean).filter((line) => line.includes('schemas.Fine')), []);
 });
 
-test('the shipped document loses two descriptions to that quoting bug -- characterised, not hidden', () => {
+test('the shipped document has no unheard keywords -- the quoting bug is repaired, not excused', () => {
+  // This test used to PIN the defect: it asserted the two flow scalars in `openapi.yaml` parsed as a truncated
+  // description plus a bogus schema keyword, and said in its own comment that the right response on failure was
+  // to delete the pointers once the strings were quoted. They are quoted now, so the honest replacement is the
+  // stronger claim rather than a smaller list: nothing in the shipped document goes unheard.
+  // The mechanism stays covered above by `a keyword the emitter does not read is reported, not swallowed`,
+  // which mutates a synthetic document and cannot be satisfied by an empty repository.
   const found = unexpressedKeywords(spec);
-  // These are defects in `openapi.yaml`, not in the emitter: quote the flow scalar and each sentence arrives in
-  // full. When they are quoted this assertion fails by name, and the right response is to delete the two pointers
-  // and the truncation assertions below -- the generated comments will then say more than they do today.
-  assert.deepEqual(found.map((line) => line.split(':')[0]).sort(), [
-    'components.schemas.Invitation.properties.emailReceipt',
-    'paths./api/v1/instances.post.requestBody.content.application/json.schema.properties.template',
-  ], `the unheard-keyword list moved -- now: ${JSON.stringify(found)}`);
-  // The visible consequence, asserted so the bug cannot be half-fixed: half of each description is gone.
-  assert.match(generate(), /\/\*\* The transport's receipt \*\//, 'the receipt sentence is truncated to its first clause');
-  assert.match(generate(), /\/\*\* Catalog identifier \*\//, 'the template sentence is truncated to its first clause');
+  assert.deepEqual(found, [], `the document still carries keywords no emitter reads: ${JSON.stringify(found)}`);
+  // And the consequence, asserted in the other direction now: both sentences arrive whole.
+  const text = generate();
+  assert.match(text, /\/\*\* The transport's receipt, so delivery is a fact about the row \(D46\)\. \*\//, 'the receipt description is complete');
+  assert.match(text, /\/\*\* Catalog identifier, e\.g\. starter-web \*\//, 'the template description is complete');
 });
 
 test('identifier() keeps a name that is not a TypeScript identifier out of the type system', () => {

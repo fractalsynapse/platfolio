@@ -456,7 +456,7 @@ paths:
               properties:
                 teamId: { type: string, minLength: 1 }
                 name: { type: string, minLength: 1, maxLength: 80, pattern: '^[a-z0-9]([a-z0-9-]{0,78}[a-z0-9])?$' }
-                template: { type: string, minLength: 1, description: Catalog identifier, e.g. starter-web }
+                template: { type: string, minLength: 1, description: "Catalog identifier, e.g. starter-web" }
                 templateRef:
                   type: object
                   additionalProperties: false
@@ -1092,7 +1092,7 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                action: { type: string, enum: [apply, destroy], default: apply }
+                action: { type: string, enum: [apply, check, drift, suspend, export], default: apply }
                 environment: { type: string, minLength: 1, maxLength: 60, default: production }
             example: { action: apply, environment: production }
       responses:
@@ -1611,7 +1611,7 @@ components:
         acceptedBy: { type: string }
         acceptedAt: { type: string, format: date-time }
         revokedAt: { type: string, format: date-time }
-        emailReceipt: { type: string, maxLength: 200, description: The transport's receipt, so delivery is a fact about the row (D46). }
+        emailReceipt: { type: string, maxLength: 200, description: "The transport's receipt, so delivery is a fact about the row (D46)." }
         emailError: { type: string, maxLength: 300 }
 
     CurrentPerson:
@@ -1753,7 +1753,7 @@ components:
         dispatchId: { type: string }
         nonce: { type: string, minLength: 16, maxLength: 64 }
         planHash: { type: string, pattern: '^[0-9a-f]{64}$' }
-        action: { type: string, enum: [apply, destroy] }
+        action: { type: string, enum: [apply, check, drift, suspend, export] }
         environment: { type: string, minLength: 1 }
         issuedAt: { type: string, format: date-time }
         expiresAt: { type: string, format: date-time }
@@ -1761,13 +1761,13 @@ components:
     Attestation:
       type: object
       additionalProperties: false
-      required: [dispatchId, instanceId, nonce, planHash, action, environment, result, resources, release, durationMs, finishedAt]
+      required: [dispatchId, instanceId, nonce, planHash, action, environment, result, resources, durationMs, finishedAt]
       properties:
         dispatchId: { type: string }
         instanceId: { type: string }
         nonce: { type: string, minLength: 16 }
         planHash: { type: string, pattern: '^[0-9a-f]{64}$' }
-        action: { type: string, enum: [apply, destroy] }
+        action: { type: string, enum: [apply, check, drift, suspend, export] }
         environment: { type: string }
         result: { type: string, enum: [ok, partial, failed, noop] }
         resources:
@@ -1775,7 +1775,7 @@ components:
           items:
             type: object
             additionalProperties: false
-            required: [kind, name, status]
+            required: [kind, name, externalId, status]
             properties:
               kind: { type: string }
               name: { type: string }
@@ -1800,13 +1800,13 @@ components:
       # receive a type it cannot satisfy.
       type: object
       additionalProperties: false
-      required: [dispatchId, instanceId, nonce, planHash, action, environment, result, resources, release, durationMs, finishedAt, receivedAt, actorKind]
+      required: [dispatchId, instanceId, nonce, planHash, action, environment, result, resources, durationMs, finishedAt, receivedAt, actorKind]
       properties:
         dispatchId: { type: string }
         instanceId: { type: string }
         nonce: { type: string, minLength: 16 }
         planHash: { type: string, pattern: '^[0-9a-f]{64}$' }
-        action: { type: string, enum: [apply, destroy] }
+        action: { type: string, enum: [apply, check, drift, suspend, export] }
         environment: { type: string }
         result: { type: string, enum: [ok, partial, failed, noop] }
         resources:
@@ -1814,7 +1814,7 @@ components:
           items:
             type: object
             additionalProperties: false
-            required: [kind, name, status]
+            required: [kind, name, externalId, status]
             properties:
               kind: { type: string }
               name: { type: string }
