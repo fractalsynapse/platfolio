@@ -13,8 +13,10 @@ auth posture are [07](../../../docs/design/07-interfaces-api-mcp-mobile.md); the
 
 ## What exists before you start (measured)
 
-`packages/ui`, `packages/tokens`, `packages/api-client` and `apps/site` **do not exist**. Real today:
-`apps/control-plane/openapi.yaml` (request/response only, no push channel), `packages/api-contract`'s
+`packages/ui` (D63, 2026-11-15: it will hold ALL reusable components **and** design tokens as CSS custom
+properties — there is no `packages/tokens`), `packages/api-client` and `apps/site` **do not exist**. Real
+today: `apps/control-plane/openapi.yaml` (request/response only, no push channel — re-check with the grep
+below; D64 makes building toward push *required*, shipping on `poll` *current*), `packages/api-contract`'s
 generated types, and `packages/page-schema` (pages as data, `buildSecretsPanel`, `findValueBearingProps`).
 So a UI gate that audits `packages/ui` cannot run yet: report it **not run**, never passed.
 
@@ -37,9 +39,11 @@ So a UI gate that audits `packages/ui` cannot run yet: report it **not run**, ne
    by `draftable`, TTL'd, wiped on sign-out and on successful submit, **never synced**. A secret field is
    never draftable, rejected by the value-bearing walk — not by a naming convention. Losing half-typed secret
    input on a kill is **correct behavior**; do not "fix" it.
-5. **Real-time is honest about what exists.** No push channel exists, so no `EventSource`, no `WebSocket`, no
-   "live" pill, no unlabelled spinner, no optimistic success. One SDK freshness primitive owns polling; every
-   server-derived render carries its age. Polling is never described or styled as push.
+5. **Real-time is honest about what exists.** D64 (UI-OD2 answered): the design must be **capable** of real
+   time — one SDK freshness primitive whose transport is swappable at build time (`poll` today, `events` when
+   §4's operations land) — while no push channel exists yet, so no `EventSource`, no `WebSocket`, no "live"
+   pill, no unlabelled spinner, no optimistic success. Every server-derived render carries its age. Polling
+   is never described or styled as push, and a UI change never designs the endpoint (D41).
 6. **Pluggable means build-time.** The component registry is compiled in; page documents are data. **Never**
    dynamic-import UI code from a URL, never fetch a registry at runtime. [10's Tier 2 boundary](../../../docs/design/10-cordis-kernel-and-extension-seams.md#the-collision-and-the-resolution)
    is a security property, not a style preference.
@@ -60,7 +64,7 @@ documents as equivalent; CI runs the `pnpm run` wrappers inside `verify`.
 | `npx -y tsx --test apps/control-plane/test/cors.test.ts` | the browser half of rule 1: origins are configuration (`PLATFOLIO_ALLOWED_ORIGINS`), so a UI cannot smuggle a committed endpoint past it |
 | `npx -y tsx scripts/check-contracts.ts` (`contracts:check`) | the surface being rendered changed without its bump being derived |
 | `npx -y tsx scripts/check-project.ts` (`check`) | a doc link, heading anchor or skill metadata broke |
-| `grep -n "text/event-stream\|websocket\|EventSource\|WebSocket" apps/control-plane/openapi.yaml` | expect **no match** (exit 1). A match means §4's push operations exist — rule 5's constraint changes, and UI-OD2 is the maintainer's answer, not yours |
+| `grep -n "text/event-stream\|websocket\|EventSource\|WebSocket" apps/control-plane/openapi.yaml` | expect **no match** (exit 1). A match means §4's push operations exist — rule 5's constraint changes, and the UI task becomes swapping the SDK transport driver, not touching a component; designing those operations is still nobody's call from a UI branch (D41, D64) |
 
 `pnpm run verify` runs every gate in that table except the last row, which is a reading of the document rather
 than a gate. It is the merge gate. For a screen-level review, use the nine-step conformance checklist in
@@ -68,21 +72,29 @@ than a gate. It is the merge gate. For a screen-level review, use the nine-step 
 
 ## Stop conditions — do not decide these yourself
 
-Seven UI-OD decisions are open in [11 § Open decisions](../../../docs/design/11-ui-components-and-page-model.md#open-decisions).
-An agent who resolves one in code has made a decision the project has not made, in a place nobody reviews:
+Five UI-OD decisions are open in [11 § Open decisions](../../../docs/design/11-ui-components-and-page-model.md#open-decisions);
+two more were **answered by the maintainer on 2026-11-15** (UI-OD2, UI-OD6) and are kept with his reasons in
+[11 § Closed UI-OD decisions](../../../docs/design/11-ui-components-and-page-model.md#closed-ui-od-decisions).
+An agent who resolves an open one in code has made a decision the project has not made, in a place nobody
+reviews; an agent who re-litigates a closed one has done the same against a decision that *has* been made:
 
-- **UI-OD6 — design tokens: `packages/tokens` vs CSS custom properties in `packages/ui`.** Blocks the
-  *first commit* of `packages/ui`. Do not create a token file to get unblocked.
 - **UI-OD3 — native vehicle** (RN / Capacitor / Tauri / web-only). Build to the contracts; choose nothing.
-- **UI-OD2 — the push operations** (`GET …/events`, `POST …/events/ticket`) and the ticketed-auth identity
-  work. These are API operations under D41, owned by the sessions that own `openapi.yaml`. Never design them
-  from a UI branch.
 - **UI-OD1 — Astro islands vs a plain React mount** for the dashboard shell.
 - **UI-OD5 — replay-from-store as the pattern for context signals**, with transient mandatory elsewhere.
 - **UI-OD4 — the draft retention numbers** (7-day TTL, wipe-on-sign-out posture). Implement the mechanics,
   leave the numbers as the open question.
 - **UI-OD7 — where a template's screens live** (generated from the manifest, or page documents versioned in
   the template repository under D60).
+
+Answered — follow the answer, do not re-ask, do not overstep it either:
+
+- **UI-OD6 — CLOSED (D63): `packages/ui` holds components *and* design tokens as CSS custom properties; no
+  `packages/tokens`.** Do not scaffold `packages/ui` from a UI task anyway — its first commit is the contract
+  package and gates, per [11 § Consequences for the plan](../../../docs/design/11-ui-components-and-page-model.md#consequences-for-the-plan).
+- **UI-OD2 — ANSWERED (D64): design the push capability, ship polling first.** The push operations
+  (`GET …/events`, `POST …/events/ticket`) and the ticketed-auth identity work remain API operations under
+  D41, owned by the sessions that own `openapi.yaml` and `packages/contracts`; they do not exist yet and are
+  required work, not permission to build a "live" UX today. Never design them from a UI branch.
 
 Also stop and ask when: a `draftable` field looks credential-shaped but `findValueBearingProps` does not
 reject it (see the two-predicate gap in [docs/ui-architecture.md § Open gaps](../../../docs/ui-architecture.md#open-gaps-this-file-refuses-to-paper-over)

@@ -32,10 +32,13 @@ can run against one screen and fail it on named criteria (§9). Status tags used
 - **Components talk to the backend only through the SDK (§6), and to each other only through the typed
   signals registry (§3).** No `fetch` in a component, no stringly-typed event bus, no second client beside
   the spec — #247's lesson, enforced by gates, not by convention.
-- **"Built for real-time" is half buildable today.** In-page signals and conditional-GET freshness are
-  client work; a server push channel is **absent** — `apps/control-plane/openapi.yaml` has 34 paths and no
-  event stream of any kind (measured). §4 names the operations it would need and says plainly that the UI
-  must not ship a "live" UX before they exist ([07 § The rule](07-interfaces-api-mcp-mobile.md#the-rule)).
+- **"Built for real-time" is now a requirement (D64, 2026-11-15), and it is half buildable today.** In-page
+  signals and conditional-GET freshness are client work; a server push channel is **absent** —
+  `apps/control-plane/openapi.yaml` has 31 paths and 36 operations, all request/response, no event stream of
+  any kind (re-measured 2026-11-15; prefer re-measuring, per the rules doc's own note on stale counts).
+  D64 answers UI-OD2: *design the push capability, ship polling first*. §4 names the operations the design
+  now requires and the UI still must not ship a "live" UX before they exist
+  ([07 § The rule](07-interfaces-api-mcp-mobile.md#the-rule)).
 - **Mobile overlays preserve in-progress work across push/pop, backgrounding, and reload — client-side,
   never server-side, and never for secret values** (§5), because D4/D53 do not bend for convenience.
 - **The native vehicle is the maintainer's open decision, and this spec is what makes waiting cheap** (§7):
@@ -61,10 +64,10 @@ surface: overlays, signals and drafts move data, never code.
 
 | Path | State |
 | --- | --- |
-| `apps/control-plane/openapi.yaml` | real — 34 paths, 36 operations, validated both directions by `api:check`; **no** SSE/WebSocket/event path, no ETag/304 cache semantics declared anywhere in it |
-| `packages/api-contract/src/generated/types.ts` | real, 830 lines — exports `Instance`, `Attestation`, `Error`, `OperationId`, `ParamsOf`, `RequestBodyOf`, `ResponseOf`, `SuccessOf`; byte-for-byte gated by `api:types:check` |
+| `apps/control-plane/openapi.yaml` | real — 31 paths, 36 operations (re-measured 2026-11-15; the previous revision said 34, which is exactly the drift the rules doc prices), validated both directions by `api:check`; **no** SSE/WebSocket/event path, no ETag/304 cache semantics declared anywhere in it |
+| `packages/api-contract/src/generated/types.ts` | real, 894 lines (re-measured 2026-11-15; 830 last revision) — exports `Instance`, `Attestation`, `Error`, `OperationId`, `ParamsOf`, `RequestBodyOf`, `ResponseOf`, `SuccessOf`; byte-for-byte gated by `api:types:check` |
 | `packages/page-schema` | real — `page.ts`, `secrets-panel.ts` (`buildSecretsPanel`, `findValueBearingProps`), `binding-panel.ts` (`buildBindingPanel`), `project-text.ts` (`projectToText`), with tests |
-| `packages/ui`, `packages/tokens`, `packages/api-client`, `apps/site`, any web UI | **do not exist** — everything in §§1–8 that names them is `specified` |
+| `packages/ui` (per D63, 2026-11-15: all reusable components **and** design tokens as CSS custom properties — no separate tokens package), `packages/api-client`, `apps/site`, any web UI | **do not exist** — everything in §§1–8 that names them is `specified`. D63 decided what `packages/ui` will contain; it did not make it exist |
 | a UI service in `compose.yaml`; `platfolio.dev` / `preview.platfolio.dev` resolving | **absent** — D62 has decided the hosts, the DNS records, certificate and service do not yet exist; the API side is already prepared (`PLATFOLIO_ALLOWED_ORIGINS` feeds CORS and the `platfolio-web` PKCE client's `<origin>/callback` redirect URIs) |
 
 So the honest baseline is: **the contract exists, the panel builders exist, the UI does not.** That is the
@@ -275,9 +278,11 @@ against actual use: a declared-but-unused signal fails, so the table cannot silt
 
 ## 4. Real-time
 
-"Built from the ground up for real-time communication" against the control plane **as it exists today**
-(measured: `openapi.yaml` has 34 paths, 36 operations, zero push endpoints, zero cache validators — no
-`ETag`, no `304`, no `text/event-stream` anywhere in it) decomposes into three fabrics, and they have very
+"Built from the ground up for real-time communication" is now a decided requirement, not an aspiration:
+D64 (2026-11-15, answering UI-OD2) says the UI must be capable of a real-time interface even though it
+starts out polling. Against the control plane **as it exists today** (re-measured 2026-11-15: `openapi.yaml`
+has 31 paths, 36 operations, zero push endpoints, zero cache validators — no `ETag`, no `304`, no
+`text/event-stream` anywhere in it) the requirement decomposes into three fabrics, and they have very
 different statuses:
 
 1. **In-page real-time — buildable now (specified).** The §3 bus plus one state layer means one poller or
@@ -287,29 +292,35 @@ different statuses:
    `ETag`/`304` on the list/read operations, held entirely in the SDK transport (§6), give per-operation
    freshness without new endpoints — but note honestly: the server does not emit `ETag` headers today
    (absent), so even this is a small server change, not a client-only one.
-3. **Server push — does not exist (absent). The UI must be built as if it will, and must not pretend.**
+3. **Server push — required by the design (D64), does not exist yet (absent). The UI is built as if it
+   will, and must not pretend.** What §4 names below is therefore **required work, not optional** — the
+   record of that answer, with no implementation in this document.
 
 ### The mechanism table
 
 | Mechanism | What it costs the platform | Verdict for this spec |
 | --- | --- | --- |
 | **Polling with ETag/304** | Nothing new in lifecycle or auth; freshness = poll interval; the server must emit validators on the existing operations (absent today, a header-semantics change on paths that already exist). | **What the spec assumes for MVP.** The §3 signals fan a single poll result out to every panel, so the UX is "live-ish" with one connection per page. |
-| **SSE** (`GET …/events`) | One long-lived connection per open tab behind the Railway service; browser `EventSource` cannot send an `Authorization` header, so it needs a ticketed-URL auth path — a real identity change beside the endpoint; an event store to cursor into; connection accounting to keep "live" meaningful for a host with no long-lived process (the D62 consequence note). | **The target.** Unidirectional is exactly what this product needs; it is the same shape the 07 webhooks-out rule already implies, pointed at our own UI. |
+| **SSE** (`GET …/events`) | One long-lived connection per open tab behind the Railway service; browser `EventSource` cannot send an `Authorization` header, so it needs a ticketed-URL auth path — a real identity change beside the endpoint; an event store to cursor into; connection accounting to keep "live" meaningful for a host with no long-lived process (the D62 consequence note). | **The target, and required by D64 rather than optional.** Unidirectional is exactly what this product needs; it is the same shape the 07 webhooks-out rule already implies, pointed at our own UI. Design it in the spec first (§ The dependency, below); ship polling until it exists. |
 | **WebSocket** | Everything SSE costs, plus framing, heartbeats, re-auth on reconnect, and a request path that `api:check` does not validate the way REST is validated (D41) — a second transport with weaker gates. | **Rejected for v1** unless a client→server stream appears; none does. Instance ops are HTTP mutations with idempotency keys ([07 § Public API](07-interfaces-api-mcp-mobile.md#public-api)); they do not need a socket. |
 | **Webhook-to-server-then-push** | The ingest half genuinely exists — attestations *are* inbound lifecycle events, and `postAttestation` / `getLatestAttestation` / `listAudit` are real (measured). The fan-out half (attestation row → connected browser) is SSE plus a cursor; the tenant-facing webhooks themselves are specified in 07 and not built. | **The eventual composite**: attestations already give platfolio a live event log; the missing piece is a way to tell subscribed clients about new rows. |
 
 ### The dependency, named, and labelled as not existing
 
-If and when the push channel is taken up, these are **API operations that must be designed in
-`openapi.yaml` first (D41), by the sessions that own that file — this document does not add them**:
+D64 made taking the push channel up **required work**, not a conditional: the capability must be built,
+even though MVP ships on polling. What follows is therefore a dependency to be paid, not an option to be
+weighed. These are **API operations that must be designed in `openapi.yaml` first (D41), by the sessions
+that own that file and `packages/contracts` — this document does not add them, and implementing them here
+is out of scope by rule**:
 
 - `GET /api/v1/teams/{teamId}/events` — team-scoped SSE stream; `text/event-stream`; cursor via
   `Last-Event-ID` mapped to an event sequence; payloads are refs and state transitions only (never secret
   material, upholding D4/D53 by construction — the same reason §3's replay table is value-free).
   **absent — not in the spec, not implemented.**
 - `POST /api/v1/teams/{teamId}/events/ticket` — short-TTL one-time ticket so a browser `EventSource` can
-  authenticate without a header; touches the Keycloak realm setup (D56), so it is an identity decision as
-  much as an endpoint. **absent.**
+  authenticate at all: the browser API sends no `Authorization` header, and a bearer token cannot be put in
+  the stream URL, so without this ticket the stream is an authentication hole, not a feature. Touches the
+  Keycloak realm setup (D56), so it is an identity decision as much as an endpoint. **absent.**
 - Whatever event rows the stream cursors over. Today the closest real facts are attestations and audit
   entries (measured: `getLatestAttestation`, `listAudit` exist); a *stream* implies a persisted, ordered
   event entity that the Store does not have. That is a contracts-surface change (minor bump, D41/10's
@@ -542,9 +553,11 @@ the difference between a specification and an aspiration.
 **Kept and extended** (the prior decisions survive this revision because the maintainer's direction does
 not contradict them, and a framework spec is what "make it testable" needed):
 
-- **Layers** — tokens/ui/page-schema/api-client/site, now with existence status at top. `packages/ui` rules
-  (props-not-fetch, quarantined `web/`, tokens-not-utility-only, headless variants, route table,
-  schema-generated forms) became §1's contract with named gates.
+- **Layers** — tokens/ui/page-schema/api-client/site, now with existence status at top. **The tokens layer
+  was folded into `packages/ui` by D63 on 2026-11-15: no separate tokens package; tokens are CSS custom
+  properties that ship with the components.** `packages/ui` rules (props-not-fetch, quarantined `web/`,
+  tokens-not-utility-only, headless variants, route table, schema-generated forms) became §1's contract
+  with named gates.
 - **Pages as composition with registered components; page documents deliberately not Turing-complete** —
   unchanged; §9.5–9.6 are its enforcement now.
 - **Server-driven, not code-down** — unchanged, and restated loudly as *the security line*, because
@@ -579,15 +592,28 @@ not contradict them, and a framework spec is what "make it testable" needed):
 
 ## Open decisions
 
+Five remain open. UI-OD2 (push channel) and UI-OD6 (design tokens) were **answered by the maintainer on
+2026-11-15** and moved, with his reasons, to [§ Closed UI-OD decisions](#closed-ui-od-decisions) — kept,
+not deleted, because an open decision that vanishes looks like an oversight.
+
 | ID | Decision the maintainer must make | What it blocks |
 | --- | --- | --- |
 | **UI-OD1** | Web shell: Astro islands (07's choice) vs plain React mount for the dashboard, both under the D62 Railway service. | The `apps/site` build and first-island wiring; nothing else — §2's layout contract is shell-agnostic. |
-| **UI-OD2** | Push channel: adopt §4's SSE operations (and the ticketed-auth identity work), or ship MVP on conditional-GET + age labels only. | Whether `GET /api/v1/teams/{teamId}/events` gets designed in `openapi.yaml` (D41) this quarter; the "real-time" claim's final form. |
 | **UI-OD3** | Native vehicle (§7 table): RN / Capacitor / Tauri / web-only — deliberately **not chosen here**. | Only the first native app; the decision must not be made *before* §9's gates exist, or the cost asymmetry that makes all four options viable is destroyed. |
 | **UI-OD4** | Draft retention rule as specified (7-day TTL, local-only, sign-out wipe, never secrets) vs a stricter/looser variant. | §5's implementation and the app-store privacy declarations; it is tenant working data at rest on user devices — the maintainer should own that posture. |
 | **UI-OD5** | Replay-from-store as the default for context signals (§3), with mandatory-transient for side-effecting signals. | The signals registry code shape; cheap to decide, expensive to flip after components lean on replay. |
-| **UI-OD6** | Where design tokens live (`packages/tokens` package vs CSS custom properties in `packages/ui`) and what the native theme maps onto first. | The first commit of `packages/ui` — styling foundation cannot be retrofitted (the prior doc said this about components; it is truer of tokens). |
 | **UI-OD7** | Who authors per-platform screens: builder-generated from the manifest (the D21 `buildSecretsPanel` pattern, extended) vs page documents versioned in the template repositories themselves (D60: a template *is* a repository). | The "adding a hosted platform is a data change, not a frontend release" claim (D9): both shapes satisfy it; only the second decides where a template's screens live — and under D60 that is the template repo's root, beside `environment.yaml`. |
+
+## Closed UI-OD decisions
+
+Answered by the maintainer; recorded here with the date and the reason, then linked from the register
+rather than restated. Nothing in this section is implemented — it is the decision of record, and the
+work it names belongs to whichever change owns the file that must change.
+
+| ID | Closed | The maintainer's reason | What it decided, and what it does not |
+| --- | --- | --- | --- |
+| **UI-OD2** | 2026-11-15, recorded as **D64** | *"Yes, the UI should show live updates when it makes sense. I just want to make sure we are capable of real-time like interface even if we have to start out polling the API when needed."* | Decided: **design the push capability, ship polling first.** One SDK freshness primitive whose transport is swappable at build time (`poll` today, `events` later); every server-derived render carries its age; no UI surface may imply a liveness the contract does not serve. Required work, not optional: §4's operations (`GET …/events`, `POST …/events/ticket`, the event entity) are **API operations designed in `openapi.yaml` first** (D41) — measured absent as of 2026-11-15 (`grep -n "text/event-stream\|websocket\|EventSource\|WebSocket" apps/control-plane/openapi.yaml` → no match, all 36 operations request/response), landing them is a contracts MINOR bump. It does **not** authorize implementing any of it from here. |
+| **UI-OD6** | 2026-11-15, recorded as **D63** | *"Go would rather have a packages/ui package that contains ALL reusable UI components, colors, spacing, font sizes (CSS), etc..."* | Decided: **one package owns everything reusable.** `packages/ui` carries the components **and** the design tokens, tokens delivered as CSS custom properties from that package; there is no separate `packages/tokens` (superseded wherever it appeared in the layer tables). What the first `packages/ui` commit may contain is now unblocked — but the package still **does not exist**, and "tokens are CSS custom properties" does not change what it will contain, only where. |
 
 ## Consequences for the plan
 
@@ -600,9 +626,10 @@ not contradict them, and a framework spec is what "make it testable" needed):
   container technology (a bare React mount and an Astro island both rendering the same registry proves the
   shell question UI-OD1 is really open and §9.7 is satisfiable). It proves portability before it becomes a
   bet, which was the old E9-line's intent, pointed at the right experiment number this time.
-- §4's operations, if UI-OD2 goes that way, are **API operations first** — designed in
-  `apps/control-plane/openapi.yaml` (owned elsewhere, D41), type-generated, `api:check`-green — before any
-  screen touches `EventSource`. The UI spec deliberately contains no UX the backend cannot serve today,
-  and says so section by section.
+- §4's operations are now **required work** (UI-OD2 answered 2026-11-15 as D64: design the push
+  capability, ship polling first), and they remain **API operations first** — designed in
+  `apps/control-plane/openapi.yaml` (owned elsewhere, D41), type-generated, `api:check`-green, a contracts
+  MINOR bump — before any screen touches `EventSource`. The UI spec deliberately contains no UX the backend
+  cannot serve today, and says so section by section.
 - The numbering question, answered: this stays document **11**; it is the canonical UI framework spec and a
   second file would recreate the two-definitions-of-one-thing failure this whole project keeps paying for.

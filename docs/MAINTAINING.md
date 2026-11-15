@@ -152,6 +152,13 @@ isolation the shared host does not have to provide.
 The local development stack keeps its own Keycloak container, and that is not a contradiction: it is the offline
 test double (D49), not a deployed environment.
 
+The hosted Keycloak's master realm holds exactly one admin — the bootstrap account, still flagged
+`is_temporary_admin=true` — and the maintainer's answer of 2026-11-15 was to leave it in place for now. The
+procedure for changing that, the stopped-nodes recovery if access is ever lost, and the credential rules that
+apply while doing either are **not** restated here: they are the runbook in
+[05 § Rotating the temporary Keycloak admin](design/05-identity.md#rotating-the-temporary-keycloak-admin-runbook).
+One thing, one home (and the DNS/origin state both realms carry is recorded there too).
+
 ## Releases and credentials are operations, not console work
 
 A platform's build reports its own artifact; nobody types a digest, and nobody types a credential:

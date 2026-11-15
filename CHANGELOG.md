@@ -5,6 +5,46 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+### Changed — three maintainer decisions recorded: one UI package (D63), a required real-time capability (D64), and the admin-rotation runbook he asked for
+
+The maintainer answered three standing open questions on 2026-11-15, and this change is the record — no code,
+no `packages/ui` scaffold, no live mutations.
+
+**D63** *(closing UI-OD6):* *"Go would rather have a packages/ui package that contains ALL reusable UI
+components, colors, spacing, font sizes (CSS), etc..."* One package owns everything reusable; design tokens
+ship as CSS custom properties from `packages/ui`, and there is no `packages/tokens`. Every layer table that
+listed `packages/tokens` now says so ([11](docs/design/11-ui-components-and-page-model.md),
+[the rules doc](docs/ui-architecture.md), [AGENTS.md](AGENTS.md), the
+[ui-architecture skill](.agents/skills/ui-architecture/SKILL.md)) — with the honesty convention intact:
+D63 decided *contents*, not *delivery*, and `packages/ui` still does not exist. UI-OD6 moved to 11's new
+**§ Closed UI-OD decisions** with the date and the reason rather than vanishing.
+
+**D64** *(answering UI-OD2):* *"Yes, the UI should show live updates when it makes sense. I just want to make
+sure we are capable of real-time like interface even if we have to start out polling the API when needed."*
+Design the push capability, ship polling first. Decided: one SDK freshness primitive whose transport is
+swappable at build time, every server-derived render carries its age, and no surface may imply liveness it
+does not have. Required work: the control plane has **no** push channel — re-measured on this tree, 31 paths
+and 36 operations, the grep for a push mechanism still finds nothing — so 11 §4's event stream and ticketed
+connection must be designed in `openapi.yaml` first (D41), a contracts MINOR bump, by the sessions that own
+it. Implementing any of it was explicitly out of scope here.
+
+**The runbook** *(answering "leave it alone for now, but tell me what I need to do"):*
+[05 § Rotating the temporary Keycloak admin](docs/design/05-identity.md#rotating-the-temporary-keycloak-admin-runbook)
+records the maintainer's decision to keep the temporary master-realm admin, plus the step-by-step rotation
+path (create permanent → grant the `admin` realm role → verify → *only then* delete the temporary one), the
+stopped-nodes `bootstrap-admin user` recovery with its honest downtime, the credential-handling rules D4
+implies for ourselves, where the credential lives afterwards — including the footgun that
+`.secrets/platfolio-keycloak-admin` carries the 25.x-style key names while the composition correctly
+declares the 26.x pair — and the DNS half: `platfolio.dev` / `preview.platfolio.dev` configured as origins,
+read back in both hosted realms, not resolving, ready-for-DNS meaning a UI service in `compose.yaml` per
+D62. Every step is tiered: what was measured read-only today (token grant 200; one master-realm user,
+created 2026-11-12, `is_temporary_admin=true`, with the `admin` realm-role grant shape read back), what is
+measured-and-recorded from `scripts/seed-identity.ts` (the 26.8.2 `reset-password` 404; the
+PUT-with-`credentials` convergence asserting 204), what is upstream-documented, and what is **specified but
+not exercised** — which is the entire mutation sequence. [MAINTAINING](docs/MAINTAINING.md) links the
+runbook instead of restating it. This entry changes only prose and registers; no behavior moved, so the
+`verify` gates are unchanged and re-run to prove it.
+
 ### Changed — the shared OpenAPI components are a build artifact (#247)
 
 `apps/control-plane/openapi.yaml` is now generated, for the shapes a capability contract already defines, from

@@ -19,6 +19,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import { parse as parseYaml } from 'yaml';
 import path from 'node:path';
+import { checkDecisionRegister } from './check-decision-register.ts';
 
 const argv = process.argv.slice(2);
 const quiet = argv.includes('--quiet');
@@ -692,8 +693,9 @@ async function checkNoPython(): Promise<string[]> {
 }
 
 const pythonProblems = await checkNoPython();
+const registerProblems = checkDecisionRegister(ROOT);
 
-const all = [...docProblems, ...skillProblems, ...workflowProblems, ...actionProblems, ...hygieneProblems, ...endpointProblems, ...projectProblems, ...overlayProblems, ...registryProblems, ...pythonProblems];
+const all = [...registerProblems, ...docProblems, ...skillProblems, ...workflowProblems, ...actionProblems, ...hygieneProblems, ...endpointProblems, ...projectProblems, ...overlayProblems, ...registryProblems, ...pythonProblems];
 say(`skills checked: ${skills.length} (${skills.map((s) => s.name).join(', ')})`);
 say(`workflows linted: ${workflowProblems.length === 0 ? 'clean' : `${workflowProblems.length} problem(s)`}`);
 say(`action manifests checked: ${actionProblems.length === 0 ? 'clean' : `${actionProblems.length} problem(s)`}`);
@@ -708,4 +710,5 @@ if (all.length) {
   for (const p of all) console.error(` - ${p}`);
   process.exit(1);
 }
+say(`decision register: ${registerProblems.length === 0 ? 'one table shape, unique ids, no orphan fragments' : `${registerProblems.length} problem(s)`}`);
 say('project checks passed: links and anchors resolve, skill metadata is consistent, workflows lint clean.');
