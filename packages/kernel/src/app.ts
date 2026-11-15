@@ -33,7 +33,11 @@ export interface KernelOptions {
   identity?: IdentityConfig;
   /** Key material for tests and the conformance double. Production supplies a JWKS endpoint instead. */
   identityKeys?: Jwk[];
-  server?: { host?: string; port?: number };
+  /**
+   * The transport's own settings. `cors` is passed as configuration data (an origin list), never as behaviour:
+   * the kernel applies it, the composition root decides it. See `packages/kernel/src/cors.ts`.
+   */
+  server?: { host?: string; port?: number; cors?: Partial<import('./cors.ts').CorsConfig> };
   /**
    * Persistence driver and location. The store is a capability like every other: chosen by configuration, and
    * two implementations satisfy one conformance suite.

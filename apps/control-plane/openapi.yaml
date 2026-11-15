@@ -19,6 +19,17 @@ info:
 
     The secret rule holds here too (D4): no operation accepts, returns or echoes a secret **value**. Names,
     presence and provenance only, from the API up.
+
+    Cross-origin calls are **not in this document, deliberately**. A CORS preflight — `OPTIONS` carrying
+    `Access-Control-Request-Method` — presents no credential, matches no operation and has no response schema a
+    client may depend on: it is transport negotiation, like `Content-Length`. `operationsOf` reads every method
+    key under a path as an operation, so one `options:` entry per path would add ~30 phantom endpoints to the
+    contract, to `ROUTE_MANIFEST` and to the policy table in order to describe something no caller is permitted
+    to call directly. It is answered in the HTTP transport instead (`packages/kernel/src/cors.ts`), which grants a
+    preflight only for a method the route table really registers for that path. Two things *are* for a client
+    author: this API authenticates with `Authorization: Bearer` and never with cookies, so
+    `Access-Control-Allow-Credentials` is not sent and a UI must present its own token; and which browser origins
+    may call at all is deployment configuration — `PLATFOLIO_ALLOWED_ORIGINS`, unset meaning same-origin only.
   contact:
     name: platfolio
 servers:

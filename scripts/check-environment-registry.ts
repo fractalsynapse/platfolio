@@ -271,6 +271,17 @@ const HUMAN: Record<string, Partial<Entry>> = {
   PLATFOLIO_SMTP_USER: { kind: 'value', required: false, service: 'api' },
   PLATFOLIO_SMTP_PASSWORD: { kind: 'secret', required: false, service: 'api' },
   PLATFOLIO_MAILPIT_URL: { kind: 'value', required: false, service: 'api', note: 'the local mailbox reader; absent in production (D46)' },
+  // Cross-origin policy for the control plane's HTTP layer. Configuration, not a credential: an origin is a
+  // public URL the browser already sends, so it is safe in a composition, safe in the registry and safe in the
+  // boot log -- which is exactly why it may be `environments: all` rather than per-deployment secret material.
+  // `all` is deliberate and is not the derivation's guess: the local stack needs it too (a UI on
+  // http://localhost:5173 calling http://localhost:8080 is cross-origin by browser definition), and staging's UI
+  // origin is not production's, so the *value* varies per environment while the *name* applies everywhere --
+  // that is D56's `environmentValues`, not a second variable.
+  PLATFOLIO_ALLOWED_ORIGINS: {
+    kind: 'value', required: false, default: '', environments: 'all', service: 'api',
+    note: 'comma-separated browser origins allowed to call the API cross-origin (scheme://host[:port] each). Unset or empty means same-origin only -- the documented, safe default, and never `*`. A malformed entry is a boot failure, not a warning; the UI origin per environment belongs in environmentValues (D56)',
+  },
 };
 
 function guess(name: string, places: Set<string>): Entry {
@@ -324,7 +335,25 @@ function guess(name: string, places: Set<string>): Entry {
   // field with four synonyms for one meaning comes back.
   environments = applies.size === ENVIRONMENTS.length ? 'all' : ENVIRONMENTS.filter((e) => applies.has(e));
   const over = HUMAN[name] ?? {};
-  return { name, secret: over.secret ?? secret, environments: over.environments ?? environments, deployedTo: over.deployedTo ?? deployedTo, note: over.note ?? `referenced by ${[...new Set(hosts.map((h) => h.split(':')[0]!))].slice(0, 4).join(', ')}` };
+  // Every judgement field, not four of them. This used to merge only `secret`, `environments`, `deployedTo` and
+  // `note`, so a `kind`, `service`, `required`, `default` or `enum` written into HUMAN was thrown away by `--emit`
+  // for any name not already in the file -- the exact "a hand-edit is silently lost on the next emit" failure this
+  // table exists to prevent, running in reverse: the judgement was written in the right place and still did not
+  // arrive. Rows that already exist take their fields from the file (`existing ?? guess(...)`), so this changes the
+  // derivation only for a newly declared variable -- which is precisely when a HUMAN entry is load-bearing.
+  // `name` is dropped from the judgement copy first: the table is keyed by name, so an entry that set one would be
+  // a second spelling of its own key, and the derivation must not let that through. (Writing `name` twice in the
+  // literal is not an option -- TypeScript refuses a duplicate property in an object literal.)
+  const judgement: Partial<Entry> = { ...over };
+  delete judgement.name;
+  return {
+    name,
+    secret,
+    environments,
+    deployedTo,
+    note: `referenced by ${[...new Set(hosts.map((h) => h.split(':')[0]!))].slice(0, 4).join(', ')}`,
+    ...judgement,
+  };
 }
 
 /**

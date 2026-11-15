@@ -267,6 +267,15 @@ variables:
     environments: [development]
     deployedTo: host:shell
     note: "referenced by apps/managed-action/src/runner.ts"
+  - name: PLATFOLIO_ALLOWED_ORIGINS
+    kind: value
+    secret: false
+    environments: all
+    service: api
+    required: false
+    default: ""
+    deployedTo: host:shell
+    note: "comma-separated browser origins allowed to call the API cross-origin (scheme://host[:port] each). Unset or empty means same-origin only -- the documented, safe default, and never `*`. A malformed entry is a boot failure, not a warning; the UI origin per environment belongs in environmentValues (D56)"
   - name: PLATFOLIO_API_ORIGIN
     kind: value
     secret: false
@@ -477,6 +486,12 @@ variables:
     environments: [development]
     deployedTo: host:shell
     note: "referenced by apps/managed-action/src/runner.ts"
+  - name: PLATFOLIO_UI_ORIGIN
+    kind: value
+    secret: false
+    environments: [development]
+    deployedTo: host:shell
+    note: "referenced by scripts/seed-identity.ts"
   - name: PLATFOLIO_URL
     kind: value
     secret: false
