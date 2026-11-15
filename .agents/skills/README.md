@@ -16,6 +16,7 @@ report it and resolve in the project decision log instead of editing the skill:
 | [capability-seams](capability-seams/SKILL.md) | adding or reviewing a swappable provider, a `packages/contracts` interface, or anything touching the vendored framework |
 | [platform-manifest](platform-manifest/SKILL.md) | adding a hosted platform to the catalog, or changing the manifest schema and renderers |
 | [tenant-safety-check](tenant-safety-check/SKILL.md) | before claiming a control-plane, provisioning, identity, billing or execution-plane change is correct |
+| [ui-architecture](ui-architecture/SKILL.md) | building or reviewing UI — the six architecture rules, the commands that check them, and the decisions an agent must not resolve alone |
 | [vendored-dependencies](vendored-dependencies/SKILL.md) | updating, patching or verifying anything under `vendor/` |
 
 Each project skill is procedure only and links to the canonical documents in

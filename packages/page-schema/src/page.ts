@@ -132,10 +132,38 @@ export const COMPONENT_REGISTRY: Record<(typeof COMPONENT_NAMES)[number], string
 };
 
 /**
- * Defense in depth beyond strict schemas: walk every prop key looking for something that could hold a
- * secret. A future component that adds a `value` prop by mistake fails here, in CI, rather than in a
- * screenshot review.
+ * The one implementation of "could this key hold a secret value" (D4, D53).
+ *
+ * It used to be TWO functions with one name: this one matched a closed list of five key names, while a private
+ * copy in `secrets-panel.ts` matched any key containing `value`. Neither covered the other, and both readings
+ * looked defensible, which is this project's central failure mode -- one fact, two spellings, and no gate able to
+ * see the disagreement. The union lives here now, so nothing that used to be caught is let through.
+ *
+ * What was missing from BOTH copies, measured before this change: `token`, `apiKey`, `clientSecret` and
+ * `passphrase` each returned an empty list. A rule that says "drafts can never hold a secret value" was resting
+ * on a name test that did not test for the commonest secret field names in the language.
+ *
+ * What this still is NOT: proof a value is absent. Page documents are validated by `PageSchema`, so a secret has
+ * no legal place to sit; this walk is the backstop for shapes nobody declared. It is a NAME test -- a credential
+ * under a neutral key (`note`, `text`) is invisible here and must be refused by the schema and by the builder
+ * that composes the document. That limit is stated rather than papered over.
  */
+
+/** Keys that are unambiguously a payload. */
+const VALUE_NAME_EXACT = /^(value|currentValue|defaultValue|secretValue|plaintext)$/i;
+/** Any other key containing `value` also counts -- the broader half of the old duplicated pair. */
+const VALUE_NAME_SUBSTRING = /value/i;
+/** Two keys that contain `value` and demonstrably are not payloads. */
+const VALUE_NAME_EXEMPT = /^(satisfied|labelValue)$/i;
+/** Credential-shaped names, which neither old copy matched. */
+const CREDENTIAL_NAME = /(token|secret|password|passphrase|credential|authorization|bearer|api[_-]?key|access[_-]?key|private[_-]?key|session|cookie)/i;
+
+/** The single question the predicate answers, exported so a test can ask it per key instead of by document. */
+export function isValueBearingKey(key: string): boolean {
+  if (VALUE_NAME_EXEMPT.test(key)) return false;
+  return VALUE_NAME_EXACT.test(key) || VALUE_NAME_SUBSTRING.test(key) || CREDENTIAL_NAME.test(key);
+}
+
 export function findValueBearingProps(node: unknown, path = ''): string[] {
   const found: string[] = [];
   if (Array.isArray(node)) {
@@ -145,7 +173,7 @@ export function findValueBearingProps(node: unknown, path = ''): string[] {
   if (node && typeof node === 'object') {
     for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
       const at = path ? `${path}.${key}` : key;
-      if (/^(value|currentValue|defaultValue|secretValue|plaintext)$/i.test(key)) found.push(at);
+      if (isValueBearingKey(key)) found.push(at);
       if (value && typeof value === 'object') found.push(...findValueBearingProps(value, at));
     }
   }

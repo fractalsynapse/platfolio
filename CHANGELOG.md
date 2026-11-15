@@ -2874,3 +2874,59 @@ packages stay at `0.0.0` because nothing is distributed from them.
 
 Commits before the platform work began carry this repository's origin as the `scaffold` starter
 package. The starter's own change history is maintained upstream, not here.
+
+### Fixed — the secret-value predicate caught five names and missed every credential (2026-11-15)
+
+`docs/ui-architecture.md` rule 4 says overlay drafts can never hold a secret value, enforced "mechanically" by
+`findValueBearingProps`. Measured, that citation was false twice over. The name referred to **two functions with
+one definition**: the exported one matched a closed list of five exact keys (`value`, `currentValue`,
+`defaultValue`, `secretValue`, `plaintext`), while a private copy in `secrets-panel.ts` matched any key containing
+`value` with two exemptions. Neither reading covered the other, and **neither rejected `token`, `apiKey`,
+`clientSecret` or `passphrase`** — the commonest secret field names in the language, returning an empty list. One
+fact, two spellings, no gate able to see the disagreement: the duplication rule, applying to a security predicate.
+
+Now one exported implementation (`isValueBearingKey` plus the walk), the **union** of both previous behaviours so
+nothing formerly caught is let through, plus credential-shaped names. Pinned by a test that fails if the duplicate
+returns, if the list narrows, or if a benign key starts being rejected — measured 19/19 credential names caught,
+14/14 benign keys ignored. Falsified by reverting to the old closed list: the test fails naming `token`.
+
+**The residual limit is not closable and is stated rather than glossed**: this is a NAME test. A credential under a
+neutral key (`note`, `text`) is invisible to it. Rule 4 holds because `PageSchema` gives a secret no legal place to
+sit and the builders are checked by their own tests — not because this walk is sufficient. A name is not a custody
+claim (D52) in either direction.
+
+### Fixed — the zod guard asserted my laptop, not the repository (2026-11-15)
+
+CI failed *"the hazard is real: zod does NOT resolve from this package on its own"* because the assertion measured
+a maintainer-machine accident (`/home/adrian/node_modules/zod`) while CI resolves zod inside the repo. The rule it
+protected was sound; the check was an environment-dependent claim dressed as an invariant. Replaced with a premise
+true everywhere: zod is undeclared in `packages/api-contract/package.json`, so nothing can import it and install
+cleanly. Falsified by declaring it — the guard fails by name and says to delete the declaration or the rule, not
+keep both.
+
+### Fixed — a workflow trigger that assumed a push could carry a dispatch (#252 #253, 2026-11-15)
+
+`platfolio check` failed in ~500ms on both open PRs: `managed action: required input instance_id is missing`. Cause
+was my own change the same day — I added `on.push` / `on.pull_request` triggers so PRs run `pnpm run verify`, and
+set the action by event name, while assuming a non-dispatch event could supply `instance_id`, `dispatch_id`,
+`nonce` and `plan_hash`. It cannot: the nonce is issued per dispatch precisely because it makes an attestation
+non-replayable, so the action's refusal was correct and my trigger was the bug — on platfolio's checks and on every
+tenant's install PR. The managed job is now conditional and the `tests` job stays unconditional, so PR verification
+keeps happening; falsified by deleting the guard line, which fails the new test with `got undefined`.
+
+**This is a stopgap, not the deploy-on-push capability the maintainer asked for** — see #254, which needs the runner
+to request a dispatch using the OIDC token GitHub already mints. The rejected shortcuts are recorded there: a
+self-issued nonce, a committed instance id without a nonce, and a relaxed guard each delete the attestation's
+meaning to make a check go green.
+
+### Corrected — the record on #248, and AGENTS.md said it wrong until now (2026-11-15)
+
+Production's master-realm admin was never unreachable: `400 invalid_grant` appeared only when an operator script
+fell back to its loopback default password against a live host. `AGENTS.md` still asserted the original false
+diagnosis — "unrecoverable by environment variables… recovery needs `bootstrap-admin user` with all nodes stopped"
+— which is the first thing an agent reads, and the paragraph above it even warns that stale prose is why that
+paragraph was rewritten once already. Corrected in place with the measured cause, the refusal now implemented in
+`scripts/identity-credentials.ts`, the framing that the 26.x bootstrap rename is declaration correctness for new
+deployments only, and the note that `platfolio.dev` / `preview.platfolio.dev` do not resolve yet so browser auth is
+configured and read back, **not exercised against a live UI**. The 11 §9 gate list also gained the eleventh gate it
+had been citing but never contained.

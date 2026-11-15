@@ -1,5 +1,11 @@
 # platfolio — UI framework: the component, layout, and page specification
 
+> **Authority, so this document and its rules do not become two descriptions of one fact:**
+> [docs/ui-architecture.md](../ui-architecture.md) is **normative** for the six UI architecture rules and the
+> gate that enforces each. **This document is the design rationale, the full contracts and the history those
+> rules are drawn from.** Read this for *why* and for the shape of a contract; read that file for *what a
+> reviewer fails a screen on*. Neither restates the other.
+
 Implements D10 and D14, extended by the maintainer's direction of this revision: **React with pluggable
 reusable components and layouts, built from the ground up for real-time communication, mobile first with
 progressive enhancement as the screen widens, one signals bus between components, one data path through a
@@ -504,6 +510,14 @@ CI gates (mechanical, block merge) and the reviewer pass (one screen, ten questi
 10. **Freshness honesty.** Every server-derived render carries `lastKnownAt`; no screen renders a state
     without its age; no `EventSource`/`WebSocket` exists while §4's operations remain absent.
     *Method: type-level — the data hook's result includes age by construction — plus grep.*
+11. **Capability parity across widths.** For every screen, the set of API operations reachable from its
+    components at a 360 px container equals the set reachable at 1920 px, derived mechanically from the
+    components' declared `reads` (§2 acceptance (d)) — not from a screenshot, and not from a reviewer's
+    impression. A capability that exists only on wide layouts is the failure this gate exists to make
+    unfashionable: it means someone forked a component or built a screen desktop-first, and mobile users
+    silently get a smaller product. *Specified, cannot run today: needs `packages/ui`, so like gates 2–5 and
+    7–9 it is **not run**, never **passed**. Adding it after screens exist audits nothing, which is the same
+    reason gate 1 must land with the first commit.*
 
 ### The reviewer pass — look at one screen, fail it on these
 

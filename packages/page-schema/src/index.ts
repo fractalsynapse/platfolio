@@ -1,5 +1,5 @@
 export {
-  COMPONENT_NAMES, COMPONENT_REGISTRY, PageSchema, PageChildSchema, SecretFieldSchema, SecretGroupSchema, findValueBearingProps,
+  COMPONENT_NAMES, COMPONENT_REGISTRY, PageSchema, PageChildSchema, SecretFieldSchema, SecretGroupSchema, findValueBearingProps, isValueBearingKey,
   type Node, type Page, type SecretField,
 } from './page.ts';
 export { buildSecretsPanel, type PanelCapabilities, type PanelInstance } from './secrets-panel.ts';

@@ -23,6 +23,7 @@ selections it has already made are recorded, not improvised:
 | Change, review, check and release policy | [docs/MAINTAINING.md](docs/MAINTAINING.md) |
 | Project-specific procedures | [.agents/skills/README.md](.agents/skills/README.md) |
 | Control-plane API design (the validation mechanism itself) | [apps/control-plane/openapi.yaml](apps/control-plane/openapi.yaml) — spec first, then the handler |
+| UI architecture rules (normative; rationale and contracts live in [11](docs/design/11-ui-components-and-page-model.md)) | [docs/ui-architecture.md](docs/ui-architecture.md) — the six rules, the gate that enforces each, and the open UI-OD decisions |
 | Every environment variable: custody, environments, obligations and wiring -- one registry per platform, at its root | [environment.yaml](environment.yaml) — the central registry (D52, and D33's obligations since D58), enforced by `pnpm run environment:registry`: one definition per variable, one spelling of everywhere, one file per platform |
 
 Status: foundation poured, interfaces first (D40, [16](docs/design/16-foundation-build-order.md)). Slices 1
@@ -86,7 +87,7 @@ The control plane is **deployed and answering on a public HTTPS host**, built by
 database created and migrated by its own plan (#172's first run). It is not yet the live service for tenants:
 Keycloak now boots (its JDBC DSN is wired as verified `references[].output` components, #198), and
 `api.platfolio.dev` / `auth.platfolio.dev` are **verified and certificate-issued** (#199 closed), the realm is
-seeded, and `identity:smoke` passes 11/11 **against those public URLs** — including a token minted by the **peer realm** refused as `unknown-key`, which is D4 proven beyond loopback in both directions (11/11 on production and staging, #251). The cross-issuer check no longer depends on a master-realm admin token: that was a weak proxy for the invariant (the threat is one tenant’s credential arriving at another tenant’s control plane, not an administrator’s) and it broke when production’s master admin credential became unrecoverable by environment variables — 26.8 creates the bootstrap admin only when the master realm does not exist yet, so recovery needs `bootstrap-admin user` with all nodes stopped (#248, still open). That check also proved to be a coin flip: flipping the last character of a 342-character RS256 signature decodes to identical bytes on many signatures, so the forged token was sometimes still valid; it now flips a mid-signature character and refuses to run unless the bytes actually changed. What #172 still needs is the cutover: the three template
+seeded, and `identity:smoke` passes 11/11 **against those public URLs** — including a token minted by the **peer realm** refused as `unknown-key`, which is D4 proven beyond loopback in both directions (11/11 on production and staging, #251). The cross-issuer check no longer depends on a master-realm admin token: that was a weak proxy for the invariant (the threat is one tenant’s credential arriving at another tenant’s control plane, not an administrator’s). That check also proved to be a coin flip: flipping the last character of a 342-character RS256 signature decodes to identical bytes on many signatures, so the forged token was sometimes still valid; it now flips a mid-signature character and refuses to run unless the bytes actually changed. **#248’s stated cause was wrong and is recorded here so nobody re-inherits it:** production’s master-realm admin was never unreachable. `400 invalid_grant` appeared only when an operator script fell back to its loopback default password (`platfolio-dev-only`) against a live host — three scripts did, silently — and I filed that as lost infrastructure and planned a service stop, a `bootstrap-admin user` one-off and a credential rotation on top of a problem that did not exist. `scripts/identity-credentials.ts` now *refuses* a loopback-default credential against a non-loopback host, naming the file and variable to supply, and never prints a value or its length. The compose rename to the 26.x `KC_BOOTSTRAP_ADMIN_*` pair is declaration correctness for **new** deployments only (26.8 creates that admin only when the master realm does not yet exist) and recovers nothing on a running one. The sole master-realm user is still flagged `is_temporary_admin=true`; replacing it means rotating a live credential, which is the maintainer’s call. `platfolio-web` (public, PKCE S256, no ROPC, exact `<origin>/callback`) is now present in both hosted realms, with origins read from `compose.yaml` — but `platfolio.dev` and `preview.platfolio.dev` **do not resolve yet**, so browser auth is configured and read back, not exercised against a live UI. What #172 still needs is the cutover: the three template
 repositories pointing at `api.platfolio.dev` (a `PLATFOLIO_URL` repository variable each, D47) and one install
 PR watched end to end. platfolio's own repository already dispatches there, and its hosting description now sits
 at the root exactly like a tenant's (D50) -- `selfhost/` and the separate root `docker-compose.yml` are gone, so
@@ -160,6 +161,8 @@ The layout is therefore explicit, and a new file goes where its **kind** goes:
 | `packages/contracts/` | Capability interfaces, DTO schemas, conformance suites, provider implementations | Framework-free; the only place a seam is defined |
 | `packages/kernel/` | The only package permitted to import Cordis (D15) | Plugin wiring, never business rules |
 | `apps/<name>/openapi.yaml` | The HTTP contract of the app it sits beside (D41) | The spec is the app's own file, not a documentation folder |
+| `docs/ui-architecture.md` | The six UI architecture rules as MUST/MUST NOT, each with the gate that enforces it and the incident that prices it | **One authority for the rules.** Rationale, full contracts and the eleven CI gates stay in [11](docs/design/11-ui-components-and-page-model.md); neither file restates the other |
+| `.agents/skills/ui-architecture/` | The project skill an agent loads before building or reviewing UI: the six rules compressed, the commands that check them, the stop conditions | Routing, not restatement -- the skill points at `docs/ui-architecture.md` and at the open `UI-OD` decisions it must not resolve |
 | `packages/contracts/api.json` | The generated **public-surface baseline** of the contracts package -- structured data (`schema`, `version`, `bump`, `digest`, `declarations[]`) | Lives with what it measures; `check-contracts` writes it, and a deterministic gate may only read data. It was markdown until the maintainer asked why a test parses prose: the header regexes and the ``` fence meant a writer change could make the reader see zero declarations, which reads as "no drift" |
 | `packages/contracts/railway-graphql-schema.json` | Captured provider schema, evidence for `graphql:check` | Provider evidence sits with the provider implementation |
 | `db/` | Forward-only migrations and Postgres init scripts | Readiness comes from the migrations ledger |
@@ -189,6 +192,26 @@ the validation mechanism for every endpoint:
 
 This exists because an API invented in handlers becomes a description of one implementation, and a platform
 whose value is pluggability needs the contract to be the thing that is checked.
+
+## UI rule: six architecture rules, each with the gate that holds it
+
+Normative statements are [docs/ui-architecture.md](docs/ui-architecture.md); rationale, full contracts and the
+eleven CI gates are [11](docs/design/11-ui-components-and-page-model.md). Build or review any UI through the
+[ui-architecture skill](.agents/skills/ui-architecture/SKILL.md). `packages/ui`, `packages/tokens`,
+`packages/api-client` and `apps/site` **do not exist** — a UI gate that audits them is *not run*, not passed.
+
+| # | Rule (one line) | What enforces it |
+| --- | --- | --- |
+| 1 | Components reach the API only through the SDK, with types generated from `apps/control-plane/openapi.yaml`; a hand-written client or a hand-copied DTO is forbidden (#247 at a higher altitude) | `spec:check`, `api:check`, `api:types:check` — all real and green today |
+| 2 | Responsive comes from the **container**, not the window: five layout primitives with a containment matrix, no width `@media`, no `isMobile` prop; every capability reachable at 360 px, desktop adds simultaneity not features | 11 §9.3/§9.7 + parity on `reads` — specified, needs `packages/ui` |
+| 3 | Signals are typed and each declares `retention: 'replay' \| 'transient'` with **no default**; side-effecting or credential-shaped payloads are transient by rule; late-mount tested both ways | 11 §9.4 + the registry tests — specified. No stringly-typed bus, ever |
+| 4 | Drafts are client-only, allowlisted per field, TTL'd, wiped on sign-out and submit, **never synced**, and never able to hold a secret value (D4/D53) | one exported `isValueBearingKey`/`findValueBearingProps` + `packages/page-schema/test/secrets-panel.test.ts` — real today and it now catches credential-shaped names (`token`, `apiKey`, `clientSecret`) it previously missed; the residual limit is that a name test cannot see a secret under a neutral key, stated in [the rules doc](docs/ui-architecture.md#open-gaps-this-file-refuses-to-paper-over) |
+| 5 | Real-time is honest: no push channel exists, so no `EventSource`/`WebSocket`/"live" pill — one SDK freshness primitive and a visible age; polling is never styled as push | `api:check` (the operation cannot hide) + 11 §9.10 — specified |
+| 6 | **Pluggable means build-time, never runtime-loaded**: no dynamic import of UI code, no server-supplied component registry. [10's Tier 2 boundary](docs/design/10-cordis-kernel-and-extension-seams.md#the-collision-and-the-resolution) is a security property (D13/D14) | closed component union + strict `PageSchema` (`packages/page-schema`) — real today; 11 §9.5/§9.6 when the registry lands |
+
+The first `packages/ui` commit is the **contract package and its gates, not a screen**: a gate added after four
+screens exist audits nothing (11 § Consequences for the plan). The seven open `UI-OD` decisions belong to the
+maintainer — an agent does not settle one in code.
 
 ## Authority and scope
 
