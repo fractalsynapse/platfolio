@@ -20,16 +20,44 @@ export type {
 } from './contract.ts';
 export { ContractViolation, declareKnownSignalIds, defineComponent, draftableLeaf } from './contract.ts';
 
-// `consumes`/`produces` are validated against the ids the registry actually holds. Seeded here rather than
-// imported inside contract.ts, because signals.ts must not depend on the contract layer and this module is the
-// one place both are already in scope. A module-load side effect, so it is fixed at build time like everything
-// else in this package (gate §9.6).
+// `consumes`/`produces` are validated against the ids the registry actually holds, and `contract.ts` now reads
+// that table directly: the seeding this file used to do was the only thing making the check work, which meant
+// anything importing `registry.ts` without importing this barrel -- like `scripts/check-ui.ts` -- saw an empty id
+// set and refused every component that declared a signal. Measured; see the note in contract.ts. The call stays
+// for callers outside the package graph that need to describe a platform's own ids.
 import { declareKnownSignalIds } from './contract.ts';
 import { SIGNAL_IDS } from './signals.ts';
 declareKnownSignalIds(SIGNAL_IDS);
 
 export type { ComponentId } from './registry.ts';
 export { componentById, documentProblems, isRegistryImmutable, registeredComponentIds, registrySize, UnknownComponentError } from './registry.ts';
+
+export type {
+  ContextSwitcherProps, FreshnessLabelProps, InstanceDetailProps, InstanceListProps, InstanceRowProps, InstanceStateProps,
+} from './components/instances.tsx';
+export {
+  contextSwitcher, freshnessLabel, INSTANCE_COMPONENTS, instanceDetail, instanceList, instanceRow, instanceState,
+} from './components/instances.tsx';
+export { ROLLUP_IS_NOT_THE_TRUTH, statePresentation, STATE_PRESENTATION, type InstanceState, type StateTone } from './components/instance-state.ts';
+export { ageAt, ageIsDoubtful, ageLabel, STALE_AFTER_SECONDS, transportWord, useClock } from './components/freshness.ts';
+export { fieldLabel, schemaPropertyNames } from './components/props.ts';
+export { AGE_UNKNOWN, STALE_SUFFIX } from './components/copy.ts';
+export {
+  isSelectableEnvironment, SELECTABLE_ENVIRONMENTS, unservedEnvironments,
+  type InstanceDetail, type InstanceEnvironmentRow, type InstanceRow as InstanceRowModel, type LatestAttestation,
+  type SelectableEnvironment, type TeamMembership,
+} from './components/view-models.ts';
+export { COMPONENT_CLASSES, COMPONENT_RULES, isComponentClass, renderComponentCss } from './components/style.ts';
+
+export type { ScreenDocument, ScreenNode } from './screens/screen.ts';
+export {
+  capabilityParityProblems, reachableOperations, renderScreen, screenLayoutTree, screenPlacements, screenSlots,
+} from './screens/screen.ts';
+export { INSTANCE_LIST_SCREEN, SCREENS } from './screens/index.ts';
+export { InstanceListScreen } from './screens/instance-list.tsx';
+
+export type { SignalsProviderProps } from './signals-context.ts';
+export { SignalsContext, SignalsProvider, useEmit, useSignalRetention, useSignalValue, useSignals } from './signals-context.ts';
 
 export type {
   AnySignal, PayloadOf, Retention, RetentionOf, Signal, SignalBus, SignalDeclaration, SignalId, SignalMeta,

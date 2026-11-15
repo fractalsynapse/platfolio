@@ -1,4 +1,5 @@
 import { contractProblems, type AnyComponentContract } from './contract.ts';
+import { contextSwitcher, freshnessLabel, instanceDetail, instanceList, instanceRow, instanceState } from './components/instances.tsx';
 
 /**
  * The component registry — **a security boundary, not a lookup table (D13, D14, D63, gate §9.6).**
@@ -29,12 +30,25 @@ import { contractProblems, type AnyComponentContract } from './contract.ts';
  * The closed set. Adding a component means editing this object, which puts it in a diff, a review and a test —
  * that is the whole mechanism, and it is deliberately not more convenient than that.
  *
- * Empty at this commit **by design**: the first `packages/ui` commit is the contract package and its gates,
- * not a screen (11 § Consequences for the plan). `test/registry.test.ts` therefore asserts the *shape* of the
- * boundary (no mutator export, unknown id refused, frozen map) and the gate reports the component-level checks
- * as having no subject yet rather than as passing.
+ * It was empty on purpose for one commit (11 § Consequences for the plan: a gate added after four screens exist
+ * audits nothing), and it is populated now that the screens have landed. What did **not** change is the shape of
+ * the boundary: still a literal, still no mutator export, still `ComponentId = keyof typeof COMPONENTS`, so a
+ * remote specifier is refused by type as well as by grep. What did change is which gates have a subject: §9.5 now
+ * resolves real ids and re-validates a stored document, and §9.11 has `reads` declarations to compare. Both were
+ * NOT RUN and said so; both run now, and `test/gates-falsify.test.ts` has a mutation for each.
+ *
+ * The keys are the contracts' own `id` strings and `CACHE` below throws when a key and its contract disagree, so
+ * this table cannot quietly become a second list of component names beside the components — #247's shape, one file
+ * down. Six components, each declared in `components/instances.tsx` with its `reads`, `slots` and signal lists.
  */
-const COMPONENTS = {} as const satisfies Record<string, AnyComponentContract>;
+const COMPONENTS = {
+  'context.switcher': contextSwitcher,
+  'freshness.label': freshnessLabel,
+  'instance.detail': instanceDetail,
+  'instance.list': instanceList,
+  'instance.row': instanceRow,
+  'instance.state': instanceState,
+} as const satisfies Record<string, AnyComponentContract>;
 
 export type ComponentId = keyof typeof COMPONENTS;
 

@@ -1,0 +1,65 @@
+/*
+ * GENERATED FILE -- DO NOT EDIT. The writer is `renderComponentCss()` in
+ * packages/ui/src/components/style.ts and it is the only one.
+ *
+ * Source: packages/ui/src/components/style.ts
+ * Input digest: sha256/ced385431d801437
+ *
+ * Reproduce with `pnpm run ui:css`; `pnpm run ui:css:check` fails when this stops matching the module. The
+ * numbers in here are not literals: they reference the custom properties in ../tokens.css, which is what makes
+ * 11 §8's hit-target floor a token fact rather than a duplicated measurement (D63). No width `@media` query
+ * appears in this file -- a threshold belongs to a layout primitive's `@container` rule, and gate §9.3 audits
+ * both sheets for the difference.
+ */
+
+/* 11 §8: the primary surface is the phone, so a row, a select and the action a person aims at are 44 CSS px before anything else is decided. */
+.ui-hit-primary {
+  box-sizing: border-box;
+  min-inline-size: var(--ui-target-primary);
+  min-block-size: var(--ui-target-primary);
+}
+
+/* Secondary controls clear WCAG 2.2 §2.5.8 at 24 px with 8 px between, which is the floor 11 §8 states rather than a number invented here. */
+.ui-hit-secondary {
+  box-sizing: border-box;
+  min-inline-size: var(--ui-target-secondary);
+  min-block-size: var(--ui-target-secondary);
+  gap: var(--ui-gap-secondary);
+}
+
+/* Rule 5: the age label is load-bearing, not caption decoration, and `textMuted` on `surface` is a listed contrast pair rather than a grey someone picked. */
+.ui-age {
+  color: var(--ui-color-textMuted);
+}
+
+/* An observation older than the interval that keeps it current changes colour *and* keeps its words: 11 §8 says an error is never colour alone, and neither is a doubt. */
+.ui-age--doubtful {
+  color: var(--ui-color-warn);
+}
+
+/* The row list is a `ul` for the screen reader and a plain column for the layout; resetting the marker is the only way both are true at once. */
+.ui-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* The state word is text on purpose. Tone arrives as a word first and a colour second, which is the difference between a state and a dot. */
+.ui-state {
+  color: var(--ui-color-text);
+}
+
+/* The selected row is marked by an edge and by `aria-current`, not by colour alone. */
+.ui-selected {
+  border-inline-start: 0.25rem solid var(--ui-color-accent);
+}
+
+/* The explanation that belongs to a screen reader and not to the layout. 11 §8: errors are text, never colour alone -- and some of that text has to be said without pushing a column apart. */
+.ui-sr-only {
+  inline-size: 1px;
+  block-size: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  position: absolute;
+  white-space: nowrap;
+}

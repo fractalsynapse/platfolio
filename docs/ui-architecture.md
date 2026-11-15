@@ -33,7 +33,7 @@ table for long.
 | `packages/api-contract/src/generated/types.ts` | **real** — generated from that spec, byte-for-byte gated by `api:types:check` |
 | `packages/page-schema/` (`page.ts`, `secrets-panel.ts`, `binding-panel.ts`, `project-text.ts`) | **real** — pages as data, the build-time component registry, `findValueBearingProps`, with tests |
 | browser-auth plumbing beside the API | **real** — `PLATFOLIO_ALLOWED_ORIGINS` feeds CORS and the `platfolio-web` PKCE client's `<origin>/callback` redirect URIs, tested by `apps/control-plane/test/cors.test.ts`. So rule 1's "the endpoint is configuration, not a literal" already has a gate on the server half |
-| `packages/ui` — **exists since 2026-11-15** (component contract, design tokens per D63 as CSS custom properties with `tokens.css` generated from `tokens.ts`, the five layout primitives, the signals registry, the SDK seam, 19 gates) and holds **no screens**; `packages/api-client`, `apps/site`, any web UI | **do not exist.** Everything in this file that names them is **specified**, not delivered. D63 decided what `packages/ui` will contain, not that it exists |
+| `packages/ui` — **exists since 2026-11-15** (component contract, design tokens per D63 as CSS custom properties with `tokens.css` generated from `tokens.ts`, the five layout primitives, the signals registry, the SDK seam) and **since #259 has its first screens**: six registered `.tsx` components, one screen document, `packages/ui/tsconfig.json` with `jsx` + `DOM`, 20 gates of which 17 pass and 3 report NOT RUN. `packages/api-client`, `apps/site`, any web UI | **do not exist.** Everything in this file that names them is **specified**, not delivered. The screens are components, not a runnable site: nothing mounts them (UI-OD1 is still open) |
 | the layout, signal, draft and freshness gates (11 §9.2–§9.10) | **specified, and unrunnable today** — there is no UI source for them to audit. They must land *with* the first `packages/ui` commit, not after it |
 
 So the enforcement story per rule is always two halves: the gate that bites today, and the gate that is
@@ -89,12 +89,13 @@ window; and a narrow screen is missing nothing but simultaneity.
 - **MUST NOT** use `@media (width …)` for component behavior (`prefers-*` is the only window input a component
   may read), and **MUST NOT** carry an `isMobile` / `compact` / `desktop` prop.
 
-**Enforced by.** Specified as 11 §9.3 (no width queries, no fork props, every primitive declares its
-container), §9.7 (same-slot matrix: each component renders in each declared slot at 320 px and 1280 px, no
-variant fork in source) and 11 §2 acceptance (d) (the set of `OperationId`s reachable from a screen's
-components at 360 px equals the set at 1920 px). **None of these runs today**: there is no `packages/ui` to
-grep. A reviewer's interim check is behavioral — open the screen at 360 px and confirm nothing is absent
-(R1).
+**Enforced by.** `ui:check` §9.3 runs today, over `.ts` **and** `.tsx` and over all three generated stylesheets
+(tokens, layout, components). §9.11 runs today per screen document: the floor degradation is a `floorSlots` field
+on each primitive, so "the set of `OperationId`s reachable from a screen's components at 360 px equals the set
+reachable at 1920 px" is arithmetic over declared `reads`, and it names the component and the operation when they
+differ. §9.7 (each component rendered in each declared slot at 320 px and 1280 px, in a browser) is **NOT RUN** —
+the components exist now, the containers do not. A reviewer's interim check stays behavioral: open the screen at
+360 px and confirm nothing is absent (R1).
 
 **What breaking it costs.** No UI screen exists yet, so there is no incident in this repository's UI history
 — say so plainly rather than borrowing one. The mechanism that breaks is documented in 11 §2: a window
@@ -243,9 +244,14 @@ side where a human acts on it.
 **Enforced by.** Today, real: `packages/page-schema`'s strict schemas and closed component union —
 `packages/page-schema/test/secrets-panel.test.ts` asserts "unknown components are refused by the page schema"
 and "the registry covers every declared component name and nothing else", and a page that tries to carry a
-secret value fails validation instead of rendering it. Specified as 11 §9.5–§9.6 (registration must resolve;
-no dynamic import of non-first-party URLs; a fixture that re-renders *yesterday's* stored page document and
-fails loudly on an unknown id). 11 §9.6 calls itself "gate #247 for the security line at the top".
+secret value fails validation instead of rendering it. Both §9.5 and §9.6 **run today** as of #259: §9.6 audits
+the build-time registry (no mutator export, no dynamic import, no remote specifier, no compiled-at-runtime code),
+and §9.5 resolves six real ids, re-validates a stored page document, and refuses five invalid prop sets. Two
+invalid prop sets are **named-accepted** and reported in the gate's own output, because props validation checks
+the *kind* of an enumerated field and not its membership — `components/props.ts` states the three routes that led
+there and the two that would close it. What §9.5 still cannot do is re-render a document from a previous
+*release*: this registry has had none, so the load-bearing half is the refusal path, and the gate says so rather
+than counting the fixture as proof. 11 §9.6 calls itself "gate #247 for the security line at the top".
 
 **What breaking it costs.** An in-process extension shares the heap of the user's session; 11 names it exactly
 ("cross-tenant XSS with a nicer name") and 10 § The collision gives the arithmetic: a runtime-hot-loading
@@ -399,7 +405,7 @@ moved while this file was being written, and it is worth keeping as evidence for
 | `npx -y tsc --noEmit -p tsconfig.json` | 0 | the tree type-checks (it exited 2 earlier in this same session on another agent's in-flight test edit — see the note above, and [§ Open gaps](#open-gaps-this-file-refuses-to-paper-over) item 4 on why numbers age) |
 | `pnpm run verify` | 1, **before running any gate** | `ERR_PNPM_STORE_DIR_OPEN_OPERATION_LOCK … Read-only file system` — the wrapper cannot lock its engine store in this sandbox, so each gate above was executed directly instead. [MAINTAINING § If `pnpm run <script>` fails before running anything](MAINTAINING.md#if-pnpm-run-script-fails-before-running-anything) records this and says CI is unaffected. Reporting it as a failed gate would be the wrong honesty |
 
-Rules 2, 3, 4's UI half, and 5–6's UI half gained their first runnable gates on 2026-11-15 (`ui:check`: 19 gates, 14 pass, 0 fail, 5 NOT RUN), because `packages/ui`,
+Rules 2, 3, 4's UI half, and 5–6's UI half gained their first runnable gates on 2026-11-15, and #259 took two of the five NOT RUN rows off the list by putting screens in the registry (`ui:check` today: 20 gates, 17 pass, 0 fail, 3 NOT RUN — §9.7 needs browser containers, §9.8 needs axe and a layout engine, §9.9 needs the draft store). The remaining reason is not that `packages/ui`,
 `packages/api-client` and `apps/site` do not exist. 11's consequence is the actual
 enforcement for now, and it is worth repeating here because it is the one thing that stops the drift: **the
 first `packages/ui` commit is the contract package — `contract.ts`, `layout.ts`, `signals.ts` and gates

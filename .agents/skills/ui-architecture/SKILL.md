@@ -13,12 +13,22 @@ auth posture are [07](../../../docs/design/07-interfaces-api-mcp-mobile.md); the
 
 ## What exists before you start (measured)
 
-`packages/ui` (D63, 2026-11-15: it will hold ALL reusable components **and** design tokens as CSS custom
-properties — there is no `packages/tokens`) **now exists** with contracts, tokens, layout primitives, signals, the SDK seam and `ui:check` (19 gates; 5 report NOT RUN), **and no screens**; `packages/api-client` and `apps/site` **do not exist**. Real
+`packages/ui` (D63, 2026-11-15: it holds ALL reusable components **and** design tokens as CSS custom
+properties — there is no `packages/tokens`) **now exists** with contracts, tokens, layout primitives, signals, the
+SDK seam and `ui:check` — **and since #259 it has its first screens**: six registered `.tsx` components and one
+screen document (`packages/ui/src/components/instances.tsx`, `packages/ui/src/screens/`). `ui:check` today:
+20 gates, 17 pass, 0 fail, 3 NOT RUN — §9.7 (same-slot matrix) needs browser containers, §9.8 (a11y floor) needs
+axe and a layout engine, §9.9 (draft contract) needs `src/web/drafts.ts`. A gate that cannot run reports
+**NOT RUN**, never passed, and its output names the missing subject.
+
+Screens are type-checked because `packages/ui/tsconfig.json` declares `jsx: react-jsx` and `lib` with `DOM`, and
+`npm run typecheck` runs **both** that project and the DOM-free root one: `document` in `packages/contracts` or
+`apps/control-plane` is still TS2584, and `scripts/check-project.ts` fails if a source file is claimed by no
+type-check project, by two, or by one without `jsx`. `packages/api-client` and `apps/site` **do not exist** —
+nothing mounts the screens (UI-OD1 is open), so a gate that audits a shell is *not run*, not passed. Real
 today: `apps/control-plane/openapi.yaml` (request/response only, no push channel — re-check with the grep
-below; D64 makes building toward push *required*, shipping on `poll` *current*), `packages/api-contract`'s
+below; D64 makes building toward push *required*, shipping on `poll` *current`), `packages/api-contract`'s
 generated types, and `packages/page-schema` (pages as data, `buildSecretsPanel`, `findValueBearingProps`).
-So a UI gate that audits `packages/ui` cannot run yet: report it **not run**, never passed.
 
 ## The six rules, compressed
 
@@ -79,7 +89,9 @@ An agent who resolves an open one in code has made a decision the project has no
 reviews; an agent who re-litigates a closed one has done the same against a decision that *has* been made:
 
 - **UI-OD3 — native vehicle** (RN / Capacitor / Tauri / web-only). Build to the contracts; choose nothing.
-- **UI-OD1 — Astro islands vs a plain React mount** for the dashboard shell.
+- **UI-OD1 — Astro islands vs a plain React mount** for the dashboard shell. The screens in `packages/ui` are
+  shell-agnostic on purpose: `renderScreen(screenDocument, propsFor)` resolves ids through the build-time
+  registry, and `InstanceListScreen` needs an `SdkContext` and a `SignalsContext` from whoever mounts it.
 - **UI-OD5 — replay-from-store as the pattern for context signals**, with transient mandatory elsewhere.
 - **UI-OD4 — the draft retention numbers** (7-day TTL, wipe-on-sign-out posture). Implement the mechanics,
   leave the numbers as the open question.

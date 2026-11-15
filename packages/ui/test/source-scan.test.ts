@@ -104,6 +104,37 @@ test('stripCssComments removes only comments and keeps the newlines', () => {
   assert.equal(out.split('\n').length, css.split('\n').length);
 });
 
+test('a quote inside a regex character class does not open a string', () => {
+  // The defect this pins, measured rather than imagined: `['"]` used to be read as the start of a string, so the
+  // scanner swallowed the rest of the file and a gate reported blanked code as code it had cleared. Silence is
+  // the expensive direction, which is why both halves are asserted.
+  const src = 'const re = /x[\'"`]/g;\nconst label = "fetch(x)";\nexport const f = (): unknown => fetch(y);\n';
+  const out = stripComments(src);
+  assert.ok(out.includes('fetch(y)'), 'code after a quote-in-regex was erased -- the mode leaked and every later gate on this file is blind');
+  assert.ok(!out.includes('fetch(x)'), 'the string body survived the strip, so prose naming a call reads as a call');
+  assert.ok(out.includes('/x['), 'the regex literal itself disappeared -- it is code, and a gate reading a pattern table must still see the pattern');
+  assert.equal(out.split('\n').length, src.split('\n').length, 'line count shifted, so reported line numbers would lie');
+});
+
+test('a division is not mistaken for the start of a regex', () => {
+  // The other direction. Read `/` after a value as a literal and the scanner runs forward hunting for a closing
+  // slash through text that has none, which is how real strings stop being blanked.
+  const src = 'const half = width / 2;\nconst ratio = (a) / (b);\nconst label = "window.location";\nconst w = window.location;\n';
+  const out = stripComments(src);
+  assert.ok(out.includes('window.location;'), 'real code after a division was erased');
+  assert.ok(!out.includes('"window.location"'), 'the string body survived, so a division made the scanner blind to literals');
+  assert.equal(out.length, src.length, 'character offsets shifted');
+});
+
+test('a slash at the end of a line is division, not an unterminated regex', () => {
+  // readRegex() refuses when it reaches a newline before the closing slash. Without that refusal, `b /` would
+  // consume the following lines looking for a terminator that never comes.
+  const src = 'const a = b /\n  c;\nconst label = "indexedDB.open";\nconst d = indexedDB.open(name);\n';
+  const out = stripComments(src);
+  assert.ok(out.includes('indexedDB.open(name)'), 'a trailing slash consumed the code after it');
+  assert.ok(!out.includes('"indexedDB.open"'), 'the string body survived');
+});
+
 test('the scanner is idempotent', () => {
   const src = 'const a = `x ${y} z`; // c\n/* b */ const d = "e";\n';
   const once = stripComments(src);
@@ -133,3 +164,27 @@ test('it survives the real files in packages/ui without erasing their code', () 
 
 const ROOT = path.resolve(import.meta.dirname, '../../..');
 const readFileSync = (rel: string): string => fs.readFileSync(path.join(ROOT, 'packages/ui', rel), 'utf8');
+
+test('it survives the scripts that read it -- where the desync actually lived', () => {
+  // #259 moved these three files into the DOM-enabled project and gate TS0 now reads them through this scanner.
+  // Their pattern tables contain `['"]` inside regular-expression literals, which is exactly the shape that used
+  // to open string mode and swallow the rest of the file. Measured, not theorised: with the old scanner TS0
+  // reported the gate's own pattern table as a browser-global violation, and the labels beside the patterns --
+  // `'document.'`, `'window.'` -- were visible as code. A gate that cannot tell its own source from its subject
+  // is a gate that gets widened, and then switched off.
+  const rels = ['scripts/check-ui.ts', 'scripts/gen-ui-css.ts', 'scripts/ui-source-scan.ts'];
+  const declarations = (text: string): number => (text.match(/^export\s(?:const|function|class|interface|type|enum)\b/gm) ?? []).length;
+  for (const rel of rels) {
+    const src = fs.readFileSync(path.join(ROOT, rel), 'utf8');
+    const out = stripComments(src);
+    assert.equal(declarations(out), declarations(src), `${rel}: a declaration vanished -- the scanner lost sync and every gate reading this file under-reports`);
+    assert.equal(stripComments(out), out, `${rel}: the strip is not idempotent over this file, so a mode is leaking`);
+    for (const label of ["'document.'", "'window.'", "'localStorage.'", "'indexedDB.'", "'navigator.'"]) {
+      assert.ok(!out.includes(label), `${rel}: the label ${label} survived the strip, so its body was read as code and the gate fires on itself`);
+    }
+    // The pattern must survive: blanking the scanner's own regex source would make every rule below it vacuous.
+    if (rel === 'scripts/check-ui.ts') {
+      assert.ok(out.includes('/\\bdocument\\s*\\./g'), `${rel}: the FORBIDDEN_OUTSIDE_WEB pattern disappeared -- code was erased, not comments`);
+    }
+  }
+});

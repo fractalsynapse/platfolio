@@ -2,7 +2,7 @@
  * GENERATED FILE -- DO NOT EDIT. The writer is `renderLayoutCss()` in packages/ui/src/layout/primitives.ts.
  *
  * Source: packages/ui/src/layout/primitives.ts
- * Input digest: sha256/65965e16989535ca
+ * Input digest: sha256/dcbcce4d631820a8
  *
  * Reproduce with `pnpm run ui:css`; `pnpm run ui:css:check` fails when this stops matching the primitive
  * table. Gate 9.3 audits this file too: it contains `@container` width queries and no `@media` width query,

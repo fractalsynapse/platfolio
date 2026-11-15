@@ -141,6 +141,49 @@ const MUTATIONS: readonly Mutation[] = [
     append: '\nexport const liveLabel = (): string => "live";\n',
     expect: /a push-implying state word/,
   },
+  /* ---------------------------------------------------------------- the #259 screens */
+  {
+    // The walk that used to be `.ts`-only. Every grep gate reads through `listSources`, so if it skipped `.tsx`
+    // the gates would have scanned 13 files, reported PASS, and never looked at a screen. This is the mutation
+    // that says whether the extension to `.tsx` is real or decorative.
+    gateId: '9.2',
+    label: 'a fetch in a .tsx component',
+    file: 'packages/ui/src/components/instances.tsx',
+    append: '\nexport const __rogueFetchTsx = (): unknown => fetch("/api/v1/instances");\n',
+    expect: /transport surface `fetch\(`/,
+  },
+  {
+    gateId: '9.3',
+    label: 'an isMobile prop in a .tsx component',
+    file: 'packages/ui/src/components/instances.tsx',
+    append: '\nexport interface __ForkTsx { readonly isMobile: boolean }\n',
+    expect: /fork prop or window query `isMobile`/,
+  },
+  {
+    gateId: '9.4',
+    label: 'an addEventListener in a .tsx component',
+    file: 'packages/ui/src/components/instances.tsx',
+    append: '\nexport const __wireTsx = (el: EventTarget): void => { el.addEventListener("x", () => undefined); };\n',
+    expect: /raw event mechanism `addEventListener\(`/,
+  },
+  {
+    // §9.5's refusal path, weakened from the other side: make one of the "invalid" prop sets actually valid and
+    // the gate must notice that the case it claims to refuse no longer refuses anything.
+    gateId: '9.5',
+    label: 'a fixture violation that stops being a violation',
+    file: 'packages/ui/test/fixtures/page-documents.ts',
+    append: '\n(BAD_PROPS as unknown as { label: string; page: { component: string; props: Record<string, unknown> }[] })\n  .find((bad) => bad.label === "no instances at all")!\n  .page.props.instances = SAMPLE_INSTANCES;\n',
+    expect: /no instances at all .* was ACCEPTED|was ACCEPTED -- §9\.5/,
+  },
+  {
+    // TS0 pays the price of checking the gate scripts under `DOM`. If it does not fire on a browser global in
+    // `scripts/check-ui.ts`, that price is being paid by nobody.
+    gateId: 'TS0',
+    label: 'a window touch in the gate script itself',
+    file: 'scripts/check-ui.ts',
+    append: '\nexport const __probeWidth = (): number => window.innerWidth;\n',
+    expect: /browser global `window\.` in a Node script/,
+  },
 ];
 
 /**
@@ -333,6 +376,80 @@ test('the boundary path is stated once, in the package that owns it (D63)', () =
   assert.match(gate, /import \{ WEB_BOUNDARY_DIR \} from '\.\.\/packages\/ui\/src\/web\/index\.ts'/);
   assert.match(owner, /export const WEB_BOUNDARY_DIR = 'packages\/ui\/src\/web';/);
   assert.ok(!/const WEB_BOUNDARY = 'packages\/ui\/src\/web\/?'/.test(gate), 'the gate hardcodes the boundary path again');
+});
+
+test('rule 5\'s state-word grep is real in both directions: it permits aria-live and refuses the pill', () => {
+  // 11 §8 mandates `aria-live="polite"` on a region that updates from a signal, and the same gate refuses the word
+  // when it claims liveness. Those two rules collide unless the grep knows the difference, and a grep that fires on
+  // the mandated attribute is one that gets widened until it fires on nothing. Both halves, one test -- the same
+  // shape as the `web/` allowlist check below it.
+  const target = path.join(ROOT, 'packages/ui/src/components/copy.ts');
+  const original = fs.readFileSync(target);
+  try {
+    fs.appendFileSync(target, '\nexport const __politeMarkup = \'<ul aria-live="polite" role="list">x</ul>\';\n');
+    const permitted = runGate('R5');
+    assert.equal(permitted.code, 0, `the mandated a11y attribute was refused:\n${permitted.output.slice(-700)}`);
+  } finally {
+    fs.writeFileSync(target, original);
+    assert.ok(original.equals(fs.readFileSync(target)), 'copy.ts not restored');
+  }
+  try {
+    fs.appendFileSync(target, '\nexport const __pill = (): string => "live";\n');
+    const refused = runGate('R5');
+    assert.equal(refused.code, 1, 'a copy-level liveness claim was permitted -- the narrowing swallowed the rule too');
+    assert.match(refused.output, /a push-implying state word/);
+  } finally {
+    fs.writeFileSync(target, original);
+    assert.ok(original.equals(fs.readFileSync(target)), 'copy.ts not restored after the refusal case');
+  }
+});
+
+test('§9.11 is real in both directions: it permits a component with a floor home and refuses one without', () => {
+  // The parity gate has one job: a capability that exists only when wide must fail the build. A check that refuses
+  // everything would satisfy the mutation above and be switched off within a week, so the permit side is asserted
+  // against the same declaration the refusal reads.
+  const clean = runGate('9.11');
+  assert.equal(clean.code, 0, `the honest screen was refused:\n${clean.output.slice(-700)}`);
+  assert.match(clean.output, /reachable at both widths/);
+
+  const target = path.join(ROOT, 'packages/ui/src/components/instances.tsx');
+  const original = fs.readFileSync(target);
+  try {
+    // Give the list a slots list that cannot be a sheet, and its `reads` become reachable only when wide.
+    // The detail pane is the component the screen places in the split's detail track, and `popout-sidebar`
+    // projects its content to `overlay-sheet` at the floor. Take that slot away and its two operations become
+    // reachable only when the container is wide -- the defect §9.11 exists for.
+    //
+    // The first version of this case removed `overlay-sheet` from `instance.list` instead and did not bite, which
+    // was the test's error rather than the gate's: the list is placed in a `stack`, whose floor home it still
+    // declared, so there was no violation to find. A mutation that cannot fail is not a falsification.
+    fs.writeFileSync(target, original.toString().replace(
+      "  slots: ['overlay-sheet', 'popout-sidebar', 'stack', 'full-page'],",
+      "  slots: ['popout-sidebar', 'stack', 'full-page'],",
+    ));
+    assert.notEqual(fs.readFileSync(target, 'utf8'), original.toString(), 'the mutation changed nothing, so this case proves nothing');
+    const { code, output } = runGate('9.11');
+    assert.equal(code, 1, 'a wide-only capability was accepted -- §9.11 is decoration');
+    assert.match(output, /no floor home|reachable only when wide/);
+  } finally {
+    fs.writeFileSync(target, original);
+    assert.ok(original.equals(fs.readFileSync(target)), 'instances.tsx not restored');
+  }
+});
+
+test('the primitive table cannot lose its floor home without §9.11 saying which primitive', () => {
+  const target = path.join(ROOT, 'packages/ui/src/layout/primitives.ts');
+  const original = fs.readFileSync(target);
+  try {
+    fs.writeFileSync(target, original.toString().replace("    floorSlots: ['overlay-sheet'],\n    containerType: 'inline-size',\n    mayContain: ['stack'],", "    floorSlots: [],\n    containerType: 'inline-size',\n    mayContain: ['stack'],"));
+    assert.notEqual(fs.readFileSync(target, 'utf8'), original.toString(), 'the mutation changed nothing');
+    const { code, output } = runGate('9.11');
+    assert.equal(code, 1, 'a primitive with no floor home at all was accepted');
+    assert.match(output, /no floor home for their content/);
+  } finally {
+    fs.writeFileSync(target, original);
+    assert.ok(original.equals(fs.readFileSync(target)), 'primitives.ts not restored');
+  }
 });
 
 test('nothing was left behind: every mutated file is byte-identical to how it was found', () => {

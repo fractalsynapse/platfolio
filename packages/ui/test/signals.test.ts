@@ -274,3 +274,56 @@ test('makeSignal refuses a missing retention even when the compiler is not in th
   const explicitUndefined = { name: 'x', payload: z.object({ a: z.string() }).strict(), retention: undefined } as unknown as Parameters<typeof makeSignal>[0];
   assert.throws(() => makeSignal(explicitUndefined), /must be "replay" or "transient"/);
 });
+
+/* ------------------------------------------------------------------ peek: the store read behind a first render */
+
+test('peek hands a replay signal\'s last value to a reader that never subscribed', () => {
+  // 11 §3 acceptance (d) on the render path needs a *synchronous* read: `useSignalValue` takes its initial value
+  // from here, because an effect-registered subscription arrives one commit late and a server render has no next
+  // commit. This is the addition to §3's `SignalBus` shape, so it gets the same both-directions testing the
+  // subscription path has.
+  const bus = createSignalBus();
+  const payload = { teamSlug: 'fractalsynapse', instanceId: '01INSTANCEWEB', environment: 'production' } as const;
+  bus.emit('context.switched', payload);
+  assert.deepEqual(bus.peek('context.switched'), payload);
+  // The read agrees with what a late subscriber is handed -- two doors, one value, no second store.
+  const seen: unknown[] = [];
+  bus.subscribe('context.switched', (value) => seen.push(value));
+  assert.deepEqual(seen, [bus.peek('context.switched')], 'subscribe replay and peek disagree');
+});
+
+test('peek returns null for a transient signal that has already fired, and says why', () => {
+  const bus = createSignalBus();
+  bus.emit('instance.state-changed', { instanceId: '01INSTANCEWEB', environment: 'production', from: 'pending', to: 'degraded' });
+  // Not "the last value, quietly": a transient payload re-fired into a late render is the double action 11 §3
+  // cost 2 names. The null *is* the retention decision, read back.
+  assert.equal(bus.peek('instance.state-changed'), null);
+  assert.equal(bus.retentionOf('instance.state-changed'), 'transient');
+});
+
+test('peek on nothing stored is null, not undefined and not a throw', () => {
+  const bus = createSignalBus();
+  assert.equal(bus.peek('overlay.changed'), null, 'a replay signal with no emit yet must read as "nothing to replay"');
+});
+
+test('peek refuses an id the table does not hold, in the same words as emit', () => {
+  // Answering `null` here would let a stale signal id read as "no context selected" forever -- the
+  // `UnknownSignalError` refusal is the only answer that sends someone to the table.
+  const bus = createSignalBus();
+  assert.throws(() => bus.peek('context.changed' as 'context.switched'), UnknownSignalError);
+  assert.throws(() => bus.peek('context.changed' as 'context.switched'), /Add a table entry to packages\/ui\/src\/signals\.ts/);
+});
+
+test('what peek returns is the validated copy, not the emitter\'s object', () => {
+  // The claim I came here to test was "peek re-validates, so a mutated store cannot reach a render". The
+  // measurement says something better and different: the store never held the caller's object at all -- `emit`
+  // validates and keeps the parsed copy, so mutating the input afterwards changes nothing a reader sees. That is
+  // the honest assertion, and it is the one that would notice if a future `emit` started storing the reference.
+  // peek's own re-validation still runs, and stays as defence in depth for exactly that change.
+  const bus = createSignalBus();
+  const mutable: { teamSlug: string; instanceId: string | null; environment: 'production' } = { teamSlug: 'fractalsynapse', instanceId: null, environment: 'production' };
+  bus.emit('context.switched', mutable);
+  (mutable as { teamSlug: string }).teamSlug = '';
+  assert.deepEqual(bus.peek('context.switched'), { teamSlug: 'fractalsynapse', instanceId: null, environment: 'production' },
+    'the emitter kept a reference into the replay store, so a mutation would now be visible to every later reader');
+});

@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { componentById, documentProblems, isRegistryImmutable, registeredComponentIds, registrySize, UnknownComponentError } from '../src/registry.ts';
+import { SAMPLE_PROPS } from './fixtures/page-documents.ts';
 
 /**
  * Gates §9.5 and §9.6 as executable claims about a registry that is deliberately **empty**.
@@ -41,8 +42,28 @@ test('registeredComponentIds is derived from the table, not a list beside it', (
   // Whatever the count is today, it must equal what the registry can actually resolve. This is the assertion
   // that stops a second list of component names from being maintained beside the table (#247's shape).
   for (const id of ids) assert.equal(componentById(id).id, id);
+
+  // The claim this test used to make -- `const COMPONENTS = {}` -- was a claim about an empty table, and the table
+  // is no longer empty (#259's screens are the point). Asserting the emptiness would have been asserting the old
+  // state of the world; the property that was ever worth holding is that the *keys in the source literal* are the
+  // ids the module reports, read off the source rather than from a second list maintained in this file.
   const source = fs.readFileSync(path.join(ROOT, 'packages/ui/src/registry.ts'), 'utf8');
-  assert.match(source, /const COMPONENTS = \{\}/, 'the closed table moved; update this test and the claim about what is registered');
+  const table = source.slice(source.indexOf('const COMPONENTS = {'), source.indexOf('} as const satisfies'));
+  assert.ok(table.length > 'const COMPONENTS = {'.length, 'the closed table moved; update this test and the claim about what is registered');
+  const keys = [...table.matchAll(/^\s*'([^']+)':/gm)].map((m) => m[1] as string);
+  assert.deepEqual([...ids].sort(), [...keys].sort(), 'the ids the module reports are not the keys in the source table');
+  assert.ok(ids.length >= 1, 'the registry is empty again: the gates that read it are reporting NOT RUN, and this test is the tripwire that says so');
+});
+
+test('every registered id resolves through the same table that §9.5 refuses an unknown id against', () => {
+  // The pair to the assertion above: a table that lists an id `componentById` cannot resolve would be a second
+  // description of the registry, and the refusal path would be the only honest one.
+  const ids = registeredComponentIds();
+  assert.ok(ids.length > 0, 'no ids to check; the claim below is vacuous until the registry has a component');
+  for (const id of ids) {
+    assert.equal(componentById(id).id, id);
+    assert.deepEqual(documentProblems({ component: id, props: SAMPLE_PROPS[id] }), [], `${id} does not accept its own fixture props`);
+  }
 });
 
 /* ------------------------------------------------------------------ §9.6: the security line */

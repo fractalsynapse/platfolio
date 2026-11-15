@@ -24,6 +24,18 @@ export const LAYOUT_SLOTS = ['stack', 'split', 'popout-sidebar', 'overlay-sheet'
 
 export interface LayoutPrimitive {
   readonly slot: LayoutSlot;
+  /**
+   * Which slots this primitive's content can land in when its container is at the floor width -- the
+   * single-column case, where nothing may be lost. 11 §2 states each one in prose ("never two-up; it degrades
+   * to a stack plus a push", "becomes a bottom sheet"); gate §9.11 cannot read prose, and a capability
+   * reachable only when wide is what §2 calls a spec violation. So the degradation is a *field*, and
+   * `floorProjection()` is the one function that asks it.
+   *
+   * A list rather than one slot, because `split` has two tracks: the master column stays a stack and the
+   * detail is pushed as a sheet. An empty list is unrepresentable on purpose -- a primitive whose content has
+   * no floor home has no honest answer to "what does the phone user get".
+   */
+  readonly floorSlots: readonly LayoutSlot[];
   /** The class `layout.css` attaches the container to. One spelling, so no consumer may invent another. */
   readonly className: `ui-${string}`;
   /**
@@ -72,6 +84,7 @@ export const PRIMITIVES = {
   stack: {
     slot: 'stack',
     className: 'ui-stack',
+    floorSlots: ['stack'],
     containerType: 'inline-size',
     mayContain: ['stack'],
     mustNotContain: ['overlay-sheet', 'split', 'popout-sidebar', 'full-page'],
@@ -83,6 +96,7 @@ export const PRIMITIVES = {
   split: {
     slot: 'split',
     className: 'ui-split',
+    floorSlots: ['stack', 'overlay-sheet'],
     containerType: 'inline-size',
     mayContain: ['stack', 'popout-sidebar'],
     mustNotContain: ['split', 'overlay-sheet', 'full-page'],
@@ -94,6 +108,7 @@ export const PRIMITIVES = {
   'popout-sidebar': {
     slot: 'popout-sidebar',
     className: 'ui-popout',
+    floorSlots: ['overlay-sheet'],
     containerType: 'inline-size',
     mayContain: ['stack'],
     // An overlay-sheet is refused because a sheet is page-level by rule. `popout-sidebar` in a sidebar is the
@@ -109,6 +124,7 @@ export const PRIMITIVES = {
   'overlay-sheet': {
     slot: 'overlay-sheet',
     className: 'ui-sheet',
+    floorSlots: ['overlay-sheet'],
     containerType: 'inline-size',
     // A sheet may host a stack (its body) and one nested sheet — depth <= 2 per the matrix.
     mayContain: ['stack', 'overlay-sheet'],
@@ -122,6 +138,7 @@ export const PRIMITIVES = {
   'full-page': {
     slot: 'full-page',
     className: 'ui-page',
+    floorSlots: ['full-page'],
     containerType: 'inline-size',
     mayContain: LAYOUT_SLOTS,
     mustNotContain: [],
@@ -133,6 +150,43 @@ export const PRIMITIVES = {
 } as const satisfies Record<LayoutSlot, LayoutPrimitive>;
 
 export const LAYOUT_PRIMITIVE_SLOTS = Object.keys(PRIMITIVES) as LayoutSlot[];
+
+/**
+ * Where the content of `slot` still lives when its container is at the floor width. The one implementation of
+ * that question, so a gate, a screen and a test cannot each hold their own guess at "what the phone gets".
+ *
+ * Transitive, because a `split` inside a `full-page` degrades through the `split`'s own rule and stops there:
+ * the projection is a property of the primitive, not of how deep it sits.
+ */
+export function floorProjection(slot: LayoutSlot): readonly LayoutSlot[] {
+  return PRIMITIVES[slot].floorSlots;
+}
+
+/**
+ * The slots a component may be asked to render in when the whole composition is at the floor width: every
+ * primitive reachable from `root`, projected through its own `floorSlots`. This is the set gate §9.11 compares
+ * a screen's placements against -- 11 §2 acceptance (d) stated as data rather than as a reviewer's impression.
+ *
+ * From `full-page` the answer is `stack`, `overlay-sheet` and `full-page`: the column, the pushed sheet, and
+ * the route. `split` and `popout-sidebar` are absent because at 360 px they are not there to be in -- which is
+ * precisely why a component whose only declared slot is `split` would be a capability that exists only when
+ * wide, and why the gate refuses that placement rather than screenshotting it.
+ */
+export function floorSlotsReachableFrom(root: LayoutSlot): LayoutSlot[] {
+  const reachable = new Set<LayoutSlot>();
+  const open: LayoutSlot[] = [root];
+  while (open.length > 0) {
+    const slot = open.pop() as LayoutSlot;
+    if (reachable.has(slot)) continue;
+    reachable.add(slot);
+    for (const child of PRIMITIVES[slot].mayContain) open.push(child);
+  }
+  const homes = new Set<LayoutSlot>();
+  for (const slot of reachable) {
+    for (const home of PRIMITIVES[slot].floorSlots) homes.add(home);
+  }
+  return [...homes].sort() as LayoutSlot[];
+}
 
 export class ContainmentError extends Error {
   readonly slot: LayoutSlot;

@@ -39,9 +39,26 @@ import { LAYOUT_PRIMITIVE_SLOTS, LAYOUT_SLOTS, PRIMITIVES } from '../packages/ui
 import { REPLAY_SIGNAL_IDS, SIGNAL_IDS } from '../packages/ui/src/signals.ts';
 import { componentById, documentProblems, registeredComponentIds } from '../packages/ui/src/registry.ts';
 import { WEB_BOUNDARY_DIR } from '../packages/ui/src/web/index.ts';
+import { capabilityParityProblems, reachableOperations, screenPlacements } from '../packages/ui/src/screens/screen.ts';
+import { SCREENS } from '../packages/ui/src/screens/index.ts';
+import type { ScreenDocument } from '../packages/ui/src/screens/screen.ts';
+import { ACCEPTED_BUT_WRONG, BAD_PROPS, SAMPLE_PROPS, STORED_DOCUMENT } from '../packages/ui/test/fixtures/page-documents.ts';
 import { lineOf, stripComments, stripCssComments } from './ui-source-scan.ts';
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+
+/**
+ * The screen list and the primitive floor homes, read through their *declared* types rather than the literal
+ * tuples the compiler infers from `as const`.
+ *
+ * Both reads have a branch that is currently empty -- "no screens declared", "a primitive with no floor home" --
+ * and those branches are the whole point of the gates they belong to. Without the widening, `SCREENS.length ===
+ * 0` on a one-element `as const` tuple is TS2375-flagged dead code (measured: "this comparison appears to be
+ * unintentional because the types '1' and '0' have no overlap"), and the next `as const` addition would be
+ * checked by a branch the compiler says can never run. Widening is how a gate keeps its own vacuity check alive.
+ */
+const declaredScreens: readonly ScreenDocument[] = SCREENS;
+const primitiveFloorHomes = LAYOUT_PRIMITIVE_SLOTS.map((slot) => [slot, PRIMITIVES[slot].floorSlots as readonly string[]] as const);
 const SRC = path.join(ROOT, 'packages/ui/src');
 
 /**
@@ -124,6 +141,17 @@ interface SourceFile {
   readonly lines: readonly string[];
 }
 
+/**
+ * A file the grep gates read: TypeScript or TSX.
+ *
+ * `.tsx` joined the walk on 2026-11-15 with #259 -- and the *predicate* had to join it too. The first attempt
+ * widened `listSources` and left `§9.2`'s own filter reading `rel.endsWith('.ts')`, so a `fetch` planted in a
+ * screen was still invisible to the gate whose job is to find it, and the mutation for exactly that said PASS.
+ * A widened walk behind a narrowed filter is the same hole wearing a fix, which is why the extension list is one
+ * function now and `test/gates-falsify.test.ts` plants in both extensions.
+ */
+const isSourceFile = (rel: string): boolean => rel.endsWith('.ts') || rel.endsWith('.tsx');
+
 function listSources(dir: string, predicate: (rel: string) => boolean): SourceFile[] {
   if (!fs.existsSync(dir)) return [];
   const out: SourceFile[] = [];
@@ -134,7 +162,13 @@ function listSources(dir: string, predicate: (rel: string) => boolean): SourceFi
         walk(abs);
         continue;
       }
-      if (!entry.isFile() || !entry.name.endsWith('.ts')) continue;
+      if (!entry.isFile()) continue;
+      // `.tsx` joined `.ts` here on 2026-11-15, with #259. It is not a cosmetic widening: every grep in this file
+      // reads through `listSources`, so a `.ts`-only walk would have scanned 13 files, reported PASS on all of
+      // them, and never looked at a single screen -- the vacuous green this package exists to refuse, arriving by
+      // way of a file-extension list. The falsification suite plants a violation in a `.tsx` and requires it be
+      // found, because "the gate is red on my machine" is not what an unchecked extension costs.
+      if (!entry.name.endsWith('.ts') && !entry.name.endsWith('.tsx')) continue;
       const rel = path.relative(ROOT, abs).split(path.sep).join('/');
       if (!predicate(rel)) continue;
       const text = fs.readFileSync(abs, 'utf8');
@@ -172,6 +206,19 @@ const TRANSPORT_DRIVER = 'packages/ui/src/sdk/poll.ts';
 const SIGNAL_REGISTRY_IMPL = 'packages/ui/src/signals.ts';
 const FRESHNESS_PRIMITIVES = new Set(['packages/ui/src/sdk/poll.ts', 'packages/ui/src/sdk/use-operation.ts']);
 
+/**
+ * The files the DOM-enabled project checks *outside* this package, read out of `packages/ui/tsconfig.json`
+ * rather than written here. Same reasoning as `WEB_BOUNDARY_DIR` above and for the same reason: the config is
+ * the thing that decides which files get `DOM`, and a second list beside it is a second description of that
+ * decision -- one that would silently stop covering the file someone added to the include list.
+ */
+const UI_GATE_SCRIPTS: readonly string[] = (() => {
+  const config = JSON.parse(fs.readFileSync(path.join(ROOT, 'packages/ui/tsconfig.json'), 'utf8')) as { include?: string[] };
+  return (config.include ?? [])
+    .filter((entry) => entry.startsWith('../../scripts/'))
+    .map((entry) => entry.replace('../../', ''));
+})();
+
 const FORBIDDEN_OUTSIDE_WEB: readonly (readonly [RegExp, string])[] = [
   [/\bdocument\s*\./g, 'document.'],
   [/\bwindow\s*\./g, 'window.'],
@@ -203,11 +250,60 @@ const FORBIDDEN_EVENTS: readonly (readonly [RegExp, string])[] = [
   [/\bon\s*\(\s*['"`]/g, "on('string')"],
 ];
 
+/* ------------------------------------------------------------------ TS0: the #259 price, paid back */
+
+/**
+ * `packages/ui/tsconfig.json` checks the three files below with `DOM` available, because they import this
+ * package's modules and dragging them into the DOM-free root program is what made `.tsx` un-checkable in the
+ * first place (#259). The honest consequence: inside these three files a stray `window.` is no longer a
+ * compile error. They are Node scripts -- a browser global here is a crash at gate time, not a UI feature --
+ * so this gate is the grep that keeps paying on their behalf.
+ *
+ * Member-access shapes only, deliberately: this file *contains* the patterns it forbids (`/\bdocument\s*\./g`),
+ * and a scanner that fired on its own regex source would be switched off within a week. `document.`, `window.`
+ * and `localStorage.` do not appear as calls in the pattern definitions, and the string labels beside them are
+ * blanked by `stripComments` like every other literal here.
+ *
+ * Limit, stated: this is a text rule over three named files. It does not cover a fourth file added to
+ * `packages/ui/tsconfig.json`'s include list later -- scripts/check-project.ts's typecheck-coverage rule
+ * reports that project's file list, so a new member is visible in its output, and the list below must be
+ * widened with it.
+ */
+{
+  const g = gate('TS0', 'the gate scripts that inherit DOM keep browser globals out (the #259 price)');
+  const browserAccess = [
+    [/\bdocument\s*\./g, 'document.'],
+    [/\bwindow\s*\./g, 'window.'],
+    [/\blocalStorage\s*\./g, 'localStorage.'],
+    [/\bsessionStorage\s*\./g, 'sessionStorage.'],
+    [/\bnavigator\s*\./g, 'navigator.'],
+    [/\bindexedDB\s*\./g, 'indexedDB.'],
+  ] as const;
+  const hits: string[] = [];
+  for (const rel of UI_GATE_SCRIPTS) {
+    const abs = path.join(ROOT, rel);
+    if (!fs.existsSync(abs)) {
+      fail(g, `${rel} is named by packages/ui/tsconfig.json but is not on disk -- the gate's own subject moved`);
+      continue;
+    }
+    const clean = stripComments(fs.readFileSync(abs, 'utf8'));
+    for (const [pattern, name] of browserAccess) {
+      pattern.lastIndex = 0;
+      let m: RegExpExecArray | null;
+      while ((m = pattern.exec(clean)) !== null) {
+        hits.push(`${rel}:${String(lineOf(clean, m.index))}: browser global \`${name}\` in a Node script -- it type-checks now because the UI project carries \`DOM\`, so this gate is the only thing refusing it (rule 1: presentational code reaches no browser surface)`);
+      }
+    }
+  }
+  if (hits.length) fail(g, ...hits);
+  else pass(g, `${String(UI_GATE_SCRIPTS.length)} scripts checked under the DOM-enabled project, none touches a browser global: ${UI_GATE_SCRIPTS.join(', ')}`);
+}
+
 /* ------------------------------------------------------------------ §9.2 rogue data and storage */
 
 {
   const g = gate('9.2', 'no rogue data or storage');
-  const sources = listSources(SRC, (rel) => rel.endsWith('.ts'));
+  const sources = listSources(SRC, isSourceFile);
   if (sources.length === 0) {
     fail(g, 'no TypeScript sources under packages/ui/src — the gate has no subject, which is a packaging failure, not a pass');
   } else {
@@ -257,11 +353,14 @@ const FORBIDDEN_EVENTS: readonly (readonly [RegExp, string])[] = [
 
 {
   const g = gate('9.3', 'layout discipline');
-  const sheets = ['packages/ui/src/tokens.css', 'packages/ui/src/layout/layout.css']
+  // Every generated sheet this package ships. The third one arrived with the components: 11 §8's hit-target
+  // floor lives in `components/components.css`, and a layout gate that scanned only the two sheets that existed
+  // when it was written would have waved a width `@media` through the one the screens actually depend on.
+  const sheets = ['packages/ui/src/tokens.css', 'packages/ui/src/layout/layout.css', 'packages/ui/src/components/components.css']
     .filter((rel) => fs.existsSync(path.join(ROOT, rel)))
     .map((rel) => ({ rel, text: fs.readFileSync(path.join(ROOT, rel), 'utf8') }));
-  if (sheets.length === 0) {
-    fail(g, 'no generated stylesheets found — run `pnpm run ui:css`');
+  if (sheets.length < 3) {
+    fail(g, `only ${String(sheets.length)} of the 3 generated stylesheets are on disk -- run \`pnpm run ui:css\`; a sheet this gate cannot see is a sheet it does not audit`);
   } else {
     const hits: string[] = [];
     for (const sheet of sheets) {
@@ -425,7 +524,51 @@ const FORBIDDEN_EVENTS: readonly (readonly [RegExp, string])[] = [
         return !c.props || typeof c.props !== 'object' || !('~standard' in c.props);
       });
       if (unvalidatable.length) fail(g95, `registered without a props schema: ${unvalidatable.join(', ')}`);
-      else pass(g95, `${String(ids.length)} component id(s) resolve, each with a StandardSchema props definition`);
+
+      // 11 §9.5's actual fixture: re-render *yesterday's* stored page document. The registry is no longer empty,
+      // so this is no longer a boundary-only check -- but note what it is and is not. The document below is a
+      // literal in `test/fixtures/page-documents.ts`, typed against the generated contract, and the honest
+      // description of it is "a document written to today's ids", not "a document captured in a previous
+      // release". A real stored document from a real previous release is what 11 §9.5 ultimately wants, and that
+      // needs a release to have happened; until then the refusal paths (unknown id, invalid props) are what carry
+      // the gate, and they are exercised against every registered component rather than against one fixture.
+      const stored = documentProblems(STORED_DOCUMENT);
+      if (stored.length) fail(g95, `the stored page document no longer validates: ${stored.join('; ')}`);
+      const unknown = documentProblems({ component: 'instances.table', props: {} });
+      if (unknown.length === 0) fail(g95, 'documentProblems() reported nothing about an unknown component id');
+
+      // Every registered id must have props the registry accepts, and must refuse props it does not.
+      const missingSample = ids.filter((id) => !Object.hasOwn(SAMPLE_PROPS, id));
+      if (missingSample.length) {
+        fail(g95, `registered with no fixture props: ${missingSample.join(', ')} — §9.5 acceptance (b) renders every registered component from a props object validated by its own schema`);
+      }
+      const sampleProblems = Object.entries(SAMPLE_PROPS)
+        .flatMap(([id, props]) => documentProblems({ component: id, props }).map((p) => `${id}: ${p}`));
+      if (sampleProblems.length) fail(g95, ...sampleProblems);
+
+      const refused = BAD_PROPS.map((bad) => ({ ...bad, problems: documentProblems(bad.page) }))
+        .filter((bad) => bad.problems.length === 0)
+        .map((bad) => `${bad.label} (${bad.page.component}) was ACCEPTED -- §9.5 promises validation, not decoration`);
+      if (refused.length) fail(g95, ...refused);
+
+      // The gap, asserted rather than described. Each entry here is *wrong in a way this package cannot refuse
+      // today* and is accepted; if a future change makes the validator strict, these stop being accepted and this
+      // gate goes red until the entry is deleted, which is how a closed gap should announce itself.
+      const stillAccepted = ACCEPTED_BUT_WRONG
+        .map((bad) => ({ label: bad.label, problems: documentProblems(bad.page) }))
+        .filter((bad) => bad.problems.length > 0)
+        .map((bad) => `${bad.label}: was expected to be ACCEPTED (the kind-only-enumeration gap that components/props.ts names), but validation refused it -- if the props schemas are now strict about enumeration membership, delete this entry from test/fixtures/page-documents.ts and say so in 11 §9.5`);
+      if (stillAccepted.length) fail(g95, ...stillAccepted);
+
+      if (unvalidatable.length === 0 && missingSample.length === 0 && sampleProblems.length === 0 && refused.length === 0 && stored.length === 0) {
+        pass(
+          g95,
+          `${String(ids.length)} component id(s) resolve, each with a StandardSchema props definition: ${ids.join(', ')}`,
+          `stored document re-validates (${STORED_DOCUMENT.component}); an unknown id still throws UnknownComponentError; ${String(BAD_PROPS.length)} invalid prop sets are refused at validation`,
+          `and ${String(ACCEPTED_BUT_WRONG.length)} prop sets are named-accepted that are still wrong: enumeration membership is checked by the compiler and by the server, not by props validation (components/props.ts states why) -- named rather than passed over`,
+          'not run here: a document captured from a previous *release*. There has been no release of this registry, so the fixture is written to today\'s ids -- which is what makes the refusal paths, not the fixture, the load-bearing half.',
+        );
+      }
     }
   }
 }
@@ -442,17 +585,60 @@ const FORBIDDEN_EVENTS: readonly (readonly [RegExp, string])[] = [
         + 'There are no registered components and no screens in this package, so there is no pair of sets to compare. '
         + 'A parity check over an empty registry is the vacuous green this repository keeps naming, so it reports itself instead.',
     );
+  } else if (declaredScreens.length === 0) {
+    notRun(
+      g,
+      `the registry has ${String(ids.length)} component(s) but packages/ui/src/screens/index.ts declares no screens, so there is no per-screen pair of operation sets to compare. `
+        + 'The structural half below still runs, and it is the weaker claim: do not read this as parity proven.',
+    );
+    const contractText = fs.readFileSync(path.join(SRC, 'contract.ts'), 'utf8');
+    if (/reads\w*(?:Wide|Narrow|Desktop|Mobile|BySlot)/i.test(contractText) || /Record<LayoutSlot,[^>]*OperationId/.test(contractText)) {
+      fail(g, 'contract.ts declares a slot-dependent `reads` shape — a capability that exists only at one width is rule 2\'s definition of a fail');
+    } else {
+      pass(g, `no per-slot read set is expressible in the contract type, and no screen exists to compare: ${String(ids.length)} component(s) registered, SCREENS is empty`);
+    }
   } else {
-    // The structural half that CAN run: nothing in the contract types admits a slot-specific read set, so a
-    // component cannot declare "wide screens get this operation". If that field is ever added, this bites.
+    // The structural refusal stays, and it is the cheap one: if the contract ever grows a width-dependent read
+    // set, every comparison below becomes a comparison of two different questions.
     const contractText = fs.readFileSync(path.join(SRC, 'contract.ts'), 'utf8');
     const perSlotReads = /reads\w*(?:Wide|Narrow|Desktop|Mobile|BySlot)/i.test(contractText)
       || /Record<LayoutSlot,[^>]*OperationId/.test(contractText);
+
+    const problems: string[] = [];
     if (perSlotReads) {
-      fail(g, 'contract.ts declares a slot-dependent `reads` shape — a capability that exists only at one width is rule 2\'s definition of a fail');
-    } else {
-      pass(g, `${String(ids.length)} component(s), and no per-slot read set is expressible in the contract type`, 'per-screen 360/1920 comparison still NOT RUN until screens exist');
+      problems.push('contract.ts declares a slot-dependent `reads` shape — a capability that exists only at one width is rule 2\'s definition of a fail');
     }
+
+    const reported: string[] = [];
+    for (const screen of declaredScreens) {
+      // One implementation of the question, in the package that owns the answer: `capabilityParityProblems` walks
+      // the placements and compares the two operation sets through `floorSlots`, the same field the CSS generator
+      // reads. A second copy of that logic here would be a gate that can disagree with the layout it audits.
+      problems.push(...capabilityParityProblems(screen));
+      const floor = reachableOperations(screen, 'floor');
+      const wide = reachableOperations(screen, 'wide');
+      if (floor.length !== wide.length || floor.some((operation) => !wide.includes(operation))) {
+        problems.push(`${screen.id}: floor set [${floor.join(', ')}] does not equal the wide set [${wide.join(', ')}]`);
+      }
+      // Non-vacuity, in the direction the whole gate depends on: a parity comparison over a screen with no
+      // operations would pass forever. Both sets must be non-empty, and the placements must be more than one.
+      if (wide.length === 0) problems.push(`${screen.id}: no operations reachable at any width, so the parity comparison below is vacuous`);
+      if (floor.length === 0) problems.push(`${screen.id}: nothing reachable at the floor width — the screen is unreachable on a phone, which is the opposite of rule 2`);
+      reported.push(`${screen.id}: ${String(screenPlacements(screen).length)} placement(s), ${String(wide.length)} operation(s) reachable at both widths [${wide.join(', ')}]`);
+    }
+
+    // And the primitive table has to actually carry the degradation this gate reasons from, or `floorSlots` is
+    // documentation rather than data and every comparison above is arithmetic over an unowned guess.
+    const withoutFloor = primitiveFloorHomes.filter(([, homes]) => homes.length === 0).map(([slot]) => slot);
+    if (withoutFloor.length) problems.push(`primitives with no floor home for their content: ${withoutFloor.join(', ')}`);
+
+    if (problems.length) fail(g, ...problems);
+    else pass(
+      g,
+      `${String(declaredScreens.length)} screen(s) walked: ${reported.join('; ')}`,
+      `degradation is data, not prose: all ${String(LAYOUT_PRIMITIVE_SLOTS.length)} primitives declare floorSlots, and the comparison reads them through the same \`capabilityParityProblems\` the screens use`,
+      'still NOT RUN: what a browser paints at 360 px. This gate compares declared reachability. §9.7 is the same-slot matrix that would catch a component that claims a slot it cannot render in, and it needs a browser.',
+    );
   }
 }
 
@@ -483,7 +669,15 @@ const FORBIDDEN_EVENTS: readonly (readonly [RegExp, string])[] = [
       for (const [pattern, name, subject] of [
         [/\bEventSource\b/g, 'EventSource', clean],
         [/\bWebSocket\b/g, 'WebSocket', clean],
-        [/\b(?:live|livestream|realtime|real-time)\b/gi, 'a push-implying state word', visible],
+        // The negative lookbehind is a correction, not a concession, and both directions are falsified in
+        // `test/gates-falsify.test.ts`. `aria-live` is the one spelling this package is *required* to write:
+        // 11 §8 says a region updated from a signal lands in an `aria-live="polite"` region, never assertive.
+        // Measured before the first list existed, the pattern searched here fired on that attribute name inside a
+        // string -- so the first screen that obeyed 11 §8 would have failed the gate for being accessible. A gate
+        // that reports the compliant case as the violation gets switched off, which is the failure this
+        // repository's own history names. Refusing copy that *claims* liveness is untouched: a `"live"` label
+        // still fails, and the mutation proves it.
+        [/(?<!aria-)\b(?:live|livestream|realtime|real-time)\b/gi, 'a push-implying state word', visible],
       ] as const) {
         pattern.lastIndex = 0;
         let m: RegExpExecArray | null;
@@ -576,12 +770,24 @@ const TYPE_ASSERTIONS: readonly TypeAssertion[] = [
   },
 ];
 
+/**
+ * The flags a fixture is compiled with. They are the UI project's flags, spelled out rather than inherited from
+ * `packages/ui/tsconfig.json`, and the reason is measured: a fixture imports `packages/ui/src/index.ts`, which
+ * imports the registry, which imports `components/instances.tsx`. Without `--jsx` the control fixtures failed with
+ * TS6142 on a file they do not name, and a *control* that cannot compile makes its paired refusal meaningless --
+ * the exact coin-flip defect 11 §3 prices. Keeping the flag list here and the flag list in the config in two
+ * places is a real cost; `test/gates-falsify.test.ts` pays it back by asserting the control side of every pair.
+ */
+const FIXTURE_FLAGS = [
+  '--noEmit', '--strict', '--target', 'es2023', '--module', 'nodenext', '--moduleResolution', 'nodenext',
+  '--lib', 'es2023,dom,dom.iterable', '--jsx', 'react-jsx',
+  '--skipLibCheck', '--exactOptionalPropertyTypes', '--noUncheckedIndexedAccess', '--verbatimModuleSyntax',
+  '--allowImportingTsExtensions', '--erasableSyntaxOnly', '--noUnusedLocals', '--types', 'node',
+] as const;
+
 function runTsc(fixture: string): { code: number; output: string } {
   try {
-    execFileSync(process.execPath, ['--import', 'tsx', path.join(ROOT, 'node_modules/typescript/bin/tsc'),
-      '--noEmit', '--strict', '--target', 'es2023', '--module', 'nodenext', '--moduleResolution', 'nodenext',
-      '--skipLibCheck', '--exactOptionalPropertyTypes', '--noUncheckedIndexedAccess', '--verbatimModuleSyntax',
-      '--allowImportingTsExtensions', '--erasableSyntaxOnly', '--noUnusedLocals', '--types', 'node', fixture],
+    execFileSync(process.execPath, ['--import', 'tsx', path.join(ROOT, 'node_modules/typescript/bin/tsc'), ...FIXTURE_FLAGS, fixture],
       { stdio: 'pipe', cwd: ROOT });
     return { code: 0, output: '' };
   } catch (error) {
@@ -699,8 +905,8 @@ for (const assertion of TYPE_ASSERTIONS) {
 }
 
 for (const [id, title, why] of [
-  ['9.7', 'same-slot matrix', 'needs a browser and a registered component at 320 px and 1280 px. 11 §8/§9 put Playwright in a later slice; this task forbids smuggling a harness in with a config nobody reviewed.'],
-  ['9.8', 'a11y floor', 'needs rendered fixtures for axe-core. The token half — every contrast pair in CONTRAST_PAIRS, and the 44/24/8 px minimums — IS checked today, in test/contrast.test.ts, because those are arithmetic over data.'],
+  ['9.7', 'same-slot matrix', 'needs a browser: there are now 6 registered components and each declares the slots it promises, so the subject exists -- what is missing is 320 px and 1280 px containers. 11 §8/§9 put Playwright in a later slice and this change does not smuggle a harness in beside a config nobody reviewed.'],
+  ['9.8', 'a11y floor', 'needs axe-core and a layout engine, and neither is installed: no AA violations, focus trap/Esc-topmost/restore-on-pop and the target-size audit at 360 px all stay unrun. What IS checked today is structural and in test/components.test.ts (roles, label association by id, one polite region per list, the hit-target class on every control, the age beside every state word), plus the token arithmetic in test/contrast.test.ts. Focus order is not among them and is not claimed: renderToStaticMarkup never paints, so it cannot show where focus goes.'],
   ['9.9', 'draft contract', 'needs packages/ui/src/web/drafts.ts, which does not exist: 11 §5 is specified, not delivered, and UI-OD4 still owns the retention numbers. The half that does exist — `draftable` is an allowlist and a value-bearing path is refused at registration — is checked by test/contract.test.ts.'],
 ] as const) {
   notRun(gate(id, `${title} (declared elsewhere)`), why);
