@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { test } from 'node:test';
 import { loadSpec, operationsOf, type SpecDocument } from '../src/index.ts';
+import { ENDPOINTS } from '../src/generated/types.ts';
 import { generateApiTypes, identifier, unexpressedKeywords } from '../src/generate-types.ts';
 
 const ROOT = path.resolve(import.meta.dirname, '../../..');
@@ -63,7 +64,16 @@ test('every component and every operation reaches the generated file', () => {
   }
   const ops = operationsOf(spec);
   assert.ok(ops.length >= 21, 'the document must still describe the surface');
-  const responses = output.slice(output.indexOf('export interface ApiResponses {'));
+  // BOUNDED at both ends, and the bound is the point: `ENDPOINTS` now follows `ApiResponses` and repeats every
+  // operation id on a line that starts the same way (`  listInstances: { method: …`). A slice from the responses
+  // header to the *end of the file* would therefore read a route entry as a response entry, and a missing
+  // response would pass -- a gate made vacuous by the arrival of a good neighbour. That is a finding, not a
+  // side effect, so the slice stops where the route table starts and the stop is asserted rather than assumed.
+  const from = output.indexOf('export interface ApiResponses {');
+  const to = output.indexOf('export const ENDPOINTS = {');
+  assert.ok(from >= 0, 'the generated file has no ApiResponses map to read');
+  assert.ok(to > from, 'ENDPOINTS is not emitted after ApiResponses, so the bounded slice below proves nothing');
+  const responses = output.slice(from, to);
   for (const op of ops) {
     assert.ok(responses.includes(`  ${op.operationId}: {`), `${op.operationId} declares no responses in the generated file`);
     assert.ok(output.includes(`  /** ${op.method} ${op.path} */`), `${op.operationId} is not identified by method and path`);
@@ -71,6 +81,88 @@ test('every component and every operation reaches the generated file', () => {
       if (!/^\d{3}$/.test(status)) continue;
       assert.ok(responses.includes(`'${status}':`), `${op.operationId} is missing status ${status}`);
     }
+  }
+});
+
+/* ------------------------------------------------------------------ the route table (#258) */
+
+/** The text of the `ENDPOINTS` object literal and nothing else -- including its `satisfies` guard. */
+function endpointsRegion(output: string): string {
+  const start = output.indexOf('export const ENDPOINTS = {');
+  assert.notEqual(start, -1, 'the generated file declares no ENDPOINTS table at all');
+  const end = output.indexOf('} as const satisfies Record<OperationId, Endpoint>;', start);
+  assert.notEqual(end, -1, 'ENDPOINTS is not emitted with the `satisfies` guard that makes it total');
+  return output.slice(start, end + '} as const satisfies Record<OperationId, Endpoint>;'.length);
+}
+
+test('the route table is the document, entry for entry -- no more, no fewer', () => {
+  const block = endpointsRegion(generate());
+  const ops = operationsOf(spec);
+  assert.ok(ops.length >= 36, 'the document must still describe the surface this table routes');
+  for (const op of ops) {
+    assert.ok(
+      block.includes(`  ${op.operationId}: { method: '${op.method.toLowerCase()}', path: '${op.path}' },`),
+      `${op.operationId} has no route in ENDPOINTS, or not the one the document writes`,
+    );
+  }
+  // The other direction, which is the half that catches a stale entry: a key the document no longer declares
+  // fails to compile (the `satisfies` guard refuses a name outside `OperationId`), and this asserts the same
+  // thing from the text side so the failure is a sentence a maintainer can read.
+  const keys = [...block.matchAll(/^ {2}(\w+): \{ method:/gm)].map((m) => m[1] as string);
+  const declared = new Set(ops.map((o) => o.operationId));
+  const extra = keys.filter((k) => !declared.has(k));
+  assert.deepEqual(extra, [], `ENDPOINTS routes operations the document does not declare: ${extra.join(', ')}`);
+  assert.equal(keys.length, ops.length, `ENDPOINTS holds ${String(keys.length)} entries for ${String(ops.length)} operations -- a duplicate key or a missing one`);
+});
+
+test('the shipped route table is the one a transport imports', () => {
+  // Runtime parity, not text parity: `packages/ui`'s driver reads this *value*, so what has to be true is that
+  // the object committed in `generated/types.ts` is the object the committed spec produces. A hand edit to a
+  // path, a verb, or a key fails here, and fails `api:types:check` from the other side, byte for byte.
+  const ops = operationsOf(spec);
+  const table = ENDPOINTS as unknown as Record<string, { method: string; path: string }>;
+  assert.equal(Object.keys(table).length, ops.length, 'the shipped table and the document disagree about how many operations there are');
+  for (const op of ops) {
+    assert.deepEqual(table[op.operationId], { method: op.method.toLowerCase(), path: op.path }, `${op.operationId}: the shipped route is not the document's`);
+  }
+  // And every templated hole is a parameter the operation declares `in: path`, so `ParamsOf<O>` can fill it.
+  // Without this the table could route a URL no caller is able to complete.
+  for (const op of ops) {
+    const item = (spec.paths as SpecDocument)[op.path] as SpecDocument;
+    const entry = item[op.method.toLowerCase()] as SpecDocument;
+    const declared = new Set([...((item.parameters ?? []) as SpecDocument[]), ...((entry?.parameters ?? []) as SpecDocument[])]
+      .filter((p) => p?.in === 'path')
+      .map((p) => String(p.name)));
+    for (const hole of op.path.matchAll(/\{(\w+)\}/g)) {
+      assert.ok(declared.has(String(hole[1])), `${op.operationId}: {${String(hole[1])}} is templated but never declared \`in: path\``);
+    }
+  }
+});
+
+test('an operation added to the document arrives in the table; one deleted leaves it', () => {
+  const added = endpointsRegion(generate(withOperation('probeOperation', 'get', '/api/v1/probe'), 'probe-added'));
+  assert.ok(added.includes(`  probeOperation: { method: 'get', path: '/api/v1/probe' },`), 'a new operation produced no new route');
+
+  const removed = endpointsRegion(generate(withoutOperation('listInstances'), 'probe-removed'));
+  assert.equal(removed.includes('listInstances:'), false, 'a deleted operation left its route behind');
+});
+
+test('the emitter refuses a route it cannot fill, or a name it already declares', () => {
+  // A templated hole with no `in: path` declaration is a URL with a hole in it: `ParamsOf` cannot close it, so
+  // the transport would send `/api/v1/instances/{ghost}` and read the server's 404 as an answer. The emitter
+  // refuses instead of emitting a route nobody can complete.
+  const ghost = withOperation('ghosted', 'get', '/api/v1/instances/{ghost}');
+  assert.throws(() => generate(ghost, 'ghost-hole'), /\{ghost\} is templated in the path but not declared there as a required/, 'an unfillable template was emitted anyway');
+
+  // A component named like the emitter's own declarations would make the generated file declare that name
+  // twice -- and `--check` would bless it, because the file it compares against already carries the duplicate.
+  // Refusing at emit time names the component to rename instead.
+  for (const name of ['Endpoint', 'ENDPOINTS', 'ApiResponses', 'OperationId', 'PathParamsOf', 'ROUTES_ARE_FILLABLE', 'RequiredParamKeys']) {
+    assert.throws(
+      () => generate(withComponent(name, { type: 'string' }), `clash-${name}`),
+      new RegExp(`"${name}" is a name this emitter declares`),
+      `${name} was emitted beside the emitter's own declaration`,
+    );
   }
 });
 
@@ -228,5 +320,28 @@ test('identifier() keeps a name that is not a TypeScript identifier out of the t
 function withComponent(name: string, schema: Record<string, unknown>): SpecDocument {
   const doc = structuredClone(spec) as SpecDocument;
   ((doc.components as SpecDocument).schemas as Record<string, unknown>)[name] = schema;
+  return doc;
+}
+
+/** The document plus one operation, written the way the smallest honest operation is written. */
+function withOperation(id: string, method: string, path: string): SpecDocument {
+  const doc = structuredClone(spec) as SpecDocument;
+  const paths = doc.paths as Record<string, SpecDocument>;
+  const item = paths[path] ?? {};
+  item[method] = { operationId: id, security: [], responses: { '200': { description: 'A probe.' } } };
+  paths[path] = item;
+  return doc;
+}
+
+/** The document minus one operation, and minus any path item that only that operation was in. */
+function withoutOperation(id: string): SpecDocument {
+  const doc = structuredClone(spec) as SpecDocument;
+  const paths = doc.paths as Record<string, SpecDocument>;
+  for (const [path, item] of Object.entries(paths)) {
+    for (const [method, op] of Object.entries(item)) {
+      if ((op as SpecDocument)?.operationId === id) delete item[method];
+    }
+    if (Object.keys(item).length === 0) delete paths[path];
+  }
   return doc;
 }

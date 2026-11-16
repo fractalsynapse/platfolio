@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
+import { createMutationSandbox } from './mutation-sandbox.ts';
 
 /**
  * Falsification: every gate is mutated and required to name the violation.
@@ -21,10 +22,23 @@ import { test } from 'node:test';
  * or `reset`: this working tree carries other people's uncommitted work, and a reset would take it. The test
  * also asserts the tree is byte-identical afterwards, so a bug in this file's own restore path fails loudly
  * instead of leaving a planted violation behind for someone else to commit.
+ *
+ * ## Every case runs inside `mutation-sandbox.ts`, and two of its properties are load-bearing here
+ *
+ * `node --test` runs test *files* in parallel processes, and `typecheck-coverage.test.ts` mutates this same
+ * tree — the first assertion below ("the clean tree passes ui:check, so every failure below is attributable to
+ * the mutation") was reading the other file's planted violation and going red, correctly and uselessly. Every
+ * case now takes the tree lock for its own duration, so the suites interleave instead of corrupting each
+ * other, and a run that `timeout` or a CI step deadline kills leaves a sidecar that the next process replays
+ * before it reads anything. That recovery is what makes the baseline assertion worth making at all; it is
+ * proved by `packages/ui/test/mutation-sandbox.test.ts`, not by this comment.
  */
 
 const ROOT = path.resolve(import.meta.dirname, '../../..');
 const GATE = 'scripts/check-ui.ts';
+
+/** Module scope, like the file it protects: recovery happens before the first test body reads the tree. */
+const sandbox = createMutationSandbox({ root: ROOT });
 
 interface Mutation {
   readonly gateId: string;
@@ -288,57 +302,63 @@ function runGate(id?: string): { code: number; output: string } {
 }
 
 test('the clean tree passes ui:check, so every failure below is attributable to the mutation', () => {
-  const { code, output } = runGate();
-  assert.equal(code, 0, `ui:check is red on a clean tree; falsification results would be meaningless:\n${output.slice(-2000)}`);
+  sandbox.exclusive('baseline: clean tree is green', () => {
+    const { code, output } = runGate();
+    assert.equal(code, 0, `ui:check is red on a clean tree; falsification results would be meaningless:\n${output.slice(-2000)}`);
+  });
 });
 
 const didNotBite: string[] = [];
 
 for (const mutation of MUTATIONS) {
   test(`falsify §${mutation.gateId}: ${mutation.label}`, () => {
-    const abs = path.join(ROOT, mutation.file);
-    const original = fs.readFileSync(abs);
-    try {
-      fs.appendFileSync(abs, mutation.append);
-      const { code, output } = runGate(mutation.gateId);
-      if (code === 0) {
-        didNotBite.push(`§${mutation.gateId} ${mutation.label}`);
-        assert.fail(`DID NOT BITE: the gate reported success with the violation present.\n${output.slice(-800)}`);
+    sandbox.exclusive(`falsify §${mutation.gateId}: ${mutation.label}`, () => {
+      const abs = path.join(ROOT, mutation.file);
+      // The sandbox holds the pre-mutation bytes in a sidecar *before* it touches the file, so a SIGKILL in the
+      // middle of the gate run below leaves something the next process can put back.
+      const original = sandbox.append(mutation.file, mutation.append);
+      try {
+        const { code, output } = runGate(mutation.gateId);
+        if (code === 0) {
+          didNotBite.push(`§${mutation.gateId} ${mutation.label}`);
+          assert.fail(`DID NOT BITE: the gate reported success with the violation present.\n${output.slice(-800)}`);
+        }
+        assert.match(
+          output,
+          mutation.expect,
+          `the gate failed, but not for the planted violation (expected ${mutation.expect}). Output tail:\n${output.slice(-900)}`,
+        );
+      } finally {
+        sandbox.restore();
+        const restored = fs.readFileSync(abs);
+        assert.ok(original.equals(restored), `RESTORATION FAILED for ${mutation.file} — planted code is still in the tree`);
       }
-      assert.match(
-        output,
-        mutation.expect,
-        `the gate failed, but not for the planted violation (expected ${mutation.expect}). Output tail:\n${output.slice(-900)}`,
-      );
-    } finally {
-      fs.writeFileSync(abs, original);
-      const restored = fs.readFileSync(abs);
-      assert.ok(original.equals(restored), `RESTORATION FAILED for ${mutation.file} — planted code is still in the tree`);
-    }
+    });
   });
 }
 
 for (const weakening of WEAKENINGS) {
   test(`falsify §${weakening.gateId} by weakening the rule: ${weakening.label}`, () => {
-    const abs = path.join(ROOT, weakening.file);
-    const original = fs.readFileSync(abs);
-    const occurrences = original.toString().split(weakening.find).length - 1;
-    assert.ok(occurrences >= 1, `${weakening.file} no longer contains the source line this mutation targets: the rule moved and the falsification is stale`);
-    try {
-      fs.writeFileSync(abs, original.toString().replace(weakening.find, weakening.replace));
-      assert.notEqual(fs.readFileSync(abs, 'utf8'), original.toString(), 'the mutation changed nothing, so this case proves nothing');
-      const { code, output } = runGate(weakening.gateId);
-      if (code === 0) {
-        didNotBite.push(`§${weakening.gateId} ${weakening.label} (weakening)`);
-        assert.fail(`DID NOT BITE: the gate still reported success after the rule it enforces was relaxed.
+    sandbox.exclusive(`falsify §${weakening.gateId} weakening: ${weakening.label}`, () => {
+      const abs = path.join(ROOT, weakening.file);
+      const occurrences = fs.readFileSync(abs, 'utf8').split(weakening.find).length - 1;
+      assert.ok(occurrences >= 1, `${weakening.file} no longer contains the source line this mutation targets: the rule moved and the falsification is stale`);
+      const original = sandbox.replaceOnce(weakening.file, weakening.find, weakening.replace);
+      try {
+        assert.notEqual(fs.readFileSync(abs, 'utf8'), original.toString(), 'the mutation changed nothing, so this case proves nothing');
+        const { code, output } = runGate(weakening.gateId);
+        if (code === 0) {
+          didNotBite.push(`§${weakening.gateId} ${weakening.label} (weakening)`);
+          assert.fail(`DID NOT BITE: the gate still reported success after the rule it enforces was relaxed.
 ${output.slice(-800)}`);
-      }
-      assert.match(output, weakening.expect, `the gate went red, but not for the relaxed rule. Tail:
+        }
+        assert.match(output, weakening.expect, `the gate went red, but not for the relaxed rule. Tail:
 ${output.slice(-900)}`);
-    } finally {
-      fs.writeFileSync(abs, original);
-      assert.ok(original.equals(fs.readFileSync(abs)), `RESTORATION FAILED for ${weakening.file}`);
-    }
+      } finally {
+        sandbox.restore();
+        assert.ok(original.equals(fs.readFileSync(abs)), `RESTORATION FAILED for ${weakening.file}`);
+      }
+    });
   });
 }
 
@@ -346,36 +366,44 @@ test('the web/ allowlist is real in both directions: it bites outside and permit
   // §9.2 confines the browser surface to `src/web/` and the transport driver. An allowlist is only worth having
   // if it is *narrow* and *live*: a check that refuses everywhere passes the "bites outside" half by accident,
   // and a check that permits everything passes the "inside" half by accident. Both halves, one test.
-  const outside = path.join(ROOT, 'packages/ui/src/contract.ts');
-  const inside = path.join(ROOT, 'packages/ui/src/web/index.ts');
-  const probe = '\nexport const __falsify_storage__ = (): string | null => localStorage.getItem("draft");\n';
-  const beforeOutside = fs.readFileSync(outside);
-  const beforeInside = fs.readFileSync(inside);
-  try {
-    fs.appendFileSync(outside, probe);
-    assert.equal(runGate('9.2').code, 1, 'localStorage in a presentational file was permitted — the boundary is not narrow');
-    fs.writeFileSync(outside, beforeOutside);
+  sandbox.exclusive('web/ allowlist both directions', () => {
+    const outside = path.join(ROOT, 'packages/ui/src/contract.ts');
+    const inside = path.join(ROOT, 'packages/ui/src/web/index.ts');
+    const probe = '\nexport const __falsify_storage__ = (): string | null => localStorage.getItem("draft");\n';
+    try {
+      const beforeOutside = sandbox.append('packages/ui/src/contract.ts', probe);
+      try {
+        assert.equal(runGate('9.2').code, 1, 'localStorage in a presentational file was permitted — the boundary is not narrow');
+      } finally {
+        sandbox.restore();
+        assert.ok(beforeOutside.equals(fs.readFileSync(outside)), 'contract.ts not restored');
+      }
 
-    fs.appendFileSync(inside, probe);
-    const permitted = runGate('9.2');
-    assert.equal(permitted.code, 0, `localStorage inside the declared boundary was refused, so the boundary permits nothing:\n${permitted.output.slice(-600)}`);
-  } finally {
-    fs.writeFileSync(outside, beforeOutside);
-    fs.writeFileSync(inside, beforeInside);
-    assert.ok(beforeOutside.equals(fs.readFileSync(outside)), 'contract.ts not restored');
-    assert.ok(beforeInside.equals(fs.readFileSync(inside)), 'web/index.ts not restored');
-  }
+      const beforeInside = sandbox.append('packages/ui/src/web/index.ts', probe);
+      try {
+        const permitted = runGate('9.2');
+        assert.equal(permitted.code, 0, `localStorage inside the declared boundary was refused, so the boundary permits nothing:\n${permitted.output.slice(-600)}`);
+      } finally {
+        sandbox.restore();
+        assert.ok(beforeInside.equals(fs.readFileSync(inside)), 'web/index.ts not restored');
+      }
+    } finally {
+      sandbox.restore();
+    }
+  });
 });
 
 test('the boundary path is stated once, in the package that owns it (D63)', () => {
   // `scripts/check-ui.ts` used to hardcode `packages/ui/src/web/` while `src/web/index.ts` exported
   // `packages/ui/src/web` — two spellings of the one fact that decides which files may touch a browser, and
   // they already disagreed about the trailing slash. The gate now imports it.
-  const gate = fs.readFileSync(path.join(ROOT, 'scripts/check-ui.ts'), 'utf8');
-  const owner = fs.readFileSync(path.join(ROOT, 'packages/ui/src/web/index.ts'), 'utf8');
-  assert.match(gate, /import \{ WEB_BOUNDARY_DIR \} from '\.\.\/packages\/ui\/src\/web\/index\.ts'/);
-  assert.match(owner, /export const WEB_BOUNDARY_DIR = 'packages\/ui\/src\/web';/);
-  assert.ok(!/const WEB_BOUNDARY = 'packages\/ui\/src\/web\/?'/.test(gate), 'the gate hardcodes the boundary path again');
+  sandbox.exclusive('boundary path stated once', () => {
+    const gate = fs.readFileSync(path.join(ROOT, 'scripts/check-ui.ts'), 'utf8');
+    const owner = fs.readFileSync(path.join(ROOT, 'packages/ui/src/web/index.ts'), 'utf8');
+    assert.match(gate, /import \{ WEB_BOUNDARY_DIR \} from '\.\.\/packages\/ui\/src\/web\/index\.ts'/);
+    assert.match(owner, /export const WEB_BOUNDARY_DIR = 'packages\/ui\/src\/web';/);
+    assert.ok(!/const WEB_BOUNDARY = 'packages\/ui\/src\/web\/?'/.test(gate), 'the gate hardcodes the boundary path again');
+  });
 });
 
 test('rule 5\'s state-word grep is real in both directions: it permits aria-live and refuses the pill', () => {
@@ -383,38 +411,39 @@ test('rule 5\'s state-word grep is real in both directions: it permits aria-live
   // when it claims liveness. Those two rules collide unless the grep knows the difference, and a grep that fires on
   // the mandated attribute is one that gets widened until it fires on nothing. Both halves, one test -- the same
   // shape as the `web/` allowlist check below it.
-  const target = path.join(ROOT, 'packages/ui/src/components/copy.ts');
-  const original = fs.readFileSync(target);
-  try {
-    fs.appendFileSync(target, '\nexport const __politeMarkup = \'<ul aria-live="polite" role="list">x</ul>\';\n');
-    const permitted = runGate('R5');
-    assert.equal(permitted.code, 0, `the mandated a11y attribute was refused:\n${permitted.output.slice(-700)}`);
-  } finally {
-    fs.writeFileSync(target, original);
-    assert.ok(original.equals(fs.readFileSync(target)), 'copy.ts not restored');
-  }
-  try {
-    fs.appendFileSync(target, '\nexport const __pill = (): string => "live";\n');
-    const refused = runGate('R5');
-    assert.equal(refused.code, 1, 'a copy-level liveness claim was permitted -- the narrowing swallowed the rule too');
-    assert.match(refused.output, /a push-implying state word/);
-  } finally {
-    fs.writeFileSync(target, original);
-    assert.ok(original.equals(fs.readFileSync(target)), 'copy.ts not restored after the refusal case');
-  }
+  sandbox.exclusive('R5 state-word both directions', () => {
+    const target = path.join(ROOT, 'packages/ui/src/components/copy.ts');
+    const original = sandbox.append('packages/ui/src/components/copy.ts', '\nexport const __politeMarkup = \'<ul aria-live="polite" role="list">x</ul>\';\n');
+    try {
+      const permitted = runGate('R5');
+      assert.equal(permitted.code, 0, `the mandated a11y attribute was refused:\n${permitted.output.slice(-700)}`);
+    } finally {
+      sandbox.restore();
+      assert.ok(original.equals(fs.readFileSync(target)), 'copy.ts not restored');
+    }
+    const again = sandbox.append('packages/ui/src/components/copy.ts', '\nexport const __pill = (): string => "live";\n');
+    try {
+      const refused = runGate('R5');
+      assert.equal(refused.code, 1, 'a copy-level liveness claim was permitted -- the narrowing swallowed the rule too');
+      assert.match(refused.output, /a push-implying state word/);
+    } finally {
+      sandbox.restore();
+      assert.ok(!fs.readFileSync(target, 'utf8').includes('__pill'), 'copy.ts not restored after the refusal case');
+      assert.ok(again.equals(fs.readFileSync(target)), 'copy.ts does not hold its original bytes after the refusal case');
+    }
+  });
 });
 
 test('§9.11 is real in both directions: it permits a component with a floor home and refuses one without', () => {
   // The parity gate has one job: a capability that exists only when wide must fail the build. A check that refuses
   // everything would satisfy the mutation above and be switched off within a week, so the permit side is asserted
   // against the same declaration the refusal reads.
-  const clean = runGate('9.11');
-  assert.equal(clean.code, 0, `the honest screen was refused:\n${clean.output.slice(-700)}`);
-  assert.match(clean.output, /reachable at both widths/);
+  sandbox.exclusive('9.11 both directions', () => {
+    const clean = runGate('9.11');
+    assert.equal(clean.code, 0, `the honest screen was refused:\n${clean.output.slice(-700)}`);
+    assert.match(clean.output, /reachable at both widths/);
 
-  const target = path.join(ROOT, 'packages/ui/src/components/instances.tsx');
-  const original = fs.readFileSync(target);
-  try {
+    const target = path.join(ROOT, 'packages/ui/src/components/instances.tsx');
     // Give the list a slots list that cannot be a sheet, and its `reads` become reachable only when wide.
     // The detail pane is the component the screen places in the split's detail track, and `popout-sidebar`
     // projects its content to `overlay-sheet` at the floor. Take that slot away and its two operations become
@@ -423,41 +452,48 @@ test('§9.11 is real in both directions: it permits a component with a floor hom
     // The first version of this case removed `overlay-sheet` from `instance.list` instead and did not bite, which
     // was the test's error rather than the gate's: the list is placed in a `stack`, whose floor home it still
     // declared, so there was no violation to find. A mutation that cannot fail is not a falsification.
-    fs.writeFileSync(target, original.toString().replace(
+    const original = sandbox.replaceOnce('packages/ui/src/components/instances.tsx',
       "  slots: ['overlay-sheet', 'popout-sidebar', 'stack', 'full-page'],",
-      "  slots: ['popout-sidebar', 'stack', 'full-page'],",
-    ));
-    assert.notEqual(fs.readFileSync(target, 'utf8'), original.toString(), 'the mutation changed nothing, so this case proves nothing');
-    const { code, output } = runGate('9.11');
-    assert.equal(code, 1, 'a wide-only capability was accepted -- §9.11 is decoration');
-    assert.match(output, /no floor home|reachable only when wide/);
-  } finally {
-    fs.writeFileSync(target, original);
-    assert.ok(original.equals(fs.readFileSync(target)), 'instances.tsx not restored');
-  }
+      "  slots: ['popout-sidebar', 'stack', 'full-page'],");
+    try {
+      assert.notEqual(fs.readFileSync(target, 'utf8'), original.toString(), 'the mutation changed nothing, so this case proves nothing');
+      const { code, output } = runGate('9.11');
+      assert.equal(code, 1, 'a wide-only capability was accepted -- §9.11 is decoration');
+      assert.match(output, /no floor home|reachable only when wide/);
+    } finally {
+      sandbox.restore();
+      assert.ok(original.equals(fs.readFileSync(target)), 'instances.tsx not restored');
+    }
+  });
 });
 
 test('the primitive table cannot lose its floor home without §9.11 saying which primitive', () => {
-  const target = path.join(ROOT, 'packages/ui/src/layout/primitives.ts');
-  const original = fs.readFileSync(target);
-  try {
-    fs.writeFileSync(target, original.toString().replace("    floorSlots: ['overlay-sheet'],\n    containerType: 'inline-size',\n    mayContain: ['stack'],", "    floorSlots: [],\n    containerType: 'inline-size',\n    mayContain: ['stack'],"));
-    assert.notEqual(fs.readFileSync(target, 'utf8'), original.toString(), 'the mutation changed nothing');
-    const { code, output } = runGate('9.11');
-    assert.equal(code, 1, 'a primitive with no floor home at all was accepted');
-    assert.match(output, /no floor home for their content/);
-  } finally {
-    fs.writeFileSync(target, original);
-    assert.ok(original.equals(fs.readFileSync(target)), 'primitives.ts not restored');
-  }
+  sandbox.exclusive('9.11 primitive floor home', () => {
+    const target = path.join(ROOT, 'packages/ui/src/layout/primitives.ts');
+    const original = sandbox.replaceOnce('packages/ui/src/layout/primitives.ts',
+      "    floorSlots: ['overlay-sheet'],\n    containerType: 'inline-size',\n    mayContain: ['stack'],",
+      "    floorSlots: [],\n    containerType: 'inline-size',\n    mayContain: ['stack'],");
+    try {
+      assert.notEqual(fs.readFileSync(target, 'utf8'), original.toString(), 'the mutation changed nothing');
+      const { code, output } = runGate('9.11');
+      assert.equal(code, 1, 'a primitive with no floor home at all was accepted');
+      assert.match(output, /no floor home for their content/);
+    } finally {
+      sandbox.restore();
+      assert.ok(original.equals(fs.readFileSync(target)), 'primitives.ts not restored');
+    }
+  });
 });
 
 test('nothing was left behind: every mutated file is byte-identical to how it was found', () => {
   // A second, independent check. The per-test assertions above compare `original` against the bytes read back in
   // the same test; this one re-runs the clean gate, which is the only check that catches a mutation that
   // restored a file's bytes but left the *tree* inconsistent.
-  const { code, output } = runGate();
-  assert.equal(code, 0, `ui:check is red after the mutation suite, so something was not restored:\n${output.slice(-2000)}`);
+  sandbox.exclusive('nothing left behind', () => {
+    sandbox.assertNothingPending();
+    const { code, output } = runGate();
+    assert.equal(code, 0, `ui:check is red after the mutation suite, so something was not restored:\n${output.slice(-2000)}`);
+  });
 });
 
 test('no mutation in this file silently failed to bite', () => {

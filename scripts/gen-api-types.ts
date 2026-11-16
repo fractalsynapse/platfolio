@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * `pnpm run api:types` -- write the client types; `pnpm run api:types:check` -- prove they still reproduce.
+ * `pnpm run api:types` -- write the client types and the route table; `pnpm run api:types:check` -- prove they
+ * still reproduce.
  *
  * The rule this serves: types used by a client are generated from the specification, not hand-written beside it
  * (D41, and the reason issue #247 exists). A generated file is only trustworthy if exactly one thing writes it
@@ -11,6 +12,12 @@
  *     whether to write or to compare.
  *   - `--check` regenerates in memory and compares byte-for-byte with the committed file. It never writes.
  *     Any difference -- including the file being absent -- fails, naming the command that fixes it.
+ *
+ * It writes two kinds of thing, and both are the document's, not the writer's: the type maps (`ApiParameters`,
+ * `ApiRequestBodies`, `ApiResponses` and the helpers over them), and since #258 the route table `ENDPOINTS` --
+ * one `{ method, path }` per operationId, the path left templated. The second is why a transport can turn an
+ * operation id into a request without a route list owned by whoever wrote the driver, so it is written by this
+ * script and nobody else, in the same pass, under the same byte-for-byte gate.
  *
  * There is no timestamp and no randomness in the output, and the input digest travels in the header, so a
  * difference here is always a difference between the spec and the types, never between two runs.
@@ -36,12 +43,26 @@ if (!existsSync(SPEC_PATH)) {
 }
 
 const source = await fs.readFile(SPEC_PATH, 'utf8');
-const doc = loadSpec(source);
-const generated = generateApiTypes(doc, { specPath: rel(SPEC_PATH), source });
+// A refusal is a finding, not a crash. `generateApiTypes` throws deliberately -- it approximates nothing -- and
+// the message it names the position with is worth more than a stack trace: on 2026-11-15 an unquoted scalar in
+// the spec turned `api:check` into a YAMLParseError that hid every other finding in `verify` behind it, and this
+// script had the same shape. Same rule, applied here: report, name the pointer, exit 1.
+let generated: string;
+let unheard: string[];
+try {
+  const doc = loadSpec(source);
+  generated = generateApiTypes(doc, { specPath: rel(SPEC_PATH), source });
+  // Anything the document says that no generated client will ever read. Collected here because it needs the
+  // parsed document, and reported in every mode below -- the alternative is a prose sentence silently
+  // disappearing into a keyword nobody consumes.
+  unheard = unexpressedKeywords(doc);
+} catch (error) {
+  console.error(`api:types failed -- the emitter refuses ${rel(SPEC_PATH)} and wrote nothing.`);
+  console.error(`  ${(error as Error).message}`);
+  console.error('  The refusal is the point: a construct the document expresses that no generated client can hold is fixed in the specification, not approximated in the types.');
+  process.exit(1);
+}
 
-// Anything the document says that no generated client will ever read. Reported in every mode, because the
-// alternative is a prose sentence silently disappearing into a keyword nobody consumes.
-const unheard = unexpressedKeywords(doc);
 if (unheard.length) {
   console.warn(`warning: ${rel(SPEC_PATH)} carries ${String(unheard.length)} schema keyword(s) that nothing downstream reads:`);
   for (const line of heardSlice(unheard)) console.warn(`  - ${line}`);

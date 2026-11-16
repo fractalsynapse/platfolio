@@ -30,7 +30,7 @@ table for long.
 | Path | State |
 | --- | --- |
 | `apps/control-plane/openapi.yaml` | **real** — the single API contract; request/response operations only. Re-check for a push channel with the command in rule 5; there was none when this file was written |
-| `packages/api-contract/src/generated/types.ts` | **real** — generated from that spec, byte-for-byte gated by `api:types:check` |
+| `packages/api-contract/src/generated/types.ts` | **real** — generated from that spec, byte-for-byte gated by `api:types:check`. Exports the type maps *and*, since #258, the route table `ENDPOINTS` (method + templated path per operationId), which is what lets the SDK's transport driver turn an operation id into a request without anyone writing the URL down a second time |
 | `packages/page-schema/` (`page.ts`, `secrets-panel.ts`, `binding-panel.ts`, `project-text.ts`) | **real** — pages as data, the build-time component registry, `findValueBearingProps`, with tests |
 | browser-auth plumbing beside the API | **real** — `PLATFOLIO_ALLOWED_ORIGINS` feeds CORS and the `platfolio-web` PKCE client's `<origin>/callback` redirect URIs, tested by `apps/control-plane/test/cors.test.ts`. So rule 1's "the endpoint is configuration, not a literal" already has a gate on the server half |
 | `packages/ui` — **exists since 2026-11-15** (component contract, design tokens per D63 as CSS custom properties with `tokens.css` generated from `tokens.ts`, the five layout primitives, the signals registry, the SDK seam) and **since #259 has its first screens**: six registered `.tsx` components, one screen document, `packages/ui/tsconfig.json` with `jsx` + `DOM`, 20 gates of which 17 pass and 3 report NOT RUN. `packages/api-client`, `apps/site`, any web UI | **do not exist.** Everything in this file that names them is **specified**, not delivered. The screens are components, not a runnable site: nothing mounts them (UI-OD1 is still open) |
@@ -53,9 +53,12 @@ generated types and the SDK, and nothing else.
   then SSE — touches transport and no component. A component receives data as **props from its container** or
   through the SDK hook layer: those are 11 §1's two sanctioned doors, and the invariant is that neither of them
   is a transport.
-- **MUST NOT** hand-write a client, hand-copy a DTO, or declare a local interface with the same fields as a
-  server type. The only sanctioned local types are view-models derived from generated ones (`Pick`,
-  `Readonly`, discriminant unions).
+- **MUST** take the method and the path from the generated `ENDPOINTS` table (11 §6, #258) — the same parse of
+  the same document that produces `ParamsOf` and `SuccessOf`, under the same byte-for-byte gate. A route written
+  out in UI code is a second owner of one fact, and `packages/ui/test/transport-table.test.ts` refuses it.
+- **MUST NOT** hand-write a client, hand-copy a DTO, declare a local interface with the same fields as a
+  server type, or assemble an operation-to-endpoint table by hand. The only sanctioned local types are
+  view-models derived from generated ones (`Pick`, `Readonly`, discriminant unions).
 - **MUST NOT** call `fetch`/`XMLHttpRequest` from a component, build a URL in one, or commit an API base URL
   (D47: an endpoint is configuration).
 
@@ -63,8 +66,17 @@ generated types and the SDK, and nothing else.
 `api:check` (routes and spec agree in both directions, and spec shapes agree with the StandardSchema
 definitions), `api:types:check` (the generated file reproduces from the spec byte-for-byte), plus
 `packages/api-contract/test/spec-generation.test.ts`, `schema-parity.test.ts`, `generated-types.test.ts` and
-`spec.test.ts`. The component-side half — no `fetch`, no re-declared shape in `packages/ui` — is **specified**
-as 11 §9.1–§9.2 and cannot run until `packages/ui` exists.
+`spec.test.ts`. The component-side half — no `fetch`, no re-declared shape in `packages/ui` — was **specified**
+as 11 §9.1–§9.2 while `packages/ui` did not exist; it runs today (`ui:check` §9.1, §9.2, and the type fixtures
+§9.1b compiles), and that sentence was a slice of work out of date before this revision corrected it.
+#258 added the route half:
+`packages/api-contract/test/generated-endpoints.test.ts` compiles mutated copies of the generated table outside
+the tree and requires the compiler to refuse a missing entry, an extra entry, a stale entry, a route whose
+templated hole no required parameter names, and a verb spelled the way HTTP spells it rather than the way the
+document does — with the unmutated copy compiled as the control that makes those refusals mean something.
+`packages/ui/test/transport-table.test.ts` requires `ENDPOINTS` to be read by the transport driver alone,
+requires every operation a component or screen names to have a route, and proves a hand-assembled route table
+does not compile.
 
 **What breaking it costs.** #247: nine of eighteen components in the committed spec restated, by hand, what a
 zod definition already said, and the gate that compared the two *filed the difference instead of preventing

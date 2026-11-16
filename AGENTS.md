@@ -27,7 +27,7 @@ selections it has already made are recorded, not improvised:
 | Every environment variable: custody, environments, obligations and wiring -- one registry per platform, at its root | [environment.yaml](environment.yaml) — the central registry (D52, and D33's obligations since D58), enforced by `pnpm run environment:registry`: one definition per variable, one spelling of everywhere, one file per platform |
 
 Status: foundation poured, interfaces first (D40, [16](docs/design/16-foundation-build-order.md)). Slices 1
-and 2 of that plan are delivered (450 tests): `apps/control-plane` boots on the vendored runtime with
+and 2 of that plan are delivered (test count: run `pnpm run test`; the number ages within a week and has been wrong in this file repeatedly): `apps/control-plane` boots on the vendored runtime with
 Keycloak-verified bearer auth, persistent records (`Store` as a capability with a Postgres implementation and
 an in-memory double under one conformance suite, gated in CI against a live database), a controller
 that turns accepted attestations into stored state, and capability bindings that make shared services
@@ -199,8 +199,8 @@ Normative statements are [docs/ui-architecture.md](docs/ui-architecture.md); rat
 eleven CI gates are [11](docs/design/11-ui-components-and-page-model.md). Build or review any UI through the
 [ui-architecture skill](.agents/skills/ui-architecture/SKILL.md). `packages/ui` **now exists** (2026-11-15: the
 component contract, design tokens as CSS custom properties per D63, the five layout primitives, the signals
-registry, the SDK seam, and 19 gates) and **now has its first screens**: six registered components in
-`.tsx`, one screen document, and 20 gates of which 17 pass and 3 report NOT RUN. #259 is closed:
+registry, the SDK seam, and 20 gates) and **now has its first screens**: six registered components in
+`.tsx`, one screen document, and the gate set from `ui:check` (read its output: gates that cannot run report NOT RUN rather than passing). #259 is closed:
 `packages/ui/tsconfig.json` carries `jsx: react-jsx` plus `lib: [..., "DOM"]`, and `pnpm run typecheck` runs
 **both** projects — so a `.tsx` is compiled by CI, while `document` in `packages/contracts` or
 `apps/control-plane` is still TS2584. `scripts/check-project.ts` now fails the build unless the union of the
