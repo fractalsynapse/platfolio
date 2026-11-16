@@ -16,13 +16,14 @@ import type { OperationId, ParamsOf, RequestBodyOf, SuccessOf } from '@platfolio
  *   that changes). Shipping a push-backed UX over a polled fact is rule 5's defect: it is #202's
  *   "a service that *finished* was being reported as a service that *runs*" moved to the side of the screen
  *   where a human acts on it.
- * - No `events` **driver**. `EventsTransportUnsupported` below is a type-level placeholder and nothing more —
- *   `test/sdk-freshness.test.ts` asserts that constructing it is a compile error and that the named
- *   operation ids it refers to are absent from the generated table. The distinction matters: the seam is
- *   real today, the driver is not, and a package that pretended otherwise would be describing planned
- *   behavior as delivered.
- * - No committed base URL (D47). `ApiConfig.baseUrl` is required at construction and comes from the shell's
- *   environment; `check-project.ts`'s endpoint rule keeps it out of source.
+ * - No `events` **driver**. `EventsTransportPlaceholder` below is a type-level placeholder and nothing more —
+ *   `ui:check` §9.10c compiles `test/fixtures/events-driver-built.negative.ts` and requires the refusal, and
+ *   `test/transport-table.test.ts` reads the generated `ENDPOINTS` table and requires that the operation ids
+ *   it names are absent from it. The distinction matters: the seam is real today, the driver is not, and a
+ *   package that pretended otherwise would be describing planned behavior as delivered.
+ * - No committed base URL (D47). `PollTransportConfig.baseUrl` is required at construction and comes from the
+ *   shell's environment; `check-project.ts`'s endpoint rule keeps it out of source. The paths are not
+ *   configuration and do not come from the shell either: they come from `ENDPOINTS` (#258).
  */
 
 /** The stable error `code` from 07, as the generated contract types it. */
@@ -159,9 +160,10 @@ export function formatAge(freshness: Freshness, now: ObservedAt): string {
 export interface EventsTransportPlaceholder {
   readonly kind: 'events';
   /**
-   * Unsatisfiable on purpose. The day `GET /api/v1/teams/{teamId}/events` is in the generated table, this
-   * member is deleted and the real driver replaces it; until then any attempt to build one is a type error,
-   * which is the assertion `test/sdk-freshness.test.ts` makes real.
+   * Unsatisfiable on purpose. The day `GET /api/v1/teams/{teamId}/events` is in the generated `ENDPOINTS`
+   * table, this member is deleted and the real driver replaces it; until then any attempt to build one is a
+   * type error, which is what `ui:check` §9.10c compiles and `test/transport-table.test.ts` reads the table
+   * for.
    */
   readonly blockedOn: 'operations absent from apps/control-plane/openapi.yaml (11 §4); design them there first (D41)';
   call: never;

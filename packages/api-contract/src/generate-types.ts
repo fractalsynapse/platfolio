@@ -68,8 +68,110 @@ export function generateApiTypes(doc: SpecDocument, options: GenerateOptions): s
     operations.map((op) => [`  /** ${op.where} */`, `  ${key(op.id)}: {\n${statusMembers(op)}\n  };`]),
   ));
   out.push(HELPERS);
+  out.push(endpointBlock(operations));
 
   return `${out.join('\n\n').replace(/\n{3,}/g, '\n\n')}\n`;
+}
+
+/**
+ * The route half of the generated module (#258).
+ *
+ * The three maps above say what an operation's data looks like; none of them says where the operation *is*.
+ * A transport holding only those types cannot turn `listInstances` into a request, and the two ways to fix
+ * that are the two defects this file exists to prevent: a hand-written endpoint list beside the client (one
+ * fact, two owners -- #247's shape, moved to the URL), or `packages/ui` parsing `openapi.yaml` itself, which
+ * 11 §6 acceptance (c) forbids by name. So the method and path arrive from the same parse that produced the
+ * type maps, in the same deterministic order, and a driver reads a table instead of inventing one.
+ *
+ * The path stays **templated**. `{instanceId}` is not filled here because filling it is a request-time act:
+ * the value belongs to the caller's `ParamsOf<O>`, and the rule that turns it into a segment (percent-encode
+ * the whole value, refuse an absent one) is the transport's, not the document's -- see
+ * `packages/ui/src/sdk/poll.ts`, which owns the one helper that does it and says why it lives there.
+ */
+function endpointBlock(operations: Operation[]): string {
+  const entries = operations.map((op) => {
+    // The one promise this table makes a transport: every `{hole}` in a path is a parameter that operation
+    // declares, so `ParamsOf<O>` can fill it. `checkSpec` refuses the same class of thing at the document level
+    // for `api:check`; the emitter refuses it here too, because `api:types:check` is the gate that runs when
+    // only the generated file is in question, and a route nobody can complete is worth importing less than
+    // nothing.
+    const declared = new Set(op.parameters.filter((p) => p.in === 'path' && p.required).map((p) => p.name));
+    for (const hole of op.path.matchAll(/\{(\w+)\}/g)) {
+      const name = String(hole[1]);
+      if (!declared.has(name)) {
+        throw refuse(`#/paths${op.path}`, `${op.id}: {${name}} is templated in the path but not declared there as a required \`in: path\` parameter, so no caller is obliged to fill it`);
+      }
+    }
+    return [
+      `  /** ${op.where} */`,
+      `  ${key(op.id)}: { method: ${quote(op.method)}, path: ${quote(op.path)} },`,
+    ].join('\n');
+  });
+  return [
+    '/**',
+    ' * The HTTP methods a path item may be written under, spelled as the document spells them.',
+    ' *',
+    ' * The key of the path item, lowercase: this is the document\'s own notation, not the wire form, and a',
+    ' * transport upper-cases it when it builds the request rather than the generator inventing a second',
+    ' * spelling of the same verb.',
+    ' */',
+    `export type HttpMethod = ${HTTP_METHODS.map((method) => `'${method}'`).join(' | ')};`,
+    '',
+    '/**',
+    ' * One operation\'s route: the verb it answers to, and the path as the spec wrote it.',
+    ' */',
+    'export interface Endpoint {',
+    '  readonly method: HttpMethod;',
+    '  /** The spec\'s own notation, so `{instanceId}` matches rather than `:instanceId`. */',
+    '  readonly path: string;',
+    '}',
+    '',
+    '/**',
+    ' * Every operationId, mapped to the method and templated path the document gives it.',
+    ' *',
+    ' * `satisfies Record<OperationId, Endpoint>` is the rule, not a style choice: an operation the document',
+    ' * declares and this table lacks is a compile error, and an entry whose operation has left the document',
+    ' * is a compile error too (`pnpm run api:types:check` then refuses the file from the other side, because',
+    ' * the table no longer reproduces from the spec). A transport therefore never has to ask whether the',
+    ' * routes are complete -- the type it reads was built by checking that.',
+    ' *',
+    ' * GENERATED -- `pnpm run api:types:check` fails if this file stops reproducing from the committed spec.',
+    ' */',
+    'export const ENDPOINTS = {',
+    ...(entries.length ? entries : ['  // no operations in the current document']),
+    '} as const satisfies Record<OperationId, Endpoint>;',
+    '',
+    '/**',
+    ' * The `{name}` placeholders in a templated path, read out of the literal `as const` preserved.',
+    ' */',
+    'type PathPlaceholders<T extends string> = T extends `${infer _Segment}{${infer Name}}${infer Rest}`',
+    '  ? Name | PathPlaceholders<Rest>',
+    '  : never;',
+    '',
+    '/** Which parameters one operation must be *given*, because its path names them. */',
+    "export type PathParamsOf<O extends OperationId> = PathPlaceholders<(typeof ENDPOINTS)[O]['path']>;",
+    '',
+    '/**',
+    ' * The fillability proof, and it is the half the shape guard above cannot give.',
+    ' *',
+    ' * `satisfies Record<OperationId, Endpoint>` proves the table is complete and well-shaped. It cannot',
+    ' * prove a route is *completable*: renaming `{instanceId}` to `{id}` is a legal `string`, and the shape',
+    ' * guard stays happy while the transport refuses, at request time, a request no caller could have typed',
+    ' * -- measured on this file. So every placeholder is checked against the operation\'s own REQUIRED',
+    ' * parameters, once per operation, at compile time. `ROUTES_ARE_FILLABLE` is `true` today, and the pair',
+    ' * naming the offender the moment a hand edit or a partial regeneration makes it not. (`api:types:check`',
+    ' * refuses the same edit from the other side, as staleness; this is the refusal that still speaks when',
+    ' * only the compiler is run.)',
+    ' */',
+    'type RequiredParamKeys<T> = { [K in keyof T]-?: {} extends Pick<T, K> ? never : K }[keyof T];',
+    'type UnfillableRoutes = {',
+    '  [O in OperationId]: Exclude<PathParamsOf<O>, RequiredParamKeys<ParamsOf<O>>>',
+    '}[OperationId];',
+    'type RoutesAreFillable = UnfillableRoutes extends never',
+    '  ? true',
+    "  : ['a route templates a hole that operation does not declare as a required parameter', UnfillableRoutes];",
+    "export const ROUTES_ARE_FILLABLE: RoutesAreFillable = true;",
+  ].join('\n');
 }
 
 const HELPERS = [
@@ -313,6 +415,17 @@ function key(name: string): string {
   return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name) ? name : `'${name.replaceAll("'", "\\'")}'`;
 }
 
+/**
+ * A single-quoted string literal in emitted code, with the two characters that could end it early escaped.
+ *
+ * Paths and verbs come from a document a human writes. A backslash or a quote in a path template that is
+ * copied out raw would emit a syntax error into a file that is supposed to be machine-reproduced -- the one
+ * place where "the generator emitted nonsense" and "the spec says nonsense" become indistinguishable.
+ */
+function quote(value: string): string {
+  return `'${value.replace(/[\\']/g, (c) => `\\${c}`)}'`;
+}
+
 /** A spec name that is not a TypeScript identifier gets a safe one; its comment keeps the original visible. */
 export function identifier(name: string): string {
   return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name) ? name : `_${name.replace(/[^A-Za-z0-9_$]/g, '_')}`;
@@ -321,13 +434,38 @@ export function identifier(name: string): string {
 interface Operation {
   id: string;
   where: string;
-  parameters: Array<{ name: string; required: boolean; schema: unknown }>;
+  /** The path as the document wrote it, templated holes and all -- the `ENDPOINTS` table's `path`. */
+  path: string;
+  /** The path item's key: lowercase, because that is how the specification spells a verb. */
+  method: string;
+  parameters: Array<{ name: string; in: 'path' | 'query'; required: boolean; schema: unknown }>;
   body: unknown;
   responses: Array<{ status: string; schema: unknown }>;
 }
 
+/**
+ * Names the emitter itself declares.
+ *
+ * A component with one of these names would make the generated file declare it twice -- and `--check` would
+ * still report the file as reproducing from the spec, because the file it compares against is the one with the
+ * duplicate in it. `tsc` would then fail on a generated file the byte-for-byte gate had just blessed. Refusing
+ * at emit time names the collision instead.
+ */
+const RESERVED_NAMES = [
+  'ApiParameters', 'ApiRequestBodies', 'ApiResponses', 'OperationId', 'RequestBodyOf', 'ParamsOf',
+  'ResponseOf', 'SuccessStatuses', 'SuccessOf', 'HttpMethod', 'Endpoint', 'ENDPOINTS',
+  'PathPlaceholders', 'PathParamsOf', 'RequiredParamKeys', 'UnfillableRoutes', 'RoutesAreFillable',
+  'ROUTES_ARE_FILLABLE',
+];
+
 function operationsOf(doc: SpecDocument): Operation[] {
   const out: Operation[] = [];
+  const components = Object.keys(schemasOf(doc)).sort();
+  for (const name of RESERVED_NAMES) {
+    if (components.includes(name)) {
+      throw refuse(`#/components/schemas/${name}`, `"${name}" is a name this emitter declares for its own maps; rename the component (the generated file would otherwise declare it twice)`);
+    }
+  }
   for (const [path, item] of Object.entries<SpecDocument>(doc.paths ?? {})) {
     const shared = Array.isArray(item?.parameters) ? (item.parameters as SpecDocument[]) : [];
     for (const [method, op] of Object.entries<SpecDocument>(item ?? {})) {
@@ -339,9 +477,16 @@ function operationsOf(doc: SpecDocument): Operation[] {
       out.push({
         id,
         where: `${method.toUpperCase()} ${path}`,
+        path,
+        method: method.toLowerCase(),
         parameters: params
           .filter((p) => p?.in === 'path' || p?.in === 'query')
-          .map((p) => ({ name: String(p.name), required: p.required === true, schema: p.schema })),
+          .map((p) => ({
+            name: String(p.name),
+            in: p.in === 'path' ? 'path' as const : 'query' as const,
+            required: p.required === true,
+            schema: p.schema,
+          })),
         body: (op.requestBody as SpecDocument | undefined)?.content?.['application/json']?.schema,
         responses: Object.entries((op.responses ?? {}) as Record<string, unknown>).map(([status, entry]) => ({
           status,

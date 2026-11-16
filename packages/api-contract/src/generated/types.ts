@@ -892,3 +892,138 @@ export type SuccessStatuses<O extends OperationId> = Extract<keyof ApiResponses[
 
 /** The success body of an operation -- whatever its declared 2xx statuses produce, unionled. */
 export type SuccessOf<O extends OperationId> = { [S in SuccessStatuses<O>]: ApiResponses[O][S] }[SuccessStatuses<O>];
+
+/**
+ * The HTTP methods a path item may be written under, spelled as the document spells them.
+ *
+ * The key of the path item, lowercase: this is the document's own notation, not the wire form, and a
+ * transport upper-cases it when it builds the request rather than the generator inventing a second
+ * spelling of the same verb.
+ */
+export type HttpMethod = 'get' | 'put' | 'post' | 'delete' | 'options' | 'head' | 'patch' | 'trace';
+
+/**
+ * One operation's route: the verb it answers to, and the path as the spec wrote it.
+ */
+export interface Endpoint {
+  readonly method: HttpMethod;
+  /** The spec's own notation, so `{instanceId}` matches rather than `:instanceId`. */
+  readonly path: string;
+}
+
+/**
+ * Every operationId, mapped to the method and templated path the document gives it.
+ *
+ * `satisfies Record<OperationId, Endpoint>` is the rule, not a style choice: an operation the document
+ * declares and this table lacks is a compile error, and an entry whose operation has left the document
+ * is a compile error too (`pnpm run api:types:check` then refuses the file from the other side, because
+ * the table no longer reproduces from the spec). A transport therefore never has to ask whether the
+ * routes are complete -- the type it reads was built by checking that.
+ *
+ * GENERATED -- `pnpm run api:types:check` fails if this file stops reproducing from the committed spec.
+ */
+export const ENDPOINTS = {
+  /** POST /api/v1/me/invitations/{invitationId}/accept */
+  acceptInvitation: { method: 'post', path: '/api/v1/me/invitations/{invitationId}/accept' },
+  /** PUT /api/v1/instances/{instanceId}/bindings/{capability} */
+  bindCapability: { method: 'put', path: '/api/v1/instances/{instanceId}/bindings/{capability}' },
+  /** POST /api/v1/instances/{instanceId}/dispatches */
+  createDispatch: { method: 'post', path: '/api/v1/instances/{instanceId}/dispatches' },
+  /** POST /api/v1/instances */
+  createInstance: { method: 'post', path: '/api/v1/instances' },
+  /** POST /api/v1/teams/{teamId}/invitations */
+  createInvitation: { method: 'post', path: '/api/v1/teams/{teamId}/invitations' },
+  /** POST /api/v1/teams */
+  createTeam: { method: 'post', path: '/api/v1/teams' },
+  /** DELETE /api/v1/instances/{instanceId} */
+  destroyInstance: { method: 'delete', path: '/api/v1/instances/{instanceId}' },
+  /** GET /api/v1/me */
+  getCurrentPerson: { method: 'get', path: '/api/v1/me' },
+  /** GET /api/v1/instances/{instanceId}/dispatches/{dispatchId} */
+  getDispatchPlan: { method: 'get', path: '/api/v1/instances/{instanceId}/dispatches/{dispatchId}' },
+  /** GET /healthz */
+  getHealth: { method: 'get', path: '/healthz' },
+  /** GET /api/v1/instances/{instanceId} */
+  getInstance: { method: 'get', path: '/api/v1/instances/{instanceId}' },
+  /** GET /api/v1/instances/{instanceId}/latest-attestation */
+  getLatestAttestation: { method: 'get', path: '/api/v1/instances/{instanceId}/latest-attestation' },
+  /** GET /readyz */
+  getReady: { method: 'get', path: '/readyz' },
+  /** GET /version */
+  getVersion: { method: 'get', path: '/version' },
+  /** GET /api/v1/whoami */
+  getWhoami: { method: 'get', path: '/api/v1/whoami' },
+  /** GET /api/v1/audit */
+  listAudit: { method: 'get', path: '/api/v1/audit' },
+  /** GET /api/v1/capabilities */
+  listAvailableCapabilities: { method: 'get', path: '/api/v1/capabilities' },
+  /** GET /api/v1/instances/{instanceId}/bindings */
+  listBindings: { method: 'get', path: '/api/v1/instances/{instanceId}/bindings' },
+  /** GET /api/v1/instances/{instanceId}/consumers */
+  listConsumers: { method: 'get', path: '/api/v1/instances/{instanceId}/consumers' },
+  /** GET /api/v1/instances */
+  listInstances: { method: 'get', path: '/api/v1/instances' },
+  /** GET /api/v1/teams/{teamId}/invitations */
+  listInvitations: { method: 'get', path: '/api/v1/teams/{teamId}/invitations' },
+  /** GET /api/v1/me/invitations */
+  listMyInvitations: { method: 'get', path: '/api/v1/me/invitations' },
+  /** GET /api/v1/instances/{instanceId}/secrets */
+  listSecretPresence: { method: 'get', path: '/api/v1/instances/{instanceId}/secrets' },
+  /** GET /api/v1/teams */
+  listTeams: { method: 'get', path: '/api/v1/teams' },
+  /** POST /api/v1/attestations */
+  postAttestation: { method: 'post', path: '/api/v1/attestations' },
+  /** POST /api/v1/instances/{instanceId}/capability */
+  publishCapability: { method: 'post', path: '/api/v1/instances/{instanceId}/capability' },
+  /** PUT /api/v1/instances/{instanceId}/plan */
+  putPlan: { method: 'put', path: '/api/v1/instances/{instanceId}/plan' },
+  /** PUT /api/v1/instances/{instanceId}/secrets/{name} */
+  putSecret: { method: 'put', path: '/api/v1/instances/{instanceId}/secrets/{name}' },
+  /** POST /api/v1/instances/{instanceId}/redeploy */
+  redeployInstance: { method: 'post', path: '/api/v1/instances/{instanceId}/redeploy' },
+  /** POST /api/v1/instances/{instanceId}/plan/from-repository */
+  registerPlanFromRepository: { method: 'post', path: '/api/v1/instances/{instanceId}/plan/from-repository' },
+  /** POST /api/v1/instances/{instanceId}/artifacts */
+  reportArtifact: { method: 'post', path: '/api/v1/instances/{instanceId}/artifacts' },
+  /** DELETE /api/v1/instances/{instanceId}/capability/{capability}/shares/{toTeamId} */
+  revokeCapabilityShare: { method: 'delete', path: '/api/v1/instances/{instanceId}/capability/{capability}/shares/{toTeamId}' },
+  /** DELETE /api/v1/teams/{teamId}/invitations/{invitationId} */
+  revokeInvitation: { method: 'delete', path: '/api/v1/teams/{teamId}/invitations/{invitationId}' },
+  /** PUT /api/v1/instances/{instanceId}/capability/{capability}/shares */
+  shareCapability: { method: 'put', path: '/api/v1/instances/{instanceId}/capability/{capability}/shares' },
+  /** POST /api/v1/instances/{instanceId}/dispatches/{dispatchId}/trigger */
+  triggerDispatch: { method: 'post', path: '/api/v1/instances/{instanceId}/dispatches/{dispatchId}/trigger' },
+  /** DELETE /api/v1/instances/{instanceId}/bindings/{capability} */
+  unbindCapability: { method: 'delete', path: '/api/v1/instances/{instanceId}/bindings/{capability}' },
+} as const satisfies Record<OperationId, Endpoint>;
+
+/**
+ * The `{name}` placeholders in a templated path, read out of the literal `as const` preserved.
+ */
+type PathPlaceholders<T extends string> = T extends `${infer _Segment}{${infer Name}}${infer Rest}`
+  ? Name | PathPlaceholders<Rest>
+  : never;
+
+/** Which parameters one operation must be *given*, because its path names them. */
+export type PathParamsOf<O extends OperationId> = PathPlaceholders<(typeof ENDPOINTS)[O]['path']>;
+
+/**
+ * The fillability proof, and it is the half the shape guard above cannot give.
+ *
+ * `satisfies Record<OperationId, Endpoint>` proves the table is complete and well-shaped. It cannot
+ * prove a route is *completable*: renaming `{instanceId}` to `{id}` is a legal `string`, and the shape
+ * guard stays happy while the transport refuses, at request time, a request no caller could have typed
+ * -- measured on this file. So every placeholder is checked against the operation's own REQUIRED
+ * parameters, once per operation, at compile time. `ROUTES_ARE_FILLABLE` is `true` today, and the pair
+ * naming the offender the moment a hand edit or a partial regeneration makes it not. (`api:types:check`
+ * refuses the same edit from the other side, as staleness; this is the refusal that still speaks when
+ * only the compiler is run.)
+ */
+type RequiredParamKeys<T> = { [K in keyof T]-?: {} extends Pick<T, K> ? never : K }[keyof T];
+type UnfillableRoutes = {
+  [O in OperationId]: Exclude<PathParamsOf<O>, RequiredParamKeys<ParamsOf<O>>>
+}[OperationId];
+type RoutesAreFillable = UnfillableRoutes extends never
+  ? true
+  : ['a route templates a hole that operation does not declare as a required parameter', UnfillableRoutes];
+export const ROUTES_ARE_FILLABLE: RoutesAreFillable = true;

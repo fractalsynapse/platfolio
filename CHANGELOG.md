@@ -6,6 +6,57 @@ change; entries describe merged intent, not aspirations.
 ## [Unreleased]
 ## [Unreleased]
 
+### Added — #258: the generated contract carries the routes, and the SDK reads them
+
+`packages/api-contract/src/generated/types.ts` now exports a runtime table beside its type maps, emitted by the
+same parse and gated by the same command:
+
+```ts
+export const ENDPOINTS = {
+  listInstances: { method: 'get', path: '/api/v1/instances' },
+  // …one entry per operationId…
+} as const satisfies Record<OperationId, Endpoint>;
+```
+
+The `satisfies` guard is the rule rather than a style: an operation the document declares and the table lacks
+does not compile (TS1360), and a route whose operation has left the document does not compile either (TS2353) —
+both measured by compiling mutated copies outside the tree (`packages/api-contract/test/generated-endpoints.test.ts`).
+Completeness is not fillability, so the same pass emits a second guard: `PathParamsOf<O>` reads the `{holes}`
+out of the table's own template literals and `ROUTES_ARE_FILLABLE` asserts each is a **required** parameter of
+that operation. Measured: renaming `{instanceId}` to `{id}` and making `instanceId` optional are both refused
+there, naming the hole; a drifted path (`/api/v1/instancez`) is legal `string` and stays `api:types:check`'s
+business. The emitter also now refuses what it cannot honour: a templated `{hole}` no parameter declares as a
+required `in: path` parameter, and a component named after one of the emitter's own declarations.
+`scripts/gen-api-types.ts` reports such a refusal as a finding instead of leaking a stack trace — the same
+correction `api:check` received on 2026-11-15, applied where this script had the same shape.
+
+`PollTransport` stops taking a route table someone hand-assembles. `PollTransportConfig.endpoints` remains
+injectable and remains total — `Readonly<Record<OperationId, Endpoint>>`, so a partial table is a compile error
+(`packages/ui/test/fixtures/route-table-partial.negative.ts`, paired with the control that compiles) — and
+defaults to `ENDPOINTS`. The shell supplies an origin and nothing else, which is D47 read from this side:
+**paths are generated, base URLs are configuration.** No hostname was added anywhere; `check-project.ts`'s
+endpoint rule still exits 0, and the new tests use loopback or a reserved `.test` domain.
+
+The path stays **templated**, and the one rule that fills it — `encodeURIComponent` on the whole value, refuse
+rather than leave a hole — lives in `packages/ui/src/sdk/poll.ts` beside the driver. It lives there because
+`packages/api-contract` has no parameter-to-URL code to reuse (measured: it types parameters and validates
+bodies, and never serialises one) and 11 §6 acceptance (c) forbids parsing `openapi.yaml` inside
+`packages/ui`, so gate §9.2's one permitted URL-builder is the only honest home.
+
+Evidence, by tier: **static** — the table equals the document entry for entry, both directions.
+**In-process fake over a socket** — `packages/ui/test/transport-request.test.ts` runs the driver's default
+`fetch` against a loopback `node:http` server, so method, encoded single segment, query assembly, bearer
+header, JSON body and a declared 204 are seen by a server rather than by a recorded call. **Local stack** — not
+exercised: the Compose stack was not running, and a read-only pass does not bring one up. What none of the
+tiers reach is the *server's* behaviour on those paths; that stays `api:check`'s route-manifest comparison, and
+a live check remains a live check.
+
+Nothing moved off `ui:check`'s NOT RUN list: §9.7, §9.8 and §9.9 need a browser, a layout engine and the draft
+store, and a route table supplies none of them. The three D41 gaps the document still has — no team-scoped
+instance list, no team slug on `InstanceResponse`, an unbounded `environment` where an enum belongs — are
+**unchanged**, because closing them means adding operations to `openapi.yaml`, which is not this change's to
+make.
+
 ### Added — #259: `.tsx` is type-checked in CI, and the first screens land in `packages/ui`
 
 Two changes, deliberately separate, because the first is what made the second honest.
