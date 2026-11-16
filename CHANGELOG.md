@@ -4,6 +4,70 @@ Notable changes to the platfolio project. One human-readable entry per user- or 
 change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
+
+### Fixed — falsification by mutation no longer shares one working tree by accident
+
+`ui:check` and `typecheck` are proved to bite by tests that edit tracked source in place and then run the gate.
+They did that in a tree that `node --test` gives to several files at once: `gates-falsify.test.ts` was appending a
+violation to `packages/ui/src/contract.ts` while `typecheck-coverage.test.ts` was asserting that the clean tree is
+green — an assertion whose own failure message says the results "would be meaningless", which was true of a tree it
+did not own. [packages/ui/test/mutation-sandbox.ts](packages/ui/test/mutation-sandbox.ts) now serialises exactly the
+part that needs serialising, and self-heals a run that dies mid-mutation.
+
+**The lock.** A critical section is `sandbox.exclusive(label, fn)`: a queue ticket, then a test-and-set on a `lock`
+directory under `.tmp/mutation-sandbox/<root>/` — which must *not* be created up front, a mistake whose symptom was
+every section timing out against a lock nobody held. A waiter never proceeds past a lock it cannot account for: it
+reclaims one whose writer is provably gone and otherwise fails after a bounded 180 s wait with
+`MUTATION_LOCK_TIMEOUT`, naming the holder's pid, label, age and the evidence used. Nothing is skipped on that path,
+because a lock that quietly opts out of serialisation looks like a fix and is not one. Proving a writer gone took
+two rounds: `kill(pid, 0)` was not enough in a container that reissues low pids within minutes — a dead run's lock
+was read back as "pid 40 is running", and the suite waited it out — so each record now carries the writer's
+`/proc` start time **and** a per-process run id, and the deciding rule is the invariant that a mutation only exists
+while its writer holds the tree. Sections that waited say so in the output — running the two mutating suites side by
+side prints fifteen-odd `waited 10.6s for the working tree` lines, which makes the interleaving visible instead of
+inferred; with `--test-concurrency=1` in place the suites never meet, and those lines are what will show that #263's
+replacement is doing its job.
+
+**The sidecar, which is what a killed run cannot have.** Every mutation computes the bytes it is about to write,
+records the record (meta, original, planted) in a fresh directory, `rename`s it into place, and only then touches
+the file. `SIGKILL` — what `timeout -k`, a CI step deadline and an escalating runner deliver — runs no handler in
+the process that receives it, so teardown cannot be the answer on its own; measured directly, a `SIGTERM` arriving
+while a suite is blocked in `execFileSync` does not reach its handler either. The next process to open a sandbox
+replays records whose writer is gone, at module load, before it reads the tree. Measured: `kill -9` on the mutating
+child of each suite leaves the planted bytes in the tree *and* the sidecar beside them, and the next run prints
+`self-healed packages/ui/src/contract.ts … its sidecar put the bytes back`, reclaims the dead holder's lock, and
+passes with the tree byte-identical afterwards. Restoration compares current bytes against both records and refuses
+to write over a third state: if somebody edited a file while it carried a planted violation, that is
+`MUTATION_SIDECAR_CONFLICT`, named, with the record left standing for a human. Nothing here uses `git checkout`,
+`restore`, `stash`, `clean` or `reset`.
+
+**What this does not fix, and why that is not a detail.** The lock serialises processes that mutate. It cannot
+protect a process that merely *imports* something the mutators change: by the time a test file's code runs, its whole
+static import graph has already been evaluated in whatever bytes the tree held. Reproduced with the mutation
+provably in flight, [packages/ui/test/layout.test.ts](packages/ui/test/layout.test.ts) failed three assertions —
+including `stack declares "size"` — while `gates-falsify.test.ts` sat inside its container-type weakening, in a
+suite that touches no file. [packages/ui/test/components.test.ts](packages/ui/test/components.test.ts) had the same
+failure against the invalid-prop-set fixture, and is fixed properly: that fixture is read through `importQuietly()`,
+which waits for the tree and then evaluates the module *fresh*, since a cached import keeps whatever bytes the first
+evaluation saw. The same treatment cannot be given to `layout.test.ts` or the screens and registry suites by editing
+them — a cache-busted entry module still resolves its own imports to the already-cached instances, so a consistent
+quiet read of `packages/ui/src/**` needs the whole graph loaded under the lock. Five consecutive full runs of
+`pnpm run test` with `--test-concurrency=1` removed came out green (845 tests, nothing left modified) — the sample
+did not hit it, while the forced experiment above hits it every time, which is the difference between an exposure
+and an absence. So **the concurrency flag stays, and it is load-bearing for correctness rather than performance
+tuning**: removing it requires the copy-based mutation sandbox first, which is
+[#263](https://github.com/fractalsynapse/platfolio/issues/263) — filed with both reproduced failures, the import-graph
+mechanism, what `scripts/check-ui.ts` would have to give up (its location-derived root *and* its static imports of
+the tree it audits), and the acceptance test that decides whether it landed. What the sandbox does close for good is
+the interruption hazard: with the flag doing the serialising, the lock and the sidecar are what keep a killed or
+timed-out run from leaving a planted violation for the next person to commit.
+
+Proved by [packages/ui/test/mutation-sandbox.test.ts](packages/ui/test/mutation-sandbox.test.ts), which kills real
+child processes rather than asserting in prose: `SIGKILL` mid-mutation, `SIGKILL` mid-creation, `SIGKILL` while
+holding the lock, `process.exit()` inside a section, a live holder driving a waiter to the named timeout, a recycled
+pid refused as a holder, two contenders whose timed sections never overlap, a nested section refused instead of
+hanging, and a recovery that refuses to clobber somebody else's bytes.
+
 ## [Unreleased]
 
 ### Added — #258: the generated contract carries the routes, and the SDK reads them

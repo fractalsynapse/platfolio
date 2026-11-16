@@ -463,9 +463,17 @@ npx -y tsx scripts/check-api.ts               # api:check
 npx -y tsx scripts/gen-api-spec.ts --check    # spec:check   (write with --write; see spec:gen)
 npx -y tsx scripts/bundle-action.ts --check   # action:check
 npx -y tsc --noEmit -p tsconfig.json          # typecheck
-npx -y tsx --test packages/*/test/*.test.ts apps/*/test/*.test.ts
+npx -y tsx --test --test-concurrency=1 packages/*/test/*.test.ts apps/*/test/*.test.ts
 npx -y tsx scripts/check-contracts.ts         # contracts:check
 ```
+
+`--test-concurrency=1` belongs to the `test` script and to the line above, and it is not a performance dial. Two
+suites edit tracked source to prove the gates can bite, and a third suite that merely *imports* one of those files
+can be evaluated while the mutation is in flight -- which no waiting inside a test can prevent, because the import
+graph is built before the test body runs.
+[packages/ui/test/mutation-sandbox.ts](../packages/ui/test/mutation-sandbox.ts) serialises the mutators and heals a
+run that dies mid-mutation; [#263](https://github.com/fractalsynapse/platfolio/issues/263) is the change that would
+let the flag go.
 
 CI installs its own pnpm and is unaffected, so a locally unverifiable wrapper never excuses a merge: run the
 scripts directly, or don't merge. Record which you did.

@@ -12,8 +12,9 @@ import { COMPONENT_RULES } from '../src/components/style.ts';
 import { SELECTABLE_ENVIRONMENTS } from '../src/components/enums.ts';
 import { STALE_AFTER_SECONDS } from '../src/components/freshness.ts';
 import {
-  BAD_PROPS, SAMPLE_ATTESTATION, SAMPLE_FRESHNESS, SAMPLE_INSTANCES, SAMPLE_NOW, SAMPLE_PROPS,
+  SAMPLE_ATTESTATION, SAMPLE_FRESHNESS, SAMPLE_INSTANCES, SAMPLE_NOW, SAMPLE_PROPS,
 } from './fixtures/page-documents.ts';
+import { createMutationSandbox } from './mutation-sandbox.ts';
 import type { SignalBus } from '../src/signals.ts';
 
 /**
@@ -41,6 +42,18 @@ import type { SignalBus } from '../src/signals.ts';
  */
 
 const ROOT = path.resolve(import.meta.dirname, '../../..');
+
+/**
+ * This suite *reads* `fixtures/page-documents.ts`, and `gates-falsify.test.ts` mutates that file in place to
+ * prove §9.5 refuses what it claims to refuse. `node --test` runs the two files in parallel processes, so the
+ * fixture this suite evaluates can be the mutated one -- measured, not theorised: with the mutation in flight,
+ * the refusal test below failed with `no instances at all was accepted`, in a suite that touches no file.
+ *
+ * So the invalid-prop-set fixture is read through the sandbox: under the tree lock, and as a fresh module
+ * instance, which is what makes the wait mean something (a cached import would keep whatever bytes the first
+ * evaluation saw, poisoned or not). Everything else here is props data the mutations do not change.
+ */
+const sandbox = createMutationSandbox({ root: ROOT });
 
 /** A bus that has already announced the context a screen is normally rendered into. */
 function contextualBus(): SignalBus {
@@ -83,10 +96,18 @@ test('every registered component renders from its own validated props without th
   }
 });
 
-test('the invalid prop sets named in the fixture really are refused', () => {
+test('the invalid prop sets named in the fixture really are refused', async () => {
   // The other half of "registration resolves": a suite that only checks the happy path is a fixture list with the
   // word "invalid" in a comment beside it.
-  for (const bad of BAD_PROPS) {
+  //
+  // Read through the sandbox, because the file these come from is the one `gates-falsify.test.ts` edits in place
+  // to prove this very refusal is real. Waiting for the tree is only half of it: the module also has to be
+  // evaluated *after* the wait, so an import cached during someone else's mutation cannot be the evidence here.
+  const fixture = await sandbox.importQuietly<typeof import('./fixtures/page-documents.ts')>(
+    'read the invalid prop sets',
+    new URL('./fixtures/page-documents.ts', import.meta.url).href,
+  );
+  for (const bad of fixture.BAD_PROPS) {
     const problems = componentById(bad.page.component).props['~standard'].validate(bad.page.props);
     assert.ok(!(problems instanceof Promise) && problems.issues && problems.issues.length > 0, `${bad.label} was accepted`);
   }
