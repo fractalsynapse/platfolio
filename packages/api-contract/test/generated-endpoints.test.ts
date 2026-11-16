@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { loadSpec, type SpecDocument } from '../src/index.ts';
@@ -53,7 +52,11 @@ for (const [label, needle] of [['route line', ROUTE_LINE], ['response block', RE
 }
 
 function compile(name: string, text: string): { code: number; output: string } {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `platfolio-endpoints-${name}-`));
+  // In-repo on purpose: a compile probe outside the repository cannot inherit the repo compiler flags, and
+  // `os.tmpdir()` is /tmp in CI but inside the tree on a dev box whose TMPDIR is set -- which is exactly how this
+  // file passed locally and failed on the runner (TS2688 'Cannot find type definition file for node', TS6059
+  // 'not under rootDir'). The path must not be an input to the answer the test is measuring.
+  const dir = fs.mkdtempSync(path.join(ROOT, `.tmp-probe-${name}-`));
   try {
     fs.writeFileSync(path.join(dir, 'mutant.ts'), text, 'utf8');
     fs.writeFileSync(

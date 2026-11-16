@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { ENDPOINTS } from '@platfolio/api-contract/generated/types';
@@ -130,7 +129,7 @@ test('every operation a component or a screen names has a route', () => {
  * must succeed, or the failure would be about the harness and not about the rule.
  */
 function compileFixture(fixture: string): { code: number; output: string } {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'platfolio-ui-routes-'));
+  const dir = fs.mkdtempSync(path.join(ROOT, '.tmp-probe-routes-'));
   try {
     fs.writeFileSync(
       path.join(dir, 'tsconfig.json'),
