@@ -1,0 +1,23 @@
+{
+  "name": "@platfolio/site",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "platfolio's own web shell (D65): an Astro site that renders packages/ui, with the dashboard as one React island. There is deliberately NO workspace edge on @platfolio/ui — it is reached through the alias in astro.config.mjs and the paths in tsconfig.json. See the $comment in tsconfig.json for the open question that decision is standing in for.",
+  "license": "Apache-2.0",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview"
+  },
+  "dependencies": {
+    "@astrojs/react": "^6.0.6",
+    "astro": "^6.4.8",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0"
+  }
+}

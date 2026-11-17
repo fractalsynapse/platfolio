@@ -80,7 +80,11 @@ run can report the platform of the repository it names rather than the one the o
 checked out (D60).
 
 What is still **not** delivered, stated because the earlier version of this paragraph was the first thing an
-agent read and it had gone stale: no Stripe integration, no CLI or web UI, and no tenant on either service.
+agent read and it had gone stale: no Stripe integration, no CLI, and no tenant on either service. The web UI is
+no longer in that list: `apps/site` exists since 2026-11-17 (D65's shell -- see the UI rule below), but it is
+**built and gated, not deployed**: no service entry in `compose.yaml`, no origin that resolves, and no browser has
+ever loaded it, so no screen has been *seen* by a person yet. Treat "the UI exists" and "the UI is live" as the two
+different claims they are.
 A person is now a `persons` row with proofs in `identities`, and membership attaches to the person (#177), so a
 second issuer or a machine client does not need a parallel authorization scheme.
 The control plane is **deployed and answering on a public HTTPS host**, built by this repository, with its
@@ -199,13 +203,22 @@ Normative statements are [docs/ui-architecture.md](docs/ui-architecture.md); rat
 eleven CI gates are [11](docs/design/11-ui-components-and-page-model.md). Build or review any UI through the
 [ui-architecture skill](.agents/skills/ui-architecture/SKILL.md). `packages/ui` **now exists** (2026-11-15: the
 component contract, design tokens as CSS custom properties per D63, the five layout primitives, the signals
-registry, the SDK seam, and 20 gates) and **now has its first screens**: six registered components in
+registry, the SDK seam) and **now has its first screens**: six registered components in
 `.tsx`, one screen document, and the gate set from `ui:check` (read its output: gates that cannot run report NOT RUN rather than passing). #259 is closed:
 `packages/ui/tsconfig.json` carries `jsx: react-jsx` plus `lib: [..., "DOM"]`, and `pnpm run typecheck` runs
-**both** projects — so a `.tsx` is compiled by CI, while `document` in `packages/contracts` or
+**all three** projects now — the root DOM-free one, `packages/ui`, and `apps/site` — so a `.tsx` is compiled by CI, while `document` in `packages/contracts` or
 `apps/control-plane` is still TS2584. `scripts/check-project.ts` now fails the build unless the union of the
 type-check projects' file lists equals the source tree on disk, so an exclude list cannot become a silent skip.
-`packages/api-client` and `apps/site` **do not exist** — a UI gate that audits them is *not run*, not passed.
+**`apps/site` exists since 2026-11-17**, and it is D65's shell: Astro static output, `@platfolio/ui` reached through
+the alias in `astro.config.mjs` rather than a workspace edge, `/` emitting zero client JavaScript (measured in
+`dist/`, not inferred from config), `/dashboard` mounting `InstanceListScreen` as **one** island that calls
+`createShellContext` once, and `/callback` exchanging the PKCE code while rendering nothing. The browser's half of
+the auth policy was moved out of `scripts/browser-auth.ts` into `packages/ui/src/web/browser-auth-policy.ts`,
+because a client bundle that reaches the operator script reaches `node:crypto` — the script re-exports it, so there
+is still one definition of each fact. `packages/api-client` **still does not exist**, and 11 §6 says it should not
+be created: the SDK is `packages/ui/src/sdk/`. What the shell does *not* deliver: a service in `compose.yaml`, an
+origin that resolves, one browser-run assertion, or any screen beyond the instance list — `ui:check` §9.7, §9.8 and
+§9.9 stay NOT RUN, and the new §D65 gate says which of its own halves did not execute.
 
 | # | Rule (one line) | What enforces it |
 | --- | --- | --- |

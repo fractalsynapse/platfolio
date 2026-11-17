@@ -1,0 +1,37 @@
+---
+/**
+ * The dashboard route: the page, and the one island inside it (D65).
+ *
+ * ## What is prerendered and what is not, stated exactly
+ *
+ * Astro builds this page's HTML at build time — the heading, the stylesheet, the island placeholder. The island
+ * itself is mounted `client:only`, so its markup is not in that HTML, and that choice is not decoration:
+ * `InstanceListScreen` reads a clock during render (`useClock`, the SDK's own `() => Date`), and a server render
+ * followed by a hydration stamps two different instants into one props object. React calls the difference a
+ * mismatch and the browser pays for it in console noise and a re-render. The alternative — `client:load` — buys a
+ * prerendered dashboard whose first paint cannot be right, because the data has not arrived and the age cannot be
+ * known before the transport runs. So the honest split is: the shell is static, the part that asks the control
+ * plane is not prerendered, and the zero-JS claim belongs to `/`, where it is tested.
+ *
+ * ## The one set of endpoints
+ *
+ * `resolveSiteConfig(process.env)` runs here, at build, in Node — not in the browser, and not in a module that
+ * every page imports. The result travels to the island as serialisable props, which is why no credential-shaped
+ * field is in it (`publicConfigOf`, and `browser-auth-parity.test.ts` refuses a token-shaped key reaching a page).
+ * `PLATFOLIO_URL`, `PLATFOLIO_IDENTITY_ISSUER`, `PLATFOLIO_SITE_ORIGIN` are configuration (D47); if one is missing
+ * the build fails with its name, because a page that silently built against an invented origin is the exact
+ * failure this repository's endpoint gate exists to prevent.
+ */
+import Page from '../layouts/page.astro';
+import DashboardIsland from '../islands/dashboard-island.tsx';
+import { publicConfigOf, resolveSiteConfig } from '../lib/site-config.ts';
+
+const config = resolveSiteConfig(process.env);
+---
+<Page title="Instances — platfolio" scriptSrc="/config.js">
+  <h1>Instances</h1>
+  <p class="lede">
+    Every instance this team can see, at the age the control plane last answered for it.
+  </p>
+  <DashboardIsland client:only="react" config={publicConfigOf(config)} />
+</Page>

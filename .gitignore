@@ -53,3 +53,8 @@ probe.ts
 # intermediate if the rename fails, and without this rule a `git add -A` commits it: this repository had a
 # 461-line copy of a checker sitting in version control until an `add -A` happened to remove it.
 *.tmp
+
+# Astro's generated project directory (typed routes, content-layer schema). It is a build product of
+# `apps/site`, sits beside `dist/`, and must never be staged: it carries the endpoints the build environment
+# supplied, which is exactly what D47 keeps out of tracked files. Added with the site (D65).
+.astro/

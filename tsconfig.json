@@ -29,8 +29,14 @@
     "accident: give that app its own tsconfig.json with `jsx`, add one explicit",
     "`tsc --noEmit -p apps/<name>` invocation to the `typecheck` script, and the coverage gate does the rest.",
     "It is not done here because the shell's shape is the maintainer's open decision, not this change's.",
+    "D65 answered that decision on 2026-11-16, and `apps/site` is the shell that landed under the arrangement",
+    "described above: it is excluded here and claimed by `apps/site/tsconfig.json`, which carries `jsx`, `DOM` and",
+    "`astro/client`. The exclusion is what keeps the split honest -- leaving it in would claim this app's `.ts`",
+    "files twice (root `include` globs `apps/*/src/**/*.ts`), which is the two-answers-for-one-file failure",
+    "scripts/check-project.ts names. The cost of the arrangement is stated rather than glossed: inside the site",
+    "project a stray `document` is legal, because an Astro island is a browser artifact and that is the point.",
     ""
   ],
-  "exclude": ["packages/*/test/fixtures/*.negative.ts", "packages/ui",
+  "exclude": ["packages/*/test/fixtures/*.negative.ts", "packages/ui", "apps/site",
     "scripts/check-ui.ts", "scripts/gen-ui-css.ts", "scripts/ui-source-scan.ts"]
 }

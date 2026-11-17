@@ -58,13 +58,34 @@ const typecheck = (): { code: number; output: string } => {
 // Not --quiet: the summary line is the evidence the assertions below read, and `say()` suppresses it.
 const coverage = (): { code: number; output: string } => run(['scripts/check-project.ts']);
 
-test('the clean tree type-checks in two projects and the coverage gate agrees', () => {
+test('the clean tree type-checks in every project the script names, and the coverage gate agrees', () => {
   sandbox.exclusive('baseline: clean tree type-checks', () => {
     const check = typecheck();
     assert.equal(check.code, 0, `typecheck is red on a clean tree; the mutations below would mean nothing:\n${check.output.slice(-1500)}`);
     const cov = coverage();
     assert.equal(cov.code, 0, `type-check coverage is red on a clean tree:\n${cov.output.slice(-1500)}`);
-    assert.match(cov.output, /2 project\(s\)/);
+    // DERIVED, never hardcoded. This line asserted the literal `2 project(s)` and went red the moment `apps/site`
+    // added its own type-check project -- which is the correct outcome for a coverage change and the wrong outcome
+    // for a test: the count is whatever the `typecheck` script says it is, so pinning it here meant the test could
+    // only ever be updated by hand, exactly like the stale counts AGENTS.md keeps getting wrong. Now it re-derives
+    // the number from the script that defines it, and still fails if the gate and the script disagree.
+    const scripts = (JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')) as { scripts?: Record<string, string> }).scripts ?? {};
+    const declared = scripts.typecheck;
+    assert.ok(declared, 'the root package.json must define a `typecheck` script; this test has no subject without one');
+    // Count the projects the script actually runs: every `-p <path>.json` whose basename is a tsconfig.
+    // The first version of this used /-p\s+\S+tsconfig.../ which silently missed the bare `-p tsconfig.json`
+    // (no path prefix to satisfy `\S+`), derived 2 against a gate reporting 3, and failed -- a derived number
+    // parsed wrongly is no better than a hardcoded one, and it is harder to spot.
+    const expected = (declared.match(/-p\s+(\S+\.json)/g) ?? [])
+      .map((m) => m.replace(/-p\s+/, ''))
+      .filter((p) => p === 'tsconfig.json' || p.endsWith('/tsconfig.json')).length;
+    assert.ok(expected >= 2, `the typecheck script must name at least two projects, got ${String(expected)} in: ${declared}`);
+    assert.match(
+      cov.output,
+      new RegExp(`\\b${String(expected)} project\\(s\\):`),
+      `the coverage gate must report exactly the ${String(expected)} project(s) the typecheck script names -- `
+      + `a project on disk that the script never runs is unchecked code that looks checked:\n${cov.output.slice(-400)}`,
+    );
   });
 });
 

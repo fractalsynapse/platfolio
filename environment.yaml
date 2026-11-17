@@ -442,6 +442,13 @@ variables:
     environments: all
     deployedTo: host:shell
     note: "which driver is live: git | github-app | none (D51/D50)"
+  - name: PLATFOLIO_SITE_ORIGIN
+    kind: value
+    secret: false
+    environments: all
+    required: true
+    deployedTo: host:shell
+    note: "the origin platfolio's own UI is served from, read by `apps/site` (D65). It is not `PLATFOLIO_ALLOWED_ORIGINS`: that is the list the API *admits*, this is the one address this document is published at, and the browser needs it because the realm's redirect URIs are `<origin>/callback` (`CALLBACK_PATH` in `scripts/browser-auth.ts`). A deploy that has not answered this question has no UI to point at, and `apps/site` refuses to build rather than invent one (D47)"
   - name: PLATFOLIO_SMTP_HOST
     kind: value
     secret: false
@@ -496,6 +503,14 @@ variables:
     environments: all
     deployedTo: host:shell
     note: "reported by /healthz; set by the build, not the operator"
+  - name: PLATFOLIO_WEB_CLIENT_ID
+    kind: value
+    secret: false
+    environments: all
+    required: false
+    default: "platfolio-web"
+    deployedTo: host:shell
+    note: "which public PKCE client `apps/site` authenticates as. Optional because the default is the policy constant `WEB_CLIENT_ID` in `packages/ui/src/web/browser-auth-policy.ts` -- the same value `identity:seed` writes into the realm -- and a deploy renames it only when its realm renamed the client. Not a secret: a browser client id is public by construction (D4), which is why `secret: false` is stated rather than guessed from the name"
   - name: POSTGRES_DB
     kind: value
     secret: false

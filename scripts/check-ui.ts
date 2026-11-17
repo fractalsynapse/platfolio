@@ -866,6 +866,217 @@ for (const assertion of TYPE_ASSERTIONS) {
   if (code !== 0) fail(g, `ui:css:check exited ${String(code)}:\n${out.trim().split('\n').map((l) => `    ${l}`).join('\n')}`);
   else pass(g, out.trim().split('\n').map((l) => l.trim()).join('; '));
 }
+/* ------------------------------------------------------------------ §D65: the shell, audited */
+
+{
+  const g = gate('D65', 'the Astro shell keeps one island, one context door, and the package\'s own rules');
+  const SITE_ROOT = path.join(ROOT, 'apps/site');
+  if (!fs.existsSync(SITE_ROOT)) {
+    // This is the sentence `ui:check` printed for the shell until apps/site landed, and it is kept because a gate
+    // whose subject disappears must say so rather than go green.
+    notRun(g, 'apps/site does not exist, so the shell has no subject to audit (D65 is decided but undelivered)');
+  } else {
+    const siteFiles: { rel: string; text: string }[] = [];
+    const walkSite = (dir: string): void => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (entry.name === 'node_modules' || entry.name === 'dist' || entry.name === '.astro') continue;
+        const abs = path.join(dir, entry.name);
+        if (entry.isDirectory()) { walkSite(abs); continue; }
+        if (!entry.isFile() || !/\.(ts|tsx|astro|css)$/.test(entry.name)) continue;
+        siteFiles.push({ rel: path.relative(ROOT, abs).split(path.sep).join('/'), text: fs.readFileSync(abs, 'utf8') });
+      }
+    };
+    walkSite(path.join(SITE_ROOT, 'src'));
+    if (siteFiles.length === 0) {
+      fail(g, 'apps/site exists but has no sources under src/ — the walk found nothing, which is a vacuous pass waiting to happen');
+    } else {
+      const hits: string[] = [];
+      const srcOf = (rel: string): string | undefined => siteFiles.find((f) => f.rel === rel)?.text;
+      const inSrc = (predicate: (f: { rel: string; text: string }) => boolean): string[] => siteFiles.filter(predicate).map((f) => f.rel);
+
+      // (1) One island per page, and the marketing page is not a React page at all. `client:*` is what Astro hands
+      // to the framework, so this is the source-level statement of "the dashboard is one island": a second
+      // hydration is two registries and two token stores (D65's own words), and it is visible here first.
+      const pages = siteFiles.filter((f) => /\/pages\/[^/]+\.astro$/.test(f.rel));
+      if (pages.length === 0) hits.push('apps/site/src/pages holds no .astro page, so the island count compared nothing');
+      for (const page of pages) {
+        // `visible`, not the blanked reading: in an .astro template the directive *is* an attribute value, and a
+        // gate that strips strings cannot see the one thing it is counting. (Measured: with the blanked read, the
+        // planted second island on `/` passed the gate.)
+        const visible = stripComments(page.text, true);
+        const directives = visible.match(/client:(?:load|visible|idle|media|only)/g) ?? [];
+        if (directives.length > 1) hits.push(`${page.rel}: ${String(directives.length)} client:* directives on one page — D65 allows one island per page`);
+        if (/index\.astro$/.test(page.rel) && directives.length > 0) hits.push(`${page.rel}: the landing route hydrates (${directives.join(', ')}), and "the landing page ships no JavaScript" was the reason Astro was chosen`);
+      }
+
+      // (2) One door for the contexts. `createShellContext` is memoised on its configuration and refuses a second,
+      // different one (packages/ui/src/web/shell.tsx); that only means something if the shell is the only place a
+      // page can build them. A page that constructs its own transport or bus is a second hydration wearing different
+      // clothes, and it would not be caught by the singleton because the singleton is the thing being bypassed.
+      const doors = inSrc((f) => /createShellContext\(/.test(stripComments(f.text)));
+      if (doors.length === 0) hits.push('nothing in apps/site calls createShellContext, so the SDK and signal contexts are being built some other way (D65)');
+      for (const rel of doors) if (!/\/islands\//.test(rel)) hits.push(`${rel}: createShellContext is called outside an island module — the one door must be one place`);
+      for (const [pattern, why] of [
+        [/\bSdkProvider\b/, 'SdkProvider used directly; the page context comes from createShellContext'],
+        [/\bSignalsProvider\b/, 'SignalsProvider used directly; same reason'],
+        [/\bnew PollTransport\(/, 'a transport built by the shell instead of by the one page context'],
+        [/\bcreateSignalBus\(/, 'a second signal registry'],
+        [/\bcreateTokenBag\(|\bcreateBrowserAuthSource\(/, 'a second token store or auth source, which is D65\'s named risk'],
+      ] as const) {
+        for (const rel of inSrc((f) => pattern.test(stripComments(f.text)))) hits.push(`${rel}: ${why}`);
+      }
+
+      // (3) Rule 1 and #258, over the app: the only `fetch` allowed in the shell is the issuer token call the SDK
+      // cannot make for itself, and it may not be pointed at the control plane. A hand-supplied route table or a
+      // typed `/api/v1/...` would be a second description of the API living in UI code.
+      const fetchers = inSrc((f) => /\bfetch\(/.test(stripComments(f.text)));
+      for (const rel of fetchers) if (!/\/lib\/browser-capabilities\.ts$/.test(rel)) hits.push(`${rel}: a fetch() in the shell outside lib/browser-capabilities.ts (rule 1: components reach the API through the SDK only)`);
+      const caps = srcOf('apps/site/src/lib/browser-capabilities.ts');
+      if (caps === undefined) hits.push('apps/site/src/lib/browser-capabilities.ts is missing — the injected issuer transport has no home, so fetch() has to live somewhere it should not');
+      else if (/\/api\/v1|PLATFOLIO_URL/.test(caps)) hits.push('apps/site/src/lib/browser-capabilities.ts addresses the control plane — the injected requester exists for the issuer token endpoint and nothing else');
+      for (const rel of inSrc((f) => /["'`]\/api\/v1/.test(stripComments(f.text, true)))) hits.push(`${rel}: a spec path typed into the shell — paths come from the generated ENDPOINTS table (#258)`);
+      for (const rel of inSrc((f) => /\bendpoints\s*:/.test(stripComments(f.text)))) hits.push(`${rel}: a hand-supplied route table (PollTransportConfig.endpoints defaults to ENDPOINTS for exactly this reason)`);
+      for (const rel of inSrc((f) => /from '@platfolio\/api-contract/.test(stripComments(f.text, true)))) hits.push(`${rel}: the shell imports the generated contract directly — it reaches the API through the SDK`);
+
+      // (4) D64's honesty, and D63's tokens, in the shell's own files. The vocabulary is checked against literals
+      // (`stripComments(text, true)`), because the thing this rule polices is copy; the timer and transport shapes
+      // are checked against code.
+      for (const file of siteFiles) {
+        const clean = stripComments(file.text);
+        const visible = stripComments(file.text, true);
+        // Two readings of one file, in the same shape gate §R5 uses for the package: `clean` erases literals, so a
+        // `WebSocket` inside a comment is not a claim; `visible` keeps strings, because the thing the state-word half
+        // of this rule polices is *copy*, and copy only ever lives inside a literal.
+        const haystackFor = (source: RegExp): string =>
+          /EventSource|WebSocket/.test(source.source) ? clean : visible;
+        for (const [pattern, why] of [
+          [/\bEventSource\b/, 'EventSource'],
+          [/\bWebSocket\b/, 'WebSocket'],
+          [/(?<!aria-)\b(?:live|livestream|realtime|real-time)\b/gi, 'a push-implying state word'],
+        ] as const) {
+          pattern.lastIndex = 0;
+          const haystack = haystackFor(pattern);
+          // `test`, not `matchAll`. Two of these three patterns are deliberately non-global, and
+          // `String.prototype.matchAll` refuses a non-global RegExp outright — measured: a TypeError raised inside
+          // the gate, which took the whole `ui:check` report down with it and printed no statuses at all. One line
+          // per file per rule is the shape the neighbouring gates report in, so the first hit is enough.
+          if (pattern.test(haystack)) {
+            // `search` rather than a match object: it accepts a non-global RegExp and returns the index, which is
+            // all a one-line-per-file report needs in order to name the line.
+            const at = haystack.search(pattern);
+            hits.push(`${file.rel}:${String(Math.max(1, haystack.slice(0, at).split('\n').length))}: ${why} while §4's push operations are absent from the spec (rule 5: polling is never described or styled as push)`);
+          }
+        }
+        if (/\bsetTimeout\(|\bsetInterval\(/.test(clean) && !/\/pages\/.*\.astro$/.test(file.rel)) {
+          hits.push(`${file.rel}: a timer in the shell — freshness and the refresh schedule belong to the SDK and to whoever arms them (11 §9.2)`);
+        }
+      }
+
+      // (5) D63: no new colours, typefaces or spacing steps invented in app CSS — the token sheet is imported, and
+      // a literal here is a second source of truth about the design system. Measured against the generated tokens:
+      // a hex colour is refused outright, and so is a `--ui-*` declaration, which would shadow the sheet.
+      const tokenSheet = '@platfolio/ui/tokens.css';
+      const cssFiles = siteFiles.filter((f) => f.rel.endsWith('.css') || /<style/.test(f.text));
+      if (cssFiles.length === 0) hits.push('apps/site owns no stylesheet, so the token rule had nothing to read');
+      for (const file of cssFiles) {
+        const body = file.rel.endsWith('.css') ? file.text : (file.text.match(/<style[^>]*>[\s\S]*?<\/style>/g) ?? []).join('\n');
+        const code = stripCssComments(body);
+        for (const [pattern, why] of [
+          [/#[0-9a-fA-F]{3,8}\b/, 'a colour literal'],
+          [/rgba?\(/, 'an rgb()/rgba() colour'],
+          [/hsla?\(/, 'an hsl()/hsla() colour'],
+          [/--ui-[a-z0-9-]+\s*:/, 'a redeclared token — the generated sheet owns these, and shadowing one is a second source of truth about the design system'],
+        ] as readonly (readonly [RegExp, string])[]) {
+          if (pattern.test(code)) hits.push(`${file.rel}: ${why} (D63: no new colour in app code; import the token)`);
+        }
+        // A `font-family` is refused only when its value is not a token reference, because the sheet spells the
+        // type scale as `--ui-font-*` and `font-family: var(--ui-font-body)` is the compliant form. Doing this per
+        // declaration instead of with one broad pattern is what keeps the compliant case out of the report — the
+        // mistake gate §R5's `aria-live` story records, in the other direction.
+        for (const decl of code.match(/font-family:[^;]+;/g) ?? []) {
+          if (!decl.includes('var(--ui-font-')) hits.push(`${file.rel}: \`${decl.trim()}\` names a typeface rather than a --ui-font-* token (D63)`);
+        }
+        // Lengths: `px` is refused and `rem`/`ch`/`fr` are not, with the reason here for a reviewer to read. The
+        // package itself spells container thresholds in rem (`PRIMITIVES[*].wideFromRem`, `components.css`'s own
+        // `0.25rem solid`), and there is no measure token in `tokens.ts`. A gate stricter than the rule it enforces
+        // is a gate that gets switched off, which is the failure mode 11 §9 names more than once.
+        if (/:\s*[^;]*\d+(\.\d+)?px/.test(code)) hits.push(`${file.rel}: a px length in app CSS — the spacing scale is --ui-space-* (D63)`);
+        if (file.rel.endsWith('.css') && !file.text.includes(tokenSheet)) {
+          hits.push(`${file.rel}: does not import ${tokenSheet} — app styles must build on the generated tokens, not beside them (D63)`);
+        }
+      }
+
+      // (6) D47 in the shell: an endpoint is configuration. The names are declared in environment.yaml; the values
+      // are never in this app's source, and a platfolio-owned hostname in a tracked file here is the same defect the
+      // repository's endpoint rule refuses for generated Railway names.
+      const CONFIG_HOSTS = /https?:\/\/[a-z0-9.-]*(platfolio\.dev|railway\.app)[a-z0-9.:/-]*/gi;
+      for (const file of siteFiles) {
+        const visible = stripComments(file.text, true);
+        const found = visible.match(CONFIG_HOSTS);
+        if (found !== null) hits.push(`${file.rel}: commits an endpoint (${[...new Set(found)].join(', ')}) — configuration, not source (D47)`);
+      }
+      const varNames = srcOf('apps/site/src/lib/site-config.ts')?.match(/'[A-Z][A-Z0-9_]{6,}'/g) ?? [];
+      if (varNames.length === 0) hits.push('apps/site/src/lib/site-config.ts names no environment variable, so the shell is not reading its configuration from the deploy (D47)');
+
+      // (7) If the artifact is present, read it: the zero-JS claim and the one-island claim are about what a browser
+      // receives, and a source rule cannot show what a bundler did. `pnpm run site:build` produces it;
+      // apps/site/test/build-output.test.ts asserts on it in every run of `pnpm run test`.
+      const dist = path.join(SITE_ROOT, 'dist');
+      if (fs.existsSync(dist)) {
+        const landing = path.join(dist, 'index.html');
+        if (fs.existsSync(landing)) {
+          const html = fs.readFileSync(landing, 'utf8');
+          if (/<script[\s>]/i.test(html)) hits.push('apps/site/dist/index.html ships a script tag, so the landing route is not the zero-JS page D65 chose Astro for (measured in the artifact, not the config)');
+          if (html.includes('astro-island')) hits.push('apps/site/dist/index.html contains an island element');
+        }
+        const dash = path.join(dist, 'dashboard/index.html');
+        if (fs.existsSync(dash)) {
+          const islands = (fs.readFileSync(dash, 'utf8').match(/<astro-island/g) ?? []).length;
+          if (islands !== 1) hits.push(`apps/site/dist/dashboard/index.html carries ${String(islands)} island elements (D65: one)`);
+        }
+        const chunks = fs.existsSync(path.join(dist, '_astro')) ? fs.readdirSync(path.join(dist, '_astro')).filter((f) => f.endsWith('.js')) : [];
+        for (const chunk of chunks) {
+          const bundle = fs.readFileSync(path.join(dist, '_astro', chunk), 'utf8');
+          // Markers for the Node-only chain that made the first honest build fail: the pg driver's helper, the
+          // in-memory SCM double, the manifest build planner, the Postgres store. If any of this comes back, a
+          // shell file reached a package that imports `node:crypto` or `pg`, and the bundle breaks at the boundary
+          // rather than at the deploy. Chosen as *module* names, not variable names: an earlier draft of this line
+          // carried `PGPASSWORD` as a marker, and `check-environment-registry.ts` — which scans `scripts/` for
+          // quoted uppercase names — promptly reported that the gate "referenced" a credential it was only naming.
+          // `pool` was tried too, and matched inside React's own runtime: a gate that fires on the compliant
+          // artifact is a gate somebody switches off.
+          for (const marker of ['pgpass', 'postgres-store', 'MemoryScm', 'build-plan', 'node:crypto']) {
+            if (bundle.includes(marker)) {
+              hits.push(`apps/site/dist/_astro/${chunk} pulls in \`${marker}\` — the client bundle reached Node-only server code (the measured first-build failure: "createHash" is not exported by "__vite-browser-external")`);
+            }
+          }
+          // The operator script by name, because that is the exact import the first honest build refused to bundle.
+          if (/scripts\/browser-auth/.test(bundle)) {
+            hits.push(`apps/site/dist/_astro/${chunk} carries the operator script's path — the client bundle reached scripts/browser-auth.ts again, which is the measured failure the policy module exists to prevent (node:crypto has no browser answer)`);
+          }
+        }
+      } else {
+        g.notes.push('artifact half not measured in this run: apps/site/dist is absent (run `pnpm run site:build`). The source rules above ran; the zero-JS and island-count claims are asserted by apps/site/test/build-output.test.ts, which builds first and is part of `pnpm run test`.');
+      }
+
+      if (hits.length) fail(g, ...[...new Set(hits)]);
+      else pass(
+        g,
+        `${String(siteFiles.length)} shell files read (pages, islands, lib, styles)`,
+        `${String(doors.length)} createShellContext call site(s): ${doors.join(', ') || 'none'}`,
+        'one client:* per page, none on the landing route; no second transport, registry, token store or fetch in the shell; no spec path or route table typed into app code',
+        'no push vocabulary, no timer in the shell, no colour literal or redeclared token in app CSS, no committed endpoint',
+        fs.existsSync(dist) ? `and the built artifact was read too: zero scripts on /, one island on /dashboard, no Node-only chain in the ${String(chunksCount(dist))} emitted chunks` : 'artifact not built in this run (see the note above)',
+      );
+    }
+  }
+}
+
+/** The chunk count for the PASS evidence line, read the same way the gate reads them. */
+function chunksCount(dist: string): number {
+  const dir = path.join(dist, '_astro');
+  return fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => f.endsWith('.js')).length : 0;
+}
 
 /* ------------------------------------------------------------------ declared but not implemented */
 

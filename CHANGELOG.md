@@ -5,6 +5,93 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+### Added — `apps/site`: the D65 shell, built, and the package boundaries it forced
+
+D65 closed UI-OD1 on 2026-11-16 — Astro for the web shell, the dashboard as one React island — and this is that
+shell: `apps/site`, an Astro 6 static site with `@astrojs/react`, three routes, and one screen mounted.
+`astro build` exits 0 and the claims are read out of `dist/`, not inferred from configuration: `/index.html` carries
+zero `<script>` elements and zero island markers (that is what Astro was chosen *for*), `/dashboard/index.html` and
+`/callback/index.html` each carry exactly one `<astro-island>`, and across every emitted chunk exactly one `polled` and one
+`createShellContext`. The one literal `fetch(` that survives minification is the shell's own issuer token request; the
+SDK transport reaches the network through `config.fetchImpl ?? fetch`, which the bundler renames, so the artifact
+count is not quoted as proof that a single connection exists. No browser ran. There is no service in `compose.yaml` and no origin that
+resolves, so this is built-and-gated, not deployed — the fourth platform per D62 is deliberately the next change's
+work, because a composition entry needs a *generated* digest and `compose.prod.yaml` is generated.
+
+**The island, and what "exactly once" was made mean.** `packages/ui/src/web/shell.tsx` owns `createShellContext`:
+one `PollTransport` over the base URL the deploy supplies (never a route table — `ENDPOINTS` is generated, #258), one
+`SignalBus`, one in-memory token bag, and `wrap()` handing both React contexts to the island. It is memoised on its
+configuration, so a double hydration is harmless, and it throws `ShellContextConflict` naming both origins if a
+second call disagrees — because the failure D65 prices is two registries and two token stores, and the visible
+symptom of that is a screen that quietly disagrees with itself. Three checks hold the sentence, at three different
+tiers: `ui:check` §D65 over the source (one `client:*` per page, `createShellContext` only under `src/islands/`, no
+page building a transport, bus or bag), `apps/site/test/build-output.test.ts` over the artifact, and
+`packages/ui/test/shell-context-singleton.test.ts` over the runtime property. Every rule was falsified by planting
+it: 35 distinct violations against the gate — 20 over the shell's own sources, 14 over the built artifact (island
+counts per page, a script tag on the landing route, each bundle marker, and the operator script's path), and one by
+moving `apps/site` out of the tree to read the gate's `NOT RUN` branch. Two more went against the site's own
+artifact test and their disagreement is the useful part: a **reachable** second `fetch(` (a mount effect calling
+`fetch('/ping-me-')`) makes the bundle count fail, and was restored byte-for-byte to make it pass; a **dead** one
+(`export const secondDoor = () => fetch(…)`, nobody importing it) does not, because the bundler removes what nothing
+calls and the artifact then genuinely holds one call. That is not a hole — it is the difference between what a
+browser downloads and what a file says, and the dead case belongs to the source rules (§D65 and
+`island-singleton.test.ts`), which refuse a `fetch(` outside `lib/browser-capabilities.ts` regardless of whether it
+would ever have shipped. Three of the twenty source plants **DID NOT BITE** on the first
+pass, because they read comment- and string-blanked text where the violation lives *inside* a string: a
+`client:load` attribute, a module specifier, a quoted `/api/v1/…`. Those three were re-planted after their rules
+were widened, and the artifact set was re-planted after every later change to the gate (the marker rewrite, then
+the renderer moving into the app); 35 named failures and 35 byte-verified restores came out of it. That is
+the §9.2 hole from #259 recurring one file over, and it is written into 11 §9 rather than buried. Two more mistakes
+came out of the artifact pass and are recorded in the gate's own comment: `PGPASSWORD` sat in a marker list and
+`check-environment-registry.ts` duly reported that the UI gate *references a credential* (it scans `scripts/` for
+quoted uppercase names), and `pool` matched inside React's own runtime, so the gate was red on a compliant build.
+A gate that fires on the compliant artifact is a gate somebody switches off; every surviving marker was grepped
+against the real chunks before it was kept.
+
+**Two package boundaries moved, because the first honest browser bundle said they had to.** `packages/ui` had never
+been bundled for a browser, so nothing had ever tested what its imports drag along:
+
+- **`@platfolio/page-schema` gained a `./page` subpath export**, and `contract.ts`/`signals.ts` now import
+  `isValueBearingKey` from it. The package index also exports the panel builders, which import `@platfolio/manifest`
+  and `@platfolio/contracts` — so the predicate behind rule 4 was pulling `pg`, `pgpass` and `node:crypto` into
+  every island bundle, and Vite refused the build outright (`"createHash" is not exported by
+  "__vite-browser-external"`, with six "Module `stream`/`util`/`fs` has been externalized for browser
+  compatibility" warnings beside it). The index stays as it was for every existing importer. Worth stating because
+  it is a size fact people will ask about: the island chunk is 130 KB and the React client runtime 215 KB, and
+  neither number is caused by this — the chain was a build *error*, not a bundle that used to be smaller.
+- **The browser's authentication policy moved to `packages/ui/src/web/browser-auth-policy.ts`** and
+  `scripts/browser-auth.ts` now imports and re-exports it. Its header had always said *"nothing a deployed service
+  imports may depend on this file"* and had never been tested against a deployed UI: the dependency now points the
+  way it always should, a script depending on a package rather than a bundle depending on a script. One definition
+  per fact survives the move — `WEB_CLIENT_ID`, `REQUIRED_SCOPE`, `CALLBACK_PATH`, `PKCE_METHOD`, `TOKEN_STORAGE`,
+  `RECOMMENDED_STORE`, `LOGOUT_CLEAR`, `refreshSkewSeconds`, `refreshAt`, `endSessionUrl`, `isPkceVerifier`,
+  `isTokenShapedName` — and the seeder, the smoke script and
+  [packages/contracts/test/browser-auth.test.ts](packages/contracts/test/browser-auth.test.ts) keep reading those
+  names from where they always did. On the browser side the seam is `web/browser-auth.ts`: the PKCE flow with digest,
+  entropy, requester and handoff store all injected, so no `fetch` appears in the package outside the transport
+  driver (§9.2 stays whole), the verifier is read once and dropped before the exchange, `state` is compared before
+  anything is redeemed, and a token goes nowhere except memory — which is what `TOKEN_STORAGE` says, and what it
+  costs is stated in the file: a reload signs in again.
+
+**Configuration, not constants (D47, D58).** `PLATFOLIO_SITE_ORIGIN`, `PLATFOLIO_URL`, `PLATFOLIO_IDENTITY_ISSUER`,
+`PLATFOLIO_WEB_CLIENT_ID`: two of those names already existed and are *reused* rather than respelled, and the two
+new ones are declared in the HUMAN table of
+[scripts/check-environment-registry.ts](scripts/check-environment-registry.ts) with `environment.yaml` regenerated by
+`--emit` (88 variables, all referenced). `apps/site/src/tools/render-runtime-config.ts` renders the runtime overlay from the
+environment at container start; the tracked `apps/site/public/config.js` is a comment and nothing else, because a
+value in it would be a committed endpoint. A build with a required name unset fails by naming it, and `https:/api` is
+refused — measured: `new URL` parses that as a valid URL whose host is the single label `api`, so a mistyped
+`--url` would have aimed every request at a machine nobody owns and the dashboard would have rendered an empty list
+as an outage.
+
+**Type-checking, per the arrangement root `tsconfig.json` already documented.** `apps/site/tsconfig.json` carries
+`jsx`, `DOM` and `astro/client`; the root program excludes `apps/site` so no file is claimed twice; `typecheck` runs
+three projects. Coverage: 238 source files in the universe, 238 claimed, 5 JSX, one owner each. Two consequences
+are reported rather than smoothed over: `ui:check` is 21 gates (18 pass, 3 NOT RUN), and
+[packages/ui/test/typecheck-coverage.test.ts](packages/ui/test/typecheck-coverage.test.ts) still asserts the literal
+`2 project(s)` — seven of its eight cases pass, that one fails, and fixing it belongs to whoever owns that file, not
+to a change that was told not to touch it.
+
 ### Fixed — falsification by mutation no longer shares one working tree by accident
 
 `ui:check` and `typecheck` are proved to bite by tests that edit tracked source in place and then run the gate.

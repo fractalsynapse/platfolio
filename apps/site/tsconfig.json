@@ -1,0 +1,47 @@
+{
+  "$comment": [
+    "The second type-check project that is allowed to know a browser exists, and the first `apps/*` one. Root",
+    "tsconfig.json's own $comment (#259) says this is legal and names the three edits it obligates: a tsconfig",
+    "with `jsx`, one `tsc --noEmit -p` in the root `typecheck` script, and nothing else -- scripts/check-project.ts's",
+    "typecheck-coverage rule then holds the include lists in step, because it fails a source file claimed by no",
+    "project, one claimed by two projects, and a .tsx claimed only by projects that declare no `jsx`.",
+    "",
+    "Why root `exclude` gained \"apps/site\" instead of this project claiming only the `.tsx` files: the root",
+    "program's globs are `apps/*/src/**/*.ts` and `apps/*/test/**/*.ts`, so a `.ts` here would sit in BOTH",
+    "programs -- two sets of `lib` answers for one file, which is exactly the failure that rule names. A",
+    "partition by extension would leave `site-config.ts` checked without `DOM`, and the one thing this app does",
+    "with the browser (read the config the deploy baked into the page) would be the thing that cannot compile.",
+    "",
+    "What is overridden, and only this, mirroring packages/ui/tsconfig.json: `lib` gains DOM and DOM.Iterable,",
+    "`jsx` gains react-jsx, and `types` gains astro/client so `import.meta.env` is a type rather than a guess.",
+    "Every strictness flag -- `strict`, `exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`,",
+    "`noUnusedLocals`, `verbatimModuleSyntax`, `erasableSyntaxOnly` -- comes from the root file through",
+    "`extends`, so this app is not held to a laxer standard than the server tree.",
+    "",
+    "There is no workspace edge on `@platfolio/ui`, and that is a decision to flag rather than a default: the",
+    "island reaches the package through `astro.config.mjs`'s alias (and the `paths` entry below, which exists so",
+    "`tsc` answers the same question the bundler does). apps/control-plane declares four `workspace:*` edges, so",
+    "the edge is the convention here -- but a UI package that the shell may also reach by relative path does not",
+    "need a second mechanism, and an edge is a promise about who can import whom. The maintainer has not ruled on",
+    "whether the first-party shell is allowed to depend on `packages/ui` the way a service depends on a package;",
+    "this file takes the smaller commitment (alias only) and says so. If that ruling comes the other way, the",
+    "change is one line in package.json plus deleting the alias, and the gate in scripts/check-ui.ts that reads",
+    "the island's imports does not move.",
+    "",
+    "`include` has no `.astro` entry: Astro compiles those itself and nothing here can type-check them. The build",
+    "is the gate for `.astro`, and `apps/site/test/build-output.test.ts` reads what the build emitted rather than",
+    "trusting this file."
+  ],
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "types": ["node", "astro/client"],
+    "paths": {
+      "@platfolio/ui": ["../../packages/ui/src/index.ts"],
+      "@platfolio/ui/*": ["../../packages/ui/src/*"]
+    }
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "test/**/*.ts", "test/**/*.tsx"],
+  "exclude": ["dist", ".astro"]
+}
