@@ -22,13 +22,22 @@ axe and a layout engine, §9.9 (draft contract) needs `src/web/drafts.ts`. A gat
 **NOT RUN**, never passed, and its output names the missing subject.
 
 Screens are type-checked because `packages/ui/tsconfig.json` declares `jsx: react-jsx` and `lib` with `DOM`, and
-`npm run typecheck` runs **both** that project and the DOM-free root one: `document` in `packages/contracts` or
+`npm run typecheck` runs **three** projects: that one, the DOM-free root one, and `apps/site/tsconfig.json` (which
+owns `jsx`, `DOM` and `astro/client`). `document` in `packages/contracts` or
 `apps/control-plane` is still TS2584, and `scripts/check-project.ts` fails if a source file is claimed by no
-type-check project, by two, or by one without `jsx`. `packages/api-client` and `apps/site` **do not exist** —
-nothing mounts the screens yet (the shell is decided to D65 — Astro with the dashboard as one React island — but
-today: `apps/control-plane/openapi.yaml` (request/response only, no push channel — re-check with the grep
-below; D64 makes building toward push *required*, shipping on `poll` *current`), `packages/api-contract`'s
-generated types, and `packages/page-schema` (pages as data, `buildSecretsPanel`, `findValueBearingProps`).
+type-check project, by two, or by one without `jsx` — which is why the root program *excludes* `apps/site` rather
+than sharing it with the shell's own project. **`apps/site` has existed since 2026-11-17** (D65: Astro static shell,
+the dashboard as one React island; `/` ships zero client JavaScript, measured in `dist/`), so the shell-side rules
+are live: `ui:check` §D65 reads its pages, islands, lib and CSS, and the site's own tests read the build output.
+What the shell did not bring: a composition service, a resolvable origin, drafts, or any browser-run assertion —
+§9.7, §9.8 and §9.9 stay NOT RUN, and a gate that cannot run must be reported that way. `packages/api-client`
+**does not exist**, and 11 §6 says it should not be created: the SDK is `packages/ui/src/sdk/`. What is real today:
+`apps/control-plane/openapi.yaml` (request/response only, no push channel — re-check with the grep
+below; D64 makes building toward push *required*, shipping on `poll` *current*), `packages/api-contract`'s
+generated types, `packages/page-schema` (pages as data, `buildSecretsPanel`, `findValueBearingProps`), and
+`packages/ui/src/web/` — which since the shell landed holds the browser's `AuthSource`, the page-context door, and
+the policy declarations those two import (the operator script re-exports the same declarations rather than owning
+them twice, because a client bundle that reaches `scripts/browser-auth.ts` reaches `node:crypto`).
 
 ## The six rules, compressed
 

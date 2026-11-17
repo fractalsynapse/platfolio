@@ -67,11 +67,16 @@ surface: overlays, signals and drafts move data, never code.
 | `apps/control-plane/openapi.yaml` | real — 31 paths, 36 operations (re-measured 2026-11-15; the previous revision said 34, which is exactly the drift the rules doc prices), validated both directions by `api:check`; **no** SSE/WebSocket/event path, no ETag/304 cache semantics declared anywhere in it |
 | `packages/api-contract/src/generated/types.ts` | real — `wc -l` it, do not quote this row: the file grew past 990 lines when #258 added the route table. It exports the component types (`Instance`, `Attestation`, `Error`, …), the operation maps (`OperationId`, `ParamsOf`, `RequestBodyOf`, `ResponseOf`, `SuccessOf`), and since #258 the runtime `ENDPOINTS` table with `Endpoint`/`HttpMethod` beside it — one `{ method, path }` per operationId, path left templated. Byte-for-byte gated by `api:types:check`, which is what makes "generated" a fact rather than a claim |
 | `packages/page-schema` | real — `page.ts`, `secrets-panel.ts` (`buildSecretsPanel`, `findValueBearingProps`), `binding-panel.ts` (`buildBindingPanel`), `project-text.ts` (`projectToText`), with tests |
-| `packages/ui` (per D63: all reusable components **and** design tokens as CSS custom properties — no separate tokens package) — **exists since 2026-11-15** with contracts, tokens, primitives, signals, the SDK seam and gates, and **since #259 its first screens**: six registered `.tsx` components and one screen document (§§1–3 audited by `ui:check`, 20 gates: 17 pass, 3 NOT RUN). What it is *not* is a runnable site — nothing mounts the screens. `packages/api-client`, `apps/site`, any web UI | **do not exist** — everything in §§1–8 that names them is `specified`. D63 decided what `packages/ui` will contain; it did not make it exist |
-| a UI service in `compose.yaml`; `platfolio.dev` / `preview.platfolio.dev` resolving | **absent** — D62 has decided the hosts, the DNS records, certificate and service do not yet exist; the API side is already prepared (`PLATFOLIO_ALLOWED_ORIGINS` feeds CORS and the `platfolio-web` PKCE client's `<origin>/callback` redirect URIs) |
+| `packages/ui` (per D63: all reusable components **and** design tokens as CSS custom properties — no separate tokens package) — **exists since 2026-11-15** with contracts, tokens, primitives, signals, the SDK seam and gates, and **since #259 its first screens**: six registered `.tsx` components and one screen document (§§1–3 audited by `ui:check`: 21 gates, 18 pass, 3 NOT RUN). Since 2026-11-17 something *does* mount them: `apps/site`, below. Its `src/web/` boundary is no longer only prose: `browser-auth.ts` (the browser's `AuthSource`), `browser-auth-policy.ts` (the policy declarations, moved out of `scripts/browser-auth.ts` and re-exported by it), `shell.tsx` (the one page context). `packages/api-client` | **does not exist** — and §6 says it should not be created: the SDK is `packages/ui/src/sdk/`, not a second package. Everything in §§1–8 that names it is `specified` |
+| `apps/site` (D65's shell, since 2026-11-17) | **exists and builds** — Astro `output: 'static'` + `@astrojs/react` (astro 6.4.8 / integration 6.0.6: astro 7.x declares `engines.node >=22.23.4` and this tree runs 22.22.1, measured with `astro --version` refusing, then passing). `/` emits **no client JavaScript**, measured in `dist/index.html`: zero `<script>`, zero `<astro-island>`, one inline `<style>`; `/dashboard` mounts `InstanceListScreen` as **one** island (one `<astro-island>`) that calls `createShellContext` once and wraps the screen in the one `SdkContext` and one `SignalBus`; `/callback` renders nothing and only exchanges the code, comparing `state` before redeeming. `@platfolio/ui` is reached by the alias in `astro.config.mjs`, **not** by a workspace edge — the open question is written in `apps/site/tsconfig.json`'s `$comment`. `PLATFOLIO_SITE_ORIGIN`, `PLATFOLIO_URL`, `PLATFOLIO_IDENTITY_ISSUER`, `PLATFOLIO_WEB_CLIENT_ID` arrive from the environment (two of those four names are reused from the registry rather than invented) and a build with one unset fails by naming it. What is **not** delivered: a service in the composition, an origin that resolves, a login UI, a detail screen, drafts (§9's gate 9), or any assertion made in a browser |
+| a UI service in `compose.yaml`; `platfolio.dev` / `preview.platfolio.dev` resolving | **absent** — D62 has decided the hosts, the DNS records, certificate and service do not yet exist; the API side is already prepared (`PLATFOLIO_ALLOWED_ORIGINS` feeds CORS and the `platfolio-web` PKCE client's `<origin>/callback` redirect URIs). The site's own origin is declared (`PLATFOLIO_SITE_ORIGIN`, in the registry and read by `apps/site`) but nothing serves it yet: the fourth platform is the follow-on step, and it is not taken by a UI change |
 
-So the honest baseline is: **the contract exists, the panel builders exist, the UI does not.** That is the
-best possible position to write a specification from — no screen exists that can lobby to be exempt.
+So the honest baseline is: **the contract exists, the panel builders exist, the components exist, and a real shell
+mounts one of them.** The specification was written while none of that was true, which is what kept it honest — the
+rules were fixed before any screen could lobby for an exemption, and the screens and `apps/site` are audited
+against them rather than the other way round. What has *not* moved is the tier of the evidence: no browser has
+rendered anything, so gates 7, 8 and 9 below remain NOT RUN, and "built, gated, undeployed, unrendered" is the
+accurate sentence about platfolio's own UI.
 
 ## 1. Component contract
 
@@ -579,6 +584,24 @@ CI gates (mechanical, block merge) and the reviewer pass (one screen, ten questi
     table, and a parity check over prose is a reviewer's impression with a number on it. What is **not** proven
     is what a browser paints at either width: that remains gate 7's NOT RUN, and the gate's own output says so.
 
+### What changed when the shell landed (2026-11-17), stated apart so the eleven stay the specification
+
+Gates 2, 3, 6 and 10 were written against `packages/ui`, and until D65 there was no shell to leak into: a marketing
+page could ship a `fetch`, a colour, a `@media` query or a "live" pill and every one of those gates would have
+stayed green, because none of them looked outside the package. `ui:check` §D65 now reads `apps/site` for exactly
+those shapes — one `client:*` per page and none on `/`; `createShellContext` as the only construction door, with no
+page building its own transport, bus or token bag; no `fetch` outside the injected issuer requester; no spec path
+and no hand-supplied route table in app code; no push vocabulary and no timer; no colour/`rgb()`/`px` literal and no
+redeclared `--ui-*` token in app CSS; no committed endpoint — and when `dist/` exists it reads the artifact too
+(island counts per page, zero scripts on the landing route, and a refusal if Node-only code came back into the
+client bundle). Gates 7, 8 and 9 are unmoved: they need a browser and a draft store, and the shell has neither.
+
+Three of §D65's rules **DID NOT BITE** on the first falsification pass, because they read comment- and
+string-blanked text where the violation lives inside a string — a `client:load` attribute, a module specifier, a
+quoted `/api/v1/…`. They were widened to read string contents and all twenty source mutations then named their
+file and their rule. That is the §9.2 story from #259 recurring one file over, and it is recorded here rather than
+buried for the same reason.
+
 ### The reviewer pass — look at one screen, fail it on these
 
 | # | Question | Fail when |
@@ -622,7 +645,11 @@ not contradict them, and a framework spec is what "make it testable" needed):
   the design constraint rather than an objection: Astro owns routing, transitions and content, and the
   dashboard is **one** island that constructs the SDK context and the signal registry exactly once. Either
   shell satisfied D62, which is exactly why the choice belonged to the maintainer and not to whichever change
-  got there first. `apps/site` still does not exist; D65 decides its shape, not its delivery.
+  got there first. `apps/site` landed on 2026-11-17 as that shape — Astro static, `@astrojs/react`, the dashboard as
+  one island whose single `createShellContext` builds the one SDK context, signal registry and token store; the
+  exactly-once claim is now gated (§D65 over the source and the built artifact) and unit-tested (the runtime
+  refusal of a second, differently-configured context) rather than merely decided. What D65 did *not* buy is a
+  deployment: there is still no UI service in `compose.yaml` and no origin that resolves.
 
 **Superseded:**
 
