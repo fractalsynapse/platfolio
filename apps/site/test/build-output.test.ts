@@ -96,16 +96,28 @@ test('the dashboard hydrates exactly one island, and the callback exactly one', 
   assert.equal(landing, 0, 'the landing page must not hydrate');
 });
 
-test('the shipped bundle has one data path, one freshness word, and one shell construction', () => {
-  // Measured over every emitted chunk, because a source-level grep cannot show what the bundler actually put on
-  // the wire. Three counts, each of which was checked against this tree's build rather than assumed:
+test('the shipped bundle has one shell-side network call, one freshness word, and one shell construction', () => {
+  // Measured over every emitted chunk, because a source-level grep cannot show what the bundler produced. Read
+  // the first count for exactly what it is, since minification is what decided it:
   //
-  //  - exactly one `fetch(` in the whole artifact. That is the SDK transport, and it is rule 1's claim in the only
-  //    form a deployer cannot argue with: the code a browser downloads opens one kind of connection. Plant a
-  //    second fetch in a page and this number moves.
-  //  - exactly one `polled`. `transportWord` is the single spelling of the honesty label (D64), so one occurrence
-  //    is the expected count for the whole bundle; two would mean somebody wrote the word out again.
-  //  - exactly one `createShellContext`. The bundler keeps that name (measured), so the count is a real statement
+  //  - one literal `fetch(` survives in the artifact, and the chunk it survives in is the shell's own: it is
+  //    `formPostRequest` in `apps/site/src/lib/browser-capabilities.ts`, the issuer token POST. The SDK transport
+  //    also reaches the network -- through `this.config.fetchImpl ?? fetch` (poll.ts:183) -- but the bundler
+  //    renames that call site, so it is *not* counted here. This number therefore says "the shell added exactly
+  //    one un-renamed fetch", which is a statement about app code (rule 1's shell half), not proof that one
+  //    connection exists in the whole bundle. Writing it as the stronger claim would be the kind of overreach the
+  //    rules doc refuses: a check that does not cover the claim cannot be quoted for it.
+  //
+  //  Falsified both ways, and the two results are worth keeping together: a **reachable** second `fetch(` -- an
+  //  effect in the island that calls `fetch('/ping-me-')` -- makes this assertion fail, and restoring the source
+  //  byte-for-byte makes it pass again. A **dead** one (`export const secondDoor = () => fetch(...)`, nothing
+  //  importing it) does not, because the bundler removes it and the artifact then genuinely contains one call.
+  //  That is not a hole in this test: it is the difference between what a browser downloads and what a file says.
+  //  The dead case is the *source* rule's job -- `ui:check` §D65 and `apps/site/test/island-singleton.test.ts`
+  //  both refuse a `fetch(` outside `lib/browser-capabilities.ts` whether or not anything would have shipped it.
+  //  - exactly one `polled`: `transportWord` is the single spelling of the honesty label (D64), so two would mean
+  //    somebody wrote the word out again.
+  //  - exactly one `createShellContext`: the bundler keeps that name (measured), so the count is a real statement
   //    about construction sites, not a minification artifact.
   const chunks = fs.readdirSync(path.join(DIST, '_astro')).filter((f) => f.endsWith('.js'));
   assert.ok(chunks.length > 0, 'no JS chunks were emitted, so the island did not build');
@@ -121,7 +133,7 @@ test('the shipped bundle has one data path, one freshness word, and one shell co
   });
   const total = (key: 'fetch' | 'polled' | 'shell' | 'route'): number => counts.reduce((n, c) => n + c[key], 0);
 
-  assert.equal(total('fetch'), 1, `the artifact opens the network ${String(total('fetch'))} times; exactly one is allowed and it belongs to the SDK transport (rule 1, and gate §9.2 in the package)`);
+  assert.equal(total('fetch'), 1, `the artifact carries ${String(total('fetch'))} literal \`fetch(\` calls; exactly one is allowed, and it is the shell's issuer token request`);
   assert.equal(total('polled'), 1, `the freshness word appears ${String(total('polled'))} times; D64 says polling is named in one place (transportWord)`);
   assert.equal(total('shell'), 1, `createShellContext appears ${String(total('shell'))} times; more than one construction site is D65's second hydration`);
   assert.ok(total('route') >= 1, 'the generated route table is absent from the artifact, which means the screen is not routed by ENDPOINTS (#258)');

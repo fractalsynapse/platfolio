@@ -11,8 +11,10 @@ D65 closed UI-OD1 on 2026-11-16 — Astro for the web shell, the dashboard as on
 shell: `apps/site`, an Astro 6 static site with `@astrojs/react`, three routes, and one screen mounted.
 `astro build` exits 0 and the claims are read out of `dist/`, not inferred from configuration: `/index.html` carries
 zero `<script>` elements and zero island markers (that is what Astro was chosen *for*), `/dashboard/index.html` and
-`/callback/index.html` each carry exactly one `<astro-island>`, and across every emitted chunk exactly one `fetch(`,
-one `polled`, one `createShellContext`. No browser ran. There is no service in `compose.yaml` and no origin that
+`/callback/index.html` each carry exactly one `<astro-island>`, and across every emitted chunk exactly one `polled` and one
+`createShellContext`. The one literal `fetch(` that survives minification is the shell's own issuer token request; the
+SDK transport reaches the network through `config.fetchImpl ?? fetch`, which the bundler renames, so the artifact
+count is not quoted as proof that a single connection exists. No browser ran. There is no service in `compose.yaml` and no origin that
 resolves, so this is built-and-gated, not deployed — the fourth platform per D62 is deliberately the next change's
 work, because a composition entry needs a *generated* digest and `compose.prod.yaml` is generated.
 
@@ -25,9 +27,16 @@ symptom of that is a screen that quietly disagrees with itself. Three checks hol
 tiers: `ui:check` §D65 over the source (one `client:*` per page, `createShellContext` only under `src/islands/`, no
 page building a transport, bus or bag), `apps/site/test/build-output.test.ts` over the artifact, and
 `packages/ui/test/shell-context-singleton.test.ts` over the runtime property. Every rule was falsified by planting
-it: 35 distinct violations — 20 over the shell's own sources, 14 over the built artifact (island counts per page, a
-script tag on the landing route, each bundle marker, and the operator script's path), and one by moving
-`apps/site` out of the tree to read the gate's `NOT RUN` branch. Three of the twenty **DID NOT BITE** on the first
+it: 35 distinct violations against the gate — 20 over the shell's own sources, 14 over the built artifact (island
+counts per page, a script tag on the landing route, each bundle marker, and the operator script's path), and one by
+moving `apps/site` out of the tree to read the gate's `NOT RUN` branch. Two more went against the site's own
+artifact test and their disagreement is the useful part: a **reachable** second `fetch(` (a mount effect calling
+`fetch('/ping-me-')`) makes the bundle count fail, and was restored byte-for-byte to make it pass; a **dead** one
+(`export const secondDoor = () => fetch(…)`, nobody importing it) does not, because the bundler removes what nothing
+calls and the artifact then genuinely holds one call. That is not a hole — it is the difference between what a
+browser downloads and what a file says, and the dead case belongs to the source rules (§D65 and
+`island-singleton.test.ts`), which refuse a `fetch(` outside `lib/browser-capabilities.ts` regardless of whether it
+would ever have shipped. Three of the twenty source plants **DID NOT BITE** on the first
 pass, because they read comment- and string-blanked text where the violation lives *inside* a string: a
 `client:load` attribute, a module specifier, a quoted `/api/v1/…`. Those three were re-planted after their rules
 were widened, and the artifact set was re-planted after every later change to the gate (the marker rewrite, then
