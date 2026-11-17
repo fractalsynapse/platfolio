@@ -1037,13 +1037,22 @@ for (const assertion of TYPE_ASSERTIONS) {
         const chunks = fs.existsSync(path.join(dist, '_astro')) ? fs.readdirSync(path.join(dist, '_astro')).filter((f) => f.endsWith('.js')) : [];
         for (const chunk of chunks) {
           const bundle = fs.readFileSync(path.join(dist, '_astro', chunk), 'utf8');
-          // The Node-only chain that made the first honest build fail. If any of this comes back, a shell file
-          // reached a package that imports node:crypto or pg, and the island bundle breaks at the boundary rather
-          // than at the deploy.
-          for (const marker of ['browser-auth.ts', 'pgpass', 'PGPASSWORD', 'MemoryScm', 'build-plan']) {
-            if (marker === 'browser-auth.ts' ? /scripts\/browser-auth/.test(bundle) : bundle.includes(marker)) {
+          // Markers for the Node-only chain that made the first honest build fail: the pg driver's helper, the
+          // in-memory SCM double, the manifest build planner, the Postgres store. If any of this comes back, a
+          // shell file reached a package that imports `node:crypto` or `pg`, and the bundle breaks at the boundary
+          // rather than at the deploy. Chosen as *module* names, not variable names: an earlier draft of this line
+          // carried `PGPASSWORD` as a marker, and `check-environment-registry.ts` — which scans `scripts/` for
+          // quoted uppercase names — promptly reported that the gate "referenced" a credential it was only naming.
+          // `pool` was tried too, and matched inside React's own runtime: a gate that fires on the compliant
+          // artifact is a gate somebody switches off.
+          for (const marker of ['pgpass', 'MemoryScm', 'build-plan', 'postgres-store', 'railway-mock']) {
+            if (bundle.includes(marker)) {
               hits.push(`apps/site/dist/_astro/${chunk} pulls in \`${marker}\` — the client bundle reached Node-only server code (the measured first-build failure: "createHash" is not exported by "__vite-browser-external")`);
             }
+          }
+          // The operator script by name, because that is the exact import the first honest build refused to bundle.
+          if (/scripts\/browser-auth/.test(bundle)) {
+            hits.push(`apps/site/dist/_astro/${chunk} carries the operator script's path — the client bundle reached scripts/browser-auth.ts again, which is the measured failure the policy module exists to prevent (node:crypto has no browser answer)`);
           }
         }
       } else {
