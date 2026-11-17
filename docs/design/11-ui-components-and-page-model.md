@@ -618,10 +618,11 @@ not contradict them, and a framework spec is what "make it testable" needed):
 - **Mobile v1 scope, auth, store prerequisites** — moved under §7 as the native vehicle's obligations,
   unchanged in substance.
 - **Astro + islands as the web shell** ([07 § Web](07-interfaces-api-mcp-mobile.md#web-astro-and-mobile-portability))
-  — **kept with a disclosed tension**: if every interactive region is an island, the shell is a router
-  detail, not architecture. Whether the dashboard stays under the Astro shell or becomes a plain React
-  mount inside the D62 service is **OPEN → UI-OD1**; either satisfies D62, and the choice changes only the
-  `apps/site` build, not §§1–8.
+  — **decided 2026-11-16 to D65**, not silently inherited. The tension disclosed here was real, and it is now
+  the design constraint rather than an objection: Astro owns routing, transitions and content, and the
+  dashboard is **one** island that constructs the SDK context and the signal registry exactly once. Either
+  shell satisfied D62, which is exactly why the choice belonged to the maintainer and not to whichever change
+  got there first. `apps/site` still does not exist; D65 decides its shape, not its delivery.
 
 **Superseded:**
 
@@ -647,7 +648,7 @@ not deleted, because an open decision that vanishes looks like an oversight.
 
 | ID | Decision the maintainer must make | What it blocks |
 | --- | --- | --- |
-| **UI-OD1** | Web shell: Astro islands (07's choice) vs plain React mount for the dashboard, both under the D62 Railway service. | The `apps/site` build and first-island wiring; nothing else — §2's layout contract is shell-agnostic. |
+| ~~**UI-OD1**~~ | **Closed 2026-11-16 to D65.** See [Closed UI-OD decisions](#closed-ui-od-decisions). | The `apps/site` build and first-island wiring; nothing else — §2's layout contract is shell-agnostic. |
 | **UI-OD3** | Native vehicle (§7 table): RN / Capacitor / Tauri / web-only — deliberately **not chosen here**. | Only the first native app; the decision must not be made *before* §9's gates exist, or the cost asymmetry that makes all four options viable is destroyed. |
 | **UI-OD4** | Draft retention rule as specified (7-day TTL, local-only, sign-out wipe, never secrets) vs a stricter/looser variant. | §5's implementation and the app-store privacy declarations; it is tenant working data at rest on user devices — the maintainer should own that posture. |
 | **UI-OD5** | Replay-from-store as the default for context signals (§3), with mandatory-transient for side-effecting signals. | The signals registry code shape; cheap to decide, expensive to flip after components lean on replay. |
@@ -661,6 +662,7 @@ work it names belongs to whichever change owns the file that must change.
 
 | ID | Closed | The maintainer's reason | What it decided, and what it does not |
 | --- | --- | --- | --- |
+| **UI-OD1** | 2026-11-16, recorded as **D65** | *"I think Astro for the site with React UI real-time interfaces fits the intended architecture perfectly, and I happen to like Astro a lot and have built sites with it personally... I also LOVE the islands architecture and the routing and transitions capabilities."* | Decided: `apps/site` is an Astro shell, and the dashboard is one React island inside it; `packages/ui` stays shell-agnostic, so the same screens still target native and desktop. It does **not** decide UI-OD3 (the native vehicle), does not authorise a second component framework inside the islands, and changes nothing in §1–8. |
 | **UI-OD2** | 2026-11-15, recorded as **D64** | *"Yes, the UI should show live updates when it makes sense. I just want to make sure we are capable of real-time like interface even if we have to start out polling the API when needed."* | Decided: **design the push capability, ship polling first.** One SDK freshness primitive whose transport is swappable at build time (`poll` today, `events` later); every server-derived render carries its age; no UI surface may imply a liveness the contract does not serve. Required work, not optional: §4's operations (`GET …/events`, `POST …/events/ticket`, the event entity) are **API operations designed in `openapi.yaml` first** (D41) — measured absent as of 2026-11-15 (`grep -n "text/event-stream\|websocket\|EventSource\|WebSocket" apps/control-plane/openapi.yaml` → no match, all 36 operations request/response), landing them is a contracts MINOR bump. It does **not** authorize implementing any of it from here. |
 | **UI-OD6** | 2026-11-15, recorded as **D63** | *"Go would rather have a packages/ui package that contains ALL reusable UI components, colors, spacing, font sizes (CSS), etc..."* | Decided: **one package owns everything reusable.** `packages/ui` carries the components **and** the design tokens, tokens delivered as CSS custom properties from that package; there is no separate `packages/tokens` (superseded wherever it appeared in the layer tables). What the first `packages/ui` commit may contain is now unblocked — but the package still **does not exist**, and "tokens are CSS custom properties" does not change what it will contain, only where. |
 
@@ -673,7 +675,7 @@ work it names belongs to whichever change owns the file that must change.
   real page document (the existing `buildSecretsPanel` output, measured code) through this contract at 360
   px and 1280 px containers, with §5's push/pop/reload tests and §8's axe pass green, **and** in a second
   container technology (a bare React mount and an Astro island both rendering the same registry proves the
-  shell question UI-OD1 is really open and §9.7 is satisfiable). It proves portability before it becomes a
+  shell question (UI-OD1, since decided to D65) and that §9.7 is satisfiable). It proves portability before it becomes a
   bet, which was the old E9-line's intent, pointed at the right experiment number this time.
 - §4's operations are now **required work** (UI-OD2 answered 2026-11-15 as D64: design the push
   capability, ship polling first), and they remain **API operations first** — designed in
