@@ -2,7 +2,7 @@
  * The runtime endpoint overlay, committed as an empty file on purpose.
  *
  * A static build bakes the island's props, so a deployment that must point one artifact at several environments
- * replaces this file at container start: `apps/site/Dockerfile` runs `scripts/site-env-print.ts`, which writes the
+ * replaces this file at container start: `apps/site/Dockerfile` runs `apps/site/src/tools/render-runtime-config.ts`, which writes the
  * four names it finds in the environment into `dist/config.js`. What is tracked here is a comment and nothing
  * else — no origin, no issuer, no client id — because a value in this file would be a hostname in tracked source
  * (D47), and `check-project.ts`'s endpoint rule is the thing that would notice.

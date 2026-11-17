@@ -8,7 +8,7 @@
 # build environment supplied -- `PLATFOLIO_SITE_ORIGIN`, `PLATFOLIO_URL`, `PLATFOLIO_IDENTITY_ISSUER`,
 # `PLATFOLIO_WEB_CLIENT_ID` -- because a static artifact cannot do otherwise, and the names are declared in
 # `environment.yaml` rather than remembered here. A deployment that must re-point one artifact at run time gets
-# `dist/config.js` rewritten at start by `scripts/site-env-print.ts` (see the ENTRYPOINT below and the header of
+# `dist/config.js` rewritten at start by `apps/site/src/tools/render-runtime-config.ts` (see the ENTRYPOINT below and the header of
 # apps/site/src/lib/site-config.ts); that is the mechanism, not a hostname in this file (D47).
 FROM node:22-bookworm-slim
 
@@ -20,8 +20,19 @@ RUN corepack enable
 # a container.
 RUN echo 'node-linker=hoisted' > /app/.npmrc
 
-# Manifests first, sources second: the dependency layer is what a rebuild reuses, and it only resolves if every
-# workspace member this app touches is declared before the install runs.
+# Manifests first, sources second: the dependency layer is what a rebuild reuses.
+#
+# The install is NOT filtered to this app, and the reason is measured rather than stylistic. The first version of
+# line 34 read `--filter @platfolio/site...`, and the build inside the image failed with:
+#
+#   [vite]: Rollup failed to resolve import "@platfolio/page-schema/page" from "/app/packages/ui/src/contract.ts"
+#
+# Because `apps/site` declares no workspace edge on `@platfolio/ui` (see the `$comment` in tsconfig.json), the
+# filtered dependency graph stops at this app and installs nothing for the UI package — yet the Astro alias drags
+# `packages/ui/src/**.ts` into the bundle, where its *own* imports then have nothing to resolve against. On the
+# host it appeared to work, because this checkout is already installed whole: exactly the kind of success that does
+# not travel. Either the edge is declared (and the filter becomes correct), or the image installs the workspace.
+# The edge is the maintainer's open question, so the image takes the second option and says why here.
 COPY package.json pnpm-workspace.yaml tsconfig.json ./
 COPY packages/contracts/package.json packages/contracts/
 COPY packages/kernel/package.json packages/kernel/
@@ -31,7 +42,7 @@ COPY packages/api-contract/package.json packages/api-contract/
 COPY packages/ui/package.json packages/ui/
 COPY apps/site/package.json apps/site/
 COPY pnpm-lock.yaml ./
-RUN pnpm install --frozen-lockfile --filter @platfolio/site...
+RUN pnpm install --frozen-lockfile
 
 # The generated contract types are build inputs: `ENDPOINTS` is what the island routes with (#258), and it is
 # committed, so the copy is a source copy rather than a code-generation step.
@@ -55,9 +66,29 @@ RUN pnpm --filter @platfolio/site run build
 RUN chown -R node:node /app
 EXPOSE 4321
 USER node
-# The overlay is re-rendered from the environment the container actually has, so one artifact can be started
-# against staging or production without a rebuild. A container started without the names fails here, naming them,
-# which is the point: a UI that quietly kept the build-time origin is a UI an operator believes they re-pointed.
-# `--override` is not a flag this script has; the redirect is the whole of it.
-ENTRYPOINT ["sh", "-c", "node --import tsx /app/scripts/site-env-print.ts > /app/apps/site/dist/config.js 2>/dev/null || node --import tsx /app/scripts/site-env-print.ts; exec astro preview --host 0.0.0.0 --port 4321"]
-CMD ["astro", "preview", "--host", "0.0.0.0", "--port", "4321"]
+WORKDIR /app/apps/site
+# Two things happen at start, in this order, and the second only if the first succeeds.
+#
+# 1. **Render the endpoint overlay.** `node /app/apps/site/src/tools/render-runtime-config.ts`, run as TypeScript
+#    the same way `apps/control-plane/Dockerfile` runs its own `CMD ["node", "…/src/index.ts"]` on this base image --
+#    there is no compile step here to produce a `.js` for it. It writes `dist/config.js`, the file
+#    `apps/site/public/config.js` is a comment-only placeholder for. If a required name is unset, or is not an
+#    absolute http(s) URL with a host, or is plain http on a machine this deploy does not own, the renderer exits 1
+#    and the container does **not** serve: a UI that quietly kept its build-time origin is a UI whose operator
+#    believes they re-pointed it, and the failure would surface later as a browser talking to the wrong plane.
+# 2. **Serve the artifact.** `astro preview` reads `dist/`, which is what the build produced.
+#
+# Measured on 2026-11-17, on this file: `docker build` exits 0 (the legacy builder; BuildKit's activity file could
+# not be written in this sandbox), and the container was run and answered -- `/` 200 with **zero** `<script>`
+# elements and zero island markers, `/dashboard` 200 with exactly one `<astro-island>` whose serialized props are
+# the five endpoint fields and nothing credential-shaped, `/callback` 200, `/config.js` 200 carrying the overlay
+# rendered from that container's environment. The refusal was also observed for real: with `PLATFOLIO_URL` pointed
+# at a plain-http non-loopback host, the container printed the named problem and never served.
+#
+# Two limits this file cannot retire on its own. `astro preview` is Astro's *development* preview server, not the
+# static server a deployment wants in front of a public origin -- choosing that (a hardened static server, an edge,
+# or `output: 'server'` with a Node adapter, which is the runtime-config answer D65 priced) belongs with the
+# composition entry, and is deliberately not decided here. And no browser executed a single byte of what was
+# served: hydration, one React root, focus order and the 320 px containers remain unobserved, which is what 11
+# §9.7/§9.8 exist to cover.
+ENTRYPOINT ["sh", "-c", "node /app/apps/site/src/tools/render-runtime-config.ts > /app/apps/site/dist/config.js && exec pnpm --filter @platfolio/site run preview --host 0.0.0.0 --port 4321"]

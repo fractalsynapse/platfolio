@@ -32,14 +32,14 @@
  * also will not print a credential: the four keys are endpoints and a public client id, and D4 has nothing to do
  * here except be respected by construction — this script reads no secret name at all.
  */
-import { SITE_VARIABLES, SiteConfigError, runtimeOverlayShape } from '../apps/site/src/lib/site-config.ts';
+import { SITE_VARIABLES, SiteConfigError, runtimeOverlayShape } from '../lib/site-config.ts';
 
 const lines = process.argv.slice(2);
 const wantJson = lines.includes('--json');
 
 if (lines.includes('--help')) {
   process.stdout.write(
-    'usage: site-env-print.ts [--json]\n'
+    'usage: apps/site/src/tools/render-runtime-config.ts [--json]\n'
     + '  Prints the runtime endpoint overlay for apps/site to stdout.\n'
     + `  Reads ${Object.values(SITE_VARIABLES).join(', ')} from the environment and refuses if a required one is unset.\n`
     + '  --json prints the object only (for a pipeline); the default prints an assignment to ' + `'window.__PLATFOLIO_SITE_CONFIG__'.\n`,
@@ -57,7 +57,7 @@ function collect(env: Readonly<Record<string, string | undefined>>): Record<stri
   const missing = required.filter((name) => (env[name] ?? '').trim() === '');
   if (missing.length > 0) {
     process.stderr.write(
-      `site-env-print: ${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} not set in this environment.\n`
+      `render-runtime-config: ${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} not set in this environment.\n`
       + '  The overlay exists so one artifact can be pointed at an environment at start; starting it without the\n'
       + '  names leaves the island on whatever the build baked, which the operator believes they have changed.\n'
       + '  Set them, or do not run the container.\n',
@@ -83,7 +83,7 @@ try {
   overlay = collect(process.env as Record<string, string | undefined>);
 } catch (error) {
   if (error instanceof SiteConfigError) {
-    process.stderr.write(`site-env-print: ${error.message}\n`);
+    process.stderr.write(`render-runtime-config: ${error.message}\n`);
     process.exit(1);
   }
   throw error;

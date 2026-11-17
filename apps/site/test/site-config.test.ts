@@ -139,8 +139,8 @@ test('the overlay reader refuses what the build refuses, because an overlay is a
 });
 
 test('the renderer writes the global the reader consumes, refuses an unset name by that name, and prints no hostname of its own', () => {
-  const script = path.join(ROOT, 'scripts/site-env-print.ts');
-  assert.ok(fs.existsSync(script), 'scripts/site-env-print.ts is the other half of the overlay contract: the container runs it to make dist/config.js');
+  const script = path.join(ROOT, 'apps/site/src/tools/render-runtime-config.ts');
+  assert.ok(fs.existsSync(script), 'apps/site/src/tools/render-runtime-config.ts is the other half of the overlay contract: the container runs it to make dist/config.js');
   const text = fs.readFileSync(script, 'utf8');
   assert.ok(text.includes('SITE_VARIABLES'), 'the renderer reads the same constant map the app does -- one spelling of the four names (D58)');
   assert.ok(text.includes(RUNTIME_CONFIG_GLOBAL), 'the renderer prints the global the reader consumes');

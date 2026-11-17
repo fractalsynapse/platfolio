@@ -23,7 +23,7 @@ import { REQUIRED_SCOPE, WEB_CLIENT_ID } from '../../../../packages/ui/src/web/b
  * A static Astro artifact bakes the island's props at build, so `pnpm run site:build` resolves these from the
  * build environment. A container that must be pointed somewhere else after it was built gets the same values from
  * the runtime overlay: `astro.config.mjs` writes `dist/config.js`, which `apps/site/Dockerfile` regenerates from
- * the environment at start (`scripts/site-env-print.ts` is the renderer, and the same script answers
+ * the environment at start (`apps/site/src/tools/render-runtime-config.ts` is the renderer, and the same script answers
  * `docker compose config`'s interpolation). So one spelling of four names serves build and start, and neither of
  * them is a literal in this repository.
  *
@@ -224,7 +224,7 @@ export function runtimeConfigFrom(scope: unknown): RuntimeSiteConfig | undefined
 }
 
 /**
- * The one predicate for what an overlay field may hold, shared by the browser reader and `scripts/site-env-print.ts`.
+ * The one predicate for what an overlay field may hold, shared by the browser reader and `apps/site/src/tools/render-runtime-config.ts`.
  *
  * Both ends of the same fact need the same answer, and the renderer is the end that can fail at deploy time with
  * a person watching: if the renderer accepted a value the browser would later refuse, the container would start

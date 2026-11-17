@@ -80,7 +80,11 @@ run can report the platform of the repository it names rather than the one the o
 checked out (D60).
 
 What is still **not** delivered, stated because the earlier version of this paragraph was the first thing an
-agent read and it had gone stale: no Stripe integration, no CLI or web UI, and no tenant on either service.
+agent read and it had gone stale: no Stripe integration, no CLI, and no tenant on either service. The web UI is
+no longer in that list: `apps/site` exists since 2026-11-17 (D65's shell -- see the UI rule below), but it is
+**built and gated, not deployed**: no service entry in `compose.yaml`, no origin that resolves, and no browser has
+ever loaded it, so no screen has been *seen* by a person yet. Treat "the UI exists" and "the UI is live" as the two
+different claims they are.
 A person is now a `persons` row with proofs in `identities`, and membership attaches to the person (#177), so a
 second issuer or a machine client does not need a parallel authorization scheme.
 The control plane is **deployed and answering on a public HTTPS host**, built by this repository, with its

@@ -9,3 +9,4 @@ vendor
 .github
 coverage
 *.log
+.tmp
