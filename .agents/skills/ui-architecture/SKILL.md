@@ -25,7 +25,7 @@ Screens are type-checked because `packages/ui/tsconfig.json` declares `jsx: reac
 `npm run typecheck` runs **both** that project and the DOM-free root one: `document` in `packages/contracts` or
 `apps/control-plane` is still TS2584, and `scripts/check-project.ts` fails if a source file is claimed by no
 type-check project, by two, or by one without `jsx`. `packages/api-client` and `apps/site` **do not exist** —
-nothing mounts the screens (UI-OD1 is open), so a gate that audits a shell is *not run*, not passed. Real
+nothing mounts the screens yet (the shell is decided to D65 — Astro with the dashboard as one React island — but
 today: `apps/control-plane/openapi.yaml` (request/response only, no push channel — re-check with the grep
 below; D64 makes building toward push *required*, shipping on `poll` *current`), `packages/api-contract`'s
 generated types, and `packages/page-schema` (pages as data, `buildSecretsPanel`, `findValueBearingProps`).
@@ -89,9 +89,11 @@ An agent who resolves an open one in code has made a decision the project has no
 reviews; an agent who re-litigates a closed one has done the same against a decision that *has* been made:
 
 - **UI-OD3 — native vehicle** (RN / Capacitor / Tauri / web-only). Build to the contracts; choose nothing.
-- **UI-OD1 — Astro islands vs a plain React mount** for the dashboard shell. The screens in `packages/ui` are
-  shell-agnostic on purpose: `renderScreen(screenDocument, propsFor)` resolves ids through the build-time
-  registry, and `InstanceListScreen` needs an `SdkContext` and a `SignalsContext` from whoever mounts it.
+- **UI-OD1 — ANSWERED 2026-11-16 (D65): Astro shell, dashboard as one React island.** Do not re-ask,
+  and do not re-decide it in code. The screens stay shell-agnostic on purpose: `renderScreen(screenDocument, propsFor)`
+  resolves ids through the build-time registry, and `InstanceListScreen` needs an `SdkContext` and a
+  `SignalsContext` from whoever mounts it — **exactly one of each per island**, because a second hydration
+  means two registries and two token stores.
 - **UI-OD5 — replay-from-store as the pattern for context signals**, with transient mandatory elsewhere.
 - **UI-OD4 — the draft retention numbers** (7-day TTL, wipe-on-sign-out posture). Implement the mechanics,
   leave the numbers as the open question.

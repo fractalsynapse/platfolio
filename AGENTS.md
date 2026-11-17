@@ -217,10 +217,10 @@ type-check projects' file lists equals the source tree on disk, so an exclude li
 | 6 | **Pluggable means build-time, never runtime-loaded**: no dynamic import of UI code, no server-supplied component registry. [10's Tier 2 boundary](docs/design/10-cordis-kernel-and-extension-seams.md#the-collision-and-the-resolution) is a security property (D13/D14) | closed component union + strict `PageSchema` (`packages/page-schema`) — real today; `ui:check` §9.6 runs today (build-time registry, immutability proved by *attempting* the widening after `Object.freeze` was shown to be theatre); §9.5 runs today: 6 ids resolve, each with a props schema, a stored document re-validates and invalid prop sets are refused at validation (with 2 named-accepted, because props validation checks kind and not enumeration membership) |
 
 The first `packages/ui` commit is the **contract package and its gates, not a screen**: a gate added after four
-screens exist audits nothing (11 § Consequences for the plan). Five `UI-OD` decisions remain open and belong to
-the maintainer — an agent does not settle one in code; two were answered on 2026-11-15 (UI-OD6 → D63, UI-OD2 →
-D64) and are recorded, with his reasons, in [11 § Closed UI-OD decisions](docs/design/11-ui-components-and-page-model.md#closed-ui-od-decisions)
-rather than deleted.
+screens exist audits nothing (11 § Consequences for the plan). Four `UI-OD` decisions remain open and belong to
+the maintainer — an agent does not settle one in code; three were answered (UI-OD6 → D63 and UI-OD2 → D64 on
+2026-11-15; UI-OD1 → D65 on 2026-11-16: **the web shell is Astro, the dashboard one React island inside it**), and all three are
+recorded, with his reasons, in [11 § Closed UI-OD decisions](docs/design/11-ui-components-and-page-model.md#closed-ui-od-decisions) rather than deleted.
 
 **Two gate fixes came out of the screens, and are recorded rather than buried.** §9.2's source filter read
 `rel.endsWith('.ts')` while the walk had been widened, so a `fetch` planted in a screen was invisible to the gate
