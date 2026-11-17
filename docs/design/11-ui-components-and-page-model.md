@@ -600,7 +600,10 @@ Three of §D65's rules **DID NOT BITE** on the first falsification pass, because
 string-blanked text where the violation lives inside a string — a `client:load` attribute, a module specifier, a
 quoted `/api/v1/…`. They were widened to read string contents and all twenty source mutations then named their
 file and their rule. That is the §9.2 story from #259 recurring one file over, and it is recorded here rather than
-buried for the same reason.
+buried for the same reason. Two more lessons came from the artifact pass and live in the gate's comment now: a
+credential *name* used as a detection marker is picked up by the environment registry as a reference to that
+credential, and `pool` — a substring of React's own runtime — made the gate red on a compliant build. Markers are
+chosen by grepping the real artifact, not by imagination.
 
 ### The reviewer pass — look at one screen, fail it on these
 

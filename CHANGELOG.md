@@ -25,10 +25,17 @@ symptom of that is a screen that quietly disagrees with itself. Three checks hol
 tiers: `ui:check` §D65 over the source (one `client:*` per page, `createShellContext` only under `src/islands/`, no
 page building a transport, bus or bag), `apps/site/test/build-output.test.ts` over the artifact, and
 `packages/ui/test/shell-context-singleton.test.ts` over the runtime property. Every rule was falsified by planting
-it: 25 mutations, 25 named failures, restores byte-verified by copy. Three of §D65's rules **DID NOT BITE** first,
-because they read comment- and string-blanked text where the violation lives *inside* a string — a `client:load`
-attribute, a module specifier, a quoted `/api/v1/…`. That is the §9.2 hole from #259 recurring one file over, and it
-is written into 11 §9 rather than buried.
+it: 31 planted violations across three passes — 20 over the shell's own sources, 10 over the built artifact
+(island counts per page, a script tag on the landing route, and each bundle marker), and one by moving
+`apps/site` out of the tree to read the gate's `NOT RUN` branch — 31 named failures, restores byte-verified by
+copy. Three of §D65's rules **DID NOT BITE** first, because they read comment- and string-blanked text where the
+violation lives *inside* a string: a `client:load` attribute, a module specifier, a quoted `/api/v1/…`. That is the
+§9.2 hole from #259 recurring one file over, and it is written into 11 §9 rather than buried. Two more mistakes
+came out of the artifact pass and are recorded in the gate's own comment: `PGPASSWORD` sat in a marker list and
+`check-environment-registry.ts` duly reported that the UI gate *references a credential* (it scans `scripts/` for
+quoted uppercase names), and `pool` matched inside React's own runtime, so the gate was red on a compliant build.
+A gate that fires on the compliant artifact is a gate somebody switches off; every surviving marker was grepped
+against the real chunks before it was kept.
 
 **Two package boundaries moved, because the first honest browser bundle said they had to.** `packages/ui` had never
 been bundled for a browser, so nothing had ever tested what its imports drag along:
