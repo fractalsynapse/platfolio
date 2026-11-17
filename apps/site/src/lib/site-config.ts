@@ -1,4 +1,10 @@
-import { REQUIRED_SCOPE, WEB_CLIENT_ID } from '@platfolio/ui';
+// The policy defaults arrive by relative path, not through the `@platfolio/ui` specifier the islands use. The
+// reason is a runtime fact rather than a taste: a test that exercises this file runs under `tsx`, which resolves
+// what Node resolves, and nothing here declares a workspace edge that would make that specifier mean anything at
+// the command line (the open question is recorded in apps/site/tsconfig.json's `$comment`). The path names the
+// same file the Astro alias does, it is dependency-free, and reaching a sibling package by path is what
+// packages/ui/tsconfig.json already does to `../../scripts/check-ui.ts`.
+import { REQUIRED_SCOPE, WEB_CLIENT_ID } from '../../../../packages/ui/src/web/browser-auth-policy.ts';
 
 /**
  * The site's configuration, read from the environment it was built or started in (D47, D58).
@@ -72,13 +78,30 @@ const required = (env: Readonly<Record<string, string | undefined>>, name: strin
 };
 
 /**
- * An absolute http(s) origin or base URL, and nothing else.
+ * An absolute http(s) URL **with a host**, and nothing else.
  *
- * `new URL` alone accepts `file:` and `data:`; a UI that will carry a bearer token must not be pointed at either.
- * The trailing slash is dropped so `${apiBaseUrl}${path}` cannot become `//api/v1/…` — a double slash is a
- * different origin to a proxy, and a 404 the person reads as an outage.
+ * Three refusals, and the third is the one `new URL` does not make for you:
+ *
+ *  - a relative value (`api.platfolio.example`, `/api/v1`) throws, because a base URL that is not absolute turns
+ *    every SDK request into a request against whatever origin the page happens to be served from;
+ *  - a non-http scheme is refused — `new URL` accepts `file:` and `data:`, and a UI is about to attach a bearer
+ *    token to whatever this string becomes;
+ *  - an empty hostname is refused. `https:/api` is a *valid* URL (measured: it parses, protocol `https:`, host
+ *    `''`) and it is exactly what a mistyped `--url=https:/…` produces. Accepted, it resolves every call against
+ *    the document's own origin, so the dashboard would ask its static host for `/api/v1/instances`, be handed
+ *    HTML back, and render an empty list — a configuration error that arrives dressed as an outage.
+ *
+ * The trailing slash is dropped so `${apiBaseUrl}${path}` cannot produce `//api/v1/…`: a double slash is a
+ * different path to a proxy and a 404 a person reads as the platform being down.
  */
 const httpUrl = (value: string, name: string): string => {
+  // The shape check comes before `new URL`, because URL is more forgiving than this decision needs to be.
+  // Measured on this tree: `new URL('https:/api')` does not throw — it answers protocol `https:` and hostname
+  // `api`, turning a mistyped `--url=https:/…` into requests to a single-label host called "api". A base URL with
+  // no authority is refused here rather than resolved into something wrong and quiet.
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) {
+    throw new SiteConfigError(`${name} is not an absolute URL with an authority: "${value}"`, 'it must be scheme://host[:port], the form the SDK joins a spec path onto');
+  }
   let url: URL;
   try {
     url = new URL(value);
@@ -88,6 +111,10 @@ const httpUrl = (value: string, name: string): string => {
   if (url.protocol !== 'https:' && url.protocol !== 'http:') {
     throw new SiteConfigError(`${name} must be an http(s) URL, got ${url.protocol}`, 'a token must never be sent to another scheme');
   }
+  // No empty-hostname check here, and that is a measurement rather than an oversight: with an authority present,
+  // `new URL` either throws (`http://` — tested) or takes the first label as the host (`https:///api` resolves to
+  // host `api`). The host-less shape the check would have caught is therefore already refused by the test above,
+  // and a branch that cannot run in a validator is a branch that will never be blamed when the rule changes.
   return url.toString().replace(/\/$/, '');
 };
 
@@ -187,9 +214,36 @@ export function runtimeConfigFrom(scope: unknown): RuntimeSiteConfig | undefined
   const out: Record<string, string> = {};
   for (const key of ['apiBaseUrl', 'issuerBaseUrl', 'siteOrigin', 'clientId'] as const) {
     const value = (injected as Record<string, unknown>)[key];
-    if (typeof value === 'string' && value.trim() !== '') out[key] = value.trim();
+    if (typeof value !== 'string' || value.trim() === '') continue;
+    // Validated as it is read, not after the merge. A container that wrote a host-less URL or a client id with a
+    // slash in it must fail the page loudly at boot rather than have the value travel one layer further, because
+    // by the time `poll.ts` sees it the mistake looks like an outage.
+    out[key] = runtimeOverlayShape(key, value.trim());
   }
   return Object.keys(out).length === 0 ? undefined : (out as RuntimeSiteConfig);
+}
+
+/**
+ * The one predicate for what an overlay field may hold, shared by the browser reader and `scripts/site-env-print.ts`.
+ *
+ * Both ends of the same fact need the same answer, and the renderer is the end that can fail at deploy time with
+ * a person watching: if the renderer accepted a value the browser would later refuse, the container would start
+ * and the dashboard would break — the worst order for those two events. So `clientId` (a name, not an address) is
+ * checked as a name, and the three URLs are checked with the build's own `httpUrl` plus the loopback rule.
+ */
+export function runtimeOverlayShape(key: keyof RuntimeSiteConfig, value: string): string {
+  const label = `${RUNTIME_CONFIG_GLOBAL}.${key}`;
+  if (key === 'clientId') {
+    if (!/^[A-Za-z0-9._-]{1,128}$/.test(value)) {
+      throw new SiteConfigError(`${label} is not a client name: "${value}"`, 'a realm client id is an opaque slug; anything else is a URL that arrived in the wrong field');
+    }
+    return value;
+  }
+  const absolute = httpUrl(value, label);
+  if (absolute.startsWith('http://') && !isLoopback(absolute)) {
+    throw new SiteConfigError(`${label} is plain http on a non-loopback host`, 'the overlay is checked the way the build inputs are; a browser carrying a token does not speak http to a machine it does not own');
+  }
+  return absolute;
 }
 
 /**
@@ -201,21 +255,14 @@ export function runtimeConfigFrom(scope: unknown): RuntimeSiteConfig | undefined
  */
 export function endpointsForIsland(baked: SitePublicConfig, injected: RuntimeSiteConfig | undefined): SitePublicConfig {
   if (injected === undefined) return baked;
-  const merged: SitePublicConfig = {
+  // No validation pass here on purpose. `runtimeConfigFrom` already checked every field it let through, with the
+  // build's own `httpUrl` and the same loopback rule; a second copy in the merge would be two answers for one
+  // question, and the kind that drift -- the merge would be the one nobody tests because the reader is red first.
+  return {
     apiBaseUrl: injected.apiBaseUrl ?? baked.apiBaseUrl,
     issuerBaseUrl: injected.issuerBaseUrl ?? baked.issuerBaseUrl,
     siteOrigin: injected.siteOrigin ?? baked.siteOrigin,
     clientId: injected.clientId ?? baked.clientId,
     scope: baked.scope,
   };
-  for (const key of ['apiBaseUrl', 'issuerBaseUrl', 'siteOrigin'] as const) {
-    httpUrl(merged[key], `${RUNTIME_CONFIG_GLOBAL}.${key}`);
-    if (merged[key].startsWith('http://') && !isLoopback(merged[key])) {
-      throw new SiteConfigError(
-        `${RUNTIME_CONFIG_GLOBAL}.${key} is plain http on a non-loopback host`,
-        'the runtime overlay is checked the same way the build inputs are; a browser carrying a token does not speak http to a machine it does not own',
-      );
-    }
-  }
-  return merged;
 }

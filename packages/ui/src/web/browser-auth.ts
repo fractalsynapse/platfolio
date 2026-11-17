@@ -108,6 +108,15 @@ interface Held {
   access: string;
   /** Epoch ms at which `token()` stops trusting the access token, from the imported `refreshAt`. */
   refreshAtMs: number | undefined;
+  /**
+   * Epoch ms at which the realm itself says the access token dies (`expires_in` from its own response).
+   *
+   * This is not a second clock and not new policy: `refreshAtMs` is the *warning*, and without the deadline the
+   * warning was the only bound — a realm answering `refresh_expires_in: 0` produced no schedule at all, so
+   * `token()` would hand over an expired bearer forever and every API call came back 401 with the UI reporting an
+   * outage. The deadline is the fact that closes that hole, and it is read from the response, never assumed.
+   */
+  expiresAtMs: number | undefined;
   idToken: string | undefined;
   refresh: string | undefined;
 }
@@ -159,6 +168,14 @@ const UNRESERVED = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz01234567
  */
 export function createVerifierWith(random: RandomBytes, length = 64): string {
   const bytes = random(length);
+  if (bytes.length < length) {
+    // Not a nitpick about the shape of the alphabet: with the padding this used to do (`bytes[i] ?? 0`), an entropy
+    // source that handed back 43 bytes for a 64-byte request produced a verifier whose last 21 characters were
+    // always `A`, and `isPkceVerifier` was delighted with it. A weak verifier is indistinguishable from a strong
+    // one in every log and every gate, which is the flipped-signature lesson (11 §identity: a check that sometimes
+    // tests nothing is worse than no check, because it is trusted). Refuse the RNG instead.
+    throw new TypeError(`the entropy source returned ${String(bytes.length)} bytes when ${String(length)} were asked for`);
+  }
   let out = '';
   for (let i = 0; i < length; i++) out += UNRESERVED[(bytes[i] ?? 0) % UNRESERVED.length];
   if (!isPkceVerifier(out)) throw new TypeError('the entropy produced a string that is not a PKCE verifier');
@@ -188,6 +205,7 @@ export function createTokenBag(): TokenBag {
       held = {
         access: tokens.access_token,
         refreshAtMs: refreshAt(window),
+        expiresAtMs: Number.isFinite(tokens.expires_in) && tokens.expires_in > 0 ? nowMs + tokens.expires_in * 1000 : undefined,
         idToken: tokens.id_token,
         refresh: tokens.refresh_token,
       };
@@ -307,14 +325,32 @@ export function createBrowserAuthSource(
     },
     refresh: refreshSession,
     token: async () => {
-      const held = bag.get();
+      let held = bag.get();
       if (held === undefined) throw new Error('not signed in: the platfolio-web session bag is empty');
-      if (held.refreshAtMs !== undefined && now() >= held.refreshAtMs) {
+      // Two bounds, and they are not the same question. `refreshAtMs` is the warning the policy computes (a quarter
+      // of the life, floored and capped), so a token that is merely *near* the end is replaced before the SDK's
+      // request can fail on it. `expiresAtMs` is the realm's own deadline: past it the access token is dead, and
+      // the warning is irrelevant — which is exactly the case a realm creates when it answers
+      // `refresh_expires_in: 0` and the imported `refreshAt` therefore says "nothing to schedule". Without the
+      // second bound `token()` would hand an expired bearer to the transport forever and every call would come back
+      // 401, which a person reads as the platform being down rather than as their own session having ended.
+      const expired = held.expiresAtMs !== undefined && now() >= held.expiresAtMs;
+      const warned = held.refreshAtMs !== undefined && now() >= held.refreshAtMs;
+      if (expired || warned) {
         const outcome = await refreshSession();
-        if (outcome !== 'refreshed') throw new Error(`the access token aged out and the refresh returned ${outcome}`);
-        const refreshed = bag.get();
-        if (refreshed === undefined) throw new Error('the refresh cleared the session bag');
-        return refreshed.access;
+        if (outcome !== 'refreshed') {
+          throw new Error(expired
+            ? `the access token expired and the refresh returned ${outcome}`
+            : `the access token aged out and the refresh returned ${outcome}`);
+        }
+        held = bag.get();
+        if (held === undefined) throw new Error('the refresh cleared the session bag');
+        // A refresh that produced a *still expired* answer is a realm telling us its own clock and ours disagree.
+        // Saying so beats returning a token the very next call will reject.
+        if (held.expiresAtMs !== undefined && now() >= held.expiresAtMs) {
+          throw new Error('the issuer refreshed to a token that is already expired (check the realm clock against PLATFOLIO_IDENTITY_ISSUER)');
+        }
+        return held.access;
       }
       return held.access;
     },
@@ -336,5 +372,6 @@ export const authPolicy = {
   callbackPath: CALLBACK_PATH,
   storage: TOKEN_STORAGE,
   store: RECOMMENDED_STORE,
+  logoutClear: LOGOUT_CLEAR,
   kinds: Object.keys(TOKEN_STORAGE) as TokenKind[],
 } as const;
