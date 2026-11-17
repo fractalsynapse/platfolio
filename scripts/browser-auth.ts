@@ -15,13 +15,35 @@
  * says so in the direction that matters, by refusing any token-shaped key in the API's own audit vocabulary.
  */
 import { createHash, randomBytes } from 'node:crypto';
+
+/**
+ * The browser's half of this contract now lives in `packages/ui/src/web/browser-auth-policy.ts`, and this file
+ * imports and re-exports it rather than holding a second copy of the same policy.
+ *
+ * The reason is a dependency direction, not a preference. That file's header tells it: the first `astro build` of
+ * a platfolio UI tried to bundle this script, and a client bundle that reaches an operator script reaches
+ * `node:crypto` — which this file's own opening paragraph forbids ("nothing a deployed service imports may depend
+ * on this file"). Moving the declarations the browser must obey into the package, and leaving the realm-writing
+ * shapes here, satisfies the sentence in both directions: a deployed UI depends on a package, a script depends on
+ * a package, and nothing deployed depends on `scripts/`.
+ *
+ * The re-export is the point, not a courtesy: `packages/seed-identity.ts`, `scripts/smoke-browser-auth.ts` and
+ * `packages/contracts/test/browser-auth.test.ts` keep reading these names from here, so a split that moved a fact
+ * without moving a caller's address cannot quietly leave two spellings behind.
+ */
+import {
+  API_CLIENT_ID, CALLBACK_PATH, LOGOUT_CLEAR, PKCE_METHOD, RECOMMENDED_STORE, REQUIRED_SCOPE, TOKEN_STORAGE,
+  WEB_CLIENT_ID, endSessionUrl, isPkceVerifier, isTokenShapedName, refreshAt, refreshSkewSeconds,
+  type PkcePair, type StorageLocation, type TokenKind,
+} from '../packages/ui/src/web/browser-auth-policy.ts';
+
+export {
+  API_CLIENT_ID, CALLBACK_PATH, LOGOUT_CLEAR, PKCE_METHOD, RECOMMENDED_STORE, REQUIRED_SCOPE, TOKEN_STORAGE,
+  WEB_CLIENT_ID, endSessionUrl, isPkceVerifier, isTokenShapedName, refreshAt, refreshSkewSeconds,
+  type PkcePair, type StorageLocation, type TokenKind,
+};
 import { parse as parseYaml } from 'yaml';
 
-export const WEB_CLIENT_ID = 'platfolio-web';
-export const API_CLIENT_ID = 'platfolio-api';
-export const REQUIRED_SCOPE = 'platfolio.user';
-/** The path the UI signs in from. Derived from the origin so seed, smoke and UI agree on one string. */
-export const CALLBACK_PATH = '/callback';
 
 /**
  * The field that makes PKCE MANDATORY is a client ATTRIBUTE, not a representation field.
@@ -34,7 +56,6 @@ export const CALLBACK_PATH = '/callback';
  * is exactly the bug this constant exists to make impossible.
  */
 export const PKCE_CHALLENGE_ATTRIBUTE = 'pkce.code.challenge.method';
-export const PKCE_METHOD = 'S256';
 
 /* ------------------------------------------------------------------ the client shape */
 
@@ -284,12 +305,6 @@ export function declaredUiOrigins(
 
 /* ------------------------------------------------------------------ PKCE primitives */
 
-export interface PkcePair {
-  verifier: string;
-  challenge: string;
-  method: typeof PKCE_METHOD;
-}
-
 /**
  * RFC 7636 §4.1: a verifier is 43..128 characters of the unreserved set. 48 random bytes base64url is 64
  * characters -- inside the window, with 384 bits behind it, and no padding characters.
@@ -304,78 +319,6 @@ export function codeChallenge(verifier: string): string {
   return createHash('sha256').update(Buffer.from(verifier, 'ascii')).digest('base64url');
 }
 
-/** The verifier window, as a predicate rather than a comment, so a short verifier fails a check. */
-export function isPkceVerifier(verifier: string): boolean {
-  return /^[A-Za-z0-9\-._~]{43,128}$/.test(verifier);
-}
-
-/* ------------------------------------------------------------------ token lifecycle policy */
-
-/**
- * Where a token may live in the browser. Data, not prose, so `docs`-free code can assert on it and a test can
- * refuse a new value that weakens it.
- */
-export const TOKEN_STORAGE = {
-  access: { inMemory: true, localStorage: false, sessionStorage: false, cookie: false, platfolioDatabase: false },
-  refresh: { inMemory: true, localStorage: false, sessionStorage: false, cookie: false, platfolioDatabase: false },
-  idToken: { inMemory: true, localStorage: false, sessionStorage: false, cookie: false, platfolioDatabase: false },
-} as const;
-
-export type TokenKind = keyof typeof TOKEN_STORAGE;
-export type StorageLocation = keyof (typeof TOKEN_STORAGE)['access'];
-
-/** The recommended default, stated once and pointed at from the smoke script's header. */
-export const RECOMMENDED_STORE: StorageLocation = 'inMemory';
-
-/**
- * How long before expiry to refresh, derived from the response's own `expires_in`.
- *
- * A quarter of the lifetime, floored at 5 seconds (never so early that a refresh on every page load becomes a
- * loop) and capped at 60 seconds (never so late that a slow token endpoint turns a refresh into an expired
- * call). The cap is what makes this safe to call on any realm: an operator who sets a 12-hour access lifespan
- * gets a 60-second warning, not a 3-hour one.
- */
-export function refreshSkewSeconds(expiresIn: number): number {
-  if (!Number.isFinite(expiresIn) || expiresIn <= 0) return 0;
-  return Math.max(5, Math.min(60, Math.floor(expiresIn / 4)));
-}
-
-/**
- * When to refresh, in epoch milliseconds. `undefined` means "there is nothing to schedule": no refresh token,
- * or a response that says the refresh window is already closed (`refresh_expires_in: 0`).
- */
-export function refreshAt(input: { nowMs: number; expiresIn: number; refreshExpiresIn?: number; jitterRatio?: number }): number | undefined {
-  if (!Number.isFinite(input.expiresIn) || input.expiresIn <= 0) return undefined;
-  if (input.refreshExpiresIn !== undefined && input.refreshExpiresIn <= 0) return undefined;
-  const skew = refreshSkewSeconds(input.expiresIn);
-  const jitter = Math.round(skew * (input.jitterRatio ?? 0));
-  // Never schedule in the past: a realm with a 3-second access lifespan gets "refresh immediately", not a
-  // negative timer that a naive setTimeout would fire on the next tick anyway.
-  return input.nowMs + Math.max(0, input.expiresIn - skew - jitter) * 1000;
-}
-
-/** The OIDC RP-initiated logout call. `id_token_hint` is what makes the revocation provable. */
-export function endSessionUrl(input: { endSessionEndpoint: string; idToken: string; postLogoutRedirectUri: string; clientId?: string }): string {
-  const u = new URL(input.endSessionEndpoint);
-  u.searchParams.set('id_token_hint', input.idToken);
-  u.searchParams.set('post_logout_redirect_uri', input.postLogoutRedirectUri);
-  if (input.clientId) u.searchParams.set('client_id', input.clientId);
-  return u.toString();
-}
-
-/** What a platfolio client must clear on logout. Enumerated so "clear the session" is not left to interpretation. */
-export const LOGOUT_CLEAR = ['access token', 'refresh token', 'id token', 'cached claims', 'pending refresh timer', 'pending retry queue'] as const;
-
-/**
- * D4, as a predicate: the names that would make an API field a place a token could arrive.
- *
- * The API may legitimately carry the words `token` in `livenessToken` (a build digest) and `not-before-policy`
- * (Keycloak's own), so the rule is on the SHAPE of the name rather than on the word: anything naming an access,
- * refresh or bearer token, or a client secret, is a place a credential is being asked to go.
- */
-export function isTokenShapedName(name: string): boolean {
-  return /^(access_?token|refresh_?token|id_?token|bearer_?token|client_?secret|code_?verifier|token)$/.test(name.trim().toLowerCase());
-}
 
 /**
  * The audit detail keys the control plane writes today, and the only ones it may write without this test

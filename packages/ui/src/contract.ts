@@ -1,6 +1,6 @@
 import type { StandardSchemaV1 } from '@standard-schema/spec';
 import type { OperationId } from '@platfolio/api-contract/generated/types';
-import { isValueBearingKey } from '@platfolio/page-schema';
+import { isValueBearingKey } from '@platfolio/page-schema/page';
 import type { LayoutSlot } from './layout/index.ts';
 import { SIGNAL_IDS, type SignalId } from './signals.ts';
 

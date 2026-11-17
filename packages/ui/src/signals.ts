@@ -1,5 +1,5 @@
 import type { StandardSchemaV1 } from '@standard-schema/spec';
-import { isValueBearingKey } from '@platfolio/page-schema';
+import { isValueBearingKey } from '@platfolio/page-schema/page';
 
 /**
  * The typed signal registry (11 §3, rule 3).

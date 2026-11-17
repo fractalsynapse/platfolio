@@ -315,6 +315,21 @@ const HUMAN: Record<string, Partial<Entry>> = {
     kind: 'value', required: false, default: '', environments: 'all', service: 'api', deployedTo: 'railway:variable',
     note: 'comma-separated browser origins the UI is served from (scheme://host[:port] each). One list, both consumers: the API admits it as its CORS allow-list, and identity:seed writes it as the browser client\'s redirect URIs and webOrigins. Unset or empty means same-origin only -- the documented, safe default, and never `*`. A malformed entry is a boot failure, not a warning; the per-environment values belong in environmentValues (D56), in the platform description rather than in a script',
   },
+  // D65's shell. `apps/site` reads four names and two of them already exist (`PLATFOLIO_URL`, the control plane's
+  // base; `PLATFOLIO_IDENTITY_ISSUER`, the realm URL) -- reusing those was the point, because a second spelling of
+  // "where is the API" is the defect this registry exists to refuse. These two are the site's own, and neither is
+  // in `compose.yaml` yet: there is no site *service*, so nothing composes them and the emitter cannot see them.
+  // They are therefore declared by judgement, in the same table that declares the two the composition already
+  // carries, and the day the site becomes a service (D62's fourth platform) the composition becomes their source
+  // and these rows shrink to a note.
+  PLATFOLIO_SITE_ORIGIN: {
+    kind: 'value', required: true, environments: 'all', deployedTo: 'host:shell',
+    note: 'the origin platfolio\'s own UI is served from, read by `apps/site` (D65). It is not `PLATFOLIO_ALLOWED_ORIGINS`: that is the list the API *admits*, this is the one address this document is published at, and the browser needs it because the realm\'s redirect URIs are `<origin>/callback` (`CALLBACK_PATH` in `scripts/browser-auth.ts`). A deploy that has not answered this question has no UI to point at, and `apps/site` refuses to build rather than invent one (D47)',
+  },
+  PLATFOLIO_WEB_CLIENT_ID: {
+    kind: 'value', required: false, default: 'platfolio-web', environments: 'all', deployedTo: 'host:shell',
+    note: 'which public PKCE client `apps/site` authenticates as. Optional because the default is the policy constant `WEB_CLIENT_ID` in `packages/ui/src/web/browser-auth-policy.ts` -- the same value `identity:seed` writes into the realm -- and a deploy renames it only when its realm renamed the client. Not a secret: a browser client id is public by construction (D4), which is why `secret: false` is stated rather than guessed from the name',
+  },
 };
 
 function guess(name: string, places: Set<string>): Entry {

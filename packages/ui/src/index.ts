@@ -74,3 +74,70 @@ export * from './tokens.ts';
 
 
 export { WEB_BOUNDARY_DIR } from './web/index.ts';
+
+/**
+ * The first two modules inside the declared web boundary that are not prose (D65): the browser's `AuthSource` for
+ * the `platfolio-web` PKCE client, and the one function a page calls to build its SDK context and signal registry.
+ *
+ * Re-exported at the package entry rather than left as deep paths for one reason: the singleton guarantee in
+ * `shell.tsx` is only a guarantee if there is one obvious door. `AuthSource` itself stays where it was declared —
+ * `sdk/transport.ts` — and is not duplicated here; `TokenSet`/`IssuerRequest`/`Digest`/`RandomBytes`/`HandoffStore`
+ * are this boundary's own vocabulary and appear nowhere else. What a native or desktop shell does with any of it is
+ * UI-OD3's question, not this file's.
+ */
+export {
+  authPolicy,
+  createBrowserAuthSource,
+  createTokenBag,
+  createVerifierWith,
+  endpointsForIssuer,
+  pkceChallengeWith,
+  type BrowserAuthConfig,
+  type BrowserAuthSource,
+  type Digest,
+  type HandoffStore,
+  type IssuerEndpoints,
+  type IssuerRequest,
+  type IssuerResponse,
+  type RandomBytes,
+  type TokenBag,
+  type TokenSet,
+} from './web/browser-auth.ts';
+export {
+  createShellContext,
+  resetShellContextForTests,
+  ShellContextConflict,
+  shellContextCount,
+  type ShellCapabilities,
+  type ShellContext,
+  type ShellEndpoints,
+} from './web/shell.tsx';
+
+/**
+ * The browser authentication policy, re-exported at the package entry (D65; see the header of
+ * `web/browser-auth-policy.ts` for why the declarations live there and not in `scripts/browser-auth.ts`).
+ *
+ * These are the words a shell must not retype: the client's name, its scope, its callback path, the PKCE method,
+ * where a token may live and what logout clears. `apps/site` reads `WEB_CLIENT_ID` and `REQUIRED_SCOPE` from here
+ * rather than from the operator script, because a client bundle that imports `scripts/` imports `node:crypto`, and
+ * that is the failure the policy module's header records. `web/browser-auth.ts`'s own `authPolicy` object is the
+ * same facts as one value for a reviewer; these are the same facts for code.
+ */
+export {
+  API_CLIENT_ID,
+  CALLBACK_PATH,
+  LOGOUT_CLEAR,
+  PKCE_METHOD,
+  RECOMMENDED_STORE,
+  REQUIRED_SCOPE,
+  TOKEN_STORAGE,
+  WEB_CLIENT_ID,
+  endSessionUrl,
+  isPkceVerifier,
+  isTokenShapedName,
+  refreshAt,
+  refreshSkewSeconds,
+  type PkcePair,
+  type StorageLocation,
+  type TokenKind,
+} from './web/browser-auth-policy.ts';
