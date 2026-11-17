@@ -1045,7 +1045,7 @@ for (const assertion of TYPE_ASSERTIONS) {
           // quoted uppercase names — promptly reported that the gate "referenced" a credential it was only naming.
           // `pool` was tried too, and matched inside React's own runtime: a gate that fires on the compliant
           // artifact is a gate somebody switches off.
-          for (const marker of ['pgpass', 'MemoryScm', 'build-plan', 'postgres-store', 'railway-mock']) {
+          for (const marker of ['pgpass', 'postgres-store', 'MemoryScm', 'build-plan', 'node:crypto']) {
             if (bundle.includes(marker)) {
               hits.push(`apps/site/dist/_astro/${chunk} pulls in \`${marker}\` — the client bundle reached Node-only server code (the measured first-build failure: "createHash" is not exported by "__vite-browser-external")`);
             }
