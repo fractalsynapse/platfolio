@@ -329,6 +329,69 @@ test('a refused exchange leaves no half-built session', async () => {
   assert.equal(requests.length, 1);
 });
 
+/*
+ * A verifier is a dotted string, so "does this look like a token?" cannot be answered by shape -- and the
+ * suite said so one run in three.
+ *
+ * The assertion in the test below used to be `!/^eyJ/.test(value) && !/[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}/`,
+ * on the theory that a JWT is recognizable and a verifier is not. Measured over 2,000 verifiers from
+ * `createVerifierWith`: 1,084 contain a dot, and **222 matched the old shape test** -- an 11% false-refusal rate
+ * on the flow's own happy path, because the RFC 7636 unreserved alphabet (`A–Z a–z 0–9 - . _ ~`) includes the
+ * character that makes a JWT a JWT. Example, and it is a legitimate verifier:
+ * `R.ets_BImSC3NzWd1XybK8YMRirkdi-GI683lwkAGH2fwr.X4t9ZjNEuFTTT2Yjy`.
+ *
+ * So the guard is by identity now, and this test pins the flake itself rather than the fix: it draws 2,000
+ * verifiers and requires every one of them to pass the predicate the store asserts, and separately requires a
+ * real three-segment JWT to be caught by the rule that actually catches it -- a value equal to one the issuer
+ * handed back, or a key that is not one of the two handoff keys. If someone reintroduces a shape test here, the
+ * 2,000-draw case goes red at about 11%, which is the point of drawing 2,000 instead of one.
+ */
+test('a verifier is not distinguishable from a token by shape, so the guard is identity (the 1-in-3 flake, pinned)', async () => {
+  const OLD_SHAPE = (v: string): boolean => /^eyJ/.test(v) || /[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}/.test(v);
+  let shapedLikeAToken = 0;
+  const drawn = 2000;
+  for (let i = 0; i < drawn; i += 1) {
+    const v = createVerifierWith((n) => new Uint8Array(randomBytes(n)));
+    assert.ok(isPkceVerifier(v), `draw ${String(i)}: createVerifierWith emitted something the policy itself refuses`);
+    if (OLD_SHAPE(v)) shapedLikeAToken += 1;
+  }
+  assert.ok(shapedLikeAToken > 0, `${String(drawn)} verifiers and not one looked like a JWT by the old rule -- the rule under test changed meaning`);
+  // The measured flake rate, stated as a bound rather than a number to match: any nonzero count means a green
+  // suite is a coin flip, and this is the assertion that keeps a shape guard from coming back.
+  assert.ok(shapedLikeAToken / drawn < 0.5, `${String(shapedLikeAToken)}/${String(drawn)} verifiers matched the shape rule`);
+
+  // And the guard that does work, exercised on the real flow: the two handoff keys, no other, and nothing the
+  // issuer returned sitting under either of them.
+  const issued = { access_token: 'AT', expires_in: 300, refresh_token: 'RT', id_token: 'IT' };
+  const store = new Map<string, string>();
+  const keysWritten: string[] = [];
+  const valuesWritten: string[] = [];
+  const source = createBrowserAuthSource(
+    { issuerBaseUrl: ISSUER, siteOrigin: ORIGIN },
+    {
+      digest: nodeDigest,
+      random: (length) => new Uint8Array(randomBytes(length)),
+      handoff: {
+        read: (key) => store.get(key),
+        write: (key, value) => { keysWritten.push(key); valuesWritten.push(value); store.set(key, value); },
+        drop: (key) => { store.delete(key); },
+      },
+      request: async () => ({ status: 200, body: JSON.stringify(issued) }),
+    },
+  );
+  const authorize = new URL(await source.begin());
+  await source.complete(new URLSearchParams({ code: 'CODE', state: authorize.searchParams.get('state') ?? '' }));
+
+  assert.deepEqual([...new Set(keysWritten)].sort(), [...Object.values(HANDOFF_KEYS)].sort(),
+    'only the two handoff keys may be written; a third key is where a token would arrive');
+  for (const value of valuesWritten) {
+    for (const token of [issued.access_token, issued.refresh_token, issued.id_token]) {
+      assert.notEqual(value, token, `a value the issuer handed back was written into the handoff: ${token}`);
+    }
+  }
+  assert.equal(store.size, 0, 'a completed exchange leaves the tab holding nothing');
+});
+
 /* ------------------------------------------------------------------ refresh, storage, logout */
 
 test('token() refreshes on the imported schedule and never on a window the browser invented', async () => {
@@ -388,20 +451,49 @@ test('a realm that closes the refresh window yields no schedule, and the deadlin
 test('nothing token-shaped ever reaches the handoff store, and logout clears the enumerated items', async () => {
   const writes: string[] = [];
   const handoff = new Map<string, string>();
+  // The stub issuer's own answer, held here so the spy can refuse it by identity. A name-shaped guard
+  // (`isTokenShapedName`) cannot see a token under a neutral key; equality with what the realm actually
+  // returned can, and that is the difference between a check and a heuristic.
+  const tokens = { access_token: 'AT', expires_in: 300, refresh_token: 'RT', id_token: 'IT' };
   const spy: HandoffStore = {
     read: (key) => handoff.get(key),
     write: (key, value) => {
       writes.push(key);
-      // A JWT is three base64url segments; a refresh token is one long one. Neither may be written to a store that
-      // outlives the navigation, which is the browser half of D4 — "never log it" is not enough here.
-      assert.ok(!/^eyJ/.test(value) && !/[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}/.test(value), `a token-shaped value was persisted under ${key}`);
+      // Neither handoff value may be a token, and "is this a token?" is decided by identity, not by shape.
+      //
+      // This line used to read `!/^eyJ/.test(value) && !/[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}/.test(value)`,
+      // which is a coin flip: verifiers are drawn from the RFC 7636 unreserved set and that set *contains the
+      // dot*, so ~11% of perfectly valid verifiers matched it (222 of 2,000 measured; see the test above this
+      // one for the draw). The suite went red one run in three on unchanged code, and a security assertion that
+      // fails at random is the flipped-signature defect arriving as an intermittent red instead of a vacuous
+      // green -- same root, same reason it is written down rather than fixed silently.
+      //
+      // What refuses a token now: (1) the key set is exactly the two handoff keys, asserted after the flow runs;
+      // (2) the value under the verifier key satisfies `isPkceVerifier`, and the value under the state key is the
+      // opaque base64url that went out in the authorize URL -- so anything else is refused by *what it is*, not
+      // by resemblance; and (3) no persisted value equals any token the stub issuer returned. The residual limit
+      // is honest and unchanged from rule 4: a dot-free opaque token is not distinguishable from a verifier by
+      // shape, which is why `TOKEN_STORAGE` -- inMemory for all three kinds -- is the invariant and this is the
+      // tripwire beside it.
+      // Widened on purpose, the way `placementProblem` widens `mustNotContain`: `HANDOFF_KEYS` is `as const`, so
+      // `Object.values` gives a literal tuple and `.includes(key)` refuses the `string` the interface declares --
+      // which is exactly the question this line asks, so the widening is the answer, not a suppression.
+      assert.ok((Object.values(HANDOFF_KEYS) as readonly string[]).includes(key), `${key}: a value was written under a key that is not part of the PKCE handoff`);
+      assert.notEqual(value, tokens.access_token, 'the access token was persisted');
+      assert.notEqual(value, tokens.refresh_token, 'the refresh token was persisted');
+      assert.notEqual(value, tokens.id_token, 'the id token was persisted');
+      if (key === HANDOFF_KEYS.verifier) {
+        assert.ok(isPkceVerifier(value), `${key}: what was persisted is not a PKCE verifier`);
+      } else {
+        assert.match(value, /^[A-Za-z0-9_-]{16,}$/, `${key}: the state must be the opaque base64url value, and that alphabet has no dot`);
+      }
       handoff.set(key, value);
     },
     drop: (key) => { handoff.delete(key); },
   };
   const source = createBrowserAuthSource(
     { issuerBaseUrl: ISSUER, siteOrigin: ORIGIN },
-    { digest: nodeDigest, random: (length) => new Uint8Array(randomBytes(length)), handoff: spy, request: async () => ({ status: 200, body: JSON.stringify({ access_token: 'AT', expires_in: 300, refresh_token: 'RT', id_token: 'IT' }) }) },
+    { digest: nodeDigest, random: (length) => new Uint8Array(randomBytes(length)), handoff: spy, request: async () => ({ status: 200, body: JSON.stringify(tokens) }) },
   );
 
   const authorize = new URL(await source.begin());

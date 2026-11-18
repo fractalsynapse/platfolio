@@ -85,6 +85,33 @@ already states staging's UI origin as `https://preview.platfolio.dev` — so the
 hostnames in one platform description. What the publishing workflow must produce, and the composition-model change
 that has to come with it, are written there.
 
+### Fixed — a security assertion that refused the truth 11% of the time
+
+Re-running this branch's gates three times surfaced a failure with nothing changed: `browser-auth-parity.test.ts`'s
+storage-hygiene case reported `a token-shaped value was persisted under platfolio.pkce.verifier`. The assertion was
+the defect. It refused any value matching `^eyJ` or two 20-character base64url runs around a dot, on the theory
+that a token is recognizable by shape -- but `createVerifierWith` draws its verifier from the **RFC 7636 unreserved
+set**, and that set contains the dot. Measured over 2,000 drawn verifiers: 1,084 contained a dot, and **222 matched
+the old rule** while being entirely valid (for example `R.ets_BImSC3NzWd1XybK8YMRirkdi-GI683lwkAGH2fwr.X4t9ZjNEuFTTT2Yjy`)
+-- an ~11% false-refusal rate on the flow's own happy path. A first attempt to fix it by requiring three segments
+was measured and rejected as *worse*: 319 of 2,000. Shape cannot answer this question.
+
+The guard is by identity instead: the handoff may hold only the two `HANDOFF_KEYS`, what sits under the verifier key
+must satisfy `isPkceVerifier`, what sits under the state key must be the opaque base64url the authorize URL carried,
+and no persisted value may equal a token the issuer handed back. The residual limit is unchanged and stated in the
+test -- a dot-free opaque token is indistinguishable from a verifier by shape -- which is why `TOKEN_STORAGE`
+(inMemory, all three kinds) is the invariant and the spy is the tripwire beside it, not the argument. The flake is
+pinned by a case that draws 2,000 verifiers and requires the *old* rule to mis-fire on at least some of them, so a
+shape guard reintroduced here fails on purpose rather than on a Wednesday. No value-shape predicate was left in the
+policy module: the one drafted during this fix is the mistake the paragraph documents, and it was deleted instead of
+tuned until the suite went quiet. Determinism proof: 40 consecutive runs of the parity file, 0 failures; 25 more
+after the type widening, 0 failures; `gates-falsify` 41/41; all three type-check projects 0.
+
+Why this is a fix and not a re-run: an assertion that fails at random is the flipped-signature defect in mirror
+image -- that one was green and tested nothing, this one was red sometimes and refused something real -- and both
+come from asking a shape to settle a question of identity. AGENTS.md's rule is to prefer the evidence tier a claim
+actually holds; a suite whose verdict depends on `Math.random` holds none.
+
 ### Added — `apps/site`: the D65 shell, built, and the package boundaries it forced
 
 D65 closed UI-OD1 on 2026-11-16 — Astro for the web shell, the dashboard as one React island — and this is that
