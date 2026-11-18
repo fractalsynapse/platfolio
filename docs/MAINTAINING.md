@@ -437,6 +437,14 @@ unavailable or not applicable. Do not infer acceptance from a check that does no
 Environment notes for the current machine, not project requirements: Node is built without TypeScript
 support so `.ts` tooling runs via `tsx`; `npm` needs `npm_config_cache` pointed inside the workspace.
 
+The Node **version** is no longer one of those notes, and it is not spelled out in the workflows either:
+`.nvmrc` holds `22.22.1` — the runtime this suite was measured green on — every `actions/setup-node` step reads
+that file through `node-version-file`, and `scripts/check-project.ts` refuses a workflow that names a
+`node-version` of its own or a `.nvmrc` that carries anything but an exact `X.Y.Z`. Why that version and not the
+one Astro 7 asks for (`>=22.23.4`), and what accepting Astro 6.4.8 costs, is
+[01 § D66](design/01-product-and-decisions.md): the runtime is an environment, not a repository, and a change
+made in here cannot verify a Node it cannot run.
+
 ## Experimental work
 
 An authorized experiment answers a bounded question in isolated state — `spikes/` for code,
