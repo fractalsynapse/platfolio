@@ -136,6 +136,31 @@ export const TOUCH = {
   minContainer: '320px',
 } as const;
 
+/**
+ * Line measures (D63: the value lives here, and `layout/content.ts` is the only thing that references it).
+ *
+ * `ch`, not `rem` or `px`, because a readable line is a count of *characters*: `ch` is the advance width of the
+ * `0` glyph in the element's resolved font, so the measure holds when the typeface or the user's font size
+ * changes and a fixed width does not.
+ *
+ * Provenance, stated because there is no in-repo authority for the number: 11 §8 mandates touch targets, focus
+ * order and screen-reader semantics, and says nothing about line length. `68ch` is what
+ * `apps/site/src/styles/site.css` shipped by hand before this token existed, and #267 item 5 moved it without
+ * changing what the page renders -- the difference between a value a page chose and a value the design system
+ * owns. The 60–75 character convention it sits inside is general typography, recorded here as context rather
+ * than cited as a decision this project made.
+ *
+ * One role, on purpose. A second measure needs a second page that needs it, and `layout/content.ts` is where a
+ * third content primitive would have to be declared before any stylesheet could name one.
+ */
+export const MEASURE = { content: '68ch' } as const;
+export type MeasureRole = keyof typeof MEASURE;
+
+/** The custom-property name for a measure role, spelled the way `colorVar` spells a colour role. */
+export function measureVar(role: MeasureRole): string {
+  return `--ui-measure-${role}`;
+}
+
 const prefix = (role: ColorRole): string => `--ui-color-${role}`;
 
 /** The custom-property name for a colour role. One spelling, so no consumer may invent another. */
@@ -161,6 +186,7 @@ function scalarDeclarations(indent: string): string {
   lines.push(`${indent}--ui-target-secondary: ${TOUCH.targetSecondary};`);
   lines.push(`${indent}--ui-gap-secondary: ${TOUCH.gapSecondary};`);
   lines.push(`${indent}--ui-container-min: ${TOUCH.minContainer};`);
+  for (const role of Object.keys(MEASURE) as MeasureRole[]) lines.push(`${indent}${measureVar(role)}: ${MEASURE[role]};`);
   return lines.join('\n');
 }
 

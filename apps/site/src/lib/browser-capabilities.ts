@@ -17,13 +17,19 @@ import type { Digest, HandoffStore, IssuerRequest, RandomBytes } from '@platfoli
  *
  * ## The one thing here that is a security decision, not a plumbing detail
  *
- * `handoff` writes to `sessionStorage`, and it is the only persistence anywhere in the auth path. The policy this
- * app imports (`TOKEN_STORAGE` in `scripts/browser-auth.ts`) enumerates access, refresh and id tokens and marks all
- * three `sessionStorage: false`, so what is *not* stored here is a token: the PKCE verifier and the `state` value,
- * both single-use, both deleted before the exchange is attempted (`browser-auth.ts`'s `complete` reads once, then
- * drops). The verifier grants nothing without the code that arrives beside it, and the code is spent in the same
- * request. A token, by contrast, never touches storage at all — which is why signing in again after a reload is
- * expected behaviour and not a bug (see the header of `web/browser-auth.ts`).
+ * `handoff` writes to `sessionStorage`, and it is the only persistence anywhere in the auth path — and that is a
+ * recorded decision, not a local one (D67). The policy this app imports names both halves of it: `TOKEN_STORAGE`
+ * enumerates access, refresh and id tokens and marks all three `sessionStorage: false`, while
+ * `HANDOFF_STORAGE`/`HANDOFF_KEYS` enumerate the two values that are *not* tokens and may still survive the
+ * redirect — the verifier and `state`, both single-use, both deleted before the exchange is attempted
+ * (`browser-auth.ts`'s `complete` reads once, then drops). The verifier grants nothing without the code that
+ * arrives beside it, and the code is spent in the same request. A token never touches storage at all, which is why
+ * signing in again after a reload is the accepted cost and not a bug. This file imports the key names rather than
+ * typing them because a second spelling of a lookup key is how a handoff that was spent starts reporting an
+ * unexplained `no-handoff`. The refusals (no cookie — the transport never emits
+ * `access-control-allow-credentials`, and both sides of that seam test it; no `localStorage` — it outlives the
+ * session that minted the value) and the limit (`sessionStorage` is still readable to anything that can run script
+ * on this origin) are argued in one place: the header of `packages/ui/src/web/browser-auth-policy.ts`.
  */
 
 /** `crypto.subtle.digest`, shaped as the `Digest` the seam takes. Throws rather than returning a wrong digest. */

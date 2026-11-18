@@ -1,7 +1,6 @@
 // @ts-check
 import { defineConfig } from 'astro/config';
 import react from '@astrojs/react';
-import { fileURLToPath } from 'node:url';
 
 /**
  * The D65 shell: Astro owns routing, content and the pages that need no JavaScript at all; React exists in
@@ -20,38 +19,38 @@ import { fileURLToPath } from 'node:url';
  *
  * platfolio's own UI is meant to be a service *inside* the platfolio project, beside `api` and `identity` (D62).
  * Saying so in this repository means a `compose.yaml` service, a generated digest in the generated overlay, and
- * DNS — the follow-on step, deliberately not taken here. An unreviewed edit to a generated file is how a tree ends
- * up carrying "a real digest of the deleted service's image", which #217 records actually happening. Until that
- * entry exists, this app builds, type-checks and is gated, and nothing deploys it.
+ * DNS — the follow-on step, and #267 item 3 measured exactly where it stops (the renderer refuses a first-party
+ * `build:` service whose image has not been reported yet, D54). Until that entry exists, this app builds,
+ * type-checks and is gated, and nothing deploys it.
  *
- * ## Why the alias, and not a workspace edge
+ * ## There is no `vite.resolve.alias` in this file, and that is the decision (#267 item 1)
  *
- * `@platfolio/ui` has no build step: its `main` and its `exports["."]` both point at `./src/index.ts`, so its
- * published surface *is* raw `.ts`/`.tsx`. Naming that same file by path puts it inside this project's module
- * graph, where Astro's React integration is configured to transform JSX. This is a resolution choice, not a claim
- * that the edge cannot work: adding `"@platfolio/ui": "workspace:*"` to package.json and deleting this alias is
- * the alternative, and whether a first-party shell should depend on the UI package the way a service depends on a
- * package is the maintainer's open question. `apps/site/tsconfig.json` says the same thing for `tsc`, and
- * `apps/site/test/shell-config.test.ts` reads both spellings against `package.json` so the bundler and the
- * type-checker cannot disagree about which file the island imports.
+ * Until 2026-11-17 this config carried two alias entries and `apps/site/tsconfig.json` carried a matching `paths`
+ * block, both standing in for a workspace edge that `package.json` did not declare. The maintainer settled the
+ * open question the way the Dockerfile had already predicted: **declare the edge.** So:
+ *
+ *  - `apps/site/package.json` now depends on `"@platfolio/ui": "workspace:*"`, `pnpm-lock.yaml` records
+ *    `version: link:../../packages/ui`, and `pnpm install --frozen-lockfile` passes against that lockfile.
+ *  - The specifier `@platfolio/ui` resolves through the package's own `exports` map — `"."` for the barrel,
+ *    `"./tokens.css"` for the generated token sheet — which is what a *dependency* is for. The alias is gone, and
+ *    with it the one mechanism in this shell that the dependency graph could not see.
+ *  - Why that mattered was measured, not argued: the filtered install the Dockerfile wanted to use
+ *    (`pnpm install --frozen-lockfile --filter @platfolio/site...`) failed at `astro build` with
+ *    `Rollup failed to resolve import "@platfolio/page-schema/page"` from `packages/ui/src/contract.ts`, because
+ *    with no edge the graph stopped at this app while the alias still dragged `packages/ui/src/**` into the
+ *    bundle — its own imports installed by nothing. With the edge declared, the same filtered install is the
+ *    subject of item 1's proof, and the Dockerfile comment that said "either the edge is declared or the image
+ *    installs the workspace" no longer has to choose.
+ *
+ * What remains true and is *not* fixed by this file: `@platfolio/ui` has no build step, so its published surface
+ * is raw `.ts`/`.tsx` and Astro's React integration is the thing that transforms it. That is a property of the
+ * package (D63), not of the resolution mechanism, and `apps/site/test/island-singleton.test.ts` plus
+ * `build-output.test.ts` are what say it still works.
  */
-const uiEntry = fileURLToPath(new URL('../packages/ui/src/index.ts', import.meta.url));
-const uiTokens = fileURLToPath(new URL('../packages/ui/src/tokens.css', import.meta.url));
-
 export default defineConfig({
   output: 'static',
   // D47: a deploy's address, not a source constant. Unset means the site has no absolute origin, and
   // `apps/site/src/lib/site-config.ts` reports that as a configuration failure instead of inventing one.
   site: process.env['PLATFOLIO_SITE_ORIGIN'],
   integrations: [react()],
-  vite: {
-    resolve: {
-      alias: [
-        // Order matters: a Vite alias does prefix matching, so the tokens file must be tried before the entry,
-        // or `@platfolio/ui/tokens.css` resolves to `<index.ts>/tokens.css` and the stylesheet disappears.
-        { find: /^@platfolio\/ui\/tokens\.css$/, replacement: uiTokens },
-        { find: /^@platfolio\/ui$/, replacement: uiEntry },
-      ],
-    },
-  },
 });

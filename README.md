@@ -54,9 +54,12 @@ npx -y tsx scripts/vendor-cordis.ts check           # non-zero when an upstream 
 cd spikes/e9-cordis-kernel && npx -y tsx driver.ts  # re-run the E9 experiment
 ```
 
-There is no application build yet. Two environment facts about the current machine, not project
-requirements: its Node (v22.22.1) is built without TypeScript support, so `.ts` tooling runs through
-`tsx`; and `npm` needs `npm_config_cache="$PWD/.cache/npm"` because `~/.npm` is read-only here.
+The shell is an application build: `pnpm run site:build` emits `apps/site`, and its artifact is read by
+`apps/site/test/build-output.test.ts`. Two environment facts about the current machine: its Node is built without
+TypeScript support, so `.ts` tooling runs through `tsx`; and `npm` needs `npm_config_cache="$PWD/.cache/npm"`
+because `~/.npm` is read-only here. The Node *version* is no longer a machine fact — `.nvmrc` holds `22.22.1`,
+CI installs from that file, and the choice with its price is recorded as **D66** in
+[01 § Decision register](docs/design/01-product-and-decisions.md).
 
 Branch flow, review gates and the checks each change owes are in [docs/MAINTAINING.md](docs/MAINTAINING.md).
 

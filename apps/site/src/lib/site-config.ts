@@ -1,9 +1,16 @@
-// The policy defaults arrive by relative path, not through the `@platfolio/ui` specifier the islands use. The
-// reason is a runtime fact rather than a taste: a test that exercises this file runs under `tsx`, which resolves
-// what Node resolves, and nothing here declares a workspace edge that would make that specifier mean anything at
-// the command line (the open question is recorded in apps/site/tsconfig.json's `$comment`). The path names the
-// same file the Astro alias does, it is dependency-free, and reaching a sibling package by path is what
-// packages/ui/tsconfig.json already does to `../../scripts/check-ui.ts`.
+// The policy defaults arrive by relative path, not through the `@platfolio/ui` specifier the islands use, and the
+// reason is a runtime fact that was measured rather than assumed. This file is read twice: by the Astro build, and
+// by `node apps/site/src/tools/render-runtime-config.ts` at *container start*, where the barrel is not loadable —
+// measured inside the built image (node v22.23.4): importing `@platfolio/ui` there dies with
+// `ERR_UNKNOWN_FILE_EXTENSION`, because the package's published surface is raw `.ts`/`.tsx` (it has no build step,
+// D63) and Node's type stripping does not read JSX. The islands are transformed by Astro's React plugin before
+// anything reaches a runtime, so they take the package specifier; a plain `node` process cannot.
+//
+// #267 item 1 declared the workspace edge and deleted the `astro.config.mjs` alias and the `tsconfig.json` `paths`
+// that stood in for it, so the specifier now resolves for every consumer — but this one line stays a path, for the
+// reason above, and it is dependency-free by construction: `browser-auth-policy.ts` imports nothing, which is the
+// property that makes it the only part of the package a Node-startup script may read. `packages/ui/tsconfig.json`
+// already reaches across by path for the same kind of reason (`../../scripts/check-ui.ts`).
 import { REQUIRED_SCOPE, WEB_CLIENT_ID } from '../../../../packages/ui/src/web/browser-auth-policy.ts';
 
 /**

@@ -26,7 +26,10 @@ import Page from '../layouts/page.astro';
     </p>
   </section>
 
-  <section class="three">
+  {/* One column at the floor, three when this page's container (`ui-prose`, on <main> in the layout) has room.
+      The threshold, the tracks and both gaps are data in packages/ui/src/layout/content.ts — `ui-columns` is the
+      only thing this page says about them (#267 item 5, rule 2). */}
+  <section class="ui-columns">
     <div class="point">
       <h2>The provider stays yours</h2>
       <p>

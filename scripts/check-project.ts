@@ -388,8 +388,46 @@ async function checkWorkflows(): Promise<string[]> {
     return [];
   }
 
+  /**
+   * D66: the runtime version has one owner, and it is `.nvmrc`, not the workflows.
+   *
+   * Measured before this rule existed, at `7fa304e`: of the eight `actions/setup-node` steps across
+   * `development.yml`, `integration.yml` and `production.yml`, seven declared `node-version: '22'` -- a *moving*
+   * major, so "the CI baseline is Node 22.22.1" was a sentence in
+   * [01 § D66](../docs/design/01-product-and-decisions.md) that CI was not honouring -- and the eighth spelled the
+   * same fact as the literal `'22.22.1'`, which is a second description of one version that nobody has to edit
+   * when the first one changes. The pin now lives in `.nvmrc` and all eight read it through
+   * `node-version-file`, so bumping the baseline is one edit.
+   *
+   * The rule is about ownership, not about any particular number: a literal `node-version` in a platfolio
+   * workflow is a second description of the runtime, and a `.nvmrc` naming only a major re-opens the
+   * moving-target hole the decision closed. Both halves were falsified by hand when this rule landed —
+   * `node-version: '22'` planted back into `development.yml` and a `22` written into `.nvmrc`, each read
+   * for the named failure, each restored by byte-exact copy — and the measurements are in the commit that
+   * records D66. It has no test file yet, and that is the gap: a mutation nobody re-runs is how a rule
+   * rots, so the next change that touches this function owes it a case in a suite.
+   */
+  let nvmrcText: string | null;
+  try {
+    nvmrcText = await fs.readFile(path.join(ROOT, '.nvmrc'), 'utf8');
+  } catch {
+    nvmrcText = null;
+  }
+  let nvmrcReaders = 0;
+
   for (const name of names) {
     const text = await fs.readFile(path.join(dir, name), 'utf8');
+    if (/actions\/setup-node@/.test(text)) {
+      for (const [i, line] of text.split(/\r?\n/).entries()) {
+        if (/^\s*node-version\s*:/.test(line)) {
+          problems.push(`${name}:${String(i + 1)} declares a literal \`node-version\` -- D66 puts the runtime baseline in \`.nvmrc\` and every \`actions/setup-node\` step reads it with \`node-version-file\`, because a version number written out in a job is one more thing that can drift from the decision that named it`);
+        }
+        if (/^\s*node-version-file\s*:/.test(line)) nvmrcReaders += 1;
+      }
+      if (!/node-version-file\s*:/.test(text)) {
+        problems.push(`${name}: uses \`actions/setup-node\` without \`node-version-file\`, so it installs whatever Node the runner image happens to hold -- the recorded baseline (D66) lives in \`.nvmrc\`, and a job that never reads it is not running it`);
+      }
+    }
     const jobIds = new Set<string>();
     let inJobs = false;
     for (const line of text.split(/\r?\n/)) {
@@ -426,6 +464,27 @@ async function checkWorkflows(): Promise<string[]> {
     const opens = (text.match(/\$\{\{/g) ?? []).length;
     const closes = (text.match(/\}\}/g) ?? []).length;
     if (opens !== closes) problems.push(`${name}: unbalanced expression placeholders: ${opens} opening, ${closes} closing`);
+
+    // D66, the coverage half: a workflow may read `.nvmrc` in one job and float in another, and the floating
+    // one is the job that breaks when a dependency raises its engines. Count both, per file.
+    const setupNodes = (text.match(/uses:\s*actions\/setup-node@/g) ?? []).length;
+    const versionFiles = (text.match(/^\s*node-version-file\s*:/gm) ?? []).length;
+    if (setupNodes !== versionFiles) {
+      problems.push(`${name}: ${String(setupNodes)} \`actions/setup-node\` step(s) but ${String(versionFiles)} \`node-version-file\` line(s) -- D66 says every one reads \`.nvmrc\`; a step that does not is installing the runner's Node and calling it the baseline`);
+    }
+  }
+
+  // And the file the eight steps now point at has to actually hold a version. An empty or major-only
+  // `.nvmrc` is the moving target back again, one directory over.
+  if (nvmrcReaders > 0) {
+    if (nvmrcText === null) {
+      problems.push(`.nvmrc: ${String(nvmrcReaders)} setup-node step(s) read it and the file does not exist -- the runtime baseline (D66) would be whatever the runner holds`);
+    } else {
+      const value = nvmrcText.trim();
+      if (!/^\d+\.\d+\.\d+$/.test(value)) {
+        problems.push(`.nvmrc names "${value}" -- D66 records the exact patch this tree is gated on (an X.Y.Z string); a bare major or a range is the moving target the decision replaced`);
+      }
+    }
   }
   return problems;
 }

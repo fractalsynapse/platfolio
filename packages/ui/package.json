@@ -3,12 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "The platfolio UI framework: component contracts, design tokens, layout primitives, the signals registry, the SDK seam, and the first screens (instance list). Gates are enforced by scripts/check-ui.ts (`ui:check`), not by this description.",
+  "description": "The platfolio UI framework: component contracts, design tokens, layout primitives, the content-layout primitives, the signals registry, the SDK seam, and the first screens (instance list). Gates are enforced by scripts/check-ui.ts (`ui:check`), not by this description.",
   "license": "Apache-2.0",
   "main": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./tokens.css": "./src/tokens.css"
+    "./tokens.css": "./src/tokens.css",
+    "./content.css": "./src/layout/content.css"
   },
   "dependencies": {
     "@platfolio/api-contract": "workspace:*",

@@ -1,0 +1,41 @@
+/*
+ * GENERATED FILE -- DO NOT EDIT. The writer is `renderContentCss()` in packages/ui/src/layout/content.ts.
+ *
+ * Source: packages/ui/src/layout/content.ts
+ * Input digest: sha256/6f080cf45c2f2da4
+ *
+ * Reproduce with `pnpm run ui:css`; `pnpm run ui:css:check` fails when this stops matching the table. Gate
+ * §9.3 audits this sheet with the other three: `@container` width queries belong to primitives, a width
+ * `@media` is refused anywhere in the package, and gate §D65 refuses a width query in *app* CSS -- because an
+ * app that owns a breakpoint has started a second description of how content composes, which is the defect this
+ * sheet exists to remove.
+ */
+
+.ui-prose {
+  container-type: inline-size;
+  max-inline-size: var(--ui-measure-content);
+  margin-inline: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-7);
+  /* prose: The readable line and the rhythm between its blocks: the sections of a document, a sheet body, running text. One column at every width. */
+}
+
+.ui-columns {
+  container-type: inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-5);
+  /* columns: A group of blocks: one column at the floor, three when its container has room. Less scrolling, no new capability. */
+}
+
+/* columns adds simultaneity when its own container has room. Nothing that exists only at
+   this width is a capability -- rule 2, and the reason a content threshold lives here rather than in an
+   app stylesheet, where gate §D65 refuses it as a second owner of one decision. */
+@container (min-width: 48rem) {
+  .ui-columns {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--ui-space-6);
+  }
+}

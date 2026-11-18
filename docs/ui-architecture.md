@@ -96,18 +96,47 @@ window; and a narrow screen is missing nothing but simultaneity.
 - **MUST** use the five primitives (`stack`, `split`, `popout-sidebar`, `overlay-sheet`, `full-page`) and the
   containment matrix in 11 §2, declared per component in `ComponentContract.slots`.
 - **MUST** set `container-type: inline-size` in the primitive and query the *container*.
+- **MUST** take a *document's* composition from the content primitives too — `ui-prose` (the readable line, whose
+  length is the `--ui-measure-content` token, plus the block rhythm) and `ui-columns` (one column at the floor, N
+  tracks when its container has room), both declared in `packages/ui/src/layout/content.ts` and emitted to
+  `content.css` (11 §2 content layout, #267 item 5). A page names the class; it does not write the rule.
 - **MUST** make every capability reachable in the single-column layout; wider screens add columns, rails and
   hover detail, never features.
 - **MUST NOT** use `@media (width …)` for component behavior (`prefers-*` is the only window input a component
   may read), and **MUST NOT** carry an `isMobile` / `compact` / `desktop` prop.
+- **MUST NOT** write a width `@media`/`@container` query, or a `container-type` declaration, in an app stylesheet:
+  a breakpoint in `apps/site` is a second owner of one composition decision, and §D65 refuses it by name (the rule
+  was added *because* the committed stylesheet contained exactly that and every gate passed).
 
-**Enforced by.** `ui:check` §9.3 runs today, over `.ts` **and** `.tsx` and over all three generated stylesheets
-(tokens, layout, components). §9.11 runs today per screen document: the floor degradation is a `floorSlots` field
-on each primitive, so "the set of `OperationId`s reachable from a screen's components at 360 px equals the set
-reachable at 1920 px" is arithmetic over declared `reads`, and it names the component and the operation when they
-differ. §9.7 (each component rendered in each declared slot at 320 px and 1280 px, in a browser) is **NOT RUN** —
-the components exist now, the containers do not. A reviewer's interim check stays behavioral: open the screen at
-360 px and confirm nothing is absent (R1).
+**Enforced by.** `ui:check` §9.3 runs today, over `.ts` **and** `.tsx` and over all **four** generated stylesheets
+(tokens, layout, content, components — the count is an assertion in the gate, so a sheet added to the package and
+forgotten by the gate fails the build rather than going unaudited). §9.11 runs today per screen document: the floor
+degradation is a `floorSlots` field on each primitive, so "the set of `OperationId`s reachable from a screen's
+components at 360 px equals the set reachable at 1920 px" is arithmetic over declared `reads`, and it names the
+component and the operation when they differ. §9.7 (each component rendered in each declared slot at 320 px and
+1280 px, in a browser) is **NOT RUN** — the components exist now, the containers do not. A reviewer's interim check
+stays behavioral: open the screen at 360 px and confirm nothing is absent (R1).
+
+**Content layout, stated once above and expanded here only where the rule needs its referents.** The five slots
+compose a *screen*; a *document* needs a readable line, a block rhythm, and a group of blocks that is one column at
+the floor and three when its container has room. Those are `CONTENT_TABLE` in
+`packages/ui/src/layout/content.ts` — `ui-prose` and `ui-columns`, each with `containerType: 'inline-size'`, its
+gap steps and (for `columns`) its `wideFromRem`/`tracks` as data — emitted into
+`packages/ui/src/layout/content.css` and exported as `@platfolio/ui/content.css`, which the shell imports through the
+workspace edge (#267 item 1) rather than through an alias. The line length is `MEASURE.content` in `tokens.ts`
+(`--ui-measure-content: 68ch`), because a value three files could each type is a value nobody owns. Adding a fourth
+content primitive means a row in that table -- a diff, a review, and the §9.3 check that the sheet covers exactly the
+table -- not a rule in a stylesheet beside it.
+
+**What that half cost, and the falsification that found it.** Before this change `apps/site/src/styles/site.css`
+carried a real `@container (min-width: 48rem)` and a `68ch` measure, and `ui:check` exited 0 over it — measured
+directly, by running the pre-change §D65 against the pre-change stylesheet: **DID NOT BITE**, exit 0, because every
+width-query rule in the gate set lives in §9.3, which reads the package's sheets and has never looked at an app. The
+refusal was therefore missing, not mis-tuned; it is in §D65 now and `packages/ui/test/gates-falsify.test.ts` plants
+all three shapes (`@container`, a width `@media`, a hand-declared `container-type`) and requires each to be named by
+file, plus the compliant case (`prefers-reduced-motion`, and a `rem` with no token behind it) to stay green. That
+record matters more than the rule: a gate added *after* the violation shipped is how this project describes every
+other incident it has paid for.
 
 **What breaking it costs.** No UI screen exists yet, so there is no incident in this repository's UI history
 — say so plainly rather than borrowing one. The mechanism that breaks is documented in 11 §2: a window
@@ -172,6 +201,36 @@ failure modes — from client-only storage, and a secret value never enters it.
 - **MUST NOT** sync a draft anywhere: no server copy, no cross-device continuity, no platfolio row.
   **MUST NOT** let a component touch `localStorage` / `sessionStorage` / IndexedDB directly; the draft store is
   the one door (11 §1 rule 3).
+
+**The one exception, and it is decided rather than discovered (D67).** PKCE cannot work without
+`code_verifier` surviving the redirect to the issuer and back, and no in-memory value survives a navigation. The
+maintainer's answer, 2026-11-17: **the shipped behaviour is the decision** — the verifier and `state` go to
+`sessionStorage`, are read **once**, and are dropped **before the exchange is attempted**; nothing else in the
+auth path is persisted, at any lifetime, anywhere. The cost is accepted in the open: a person who reloads signs in
+again. That is one extra round trip, not a security regression, because the value that persists grants nothing
+without the single-use code that arrives beside it, and the code is spent in the same request.
+
+- **MUST** keep the handoff single-use and delete it on read, in `web/browser-auth.ts`'s `complete`, and **MUST**
+  name the permitted location in `web/browser-auth-policy.ts` as data (`HANDOFF_KEYS`, `HANDOFF_STORAGE`) rather
+  than as a comment beside the code that decided it — the policy module used to enumerate access, refresh and id
+  tokens and be silent about the verifier, and that silence was the defect D67 closes.
+- **MUST NOT** move the pair to a cookie. `access-control-allow-credentials` is never emitted by the transport
+  (`packages/kernel/src/cors.ts`, refused on purpose in both `packages/kernel/test/cors.test.ts` and
+  `apps/control-plane/test/cors.test.ts`), so a cookie plan would be asking the platform to loosen a CORS posture
+  to buy the UI a convenience — and `access_token`/`refresh_token` in any browser-persisted store collides with
+  `TOKEN_STORAGE`, which is the invariant, not a default.
+- **MUST NOT** move the pair to `localStorage`. It outlives the tab that minted it, and a single-use value in a
+  store that survives its session is a replayable constant.
+- **MUST** state the residual limit, because `sessionStorage` is browser-persistent state: anything that can run
+  script on this origin can read the pair before it is spent. This choice bounds lifetime and kind, not a
+  compromised page — the mitigation for that is rule 6, and it is not a storage class.
+
+**Enforced by (the handoff half).** `packages/ui/test/browser-auth-parity.test.ts`: the policy data is asserted
+not to widen (a `cookie: true` there fails the build, measured), a completed exchange leaves the tab holding
+**nothing**, a replayed callback after that answers `no-handoff` without reaching the token endpoint, and the
+mid-flow reload finishes the exchange exactly once with the verifier the tab was holding. `ui:check` §D65 reads
+the shell for the same rule: `sessionStorage` appears in `apps/site` only in `src/lib/browser-capabilities.ts`,
+the one injected door, and `localStorage`/`indexedDB`/`document.cookie` appear nowhere in its source.
 
 **Enforced by.** Today, the mechanism is real and gated: `buildSecretsPanel` refuses its own output if
 `findValueBearingProps` finds a value-bearing property, and
@@ -416,8 +475,9 @@ moved while this file was being written, and it is worth keeping as evidence for
 | `npx -y tsx scripts/check-contracts.ts` | 0 | contracts surface matches baseline (4353 declarations, derived 5.1.0) — a UI cannot quietly widen the shape it renders |
 | `npx -y tsc --noEmit -p tsconfig.json` | 0 | the tree type-checks (it exited 2 earlier in this same session on another agent's in-flight test edit — see the note above, and [§ Open gaps](#open-gaps-this-file-refuses-to-paper-over) item 4 on why numbers age) |
 | `npx -y tsc --noEmit -p apps/site/tsconfig.json` | 0 | the shell compiles under its own project: `jsx`, `DOM` and `astro/client`, while the root program stays DOM-free — the three-way split `scripts/check-project.ts`'s coverage rule now holds in step (238 source files, 238 claimed, one owner each) |
-| `pnpm run site:build` (root wrapper → `pnpm --filter @platfolio/site build`) | 0 with the four names set; **1, naming `PLATFOLIO_SITE_ORIGIN`, without them** | the artifact exists, and D47 is an outcome rather than a policy: with no origin supplied the build refuses instead of inventing one. Read `dist/`, do not trust this row: `/index.html` ships **zero** `<script>` elements and zero island markers; `/dashboard/index.html` and `/callback/index.html` carry exactly one `<astro-island>` each; across every emitted chunk exactly one `polled` and one `createShellContext`. One literal `fetch(` survives minification and it is the shell's own issuer token request (`lib/browser-capabilities.ts`); the SDK transport reaches the network through `config.fetchImpl ?? fetch`, which the bundler renames, so the artifact count is *not* a claim that one connection exists — the rule-1 claim lives in `poll.ts` being the only transport, and §9.2 refusing `fetch(` anywhere else in the package. Measured 2026-11-17 by `apps/site/test/build-output.test.ts`, which builds and then reads — a *build* measurement, not a browser one |
-| `docker build -f apps/site/Dockerfile` (legacy builder, four `--build-arg`s) | 0 | the image assembles: whole-workspace frozen install, the Astro build inside the layer, `chown` before the `USER node` drop. It is also the check that caught a defect no host run could: the filtered install (`--filter @platfolio/site...`) left `@platfolio/page-schema/page` unresolvable, because with no workspace edge the dependency graph stops at this app while the alias still drags `packages/ui/src/**` into the bundle — the host looked fine only because the checkout was already installed whole |
+ | `pnpm run site:build` (root wrapper → `pnpm --filter @platfolio/site build`) | 0 with the four names set; **1, naming `PLATFOLIO_SITE_ORIGIN`, without them** | the artifact exists, and D47 is an outcome rather than a policy: with no origin supplied the build refuses instead of inventing one. Read `dist/`, do not trust this row: `/index.html` ships **zero** `<script>` elements and zero island markers; `/dashboard/index.html` and `/callback/index.html` carry exactly one `<astro-island>` each; across every emitted chunk exactly one `polled` and one `createShellContext`. One literal `fetch(` survives minification and it is the shell's own issuer token request (`lib/browser-capabilities.ts`); the SDK transport reaches the network through `config.fetchImpl ?? fetch`, which the bundler renames, so the artifact count is *not* a claim that one connection exists — the rule-1 claim lives in `poll.ts` being the only transport, and §9.2 refusing `fetch(` anywhere else in the package. Measured 2026-11-17 by `apps/site/test/build-output.test.ts`, which builds and then reads — a *build* measurement, not a browser one |
+| `npx -y tsx --test packages/ui/test/browser-auth-parity.test.ts` | 0 | the auth seam's one-policy property proved as wire parity — `crypto.subtle` against the operator's `createHash` over fixed and random verifiers — with state compared before any redeem and the verifier spent once. And D67's half, since 2026-11-17: the handoff policy is *data* that a widening fails (`cookie: true` on the verifier is a build failure, measured), a completed exchange leaves the tab holding **nothing**, a replayed callback after that answers `no-handoff` without reaching the token endpoint, and the mid-flow reload finishes the exchange exactly once with the verifier the tab was holding — which is the reload case stated correctly instead of as "the reload discards the verifier", which is not what `sessionStorage` does |
+| `docker build -f apps/site/Dockerfile` (legacy builder, four `--build-arg`s) | 0 | the image assembles: `pnpm install --frozen-lockfile --filter @platfolio/site...` → `Scope: 6 of 8 workspace projects`, the Astro build inside the layer (`3 page(s) built`), `chown` before the `USER node` drop. The filter is the point of the row, and its history is the reason #267 item 1 declared the edge: the first version of this line used the same filter while `apps/site` declared no dependency on `@platfolio/ui`, and the build inside the image failed with `Rollup failed to resolve import "@platfolio/page-schema/page" from "/app/packages/ui/src/contract.ts"` — the graph stopped at this app while the alias still dragged `packages/ui/src/**` in, and the host looked fine only because the checkout was already installed whole. Re-measured after the edge: filtered install 0, whole-workspace install 0 (the control build, same tag family), and `docker run` of the filtered image serves `GET /` 200 with 0 `<script>` on `/` and `createShellContext` in exactly one of its 5 chunks |
 | `docker run` of that image, then HTTP against it | 200 on `/`, `/dashboard`, `/callback`, `/config.js` | the strongest tier this change reaches without a browser: the container rendered `config.js` from *its* environment and served it (`window.__PLATFOLIO_SITE_CONFIG__ = {…three endpoints, no secret…}`), the served `/` had zero `<script>` and zero island markers, the served `/dashboard` had exactly one `<astro-island>` whose serialized props were the five endpoint fields and nothing token-shaped. And the refusal is real: started with `PLATFOLIO_URL` as plain http on a non-loopback host, the container printed the named problem and **did not serve** |
 | `npx -y tsx --test apps/site/test/*.test.ts` | 0 | the shell's own logic: config resolution and its refusals, the runtime overlay's precedence and validation, one `client:*` per page, `createShellContext` only in an island, no `endpoints:` route table and no `/api/v1` literal in app code |
 | `npx -y tsx --test packages/ui/test/shell-context-singleton.test.ts packages/ui/test/browser-auth-parity.test.ts` | 0 | D65's one-context property *executed* (same config → same object; different config → refused by naming both origins, with no credential vocabulary), and the auth seam's one-policy property proved as wire parity — `crypto.subtle` against the operator's `createHash` over fixed and random verifiers — with state compared before any redeem and the verifier spent once |
@@ -425,6 +485,10 @@ moved while this file was being written, and it is worth keeping as evidence for
 | `pnpm run verify` | 1, **before running any gate** | `ERR_PNPM_STORE_DIR_OPEN_OPERATION_LOCK … Read-only file system` — the wrapper cannot lock its engine store in this sandbox, so each gate above was executed directly instead. [MAINTAINING § If `pnpm run <script>` fails before running anything](MAINTAINING.md#if-pnpm-run-script-fails-before-running-anything) records this and says CI is unaffected. Reporting it as a failed gate would be the wrong honesty |
 
 Rules 2, 3, 4's UI half, and 5–6's UI half gained their first runnable gates on 2026-11-15, and #259 took two of the five NOT RUN rows off the list by putting screens in the registry. The shell landed on 2026-11-17 and added a gate of its own rather than removing one: `ui:check` is **21 gates today — 18 pass, 0 fail, 3 NOT RUN** (§9.7 needs browser containers, §9.8 needs axe and a layout engine, §9.9 needs the draft store, which still does not exist). The three that remain NOT RUN do so for the reason they did before the site existed: **the browser is missing, not the source.** So the source-level shell gates now have a real subject to audit — §D65 over `apps/site`, §9.2's rogue-data and rogue-storage sweep extended to the shell's own files, D63's token rule read against app CSS, D64's honesty read against app copy, and D47's configuration rule read against the four names the deploy supplies. Each was falsified by planting the violation in the site's own files or its built artifact — 35 planted violations, 35 named failures, every restore byte-verified — and three of §D65's first-pass rules **DID NOT BITE** until they were widened to read string contents rather than the comment- and string-blanked text, because a `client:*` directive and a module specifier both live inside a string.
+
+#267 added two more halves to §D65, and both came with their own falsification runs (`npx -y tsx --test packages/ui/test/gates-falsify.test.ts`: **41 tests, 41 pass, 0 fail** — up from 37, and no `DID NOT BITE`). **D67's persistence door** (item 4): rule 4's storage ban was enforced by §9.2, which walks `packages/ui`, so *nothing in the gate set looked at the app* — planting `localStorage.setItem` in the dashboard island, `document.cookie` in the callback island, or a `sessionStorage.setItem` beside the one injected handoff each names its file and its rule. **The content-layout half** (item 5): planting a raw `@container (min-width: 48rem)`, a `@media (min-width: 60rem)`, or a `container-type` back into `apps/site/src/styles/site.css` each names the file, while the compliant cases — a `prefers-reduced-motion` query and a `rem` with no token behind it — are asserted to stay green in the same suite. The second of those two was measured **before** the rule existed: the pre-change §D65 reported PASS on the committed stylesheet that contained a real `@container` query and a `68ch` measure. Exit 0. DID NOT BITE — that was the finding, and the rule is the fix.
+
+**One security assertion turned out to be a coin flip, and the suite said so by going red at random.** While re-running the gates on the #267 branch, `packages/ui/test/browser-auth-parity.test.ts`'s storage-hygiene case failed one run in three on code nothing had changed, with `a token-shaped value was persisted under platfolio.pkce.verifier`. The cause was the assertion, not the flow: it refused any value matching `^eyJ` or two 20-character base64url runs around a dot, but `createVerifierWith` draws from the **RFC 7636 unreserved set**, which contains the dot — so a verifier is routinely a dotted string. Measured over 2,000 drawn verifiers: 1,084 contained a dot and **222 matched the old rule** (an example that is a valid verifier, not a token: `R.ets_BImSC3NzWd1XybK8YMRirkdi-GI683lwkAGH2fwr.X4t9ZjNEuFTTT2Yjy`) — an ~11% false-refusal rate on the happy path. A rewrite that demanded three segments was *worse*: 319 of 2,000. Shape cannot do this job, so the guard is by identity now: the written keys must be exactly the two `HANDOFF_KEYS`, the value under the verifier key must satisfy `isPkceVerifier`, the value under the state key must be the opaque base64url that was actually sent, and no persisted value may equal any token the issuer returned. The residual limit is unchanged and stated in the test: a dot-free opaque token is indistinguishable from a verifier by shape, which is why `TOKEN_STORAGE` (inMemory, all three kinds) is the invariant and the spy is the tripwire. The flake is pinned by a 2,000-draw case that requires at least one verifier to look like a token to the *old* rule — so if a shape guard comes back, this test says so at ~11% per draw rather than one suite run in three. Proof of determinism: 40 consecutive runs of the parity file, 0 failures; `gates-falsify` 41/41; and no `isJwtShaped`-style value predicate was left in the policy module, because the one that was written there is the mistake this paragraph documents. Recorded here rather than buried because "a check that sometimes tests nothing is worse than no check" is already this repository's lesson, and this is its mirror: a check that sometimes refuses the truth.
 
 What the site does *not* bring is a browser: no hydration was observed, no container was measured at 320 px, no axe run happened, and gate §9.7/§9.8/§9.9 stay exactly as honest as they were. 11's consequence is the rest of the enforcement, and it is worth repeating here because it is the one thing that stops the drift: **the
 first `packages/ui` commit is the contract package — `contract.ts`, `layout.ts`, `signals.ts` and gates
@@ -528,4 +592,49 @@ against this file.
    in the realm's `redirect_uris` and `webOrigins` as `<origin>/callback`, which is what `identity:seed` derives
    from that one variable rather than from anything the UI may invent. Then DNS plus certificates for whatever host
    the deploy names, and `PLATFOLIO_SITE_ORIGIN` set to that same origin (D58: one name, one row, already declared).
-   Until then the honest sentence about the UI is: built, gated, undeployed, unrendered.
+   **Item 3 of #267 tried exactly this and it is BLOCKED, for two independent reasons, and the entry was reverted
+   rather than weakened around** (`compose.yaml` is byte-identical to the copy taken before the edit, `cmp`-verified;
+   `platform:plan`, `check-project` and `packages/manifest/test/compose.test.ts` all return to exit 0 after the
+   revert, and they were run to confirm it).
+
+   What was written: a `site` service with `build: {context: ., dockerfile: apps/site/Dockerfile}`,
+   `expose: ["4321"]`, a healthcheck that GETs `/` in the `api`/`identity` spelling
+   (`node -e "fetch('http://127.0.0.1:4321/').then(r=>process.exit(r.ok?0:1))…"`), `public: true`,
+   `domains: [platfolio.dev]`, `environments: [production, staging]`, and
+   `x-platfolio.environmentValues.staging` carrying the three values that differ per environment (D56). Measured
+   against that tree:
+
+   | Command | Exit | Quoted message |
+   | --- | --- | --- |
+   | `npx -y tsx scripts/platform-deploy.ts` (`platform:plan`, dry run) | **1** | `services.site.image: no-artifact -- service "site" builds an image and none has been reported for it: publish one (POST /api/v1/instances/{instanceId}/artifacts) and the plan resolves. A digest is deliberately not committed to source control (D54)` |
+   | `npx -y tsx --test packages/manifest/test/compose.test.ts` | **1** | `platfolio can describe and plan its own deployment` fails: `["no-artifact"]` vs `[]` (in the manifest+auth set: 121 tests, 120 pass, 1 fail) |
+   | `npx -y tsx scripts/check-project.ts` | **1** | `compose.dev.yaml: platform service "site" has no dev entry -- local up would run without it while the plan expects it (D50)` |
+   | `npx -y tsx scripts/check-environment-registry.ts` | **0** | 88 variables, all referenced -- the site's four names were already declared, so the registry is not an obstacle |
+
+   **Blocker one: there is no published image, and the honest answer is not a digest in source.** The refusal lives
+   in `packages/manifest/src/compose.ts:204-212` (a `build:` service whose image resolves to nothing), and the CLI
+   reaches it because `scripts/platform-deploy.ts:50` calls `parseCompose([base, overlay])` with **no**
+   `resolveArtifact` option -- although the option exists and is used on the server half
+   (`apps/control-plane/src/capabilities.ts:488-490` builds the resolver from `store.listArtifacts(id)`, which is
+   precisely why a tenant fork needs no `compose.prod.yaml`, D54). So a real representation of "planned but not yet
+   published" exists in the *format* and does not exist in this repository's own deploy path, because there is no
+   artifact to resolve. What the publishing workflow has to produce, concretely: an OCI image built from
+   `apps/site/Dockerfile` and pushed to a named registry repository (declared in `x-platfolio.release` beside the
+   control plane's, **and** added to `check-project.ts`'s `PUBLISHED_IMAGES` set -- D49 refuses an org repository
+   named in configuration that is neither one of the four projects nor one of the two published images), then its
+   digest delivered either by `POST /api/v1/instances/{id}/artifacts` plus an artifact resolver in
+   `platform-deploy.ts`, or by teaching `scripts/render-platform-overlay.ts` (one hardcoded `IMAGE` today, line 17)
+   to emit a second pin into `compose.prod.yaml`. Writing a digest by hand instead is the defect this file's own
+   history records twice -- including the one where the overlay carried *a real digest of a deleted service's
+   bytes and every check passed* -- so it was not done, and it is not the fix anyone should reach for later.
+
+   **Blocker two: D62's staging origin is not expressible as a domain.** Staging hostnames are *derived*, not
+   declared: `build-plan.ts:45,83` maps each production domain through `stagingHost(host, stagingPrefix)` with the
+   schema default `staging-` (`packages/manifest/src/schema.ts:138`). Measured directly:
+   `stagingHost("platfolio.dev", "staging-")` → `staging-platfolio.dev`, while `compose.yaml:111` already declares
+   staging's UI origin as `https://preview.platfolio.dev` (D62). Landing the entry as written would therefore put
+   two different staging UI hostnames in one platform description -- the host the provider is asked to bind, and
+   the origin the API admits and the realm redirects to -- which is a second copy of one fact, the pattern AGENTS.md
+   refuses. The fix is a composition-model change (a per-environment domain, or a `dns` field that lets a service
+   name its staging host) owned by `packages/manifest`, not a compose edit that quietly invents the second name.
+   Until both blockers are settled, the honest sentence about the UI is: built, gated, undeployed, unrendered.

@@ -18,15 +18,21 @@
     "`noUnusedLocals`, `verbatimModuleSyntax`, `erasableSyntaxOnly` -- comes from the root file through",
     "`extends`, so this app is not held to a laxer standard than the server tree.",
     "",
-    "There is no workspace edge on `@platfolio/ui`, and that is a decision to flag rather than a default: the",
-    "island reaches the package through `astro.config.mjs`'s alias (and the `paths` entry below, which exists so",
-    "`tsc` answers the same question the bundler does). apps/control-plane declares four `workspace:*` edges, so",
-    "the edge is the convention here -- but a UI package that the shell may also reach by relative path does not",
-    "need a second mechanism, and an edge is a promise about who can import whom. The maintainer has not ruled on",
-    "whether the first-party shell is allowed to depend on `packages/ui` the way a service depends on a package;",
-    "this file takes the smaller commitment (alias only) and says so. If that ruling comes the other way, the",
-    "change is one line in package.json plus deleting the alias, and the gate in scripts/check-ui.ts that reads",
-    "the island's imports does not move.",
+    "There IS a workspace edge on `@platfolio/ui` (#267 item 1, 2026-11-17): `apps/site/package.json` declares",
+    "`\"@platfolio/ui\": \"workspace:*\"`, and this file no longer carries a `paths` block, because the entry that",
+    "existed to mirror `astro.config.mjs`'s alias is now redundant with the dependency the bundler, `tsc`, pnpm's",
+    "lockfile and the Dockerfile all read. The alias and the `paths` were one fact in two files plus a third",
+    "place that no dependency graph could see -- which is why a filtered install (`--filter @platfolio/site...`)",
+    "pulled `packages/ui/src/**` into the bundle without pulling its own dependencies, and the Dockerfile had to",
+    "install the whole workspace to hide it. `apps/control-plane` declares four `workspace:*` edges, so the edge",
+    "was already the convention here; the shell now follows it, and the gate in scripts/check-ui.ts that reads the",
+    "island's imports did not have to move.",
+    "",
+    "What `tsc` resolves `@platfolio/ui` to is the package's own `exports` map, the same answer Vite gives:",
+    "`\".\"` for the barrel and `\"./tokens.css\"` for the generated sheet. `allowImportingTsExtensions` comes from",
+    "the root file, so a `.ts` entry point is legal to read; if a future change makes that stop resolving, the",
+    "fix belongs in `packages/ui/package.json`'s surface, not in a `paths` block that quietly re-adds a second",
+    "resolution mechanism this file would then have to describe.",
     "",
     "`include` has no `.astro` entry: Astro compiles those itself and nothing here can type-check them. The build",
     "is the gate for `.astro`, and `apps/site/test/build-output.test.ts` reads what the build emitted rather than",
@@ -36,11 +42,7 @@
   "compilerOptions": {
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "jsx": "react-jsx",
-    "types": ["node", "astro/client"],
-    "paths": {
-      "@platfolio/ui": ["../../packages/ui/src/index.ts"],
-      "@platfolio/ui/*": ["../../packages/ui/src/*"]
-    }
+    "types": ["node", "astro/client"]
   },
   "include": ["src/**/*.ts", "src/**/*.tsx", "test/**/*.ts", "test/**/*.tsx"],
   "exclude": ["dist", ".astro"]

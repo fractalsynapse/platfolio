@@ -5,6 +5,113 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+### Changed — six maintainer decisions about the shell; five landed, one is blocked (#267)
+
+The maintainer decided six open items about `apps/site` and its surroundings. Five are implemented; the sixth is
+reported blocked with its evidence, because landing it needed a digest no pipeline has produced — and a gate edited
+into silence is the failure this repository has spent a day eradicating, so nothing was weakened to make an item
+close.
+
+**`sharp`'s build script is decided `false` (item 6).** `pnpm-workspace.yaml` carried pnpm's own placeholder
+(`sharp: set this to true or false`), which is not a decision: an undecided entry leaves the package under
+default-deny and keeps it in the install report. `sharp@0.34.5` arrives only as an *optional* dependency of
+`astro@6.4.8` and nothing consumes it — no `astro:assets` import anywhere in `apps/site/src`, no image in
+`public/`, and a real `site:build` emits no `_images/` directory. Measured on the command that reported it
+(`pnpm install --frozen-lockfile --force`): the notice went from `esbuild@0.25.8, esbuild@0.27.7, esbuild@0.28.2,
+sharp@0.34.5` to naming only the three esbuild versions. `esbuild`'s own placeholder is left as pnpm wrote it —
+same class, different item, and `ignoredBuiltDependencies` already refuses that script.
+
+**Node 22.22.1 is the runtime baseline, and it has one owner (item 2, D66).** `astro@7.4.12` and
+`@astrojs/react@7.1.9` each declare `engines.node >=22.23.4`; the installed `astro@6.4.8` and `@astrojs/react@6.0.6`
+declare `>=22.12.0`; `node --version` answers `v22.22.1`. The runtime is not upgraded from inside a repository that
+cannot verify a runtime, so Astro 6.4.8 is accepted as the baseline and written where tooling reads it: `.nvmrc`
+(created — there was none) holds `22.22.1`, and all eight `actions/setup-node` steps in the three workflows read
+`node-version-file` instead of the moving `'22'` (seven) or a lone hardcoded patch (one). `check-project.ts` now
+refuses a second spelling: a literal `node-version`, a setup-node step without `node-version-file`, a missing
+`.nvmrc`, or one that is not an exact `X.Y.Z` — each falsified by planting it and reading the named failure
+(exit 1 in all three cases), restored byte-exact. Tenants are untouched, measured: `render-install.ts` declares no
+Node version at all, so the workflow a fork receives does not change. `package.json engines.node` stays `">=22"`;
+the highest floor in the installed graph is `undici@8.12.4`'s `>=22.19.0`, and raising the claim to a number nobody
+has run would trade one unverified statement for another.
+
+**The PKCE verifier's storage is now the policy's decision, not the flow's (item 4, D67).** `TOKEN_STORAGE`
+enumerated access/refresh/idToken as inMemory-only and said nothing about the pair that must survive the redirect,
+so `web/browser-auth.ts` had decided `sessionStorage` in a comment. Shipped behaviour is accepted as the decision —
+`sessionStorage`, read-once, dropped before the exchange, and the cost (a reload signs the person in again)
+is named rather than discovered. The cookie alternative was refused on the current code: the transport never emits
+`access-control-allow-credentials` and that refusal is argued in `packages/kernel/src/cors.ts` — *not* in
+`apps/control-plane/src/cors.ts`, which owns the origin list (the instruction named the wrong file) — and both
+sides of the seam test it (`packages/kernel/test/cors.test.ts`, `apps/control-plane/test/cors.test.ts`). Made
+durable as data: `HANDOFF_KEYS`/`HANDOFF_STORAGE` in the policy module, imported by the flow instead of restated,
+re-exported by the operator script, and asserted by new cases in `browser-auth-parity.test.ts` — including the
+reload modelled on a shared store, which is *not* the sentence "a reload discards the verifier": `sessionStorage`
+survives a reload, so what a reload loses is the module-scope bag, and a spent handoff answers `no-handoff` without
+reaching the token endpoint. Removing the read-once drop makes two tests fail; widening `cookie` to `true` makes one
+fail; both are permanent falsifications.
+
+**`apps/site` declares its UI dependency (item 1).** `"@platfolio/ui": "workspace:*"` in `apps/site/package.json`,
+`version: link:../../packages/ui` in `pnpm-lock.yaml`, and the `astro.config.mjs` alias plus the `apps/site/tsconfig.json`
+`paths` that stood in for the edge are deleted. The claim was proved rather than asserted: from a scratch copy of the
+pre-edge tree, the filtered install failed inside the image with
+`Rollup failed to resolve import "@platfolio/page-schema/page" from "/app/packages/ui/src/contract.ts"` (reproduced,
+exit 1); with the edge it exits 0 at `Scope: 6 of 8 workspace projects`, and `docker run` serves `/` with 0
+`<script>` and `createShellContext` in exactly one chunk. Resolution was proved to be real (`tsc` refuses an
+undefined export from `@platfolio/ui` with TS2305), and `checkTypecheckCoverage()` was read first — it claims files
+by each project's `include` lists, not by what a program reaches through imports, so the edge cannot make a file
+double-claimed: 238 files, 238 claimed, unchanged. The Dockerfile now uses the filtered install. One deliberate
+exception stays a relative path, and the reason is measured: `render-runtime-config.ts` runs under plain node at
+container start, where the barrel is not loadable (`ERR_UNKNOWN_FILE_EXTENSION` on `.tsx` inside the built image).
+
+**Content layout is a primitive, and app CSS owns no breakpoint (item 5).** `packages/ui/src/layout/content.ts`
+declares `ui-prose` and `ui-columns` as data (required `containerType`, threshold and tracks as fields) with
+`renderContentCss()` as the only writer, emitted to `content.css`, exported as `@platfolio/ui/content.css`, and
+audited by §9.3 — which now asserts four generated sheets rather than accepting three. `MEASURE.content` (`68ch`)
+moves into `tokens.ts` as the one line length in the tree. `apps/site` imports the sheet, `<main>` carries
+`ui-prose` and the three-point row carries `ui-columns`, and the hand-rolled `@container`, `container-type` and
+`68ch` are gone. The gap was measured before it was fixed: the pre-change §D65 reported PASS, exit 0, on the
+committed stylesheet that contained a real width query — **DID NOT BITE** — so §D65 gained the refusal and
+`gates-falsify.test.ts` gained the three planted shapes plus the compliant cases (`prefers-*` and a bare `rem`) that
+must stay green; 41 falsification tests, 41 pass.
+
+**A `site` service in `compose.yaml` — BLOCKED (item 3).** The entry was written and measured, then reverted;
+`compose.yaml` is byte-identical to how it was found and every gate returned to exit 0. Two independent blockers,
+recorded with their commands and quoted messages in
+[docs/ui-architecture.md § Open gaps](docs/ui-architecture.md#open-gaps-this-file-refuses-to-paper-over):
+`platform:plan` exits 1 with `services.site.image: no-artifact` (a first-party `build:` service with no reported
+digest — the resolver exists on the server path, `capabilities.ts:488-490`, but there is no artifact to resolve, and
+committing a digest by hand is the defect `compose.prod.yaml` has already carried once), and D62's staging origin is
+not derivable: `stagingHost("platfolio.dev", "staging-")` yields `staging-platfolio.dev`, while the composition
+already states staging's UI origin as `https://preview.platfolio.dev` — so the entry would have put two staging
+hostnames in one platform description. What the publishing workflow must produce, and the composition-model change
+that has to come with it, are written there.
+
+### Fixed — a security assertion that refused the truth 11% of the time
+
+Re-running this branch's gates three times surfaced a failure with nothing changed: `browser-auth-parity.test.ts`'s
+storage-hygiene case reported `a token-shaped value was persisted under platfolio.pkce.verifier`. The assertion was
+the defect. It refused any value matching `^eyJ` or two 20-character base64url runs around a dot, on the theory
+that a token is recognizable by shape -- but `createVerifierWith` draws its verifier from the **RFC 7636 unreserved
+set**, and that set contains the dot. Measured over 2,000 drawn verifiers: 1,084 contained a dot, and **222 matched
+the old rule** while being entirely valid (for example `R.ets_BImSC3NzWd1XybK8YMRirkdi-GI683lwkAGH2fwr.X4t9ZjNEuFTTT2Yjy`)
+-- an ~11% false-refusal rate on the flow's own happy path. A first attempt to fix it by requiring three segments
+was measured and rejected as *worse*: 319 of 2,000. Shape cannot answer this question.
+
+The guard is by identity instead: the handoff may hold only the two `HANDOFF_KEYS`, what sits under the verifier key
+must satisfy `isPkceVerifier`, what sits under the state key must be the opaque base64url the authorize URL carried,
+and no persisted value may equal a token the issuer handed back. The residual limit is unchanged and stated in the
+test -- a dot-free opaque token is indistinguishable from a verifier by shape -- which is why `TOKEN_STORAGE`
+(inMemory, all three kinds) is the invariant and the spy is the tripwire beside it, not the argument. The flake is
+pinned by a case that draws 2,000 verifiers and requires the *old* rule to mis-fire on at least some of them, so a
+shape guard reintroduced here fails on purpose rather than on a Wednesday. No value-shape predicate was left in the
+policy module: the one drafted during this fix is the mistake the paragraph documents, and it was deleted instead of
+tuned until the suite went quiet. Determinism proof: 40 consecutive runs of the parity file, 0 failures; 25 more
+after the type widening, 0 failures; `gates-falsify` 41/41; all three type-check projects 0.
+
+Why this is a fix and not a re-run: an assertion that fails at random is the flipped-signature defect in mirror
+image -- that one was green and tested nothing, this one was red sometimes and refused something real -- and both
+come from asking a shape to settle a question of identity. AGENTS.md's rule is to prefer the evidence tier a claim
+actually holds; a suite whose verdict depends on `Math.random` holds none.
+
 ### Added — `apps/site`: the D65 shell, built, and the package boundaries it forced
 
 D65 closed UI-OD1 on 2026-11-16 — Astro for the web shell, the dashboard as one React island — and this is that

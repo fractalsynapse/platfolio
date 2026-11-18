@@ -13,8 +13,10 @@ import { browserCapabilities } from '../lib/browser-capabilities.ts';
  *     mismatch is a refusal, not a retry — that comparison is the whole defence against a code that arrived from
  *     somewhere else, and `packages/ui/test/browser-auth-parity.test.ts` pins it against the script-side flow.
  *  2. The verifier is read once and dropped (`web/browser-auth.ts`'s `complete`). It is the only thing in this app
- *     that survives a navigation, and the policy it is spent against lives in `scripts/browser-auth.ts`: no token
- *     is stored anywhere, so a reload signs in again.
+ *     that survives a navigation, and the policy it is spent against is `web/browser-auth-policy.ts`'s
+ *     `HANDOFF_KEYS`/`HANDOFF_STORAGE` — recorded as D67, with its cost named: no token is stored anywhere, so a
+ *     reload signs the person in again. That is the invariant holding, not a defect (rule 4, and
+ *     `packages/ui/test/browser-auth-parity.test.ts`'s reload case).
  *  3. Whatever the outcome, the browser leaves. A signed-in person goes to the dashboard; a refused or spent
  *     handoff goes to `/` with the reason in the query, where a person can read it and ask again. `no-handoff` and
  *     `state-mismatch` are different failures and are reported as different words — neither says *which* state it

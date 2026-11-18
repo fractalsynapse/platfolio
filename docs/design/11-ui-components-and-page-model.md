@@ -68,8 +68,12 @@ surface: overlays, signals and drafts move data, never code.
 | `packages/api-contract/src/generated/types.ts` | real — `wc -l` it, do not quote this row: the file grew past 990 lines when #258 added the route table. It exports the component types (`Instance`, `Attestation`, `Error`, …), the operation maps (`OperationId`, `ParamsOf`, `RequestBodyOf`, `ResponseOf`, `SuccessOf`), and since #258 the runtime `ENDPOINTS` table with `Endpoint`/`HttpMethod` beside it — one `{ method, path }` per operationId, path left templated. Byte-for-byte gated by `api:types:check`, which is what makes "generated" a fact rather than a claim |
 | `packages/page-schema` | real — `page.ts`, `secrets-panel.ts` (`buildSecretsPanel`, `findValueBearingProps`), `binding-panel.ts` (`buildBindingPanel`), `project-text.ts` (`projectToText`), with tests |
 | `packages/ui` (per D63: all reusable components **and** design tokens as CSS custom properties — no separate tokens package) — **exists since 2026-11-15** with contracts, tokens, primitives, signals, the SDK seam and gates, and **since #259 its first screens**: six registered `.tsx` components and one screen document (§§1–3 audited by `ui:check`: 21 gates, 18 pass, 3 NOT RUN). Since 2026-11-17 something *does* mount them: `apps/site`, below. Its `src/web/` boundary is no longer only prose: `browser-auth.ts` (the browser's `AuthSource`), `browser-auth-policy.ts` (the policy declarations, moved out of `scripts/browser-auth.ts` and re-exported by it), `shell.tsx` (the one page context). `packages/api-client` | **does not exist** — and §6 says it should not be created: the SDK is `packages/ui/src/sdk/`, not a second package. Everything in §§1–8 that names it is `specified` |
-| `apps/site` (D65's shell, since 2026-11-17) | **exists and builds** — Astro `output: 'static'` + `@astrojs/react` (astro 6.4.8 / integration 6.0.6: astro 7.x declares `engines.node >=22.23.4` and this tree runs 22.22.1, measured with `astro --version` refusing, then passing). `/` emits **no client JavaScript**, measured in `dist/index.html`: zero `<script>`, zero `<astro-island>`, one inline `<style>`; `/dashboard` mounts `InstanceListScreen` as **one** island (one `<astro-island>`) that calls `createShellContext` once and wraps the screen in the one `SdkContext` and one `SignalBus`; `/callback` renders nothing and only exchanges the code, comparing `state` before redeeming. `@platfolio/ui` is reached by the alias in `astro.config.mjs`, **not** by a workspace edge — the open question is written in `apps/site/tsconfig.json`'s `$comment`. `PLATFOLIO_SITE_ORIGIN`, `PLATFOLIO_URL`, `PLATFOLIO_IDENTITY_ISSUER`, `PLATFOLIO_WEB_CLIENT_ID` arrive from the environment (two of those four names are reused from the registry rather than invented) and a build with one unset fails by naming it. What is **not** delivered: a service in the composition, an origin that resolves, a login UI, a detail screen, drafts (§9's gate 9), or any assertion made in a browser |
-| a UI service in `compose.yaml`; `platfolio.dev` / `preview.platfolio.dev` resolving | **absent** — D62 has decided the hosts, the DNS records, certificate and service do not yet exist; the API side is already prepared (`PLATFOLIO_ALLOWED_ORIGINS` feeds CORS and the `platfolio-web` PKCE client's `<origin>/callback` redirect URIs). The site's own origin is declared (`PLATFOLIO_SITE_ORIGIN`, in the registry and read by `apps/site`) but nothing serves it yet: the fourth platform is the follow-on step, and it is not taken by a UI change |
+| `apps/site` (D65's shell, since 2026-11-17) | **exists and builds** — Astro `output: 'static'` + `@astrojs/react`, on the runtime recorded as **D66**: `astro@6.4.8` and `@astrojs/react@6.0.6` because `astro@7` asks for Node `>=22.23.4` and this tree runs `22.22.1`. The measurement, the tradeoff and the condition that would re-open it are [01 § D66](01-product-and-decisions.md), not a parenthetical — re-measure with `node --version` and `npm view astro@7 engines` rather than trusting this row. `/` emits **no client JavaScript**, measured in `dist/index.html`: zero `<script>`, zero `<astro-island>`, one inline `<style>`; `/dashboard` mounts `InstanceListScreen` as **one** island (one `<astro-island>`) that calls `createShellContext` once and wraps the screen in the one `SdkContext` and one `SignalBus`; `/callback` renders nothing and only exchanges the code, comparing `state` before redeeming. `@platfolio/ui` is reached by a declared `workspace:*` edge in `apps/site/package.json` (#267 item 1, 2026-11-17) —
+the `astro.config.mjs` alias and the `tsconfig.json` `paths` that stood in for the edge are deleted, so the
+dependency graph, the bundler and the type-checker give the same answer, and `pnpm install --frozen-lockfile
+--filter @platfolio/site...` is now correct (measured inside the image: `Scope: 6 of 8 workspace projects`, 3
+pages built, exit 0; before the edge the same command failed at `@platfolio/page-schema/page`). `PLATFOLIO_SITE_ORIGIN`, `PLATFOLIO_URL`, `PLATFOLIO_IDENTITY_ISSUER`, `PLATFOLIO_WEB_CLIENT_ID` arrive from the environment (two of those four names are reused from the registry rather than invented) and a build with one unset fails by naming it. What is **not** delivered: a service in the composition, an origin that resolves, a login UI, a detail screen, drafts (§9's gate 9), or any assertion made in a browser |
+| a UI service in `compose.yaml`; `platfolio.dev` / `preview.platfolio.dev` resolving | **absent** — D62 has decided the hosts, the DNS records, certificate and service do not yet exist; the API side is already prepared (`PLATFOLIO_ALLOWED_ORIGINS` feeds CORS and the `platfolio-web` PKCE client's `<origin>/callback` redirect URIs). The site's own origin is declared (`PLATFOLIO_SITE_ORIGIN`, in the registry and read by `apps/site`) but nothing serves it yet: the fourth platform is the follow-on step, and it is not taken by a UI change. #267 item 3 attempted the entry and **it is blocked**: `platform:plan` refuses the unpinned first-party build (`no-artifact`, D54) and the derived staging hostname (`staging-platfolio.dev`) contradicts the declared staging origin (`preview.platfolio.dev`) — both measured, with the exact commands and exits, in [../ui-architecture.md § Open gaps](../ui-architecture.md#open-gaps-this-file-refuses-to-paper-over) item 6 |
 
 So the honest baseline is: **the contract exists, the panel builders exist, the components exist, and a real shell
 mounts one of them.** The specification was written while none of that was true, which is what kept it honest — the
@@ -200,6 +204,34 @@ exist, the containers do not, and no browser harness was smuggled in beside a co
 from its components at 360 px viewport equals the set reachable at 1920 px (derived from `reads`
 declarations; gate §9.11, which runs today over `ScreenDocument`s and each primitive's `floorSlots`, and which
 therefore compares *declared reachability* -- not rendered geometry, which is (c) and stays NOT RUN).
+
+### Content layout: what a *document* composes (added 2026-11-17, #267 item 5)
+
+The five primitives above compose a screen: `ComponentContract.slots` names them, `assertPlacement()` refuses a
+cell of the matrix, and §9.11's parity arithmetic walks `floorSlots`. A marketing page, a docs page, or the prose
+inside a sheet body need a different set of decisions — how wide a readable line is, what rhythm separates blocks,
+and when a group of blocks becomes columns — and those are **not** a sixth slot: making `measure` a slot a
+component claims to render in would be a claim about a component that is not true, and the matrix is the thing
+§9.11 and §9.7 are defined over. So they are their own table, `CONTENT_TABLE` in
+`packages/ui/src/layout/content.ts` — `ui-prose` (the measure plus a block rhythm) and `ui-columns` (one column at
+the floor, `tracks` when the container has room) — with the same containment discipline: the primitive declares
+`container-type: inline-size`, the threshold is a field (`wideFromRem`), the emitted `@container` query comes from
+the table, and nothing reads the window.
+
+The line length is a **token**, `MEASURE.content` in `tokens.ts`, emitted as `--ui-measure-content` (68ch) and
+referenced by the sheet rather than typed by it: the `ch` unit is the width of the `0` glyph in whatever typeface
+resolved, so the measure survives a font change and a fixed px width does not. Two primitives, both used by the
+route that had been hand-rolling them, is the whole surface — a third name nobody imports is the speculative
+abstraction this project's own instruction refuses.
+
+**Acceptance, content layout.** (e) A document's measure and column behaviour come from `CONTENT_TABLE`; an app
+stylesheet that writes a width `@media`/`@container` query, or declares its own `container-type`, is refused by
+gate §D65 (measured: before the rule existed, `ui:check` exited 0 over a committed `apps/site` stylesheet holding
+exactly those — **DID NOT BITE**, which is why the rule and its three planted mutations landed together with the
+primitive, and why the compliant `prefers-reduced-motion` case is asserted in the same test). (f) `prefers-*`
+remains the only window query permitted anywhere. (g) The generated `content.css` reproduces from the table byte for
+byte (`ui:css:check`), and §9.3 audits four sheets, not three — a count is asserted, so a new sheet cannot be added
+to the package and omitted from the gate.
 
 ## 3. Signals registry
 
@@ -546,7 +578,10 @@ CI gates (mechanical, block merge) and the reviewer pass (one screen, ten questi
    `indexedDB`, `window.`, `document.` in `packages/ui` presentational sources outside `web/` and the SDK's
    transport driver; zero timer-based polling outside the freshness primitive. *Method: lint rule.*
 3. **Layout discipline.** Zero `@media` width queries and zero `isMobile`-style props in `packages/ui`;
-   every layout primitive declares `container-type`. *Method: grep gate in the build.*
+   every layout primitive declares `container-type`, and so does every *content* primitive (11 §2 content layout);
+   the grep runs over all four generated sheets -- tokens, layout, content, components -- because a sheet the gate
+   cannot see is a sheet it does not audit. *Method: grep gate in the build.* App CSS is audited for the same shapes
+   by §D65, which refuses a width query or a hand-declared container in `apps/site`.
 4. **Typed signals only.** Zero raw `EventTarget`/`dispatchEvent`/string-event subscriptions outside
    `signals.ts`; every signal in the table has an explicit `retention`; every `replay` payload passes the
    value-bearing walk. *Method: lint rule + registry unit tests (§3 acceptance).*

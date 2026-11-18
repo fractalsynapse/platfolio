@@ -25,13 +25,15 @@
  * it would be violating the single source this file is built on. `LOGOUT_CLEAR` is what `signOut()` empties,
  * item by item, and the list is imported, not retyped.
  *
- * **The verifier is a redirect handoff, not a store.** PKCE needs `code_verifier` to survive the navigation from
- * `/dashboard` to the issuer and back to `/callback`, and a module-scope bag cannot survive a navigation. So the
- * pair is written to `sessionStorage` — the *only* thing this file persists — read **once**, and deleted before
- * the exchange starts. It is not a token: it grants nothing without the single-use code that arrives beside it,
- * and it has no value after the exchange. `TOKEN_STORAGE` does not enumerate it, and this is the one place the
- * browser code decides something the policy file is silent about. Flagged for the maintainer in this change's
- * report rather than settled here.
+ * **The verifier is a redirect handoff, not a store — and the policy now says so (D67).** PKCE needs
+ * `code_verifier` to survive the navigation from `/dashboard` to the issuer and back to `/callback`, and a
+ * module-scope bag cannot survive a navigation. So the pair goes where `HANDOFF_KEYS` and `HANDOFF_STORAGE` point
+ * — `sessionStorage`, the *only* thing this file persists — read **once**, and deleted before the exchange starts.
+ * It is not a token: it grants nothing without the single-use code that arrives beside it, and it has no value
+ * after the exchange. The accepted cost is stated in the policy module and asserted in
+ * `test/browser-auth-parity.test.ts`: a reload signs the person in again. This paragraph used to end "the policy
+ * file is silent about this, flagged for the maintainer" — that silence was the defect, and D67 closed it by
+ * moving the decision to where the tokens' answer already lives instead of restating it here.
  *
  * **§9.2 — no `fetch`, no timer, no ambient browser object in `packages/ui`.** This is inside the declared web
  * boundary, where `window`/`sessionStorage` are permitted by the gate; `fetch(` and `setTimeout(` are not
@@ -49,6 +51,7 @@
  */
 import {
   CALLBACK_PATH,
+  HANDOFF_KEYS,
   LOGOUT_CLEAR,
   PKCE_METHOD,
   RECOMMENDED_STORE,
@@ -250,7 +253,10 @@ export function createBrowserAuthSource(
   const now = deps.now ?? (() => Date.now());
   const bag = createTokenBag();
   const callbackUrl = `${config.siteOrigin.replace(/\/$/, '')}${CALLBACK_PATH}`;
-  const HANDOFF = { verifier: 'platfolio.pkce.verifier', state: 'platfolio.pkce.state' } as const;
+  // The keys come from the policy (D67). A local literal here would be a second spelling of the address the
+  // shell's store is written against, and the two drift by one rename — which is how a verifier stops being
+  // found, and a person gets an unexplained `no-handoff` on the callback they earned.
+  const HANDOFF = HANDOFF_KEYS;
   let cleared: readonly string[] = [];
 
   const post = async (form: Readonly<Record<string, string>>): Promise<TokenSet> => {

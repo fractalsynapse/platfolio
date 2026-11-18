@@ -2,6 +2,12 @@ import * as React from 'react';
 import { assertPlacement, LAYOUT_SLOTS, placementProblem, PRIMITIVES, type LayoutPrimitive, type LayoutSlot } from './primitives.ts';
 
 export * from './primitives.ts';
+/**
+ * The content-layout primitives (11 §2, rule 2). Re-exported beside the five slots because a document
+ * composition and a screen composition are both `packages/ui`'s business (D63), and a consumer that wants the
+ * readable line should not have to know which subdirectory the table lives in to ask for the class.
+ */
+export * from './content.ts';
 
 /**
  * The layout primitives as components (11 §2, rule 2).

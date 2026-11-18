@@ -45,7 +45,11 @@ const origin = Astro.site ?? new URL(Astro.request.url).origin;
         <a href="/dashboard">Dashboard</a>
       </nav>
     </header>
-    <main>
+    {/* The document column is a packages/ui primitive, not a rule in this app's stylesheet: `ui-prose` carries
+        the measure (--ui-measure-content), the block rhythm, and the container its children query (11 §2, rule 2,
+        #267 item 5). What site.css owns now is this shell's furniture -- header, footer, padding -- and no
+        breakpoint at all, which is the thing gate §D65 refuses in app CSS. */}
+    <main class="ui-prose">
       <slot />
     </main>
     <footer class="site-footer">

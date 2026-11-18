@@ -4,9 +4,11 @@
  *
  * This is `gen-api-types.ts` applied one layer down. The emitters live in the package they generate for
  * (`renderTokensCss()` in `packages/ui/src/tokens.ts`, `renderLayoutCss()` in
- * `packages/ui/src/layout/primitives.ts`); this script only calls them and decides whether to write or to
- * compare. That keeps one implementation of "what the tokens and the primitives produce", so the two commands
- * cannot be greener than each other and a stylesheet cannot drift from the module that emits it.
+ * `packages/ui/src/layout/primitives.ts`, `renderContentCss()` in `packages/ui/src/layout/content.ts`,
+ * `renderComponentCss()` in `packages/ui/src/components/style.ts`); this script only calls them and decides
+ * whether to write or to compare. That keeps one implementation of "what the tokens, the primitives and the
+ * components produce", so the two commands cannot be greener than each other and a stylesheet cannot drift from
+ * the module that emits it.
  *
  * **Why this exists at all:** D63 puts the design tokens inside `packages/ui`. A hand-written `tokens.css`
  * beside a hand-written `tokens.ts` is two definitions of one fact — the exact defect every gate in this
@@ -20,6 +22,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { renderTokensCss } from '../packages/ui/src/tokens.ts';
 import { renderLayoutCss } from '../packages/ui/src/layout/primitives.ts';
+import { renderContentCss } from '../packages/ui/src/layout/content.ts';
 import { renderComponentCss } from '../packages/ui/src/components/style.ts';
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
@@ -28,6 +31,10 @@ const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
 const TARGETS = [
   { out: 'packages/ui/src/tokens.css', source: 'packages/ui/src/tokens.ts', render: renderTokensCss },
   { out: 'packages/ui/src/layout/layout.css', source: 'packages/ui/src/layout/primitives.ts', render: renderLayoutCss },
+  // The content sheet is the fourth artifact and names its own source, for the reason `layout/content.ts` gives
+  // in its header: a document's measure and column threshold are a different decision from a screen's slot, and
+  // one digest per emitter is what makes "generated from" a claim a test can check rather than a comment.
+  { out: 'packages/ui/src/layout/content.css', source: 'packages/ui/src/layout/content.ts', render: renderContentCss },
   { out: 'packages/ui/src/components/components.css', source: 'packages/ui/src/components/style.ts', render: renderComponentCss },
 ] as const;
 
