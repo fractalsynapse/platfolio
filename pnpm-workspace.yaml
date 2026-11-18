@@ -14,5 +14,27 @@ strictDepBuilds: false
 ignoredBuiltDependencies:
   - esbuild
 allowBuilds:
+  # `sharp` was decided on 2026-11-17 (#267 item 6), and the decision is a measurement rather than a
+  # preference. `sharp@0.34.5` reaches this graph through exactly one door -- it is an *optional* dependency of
+  # `astro@6.4.8` (`pnpm-lock.yaml`, the `astro` block's `optionalDependencies`) -- and its only consumer would
+  # be Astro's `astro:assets` optimiser, which no route in this workspace uses: `grep -rn "astro:assets"
+  # apps/site/src` returns nothing, `apps/site/public` holds one file (`config.js`) and no image, and a real
+  # `pnpm run site:build` emits 3 pages, 5 JS chunks and **no** `_images/` directory. So there is no sharp
+  # build step here for anything to need, and `false` records that instead of leaving pnpm's scaffold text in a
+  # tracked file.
+  #
+  # What the decision changed, measured on the command that reports it --
+  # `pnpm install --frozen-lockfile --force`, which relinks all 502 packages and therefore reprints the notice:
+  # with the placeholder the run ended `Ignored build scripts: esbuild@0.25.8, esbuild@0.27.7,
+  # esbuild@0.28.2, sharp@0.34.5.`; with this line it ends `Ignored build scripts: esbuild@0.25.8,
+  # esbuild@0.27.7, esbuild@0.28.2.` -- sharp leaves the notice because its build is now decided rather than
+  # undecided -- and the install still exits 0, as do `lock:check` and `site:build`, whose artifact counts came
+  # out identical (`/`: 0 `<script>`, 0 islands; `/dashboard` and `/callback`: 1 `<astro-island>` each; 5
+  # chunks; one `createShellContext`).
+  #
+  # The `esbuild` entry below is left exactly as pnpm wrote it: same placeholder, outside this item, and
+  # `ignoredBuiltDependencies` above already refuses that script -- which is why the notice still names the
+  # three esbuild versions. Settling it is the same one-word edit, for whoever decides whether esbuild's
+  # postinstall should ever be allowed to run.
   esbuild: set this to true or false
-  sharp: set this to true or false
+  sharp: false
