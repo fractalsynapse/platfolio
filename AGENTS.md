@@ -210,7 +210,9 @@ registry, the SDK seam) and **now has its first screens**: six registered compon
 `apps/control-plane` is still TS2584. `scripts/check-project.ts` now fails the build unless the union of the
 type-check projects' file lists equals the source tree on disk, so an exclude list cannot become a silent skip.
 **`apps/site` exists since 2026-11-17**, and it is D65's shell: Astro static output, `@platfolio/ui` reached through
-the alias in `astro.config.mjs` rather than a workspace edge, `/` emitting zero client JavaScript (measured in
+a declared `workspace:*` edge (since #267 item 1, which deleted the `astro.config.mjs` alias and the `tsconfig.json`
+`paths` that had stood in for the edge — the graph and the bundler now agree, which is what makes
+`pnpm install --filter @platfolio/site...` correct, and the Dockerfile uses it), `/` emitting zero client JavaScript (measured in
 `dist/`, not inferred from config), `/dashboard` mounting `InstanceListScreen` as **one** island that calls
 `createShellContext` once, and `/callback` exchanging the PKCE code while rendering nothing. The browser's half of
 the auth policy was moved out of `scripts/browser-auth.ts` into `packages/ui/src/web/browser-auth-policy.ts`,

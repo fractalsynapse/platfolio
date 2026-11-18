@@ -22,17 +22,28 @@ RUN echo 'node-linker=hoisted' > /app/.npmrc
 
 # Manifests first, sources second: the dependency layer is what a rebuild reuses.
 #
-# The install is NOT filtered to this app, and the reason is measured rather than stylistic. The first version of
-# line 34 read `--filter @platfolio/site...`, and the build inside the image failed with:
+# The install IS filtered to this app, and that is a fact about the dependency graph rather than a preference.
+# The first version of this line read `--filter @platfolio/site...` while `apps/site/package.json` declared no
+# edge on `@platfolio/ui` -- and the build inside the image failed with:
 #
 #   [vite]: Rollup failed to resolve import "@platfolio/page-schema/page" from "/app/packages/ui/src/contract.ts"
 #
-# Because `apps/site` declares no workspace edge on `@platfolio/ui` (see the `$comment` in tsconfig.json), the
-# filtered dependency graph stops at this app and installs nothing for the UI package — yet the Astro alias drags
-# `packages/ui/src/**.ts` into the bundle, where its *own* imports then have nothing to resolve against. On the
-# host it appeared to work, because this checkout is already installed whole: exactly the kind of success that does
-# not travel. Either the edge is declared (and the filter becomes correct), or the image installs the workspace.
-# The edge is the maintainer's open question, so the image takes the second option and says why here.
+# because the filtered graph stopped at this app and installed nothing for the UI package, while the Astro alias
+# still dragged `packages/ui/src/**.ts` into the bundle, where its *own* imports had nothing to resolve against.
+# On the host it looked fine, because this checkout is installed whole: the kind of success that does not travel.
+# The image therefore installed the whole workspace, and said so here, until #267 item 1 declared the edge --
+# `"@platfolio/ui": "workspace:*"` in package.json, `version: link:../../packages/ui` in pnpm-lock.yaml, and the
+# alias plus the `paths` block deleted. Measured with that in place, on this file:
+#
+#   Scope: 6 of 8 workspace projects      (was: all 8)
+#   astro build: 3 page(s) built in 2.23s, exit 0
+#   docker run: GET / -> 200, `grep -c '<script' dist/index.html` -> 0, islands on / -> 0, 5 chunks in
+#     dist/_astro, `createShellContext` in exactly 1 of them
+#
+# So the filter is now correct *because* the graph is complete, which is the whole point of the change. The COPY
+# lines below still copy every workspace member's manifest: pnpm resolves the workspace definition from
+# `pnpm-workspace.yaml` before it filters, and an importer whose manifest is absent is a lockfile mismatch, not a
+# smaller image.
 COPY package.json pnpm-workspace.yaml tsconfig.json ./
 COPY packages/contracts/package.json packages/contracts/
 COPY packages/kernel/package.json packages/kernel/
@@ -42,7 +53,7 @@ COPY packages/api-contract/package.json packages/api-contract/
 COPY packages/ui/package.json packages/ui/
 COPY apps/site/package.json apps/site/
 COPY pnpm-lock.yaml ./
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile --filter @platfolio/site...
 
 # The generated contract types are build inputs: `ENDPOINTS` is what the island routes with (#258), and it is
 # committed, so the copy is a source copy rather than a code-generation step.
