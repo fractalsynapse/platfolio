@@ -96,18 +96,47 @@ window; and a narrow screen is missing nothing but simultaneity.
 - **MUST** use the five primitives (`stack`, `split`, `popout-sidebar`, `overlay-sheet`, `full-page`) and the
   containment matrix in 11 §2, declared per component in `ComponentContract.slots`.
 - **MUST** set `container-type: inline-size` in the primitive and query the *container*.
+- **MUST** take a *document's* composition from the content primitives too — `ui-prose` (the readable line, whose
+  length is the `--ui-measure-content` token, plus the block rhythm) and `ui-columns` (one column at the floor, N
+  tracks when its container has room), both declared in `packages/ui/src/layout/content.ts` and emitted to
+  `content.css` (11 §2 content layout, #267 item 5). A page names the class; it does not write the rule.
 - **MUST** make every capability reachable in the single-column layout; wider screens add columns, rails and
   hover detail, never features.
 - **MUST NOT** use `@media (width …)` for component behavior (`prefers-*` is the only window input a component
   may read), and **MUST NOT** carry an `isMobile` / `compact` / `desktop` prop.
+- **MUST NOT** write a width `@media`/`@container` query, or a `container-type` declaration, in an app stylesheet:
+  a breakpoint in `apps/site` is a second owner of one composition decision, and §D65 refuses it by name (the rule
+  was added *because* the committed stylesheet contained exactly that and every gate passed).
 
-**Enforced by.** `ui:check` §9.3 runs today, over `.ts` **and** `.tsx` and over all three generated stylesheets
-(tokens, layout, components). §9.11 runs today per screen document: the floor degradation is a `floorSlots` field
-on each primitive, so "the set of `OperationId`s reachable from a screen's components at 360 px equals the set
-reachable at 1920 px" is arithmetic over declared `reads`, and it names the component and the operation when they
-differ. §9.7 (each component rendered in each declared slot at 320 px and 1280 px, in a browser) is **NOT RUN** —
-the components exist now, the containers do not. A reviewer's interim check stays behavioral: open the screen at
-360 px and confirm nothing is absent (R1).
+**Enforced by.** `ui:check` §9.3 runs today, over `.ts` **and** `.tsx` and over all **four** generated stylesheets
+(tokens, layout, content, components — the count is an assertion in the gate, so a sheet added to the package and
+forgotten by the gate fails the build rather than going unaudited). §9.11 runs today per screen document: the floor
+degradation is a `floorSlots` field on each primitive, so "the set of `OperationId`s reachable from a screen's
+components at 360 px equals the set reachable at 1920 px" is arithmetic over declared `reads`, and it names the
+component and the operation when they differ. §9.7 (each component rendered in each declared slot at 320 px and
+1280 px, in a browser) is **NOT RUN** — the components exist now, the containers do not. A reviewer's interim check
+stays behavioral: open the screen at 360 px and confirm nothing is absent (R1).
+
+**Content layout, stated once above and expanded here only where the rule needs its referents.** The five slots
+compose a *screen*; a *document* needs a readable line, a block rhythm, and a group of blocks that is one column at
+the floor and three when its container has room. Those are `CONTENT_TABLE` in
+`packages/ui/src/layout/content.ts` — `ui-prose` and `ui-columns`, each with `containerType: 'inline-size'`, its
+gap steps and (for `columns`) its `wideFromRem`/`tracks` as data — emitted into
+`packages/ui/src/layout/content.css` and exported as `@platfolio/ui/content.css`, which the shell imports through the
+workspace edge (#267 item 1) rather than through an alias. The line length is `MEASURE.content` in `tokens.ts`
+(`--ui-measure-content: 68ch`), because a value three files could each type is a value nobody owns. Adding a fourth
+content primitive means a row in that table -- a diff, a review, and the §9.3 check that the sheet covers exactly the
+table -- not a rule in a stylesheet beside it.
+
+**What that half cost, and the falsification that found it.** Before this change `apps/site/src/styles/site.css`
+carried a real `@container (min-width: 48rem)` and a `68ch` measure, and `ui:check` exited 0 over it — measured
+directly, by running the pre-change §D65 against the pre-change stylesheet: **DID NOT BITE**, exit 0, because every
+width-query rule in the gate set lives in §9.3, which reads the package's sheets and has never looked at an app. The
+refusal was therefore missing, not mis-tuned; it is in §D65 now and `packages/ui/test/gates-falsify.test.ts` plants
+all three shapes (`@container`, a width `@media`, a hand-declared `container-type`) and requires each to be named by
+file, plus the compliant case (`prefers-reduced-motion`, and a `rem` with no token behind it) to stay green. That
+record matters more than the rule: a gate added *after* the violation shipped is how this project describes every
+other incident it has paid for.
 
 **What breaking it costs.** No UI screen exists yet, so there is no incident in this repository's UI history
 — say so plainly rather than borrowing one. The mechanism that breaks is documented in 11 §2: a window
@@ -456,6 +485,8 @@ moved while this file was being written, and it is worth keeping as evidence for
 | `pnpm run verify` | 1, **before running any gate** | `ERR_PNPM_STORE_DIR_OPEN_OPERATION_LOCK … Read-only file system` — the wrapper cannot lock its engine store in this sandbox, so each gate above was executed directly instead. [MAINTAINING § If `pnpm run <script>` fails before running anything](MAINTAINING.md#if-pnpm-run-script-fails-before-running-anything) records this and says CI is unaffected. Reporting it as a failed gate would be the wrong honesty |
 
 Rules 2, 3, 4's UI half, and 5–6's UI half gained their first runnable gates on 2026-11-15, and #259 took two of the five NOT RUN rows off the list by putting screens in the registry. The shell landed on 2026-11-17 and added a gate of its own rather than removing one: `ui:check` is **21 gates today — 18 pass, 0 fail, 3 NOT RUN** (§9.7 needs browser containers, §9.8 needs axe and a layout engine, §9.9 needs the draft store, which still does not exist). The three that remain NOT RUN do so for the reason they did before the site existed: **the browser is missing, not the source.** So the source-level shell gates now have a real subject to audit — §D65 over `apps/site`, §9.2's rogue-data and rogue-storage sweep extended to the shell's own files, D63's token rule read against app CSS, D64's honesty read against app copy, and D47's configuration rule read against the four names the deploy supplies. Each was falsified by planting the violation in the site's own files or its built artifact — 35 planted violations, 35 named failures, every restore byte-verified — and three of §D65's first-pass rules **DID NOT BITE** until they were widened to read string contents rather than the comment- and string-blanked text, because a `client:*` directive and a module specifier both live inside a string.
+
+#267 added two more halves to §D65, and both came with their own falsification runs (`npx -y tsx --test packages/ui/test/gates-falsify.test.ts`: **41 tests, 41 pass, 0 fail** — up from 37, and no `DID NOT BITE`). **D67's persistence door** (item 4): rule 4's storage ban was enforced by §9.2, which walks `packages/ui`, so *nothing in the gate set looked at the app* — planting `localStorage.setItem` in the dashboard island, `document.cookie` in the callback island, or a `sessionStorage.setItem` beside the one injected handoff each names its file and its rule. **The content-layout half** (item 5): planting a raw `@container (min-width: 48rem)`, a `@media (min-width: 60rem)`, or a `container-type` back into `apps/site/src/styles/site.css` each names the file, while the compliant cases — a `prefers-reduced-motion` query and a `rem` with no token behind it — are asserted to stay green in the same suite. The second of those two was measured **before** the rule existed: the pre-change §D65 reported PASS on the committed stylesheet that contained a real `@container` query and a `68ch` measure. Exit 0. DID NOT BITE — that was the finding, and the rule is the fix.
 
 What the site does *not* bring is a browser: no hydration was observed, no container was measured at 320 px, no axe run happened, and gate §9.7/§9.8/§9.9 stay exactly as honest as they were. 11's consequence is the rest of the enforcement, and it is worth repeating here because it is the one thing that stops the drift: **the
 first `packages/ui` commit is the contract package — `contract.ts`, `layout.ts`, `signals.ts` and gates

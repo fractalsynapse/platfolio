@@ -181,6 +181,31 @@ const MUTATIONS: readonly Mutation[] = [
     append: '\nexport const __rogueHandoff = (k: string, v: string): void => { sessionStorage.setItem(k, v); };\n',
     expect: /sessionStorage touch outside apps\/site\/src\/lib\/browser-capabilities\.ts/,
   },
+  /* ---------------------------------------------------------------- the content primitives (#267 item 5) */
+  {
+    // These three are the reason §D65 grew a CSS half. Before it, the *committed* `site.css` carried a real
+    // `@container (min-width: 48rem)` and gate §D65 reported PASS on it -- measured by running the pre-change
+    // gate against the pre-change stylesheet: exit 0. The primitive exists now, and a planted one must be named.
+    gateId: 'D65',
+    label: 'a raw @container planted back in app CSS',
+    file: 'apps/site/src/styles/site.css',
+    append: '\n@container (min-width: 48rem) {\n  .lede {\n    display: grid;\n  }\n}\n',
+    expect: /a width query in app CSS .*@container/,
+  },
+  {
+    gateId: 'D65',
+    label: 'a window breakpoint planted in app CSS',
+    file: 'apps/site/src/styles/site.css',
+    append: '\n@media (min-width: 60rem) {\n  .point {\n    padding-inline: var(--ui-space-4);\n  }\n}\n',
+    expect: /a width query in app CSS .*@media/,
+  },
+  {
+    gateId: 'D65',
+    label: 'a container declared in app CSS instead of by the primitive',
+    file: 'apps/site/src/styles/site.css',
+    append: '\n.status {\n  container-type: inline-size;\n}\n',
+    expect: /an app declaring its own container/,
+  },
   /* ---------------------------------------------------------------- the #259 screens */
   {
     // The walk that used to be `.ts`-only. Every grep gate reads through `listSources`, so if it skipped `.tsx`
@@ -507,6 +532,36 @@ test('the primitive table cannot lose its floor home without §9.11 saying which
     } finally {
       sandbox.restore();
       assert.ok(original.equals(fs.readFileSync(target)), 'primitives.ts not restored');
+    }
+  });
+});
+
+test('the app-CSS width rule is real in both directions: prefers-* is permitted, a width is not (#267 item 5)', () => {
+  // Rule 2 names `prefers-*` the only window input a component may read, and §9.3 already permits it inside the
+  // package. The half added for the shell has to make the same distinction, or the first accessible
+  // `prefers-reduced-motion` block in a marketing page turns a new gate red for the compliant case -- the
+  // `aria-live` story in 11 §9, arriving one file over. Both directions, one test.
+  sandbox.exclusive('D65 app-CSS width rule, both directions', () => {
+    const target = path.join(ROOT, 'apps/site/src/styles/site.css');
+
+    const permitted = sandbox.append('apps/site/src/styles/site.css',
+      '\n@media (prefers-reduced-motion: reduce) {\n  .site-brand {\n    text-decoration: none;\n  }\n}\n');
+    try {
+      assert.notEqual(fs.readFileSync(target, 'utf8'), permitted.toString(), 'the mutation changed nothing');
+      const run = runGate('D65');
+      assert.equal(run.code, 0, `the one window query rule 2 permits was refused:\n${run.output.slice(-700)}`);
+    } finally {
+      sandbox.restore();
+      assert.ok(permitted.equals(fs.readFileSync(target)), 'site.css not restored after the prefers-* case');
+    }
+
+    const rem = sandbox.append('apps/site/src/styles/site.css', '\n.hero h1 {\n  font-size: 2rem;\n}\n');
+    try {
+      const sized = runGate('D65');
+      assert.equal(sized.code, 0, `a rem with no token behind it was refused -- the gate is stricter than the rule it states:\n${sized.output.slice(-700)}`);
+    } finally {
+      sandbox.restore();
+      assert.ok(rem.equals(fs.readFileSync(target)), 'site.css not restored after the rem case');
     }
   });
 });

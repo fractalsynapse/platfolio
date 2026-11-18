@@ -3,7 +3,7 @@
  * only one: this text is not worth editing by hand, because every line reproduces from the token module.
  *
  * Source: packages/ui/src/tokens.ts (the module you are reading; this file is its output)
- * Input digest: sha256/ab82dec3c58b5c02
+ * Input digest: sha256/34535a830d56203b
  *
  * Reproduce it with `pnpm run ui:css`. `pnpm run ui:css:check` fails when this file stops matching what the
  * token module produces -- the same discipline `api:types:check` holds the API types to, for the same reason:
@@ -44,6 +44,7 @@
   --ui-target-secondary: 24px;
   --ui-gap-secondary: 8px;
   --ui-container-min: 320px;
+  --ui-measure-content: 68ch;
 
   --ui-color-bg: #ffffff;
   --ui-color-surface: #f6f7f9;

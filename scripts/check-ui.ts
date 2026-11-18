@@ -36,6 +36,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { LAYOUT_PRIMITIVE_SLOTS, LAYOUT_SLOTS, PRIMITIVES } from '../packages/ui/src/layout/primitives.ts';
+import { CONTENT_CLASSES, CONTENT_SLOTS, CONTENT_TABLE, type ContentPrimitive } from '../packages/ui/src/layout/content.ts';
 import { REPLAY_SIGNAL_IDS, SIGNAL_IDS } from '../packages/ui/src/signals.ts';
 import { componentById, documentProblems, registeredComponentIds } from '../packages/ui/src/registry.ts';
 import { WEB_BOUNDARY_DIR } from '../packages/ui/src/web/index.ts';
@@ -353,14 +354,16 @@ const FORBIDDEN_EVENTS: readonly (readonly [RegExp, string])[] = [
 
 {
   const g = gate('9.3', 'layout discipline');
-  // Every generated sheet this package ships. The third one arrived with the components: 11 §8's hit-target
-  // floor lives in `components/components.css`, and a layout gate that scanned only the two sheets that existed
-  // when it was written would have waved a width `@media` through the one the screens actually depend on.
-  const sheets = ['packages/ui/src/tokens.css', 'packages/ui/src/layout/layout.css', 'packages/ui/src/components/components.css']
+  // Every generated sheet this package ships. The third arrived with the components: 11 §8's hit-target floor
+  // lives in `components/components.css`, and a layout gate that scanned only the two sheets that existed when
+  // it was written would have waved a width `@media` through the one the screens actually depend on. The fourth
+  // is `layout/content.css` (#267 item 5), and it is in this list for the same reason: a sheet this gate cannot
+  // see is a sheet it does not audit, and the count below is an assertion rather than a `forEach`.
+  const sheets = ['packages/ui/src/tokens.css', 'packages/ui/src/layout/layout.css', 'packages/ui/src/layout/content.css', 'packages/ui/src/components/components.css']
     .filter((rel) => fs.existsSync(path.join(ROOT, rel)))
     .map((rel) => ({ rel, text: fs.readFileSync(path.join(ROOT, rel), 'utf8') }));
-  if (sheets.length < 3) {
-    fail(g, `only ${String(sheets.length)} of the 3 generated stylesheets are on disk -- run \`pnpm run ui:css\`; a sheet this gate cannot see is a sheet it does not audit`);
+  if (sheets.length < 4) {
+    fail(g, `only ${String(sheets.length)} of the 4 generated stylesheets are on disk -- run \`pnpm run ui:css\`; a sheet this gate cannot see is a sheet it does not audit`);
   } else {
     const hits: string[] = [];
     for (const sheet of sheets) {
@@ -375,8 +378,25 @@ const FORBIDDEN_EVENTS: readonly (readonly [RegExp, string])[] = [
         const media = /@media[^{]*\b(width|min-width|max-width|device-width|device-aspect-ratio)\b/i.exec(line);
         if (media) hits.push(`${sheet.rel}:${String(i + 1)}: width @media \`${line.trim()}\` — responsive comes from the container, not the window (rule 2)`);
       });
-      if (!/@container\s*\(/.test(body) && sheet.rel.endsWith('layout.css')) {
+      if (!/@container\s*\(/.test(body) && /(?:layout|content)\.css$/.test(sheet.rel)) {
         hits.push(`${sheet.rel}: contains no @container query, so the primitives declare a container nobody queries`);
+      }
+    }
+    // The content sheet, audited against its own table rather than against the screen matrix: a primitive with
+    // no rule in the sheet is a class a page can name and a browser will never style, and a measure spelled as
+    // a literal in the sheet is a second owner of the one number `tokens.ts` owns (D63).
+    const contentSheet = sheets.find((s) => s.rel.endsWith('layout/content.css'));
+    if (contentSheet !== undefined) {
+      const contentBody = stripCssComments(contentSheet.text);
+      for (const slot of CONTENT_SLOTS) {
+        const p: ContentPrimitive = CONTENT_TABLE[slot];
+        if (!contentBody.includes(`.${p.className} {`)) {
+          hits.push(`${contentSheet.rel}: emits no rule for .${p.className}, so ${slot} is a class a page may name and nothing styles`);
+        }
+      }
+      const literalMeasures = contentBody.match(/max-inline-size:\s*[^;]*\d+(?:\.\d+)?(?:ch|rem|px)/g) ?? [];
+      if (literalMeasures.length) {
+        hits.push(`${contentSheet.rel}: a measure spelled as a length (${literalMeasures.join(', ')}) — MEASURE in tokens.ts is the one owner, and the sheet references the token (D63)`);
       }
     }
     // Fork props, in source and in types: a prop named for a device is the matrix forked into two renders.
@@ -1021,11 +1041,30 @@ for (const assertion of TYPE_ASSERTIONS) {
         for (const decl of code.match(/font-family:[^;]+;/g) ?? []) {
           if (!decl.includes('var(--ui-font-')) hits.push(`${file.rel}: \`${decl.trim()}\` names a typeface rather than a --ui-font-* token (D63)`);
         }
-        // Lengths: `px` is refused and `rem`/`ch`/`fr` are not, with the reason here for a reviewer to read. The
-        // package itself spells container thresholds in rem (`PRIMITIVES[*].wideFromRem`, `components.css`'s own
-        // `0.25rem solid`), and there is no measure token in `tokens.ts`. A gate stricter than the rule it enforces
-        // is a gate that gets switched off, which is the failure mode 11 §9 names more than once.
+        // Lengths: `px` is refused and `rem`/`fr` are not, with the reason here for a reviewer to read. The
+        // package spells its thresholds in rem (`PRIMITIVES[*].wideFromRem`, `CONTENT_TABLE.columns.wideFromRem`,
+        // and `components.css`'s own `0.25rem solid` accent rule), so a gate stricter than the rule it enforces is
+        // a gate that gets switched off — the failure mode 11 §9 names more than once. `ch` is gone from this list
+        // of permitted units for one reason: the only `ch` an app had was the measure, and that is `MEASURE.content`
+        // in `tokens.ts` now, referenced by `ui-prose` (#267 item 5).
         if (/:\s*[^;]*\d+(\.\d+)?px/.test(code)) hits.push(`${file.rel}: a px length in app CSS — the spacing scale is --ui-space-* (D63)`);
+        // (5b) Rule 2, the half §9.3 could not reach: no width query in app CSS.
+        //
+        // §9.3 audits the four generated sheets, and this app had been hand-rolling `@container (min-width: 48rem)`
+        // and a `68ch` measure beside it — a composition decision with two owners, one of them unaudited, in the
+        // one file the screen gates do not cover because they were written for `packages/ui`. The content
+        // primitives in `layout/content.ts` are the replacement, and this is the refusal that keeps the replacement
+        // from decaying back: import `ui-prose`/`ui-columns`, or add a primitive to the table where the threshold
+        // is data a gate can read. `prefers-*` is still permitted, because rule 2 names it the only window input a
+        // component may read.
+        const widthQuery = /@(?:media|container)\s*\((?![^)]*prefers-)[^)]*\b(?:min-width|max-width|width|device-width|device-aspect-ratio)\b[^)]*\)/i;
+        const query = code.match(widthQuery);
+        if (query !== null) {
+          hits.push(`${file.rel}: a width query in app CSS (${query[0].trim()}) — thresholds belong to primitives in packages/ui (${CONTENT_CLASSES.join(', ')} are the content ones), and rule 2 refuses a second owner of one composition (#267 item 5)`);
+        }
+        if (/\bcontainer-type\s*:/.test(code)) {
+          hits.push(`${file.rel}: an app declaring its own container — the primitive that queries a width is the one that declares it (rule 2, and gate §9.3's equivalent inside the package)`);
+        }
         if (file.rel.endsWith('.css') && !file.text.includes(tokenSheet)) {
           hits.push(`${file.rel}: does not import ${tokenSheet} — app styles must build on the generated tokens, not beside them (D63)`);
         }
@@ -1092,6 +1131,7 @@ for (const assertion of TYPE_ASSERTIONS) {
         'one client:* per page, none on the landing route; no second transport, registry, token store or fetch in the shell; no spec path or route table typed into app code',
         'one persistence door (D67): sessionStorage appears only in the injected handoff, and localStorage/indexedDB/cookie appear nowhere',
         'no push vocabulary, no timer in the shell, no colour literal or redeclared token in app CSS, no committed endpoint',
+        'no width query and no hand-declared container in app CSS: the content primitives (' + CONTENT_CLASSES.join(', ') + ') are the only owner of a measure or a threshold (rule 2, #267 item 5)',
         fs.existsSync(dist) ? `and the built artifact was read too: zero scripts on /, one island on /dashboard, no Node-only chain in the ${String(chunksCount(dist))} emitted chunks` : 'artifact not built in this run (see the note above)',
       );
     }

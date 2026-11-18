@@ -205,6 +205,34 @@ from its components at 360 px viewport equals the set reachable at 1920 px (deri
 declarations; gate §9.11, which runs today over `ScreenDocument`s and each primitive's `floorSlots`, and which
 therefore compares *declared reachability* -- not rendered geometry, which is (c) and stays NOT RUN).
 
+### Content layout: what a *document* composes (added 2026-11-17, #267 item 5)
+
+The five primitives above compose a screen: `ComponentContract.slots` names them, `assertPlacement()` refuses a
+cell of the matrix, and §9.11's parity arithmetic walks `floorSlots`. A marketing page, a docs page, or the prose
+inside a sheet body need a different set of decisions — how wide a readable line is, what rhythm separates blocks,
+and when a group of blocks becomes columns — and those are **not** a sixth slot: making `measure` a slot a
+component claims to render in would be a claim about a component that is not true, and the matrix is the thing
+§9.11 and §9.7 are defined over. So they are their own table, `CONTENT_TABLE` in
+`packages/ui/src/layout/content.ts` — `ui-prose` (the measure plus a block rhythm) and `ui-columns` (one column at
+the floor, `tracks` when the container has room) — with the same containment discipline: the primitive declares
+`container-type: inline-size`, the threshold is a field (`wideFromRem`), the emitted `@container` query comes from
+the table, and nothing reads the window.
+
+The line length is a **token**, `MEASURE.content` in `tokens.ts`, emitted as `--ui-measure-content` (68ch) and
+referenced by the sheet rather than typed by it: the `ch` unit is the width of the `0` glyph in whatever typeface
+resolved, so the measure survives a font change and a fixed px width does not. Two primitives, both used by the
+route that had been hand-rolling them, is the whole surface — a third name nobody imports is the speculative
+abstraction this project's own instruction refuses.
+
+**Acceptance, content layout.** (e) A document's measure and column behaviour come from `CONTENT_TABLE`; an app
+stylesheet that writes a width `@media`/`@container` query, or declares its own `container-type`, is refused by
+gate §D65 (measured: before the rule existed, `ui:check` exited 0 over a committed `apps/site` stylesheet holding
+exactly those — **DID NOT BITE**, which is why the rule and its three planted mutations landed together with the
+primitive, and why the compliant `prefers-reduced-motion` case is asserted in the same test). (f) `prefers-*`
+remains the only window query permitted anywhere. (g) The generated `content.css` reproduces from the table byte for
+byte (`ui:css:check`), and §9.3 audits four sheets, not three — a count is asserted, so a new sheet cannot be added
+to the package and omitted from the gate.
+
 ## 3. Signals registry
 
 Components must react to each other (context selection is the canonical case: change instance, every
@@ -550,7 +578,10 @@ CI gates (mechanical, block merge) and the reviewer pass (one screen, ten questi
    `indexedDB`, `window.`, `document.` in `packages/ui` presentational sources outside `web/` and the SDK's
    transport driver; zero timer-based polling outside the freshness primitive. *Method: lint rule.*
 3. **Layout discipline.** Zero `@media` width queries and zero `isMobile`-style props in `packages/ui`;
-   every layout primitive declares `container-type`. *Method: grep gate in the build.*
+   every layout primitive declares `container-type`, and so does every *content* primitive (11 §2 content layout);
+   the grep runs over all four generated sheets -- tokens, layout, content, components -- because a sheet the gate
+   cannot see is a sheet it does not audit. *Method: grep gate in the build.* App CSS is audited for the same shapes
+   by §D65, which refuses a width query or a hand-declared container in `apps/site`.
 4. **Typed signals only.** Zero raw `EventTarget`/`dispatchEvent`/string-event subscriptions outside
    `signals.ts`; every signal in the table has an explicit `retention`; every `replay` payload passes the
    value-bearing walk. *Method: lint rule + registry unit tests (§3 acceptance).*
