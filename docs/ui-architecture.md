@@ -590,4 +590,49 @@ against this file.
    in the realm's `redirect_uris` and `webOrigins` as `<origin>/callback`, which is what `identity:seed` derives
    from that one variable rather than from anything the UI may invent. Then DNS plus certificates for whatever host
    the deploy names, and `PLATFOLIO_SITE_ORIGIN` set to that same origin (D58: one name, one row, already declared).
-   Until then the honest sentence about the UI is: built, gated, undeployed, unrendered.
+   **Item 3 of #267 tried exactly this and it is BLOCKED, for two independent reasons, and the entry was reverted
+   rather than weakened around** (`compose.yaml` is byte-identical to the copy taken before the edit, `cmp`-verified;
+   `platform:plan`, `check-project` and `packages/manifest/test/compose.test.ts` all return to exit 0 after the
+   revert, and they were run to confirm it).
+
+   What was written: a `site` service with `build: {context: ., dockerfile: apps/site/Dockerfile}`,
+   `expose: ["4321"]`, a healthcheck that GETs `/` in the `api`/`identity` spelling
+   (`node -e "fetch('http://127.0.0.1:4321/').then(r=>process.exit(r.ok?0:1))…"`), `public: true`,
+   `domains: [platfolio.dev]`, `environments: [production, staging]`, and
+   `x-platfolio.environmentValues.staging` carrying the three values that differ per environment (D56). Measured
+   against that tree:
+
+   | Command | Exit | Quoted message |
+   | --- | --- | --- |
+   | `npx -y tsx scripts/platform-deploy.ts` (`platform:plan`, dry run) | **1** | `services.site.image: no-artifact -- service "site" builds an image and none has been reported for it: publish one (POST /api/v1/instances/{instanceId}/artifacts) and the plan resolves. A digest is deliberately not committed to source control (D54)` |
+   | `npx -y tsx --test packages/manifest/test/compose.test.ts` | **1** | `platfolio can describe and plan its own deployment` fails: `["no-artifact"]` vs `[]` (in the manifest+auth set: 121 tests, 120 pass, 1 fail) |
+   | `npx -y tsx scripts/check-project.ts` | **1** | `compose.dev.yaml: platform service "site" has no dev entry -- local up would run without it while the plan expects it (D50)` |
+   | `npx -y tsx scripts/check-environment-registry.ts` | **0** | 88 variables, all referenced -- the site's four names were already declared, so the registry is not an obstacle |
+
+   **Blocker one: there is no published image, and the honest answer is not a digest in source.** The refusal lives
+   in `packages/manifest/src/compose.ts:204-212` (a `build:` service whose image resolves to nothing), and the CLI
+   reaches it because `scripts/platform-deploy.ts:50` calls `parseCompose([base, overlay])` with **no**
+   `resolveArtifact` option -- although the option exists and is used on the server half
+   (`apps/control-plane/src/capabilities.ts:488-490` builds the resolver from `store.listArtifacts(id)`, which is
+   precisely why a tenant fork needs no `compose.prod.yaml`, D54). So a real representation of "planned but not yet
+   published" exists in the *format* and does not exist in this repository's own deploy path, because there is no
+   artifact to resolve. What the publishing workflow has to produce, concretely: an OCI image built from
+   `apps/site/Dockerfile` and pushed to a named registry repository (declared in `x-platfolio.release` beside the
+   control plane's, **and** added to `check-project.ts`'s `PUBLISHED_IMAGES` set -- D49 refuses an org repository
+   named in configuration that is neither one of the four projects nor one of the two published images), then its
+   digest delivered either by `POST /api/v1/instances/{id}/artifacts` plus an artifact resolver in
+   `platform-deploy.ts`, or by teaching `scripts/render-platform-overlay.ts` (one hardcoded `IMAGE` today, line 17)
+   to emit a second pin into `compose.prod.yaml`. Writing a digest by hand instead is the defect this file's own
+   history records twice -- including the one where the overlay carried *a real digest of a deleted service's
+   bytes and every check passed* -- so it was not done, and it is not the fix anyone should reach for later.
+
+   **Blocker two: D62's staging origin is not expressible as a domain.** Staging hostnames are *derived*, not
+   declared: `build-plan.ts:45,83` maps each production domain through `stagingHost(host, stagingPrefix)` with the
+   schema default `staging-` (`packages/manifest/src/schema.ts:138`). Measured directly:
+   `stagingHost("platfolio.dev", "staging-")` → `staging-platfolio.dev`, while `compose.yaml:111` already declares
+   staging's UI origin as `https://preview.platfolio.dev` (D62). Landing the entry as written would therefore put
+   two different staging UI hostnames in one platform description -- the host the provider is asked to bind, and
+   the origin the API admits and the realm redirects to -- which is a second copy of one fact, the pattern AGENTS.md
+   refuses. The fix is a composition-model change (a per-environment domain, or a `dns` field that lets a service
+   name its staging host) owned by `packages/manifest`, not a compose edit that quietly invents the second name.
+   Until both blockers are settled, the honest sentence about the UI is: built, gated, undeployed, unrendered.
