@@ -173,6 +173,36 @@ failure modes — from client-only storage, and a secret value never enters it.
   **MUST NOT** let a component touch `localStorage` / `sessionStorage` / IndexedDB directly; the draft store is
   the one door (11 §1 rule 3).
 
+**The one exception, and it is decided rather than discovered (D67).** PKCE cannot work without
+`code_verifier` surviving the redirect to the issuer and back, and no in-memory value survives a navigation. The
+maintainer's answer, 2026-11-17: **the shipped behaviour is the decision** — the verifier and `state` go to
+`sessionStorage`, are read **once**, and are dropped **before the exchange is attempted**; nothing else in the
+auth path is persisted, at any lifetime, anywhere. The cost is accepted in the open: a person who reloads signs in
+again. That is one extra round trip, not a security regression, because the value that persists grants nothing
+without the single-use code that arrives beside it, and the code is spent in the same request.
+
+- **MUST** keep the handoff single-use and delete it on read, in `web/browser-auth.ts`'s `complete`, and **MUST**
+  name the permitted location in `web/browser-auth-policy.ts` as data (`HANDOFF_KEYS`, `HANDOFF_STORAGE`) rather
+  than as a comment beside the code that decided it — the policy module used to enumerate access, refresh and id
+  tokens and be silent about the verifier, and that silence was the defect D67 closes.
+- **MUST NOT** move the pair to a cookie. `access-control-allow-credentials` is never emitted by the transport
+  (`packages/kernel/src/cors.ts`, refused on purpose in both `packages/kernel/test/cors.test.ts` and
+  `apps/control-plane/test/cors.test.ts`), so a cookie plan would be asking the platform to loosen a CORS posture
+  to buy the UI a convenience — and `access_token`/`refresh_token` in any browser-persisted store collides with
+  `TOKEN_STORAGE`, which is the invariant, not a default.
+- **MUST NOT** move the pair to `localStorage`. It outlives the tab that minted it, and a single-use value in a
+  store that survives its session is a replayable constant.
+- **MUST** state the residual limit, because `sessionStorage` is browser-persistent state: anything that can run
+  script on this origin can read the pair before it is spent. This choice bounds lifetime and kind, not a
+  compromised page — the mitigation for that is rule 6, and it is not a storage class.
+
+**Enforced by (the handoff half).** `packages/ui/test/browser-auth-parity.test.ts`: the policy data is asserted
+not to widen (a `cookie: true` there fails the build, measured), a completed exchange leaves the tab holding
+**nothing**, a replayed callback after that answers `no-handoff` without reaching the token endpoint, and the
+mid-flow reload finishes the exchange exactly once with the verifier the tab was holding. `ui:check` §D65 reads
+the shell for the same rule: `sessionStorage` appears in `apps/site` only in `src/lib/browser-capabilities.ts`,
+the one injected door, and `localStorage`/`indexedDB`/`document.cookie` appear nowhere in its source.
+
 **Enforced by.** Today, the mechanism is real and gated: `buildSecretsPanel` refuses its own output if
 `findValueBearingProps` finds a value-bearing property, and
 `packages/page-schema/test/secrets-panel.test.ts` asserts "the built page carries no value-bearing property
@@ -416,7 +446,8 @@ moved while this file was being written, and it is worth keeping as evidence for
 | `npx -y tsx scripts/check-contracts.ts` | 0 | contracts surface matches baseline (4353 declarations, derived 5.1.0) — a UI cannot quietly widen the shape it renders |
 | `npx -y tsc --noEmit -p tsconfig.json` | 0 | the tree type-checks (it exited 2 earlier in this same session on another agent's in-flight test edit — see the note above, and [§ Open gaps](#open-gaps-this-file-refuses-to-paper-over) item 4 on why numbers age) |
 | `npx -y tsc --noEmit -p apps/site/tsconfig.json` | 0 | the shell compiles under its own project: `jsx`, `DOM` and `astro/client`, while the root program stays DOM-free — the three-way split `scripts/check-project.ts`'s coverage rule now holds in step (238 source files, 238 claimed, one owner each) |
-| `pnpm run site:build` (root wrapper → `pnpm --filter @platfolio/site build`) | 0 with the four names set; **1, naming `PLATFOLIO_SITE_ORIGIN`, without them** | the artifact exists, and D47 is an outcome rather than a policy: with no origin supplied the build refuses instead of inventing one. Read `dist/`, do not trust this row: `/index.html` ships **zero** `<script>` elements and zero island markers; `/dashboard/index.html` and `/callback/index.html` carry exactly one `<astro-island>` each; across every emitted chunk exactly one `polled` and one `createShellContext`. One literal `fetch(` survives minification and it is the shell's own issuer token request (`lib/browser-capabilities.ts`); the SDK transport reaches the network through `config.fetchImpl ?? fetch`, which the bundler renames, so the artifact count is *not* a claim that one connection exists — the rule-1 claim lives in `poll.ts` being the only transport, and §9.2 refusing `fetch(` anywhere else in the package. Measured 2026-11-17 by `apps/site/test/build-output.test.ts`, which builds and then reads — a *build* measurement, not a browser one |
+ | `pnpm run site:build` (root wrapper → `pnpm --filter @platfolio/site build`) | 0 with the four names set; **1, naming `PLATFOLIO_SITE_ORIGIN`, without them** | the artifact exists, and D47 is an outcome rather than a policy: with no origin supplied the build refuses instead of inventing one. Read `dist/`, do not trust this row: `/index.html` ships **zero** `<script>` elements and zero island markers; `/dashboard/index.html` and `/callback/index.html` carry exactly one `<astro-island>` each; across every emitted chunk exactly one `polled` and one `createShellContext`. One literal `fetch(` survives minification and it is the shell's own issuer token request (`lib/browser-capabilities.ts`); the SDK transport reaches the network through `config.fetchImpl ?? fetch`, which the bundler renames, so the artifact count is *not* a claim that one connection exists — the rule-1 claim lives in `poll.ts` being the only transport, and §9.2 refusing `fetch(` anywhere else in the package. Measured 2026-11-17 by `apps/site/test/build-output.test.ts`, which builds and then reads — a *build* measurement, not a browser one |
+| `npx -y tsx --test packages/ui/test/browser-auth-parity.test.ts` | 0 | the auth seam's one-policy property proved as wire parity — `crypto.subtle` against the operator's `createHash` over fixed and random verifiers — with state compared before any redeem and the verifier spent once. And D67's half, since 2026-11-17: the handoff policy is *data* that a widening fails (`cookie: true` on the verifier is a build failure, measured), a completed exchange leaves the tab holding **nothing**, a replayed callback after that answers `no-handoff` without reaching the token endpoint, and the mid-flow reload finishes the exchange exactly once with the verifier the tab was holding — which is the reload case stated correctly instead of as "the reload discards the verifier", which is not what `sessionStorage` does |
 | `docker build -f apps/site/Dockerfile` (legacy builder, four `--build-arg`s) | 0 | the image assembles: whole-workspace frozen install, the Astro build inside the layer, `chown` before the `USER node` drop. It is also the check that caught a defect no host run could: the filtered install (`--filter @platfolio/site...`) left `@platfolio/page-schema/page` unresolvable, because with no workspace edge the dependency graph stops at this app while the alias still drags `packages/ui/src/**` into the bundle — the host looked fine only because the checkout was already installed whole |
 | `docker run` of that image, then HTTP against it | 200 on `/`, `/dashboard`, `/callback`, `/config.js` | the strongest tier this change reaches without a browser: the container rendered `config.js` from *its* environment and served it (`window.__PLATFOLIO_SITE_CONFIG__ = {…three endpoints, no secret…}`), the served `/` had zero `<script>` and zero island markers, the served `/dashboard` had exactly one `<astro-island>` whose serialized props were the five endpoint fields and nothing token-shaped. And the refusal is real: started with `PLATFOLIO_URL` as plain http on a non-loopback host, the container printed the named problem and **did not serve** |
 | `npx -y tsx --test apps/site/test/*.test.ts` | 0 | the shell's own logic: config resolution and its refusals, the runtime overlay's precedence and validation, one `client:*` per page, `createShellContext` only in an island, no `endpoints:` route table and no `/api/v1` literal in app code |

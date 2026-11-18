@@ -155,6 +155,32 @@ const MUTATIONS: readonly Mutation[] = [
     append: '\nexport const liveLabel = (): string => "live";\n',
     expect: /a push-implying state word/,
   },
+  /* ---------------------------------------------------------------- the D65 shell, and D67's one persistence door */
+  {
+    // Rule 4's storage ban was only ever enforced inside `packages/ui` (§9.2 walks that package), so the *app* was
+    // the uncovered half of the sentence "nothing credential-shaped persists". D67 settled the verifier question;
+    // these three are the gate that stops it being re-opened by an island that wanted a session to survive a
+    // reload -- which is exactly the convenience that turns into a token store.
+    gateId: 'D65',
+    label: 'a localStorage write in the shell',
+    file: 'apps/site/src/islands/dashboard-island.tsx',
+    append: '\nexport const __roguePersist = (k: string, v: string): void => { localStorage.setItem(k, v); };\n',
+    expect: /localStorage in the shell/,
+  },
+  {
+    gateId: 'D65',
+    label: 'a cookie write in the shell',
+    file: 'apps/site/src/islands/callback-island.tsx',
+    append: '\nexport const __rogueCookie = (): void => { document.cookie = "platfolio=1"; };\n',
+    expect: /document\.cookie in the shell/,
+  },
+  {
+    gateId: 'D65',
+    label: 'a second sessionStorage door beside the injected handoff (D67)',
+    file: 'apps/site/src/islands/dashboard-island.tsx',
+    append: '\nexport const __rogueHandoff = (k: string, v: string): void => { sessionStorage.setItem(k, v); };\n',
+    expect: /sessionStorage touch outside apps\/site\/src\/lib\/browser-capabilities\.ts/,
+  },
   /* ---------------------------------------------------------------- the #259 screens */
   {
     // The walk that used to be `.ts`-only. Every grep gate reads through `listSources`, so if it skipped `.tsx`

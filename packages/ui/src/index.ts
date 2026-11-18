@@ -118,7 +118,8 @@ export {
  * `web/browser-auth-policy.ts` for why the declarations live there and not in `scripts/browser-auth.ts`).
  *
  * These are the words a shell must not retype: the client's name, its scope, its callback path, the PKCE method,
- * where a token may live and what logout clears. `apps/site` reads `WEB_CLIENT_ID` and `REQUIRED_SCOPE` from here
+ * where a token may live, what logout clears, and — since D67 — the one pair of values that is *not* a token and
+ * may still be persisted across the redirect. `apps/site` reads `WEB_CLIENT_ID` and `REQUIRED_SCOPE` from here
  * rather than from the operator script, because a client bundle that imports `scripts/` imports `node:crypto`, and
  * that is the failure the policy module's header records. `web/browser-auth.ts`'s own `authPolicy` object is the
  * same facts as one value for a reviewer; these are the same facts for code.
@@ -126,6 +127,8 @@ export {
 export {
   API_CLIENT_ID,
   CALLBACK_PATH,
+  HANDOFF_KEYS,
+  HANDOFF_STORAGE,
   LOGOUT_CLEAR,
   PKCE_METHOD,
   RECOMMENDED_STORE,
@@ -137,6 +140,7 @@ export {
   isTokenShapedName,
   refreshAt,
   refreshSkewSeconds,
+  type HandoffField,
   type PkcePair,
   type StorageLocation,
   type TokenKind,

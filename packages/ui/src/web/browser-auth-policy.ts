@@ -65,6 +65,51 @@ export function isPkceVerifier(verifier: string): boolean {
   return /^[A-Za-z0-9\-._~]{43,128}$/.test(verifier);
 }
 
+/**
+ * The one thing a platfolio browser client may persist, and the one reason it may — **D67**.
+ *
+ * `TOKEN_STORAGE` answers where a *token* may live and its answer is `inMemory`, only. It said nothing about the
+ * PKCE verifier and the `state` value, and those two cannot be answered the same way: PKCE requires
+ * `code_verifier` to survive the navigation from `/dashboard` to the issuer and back to `/callback`, and a
+ * module-scope bag does not survive a navigation. Before this declaration the silence was filled locally in
+ * `web/browser-auth.ts`, which had picked `sessionStorage` on its own — a decision with no owner, which is the
+ * shape this repository keeps meeting, and the one the maintainer was asked about and answered.
+ *
+ * **The shipped behaviour is the decision.** The pair is written to `sessionStorage`, read **once**, and deleted
+ * **before the exchange is attempted**. Its cost is accepted here rather than discovered later: a person who
+ * reloads mid-session signs in again, because the session was never in storage and the handoff that was is spent
+ * — one extra round trip to the issuer. What it buys is the invariant: nothing credential-shaped persists in a
+ * browser platfolio does not administer (D4, D53, rule 4), and a verifier that has been read grants nothing
+ * without the single-use code that arrives beside it, which the realm has already spent.
+ *
+ * Two alternatives were refused, not deferred, and the refusals are mechanical rather than rhetorical:
+ *
+ *  - **A cookie — for the verifier, and a fortiori for a token.** The transport never emits
+ *    `access-control-allow-credentials`, and that is tested on both sides of the seam
+ *    (`packages/kernel/test/cors.test.ts`, `apps/control-plane/test/cors.test.ts`), because bearer-token auth must
+ *    not admit a visitor's ambient cookies to every origin on the list. A cookie-holding client would be asking the
+ *    platform to change its CORS posture to buy the UI a convenience, and a persisted `access_token`/`refresh_token`
+ *    collides head-on with `TOKEN_STORAGE`, which is the invariant, not a default to route around.
+ *  - **`localStorage`.** It outlives the tab. A single-use value in a store that survives the session that minted
+ *    it is a replayable constant sitting where every extension on that origin can read it.
+ *
+ * The limit of the decision, stated because `sessionStorage` is still browser-persistent state: anything that can
+ * run script on this origin can read the pair before it is spent. This choice bounds *lifetime* (one tab, one
+ * navigation, spent on read) and *kind* (a handoff, never a token); it does not mitigate an injected script, and
+ * the mitigation for that is rule 6's build-time registry and the refusal of runtime-loaded code, not a storage class.
+ *
+ * The key names live here so there is one spelling of them; `web/browser-auth.ts` used to own them locally.
+ */
+export const HANDOFF_KEYS = { verifier: 'platfolio.pkce.verifier', state: 'platfolio.pkce.state' } as const;
+
+/** The policy as data, so a test can refuse a new spelling instead of reading a comment. */
+export const HANDOFF_STORAGE = {
+  verifier: { sessionStorage: true, localStorage: false, cookie: false, platfolioDatabase: false, reads: 'once', dropped: 'before the exchange' },
+  state: { sessionStorage: true, localStorage: false, cookie: false, platfolioDatabase: false, reads: 'once', dropped: 'before the exchange' },
+} as const;
+
+export type HandoffField = keyof typeof HANDOFF_STORAGE;
+
 /* ------------------------------------------------------------------ token lifecycle policy */
 
 /**

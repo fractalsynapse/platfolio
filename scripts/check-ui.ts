@@ -926,6 +926,31 @@ for (const assertion of TYPE_ASSERTIONS) {
         for (const rel of inSrc((f) => pattern.test(stripComments(f.text)))) hits.push(`${rel}: ${why}`);
       }
 
+      // (2b) D67: the shell has one persistence door, and only one pair of values may go through it.
+      // Rule 4's "a component does not touch localStorage/sessionStorage/IndexedDB" is enforced by §9.2, which
+      // walks `packages/ui` — so nothing in the gate set looked at the *app*, and an `apps/site` island could
+      // have persisted a token in `localStorage` and stayed green. The decision D67 recorded (the verifier and
+      // `state` in `sessionStorage`, read-once-then-dropped, nothing else at any lifetime) is the rule this
+      // half enforces. The door is the injected `HandoffStore`, in one named file, for the same reason `fetch`
+      // has exactly one named file above: a second door is a second policy.
+      const HANDOFF_DOOR = 'apps/site/src/lib/browser-capabilities.ts';
+      for (const file of siteFiles) {
+        if (!/\.(?:ts|tsx|astro)$/.test(file.rel)) continue;
+        const clean = stripComments(file.text);
+        for (const [pattern, name] of [
+          [/\blocalStorage\b/, 'localStorage'],
+          [/\bindexedDB\b/, 'indexedDB'],
+          [/\bdocument\.cookie\b/, 'document.cookie'],
+        ] as const) {
+          if (pattern.test(clean)) {
+            hits.push(`${file.rel}: ${name} in the shell — apps/site owns no browser persistence: TOKEN_STORAGE says inMemory for every token, and D67 says one single-use handoff behind one injected door is the entire allowance (rule 4)`);
+          }
+        }
+        if (/\bsessionStorage\s*[.[]/.test(clean) && file.rel !== HANDOFF_DOOR) {
+          hits.push(`${file.rel}: a sessionStorage touch outside ${HANDOFF_DOOR} — the PKCE handoff has exactly one door (D67); a second one is a second policy about what outlives the tab`);
+        }
+      }
+
       // (3) Rule 1 and #258, over the app: the only `fetch` allowed in the shell is the issuer token call the SDK
       // cannot make for itself, and it may not be pointed at the control plane. A hand-supplied route table or a
       // typed `/api/v1/...` would be a second description of the API living in UI code.
@@ -1065,6 +1090,7 @@ for (const assertion of TYPE_ASSERTIONS) {
         `${String(siteFiles.length)} shell files read (pages, islands, lib, styles)`,
         `${String(doors.length)} createShellContext call site(s): ${doors.join(', ') || 'none'}`,
         'one client:* per page, none on the landing route; no second transport, registry, token store or fetch in the shell; no spec path or route table typed into app code',
+        'one persistence door (D67): sessionStorage appears only in the injected handoff, and localStorage/indexedDB/cookie appear nowhere',
         'no push vocabulary, no timer in the shell, no colour literal or redeclared token in app CSS, no committed endpoint',
         fs.existsSync(dist) ? `and the built artifact was read too: zero scripts on /, one island on /dashboard, no Node-only chain in the ${String(chunksCount(dist))} emitted chunks` : 'artifact not built in this run (see the note above)',
       );
