@@ -628,13 +628,15 @@ against this file.
    history records twice -- including the one where the overlay carried *a real digest of a deleted service's
    bytes and every check passed* -- so it was not done, and it is not the fix anyone should reach for later.
 
-   **Blocker two: D62's staging origin is not expressible as a domain.** Staging hostnames are *derived*, not
-   declared: `build-plan.ts:45,83` maps each production domain through `stagingHost(host, stagingPrefix)` with the
-   schema default `staging-` (`packages/manifest/src/schema.ts:138`). Measured directly:
-   `stagingHost("platfolio.dev", "staging-")` → `staging-platfolio.dev`, while `compose.yaml:111` already declares
-   staging's UI origin as `https://preview.platfolio.dev` (D62). Landing the entry as written would therefore put
-   two different staging UI hostnames in one platform description -- the host the provider is asked to bind, and
-   the origin the API admits and the realm redirects to -- which is a second copy of one fact, the pattern AGENTS.md
-   refuses. The fix is a composition-model change (a per-environment domain, or a `dns` field that lets a service
-   name its staging host) owned by `packages/manifest`, not a compose edit that quietly invents the second name.
-   Until both blockers are settled, the honest sentence about the UI is: built, gated, undeployed, unrendered.
+   **Blocker two (RESOLVED at the model, 2026-11-18): D62's staging origin is now expressible as a domain.** It
+   used to be that staging hostnames were *derived*, not declared: `build-plan.ts` mapped each production domain
+   through `stagingHost(host, stagingPrefix)` with the schema default `staging-`, and `stagingHost("platfolio.dev",
+   "staging-")` → `staging-platfolio.dev` -- while `compose.yaml:111` declares staging's UI origin as
+   `https://preview.platfolio.dev` (D62). Landing the entry as written would have put two different staging UI
+   hostnames in one platform description, the second-copy-of-one-fact pattern AGENTS.md refuses. A service may now
+   declare `environmentDomains.staging` (D68, `packages/manifest`) to name the host that environment serves,
+   winning the derivation; `packages/manifest/test/fixtures/site-per-env-compose.yaml` proves the exact stanza
+   parses, validates and plans `preview.platfolio.dev` as the site's staging host, and the model changes are
+   committed. **This does not deploy the site.** The digest blocker above still stands, so the site service is
+   expressible but not yet publishable, and no origin resolves. Until blocker one is settled the honest sentence
+   about the UI stays: built, gated, undeployed, unrendered.
