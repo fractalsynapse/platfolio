@@ -183,6 +183,11 @@ test('refused: production listed in environmentDomains, where domains is already
   assert.ok(codes(m).includes('environment-domains-production-is-domains'), JSON.stringify(validateManifest(m)));
 });
 
+test('refused: an empty declared host list for an environment the service runs in', () => {
+  const m = withApi(web(), { environmentDomains: { staging: [] } });
+  assert.ok(codes(m).includes('environment-domains-empty'), JSON.stringify(validateManifest(m)));
+});
+
 test('refused: a declared staging host identical to what derivation produces', () => {
   // Redundant by construction: stagingHost("api.example.com","staging-") == "staging-api.example.com".
   const derived = stagingHost('api.example.com', 'staging-');
