@@ -189,6 +189,52 @@ reachable and the host *pattern* (`app`, `api`, wildcard and apex policy); the i
 per environment; the plan resolves the two into the concrete hosts the provider already consumes. Until OD12
 lands, treat literal hosts in manifests and templates as examples — never copy one into a platform definition
 intended for more than one tenant.
+
+### Per-environment hosts: `environmentDomains` (D68)
+
+A service may name the host it serves in a **non-production** environment, the same way it may name a
+**per-environment value** (D56's `environmentValues`): same service, same file, environment as a key. The field
+is `environmentDomains`, a map from an environment name to the full host list that environment serves:
+
+```yaml
+    site:
+      x-platfolio:
+        public: true
+        domains: [platfolio.dev]                     # the production host list -- one home (D50)
+        environments: [production, staging]
+        environmentDomains:
+          staging: [preview.platfolio.dev]           # staging's host, said once (D68)
+```
+
+`buildPlan` resolves every host through `effectiveDomains()` in `packages/manifest/src/environments.ts`: **a
+declared list wins over derivation; absent a declaration the host is derived exactly as before** -- production
+uses `domains` verbatim, every other environment passes each host through `stagingHost()` (D57). Because the plan
+builder and `validateManifest` share that one function, the two can never disagree about what a service's staging
+host is.
+
+Why a sibling field and not a second shape of `domains`. The alternative was to let `domains` be either the flat
+list it is today *or* a map keyed by environment. That is the same fact in two spellings, and it is unsafe here
+for a mechanical reason: `compose.ts` maps the field with `Array.isArray(svcX.domains) ? svcX.domains : []`, so a
+map written under `domains` would be read as "no domains" -- a service planning with zero hosts, silently, the
+exact shape that swallowed `public: true` once before. `validateManifest` therefore refuses a map-shaped `domains`
+by name; `environmentDomains` is the only spelling of a per-environment host.
+
+Precedence and refusal, stated rather than guessed. Declared hosts win over derivation. A declaration that merely
+restates what derivation would produce is **refused** as redundant -- it is a second copy of the rule it overrides
+and drifts the moment the prefix or the base host moves. `production` is refused as a key (its hosts already live
+in `domains`). An empty list, a value that is not a hostname, an environment the platform does not enable or the
+service is not deployed to, and a host a declaration binds that is already bound in another environment of the
+same service or by another service are all refused, each naming the service, the environment, both values and the
+fix. There is no "unknown" fallback: where the model cannot state a host safely, it refuses.
+
+**Limits reported, not papered over.** This is a model change only: platfolio's own `site` service still cannot
+deploy, blocked separately by D54 (a `build:` service with no reported artifact). And `dns.apexPolicy` is
+declarative -- neither `buildPlan` nor `validateManifest` inspects whether a bound host is an apex that cannot be
+a plain CNAME -- so a per-environment host is exactly as unchecked against the apex rules as a `domains` host
+already was; `12 § Apex and wildcards` remains the authority, and making apex a *validated* fact is a separate
+change to `packages/manifest`. See [D68](01-product-and-decisions.md) and
+[12 § Where a domain is defined](12-domains-and-dns.md).
+
 ## Secrets
 
 `value_source` is a closed enum, and it is the mechanism that keeps decision D4 true:

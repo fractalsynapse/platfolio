@@ -1,4 +1,5 @@
 import { CapabilitySchema, RequiredCapabilitySchema } from '@platfolio/contracts';
+import { DEFAULT_STAGING_PREFIX } from './environments.ts';
 import { z } from 'zod';
 
 /** Schema version this renderer understands. Bumped only by breaking manifest changes. */
@@ -42,6 +43,30 @@ const Service = z.object({
    * a literal in either map.
    */
   environmentValues: z.record(z.string(), z.record(z.string(), z.string())).default({}),
+  /**
+   * Hosts that differ PER ENVIRONMENT (D68). Keys are environment names this service is placed in; the value is
+   * the full host list that environment serves, replacing derivation for that environment only.
+   *
+   * This is the sibling of `environmentValues`, and it is deliberately the same SHAPE -- environment as a key,
+   * the same service, the same file (D56). A staging environment whose hostnames are only ever what
+   * `stagingHost()` derives is a staging environment that cannot name a host the rule did not guess: D62 serves
+   * platfolio's own staging UI at `preview.platfolio.dev`, while D57's `{name}-{env}` family derives
+   * `staging-platfolio.dev`. A flat `domains` list has no way to say which of the two is staging's, so landing
+   * the site service as written would state one environment's host twice (see
+   * [docs/ui-architecture.md § Open gaps](../../../docs/ui-architecture.md), gap #6 blocker two).
+   *
+   * WHY A SIBLING AND NOT A POLYMORPHIC `domains` (the alternative considered and refused). Option (a) was to
+   * let `domains` be either the flat list it is today OR a map keyed by environment. That is the same fact in two
+   * spellings -- the exact failure this repository has spent the week removing -- and it is unsafe here for a
+   * mechanical reason: the compose adapter maps service fields with `Array.isArray(svcX.domains) ? svcX.domains
+   * : []`, so a map written under `domains` would be read as "no domains" and the service would plan with zero
+   * hosts, silently. `validateManifest` refuses a map-shaped `domains` by name for that reason. `environmentDomains`
+   * is the only spelling; production hosts stay `domains` verbatim (refused as a key here, because they already
+   * have a home), and every declared list must differ from what derivation would produce -- a declared host that
+   * merely restates `stagingHost()` is refused rather than permitted, so the declaration cannot become a second
+   * copy of the rule it overrides.
+   */
+  environmentDomains: z.record(z.string(), z.array(z.string().min(1))).default({}),
   /** `external` = an upstream image platfolio hosts but does not develop; production-only by default. */
   ownership: z.enum(['maintained', 'external']).default('maintained'),
   domains: z.array(z.string().min(1)).default([]),
@@ -135,7 +160,7 @@ export const ManifestSchema = z.object({
        * How a staging host is derived from a declared production host. Rendered explicitly rather than
        * left to provider magic: a service present in both environments cannot claim the same host twice.
        */
-      stagingPrefix: z.string().min(1).default('staging-'),
+      stagingPrefix: z.string().min(1).default(DEFAULT_STAGING_PREFIX),
     }).strict().optional(),
     lifecycle: z.object({
       onSuspend: z.enum(['scale-to-zero']).default('scale-to-zero'),

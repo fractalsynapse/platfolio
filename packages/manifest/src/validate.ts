@@ -1,5 +1,6 @@
 import { ManifestSchema, RENDERER_VERSION, SUPPORTED_API_VERSIONS } from './schema.ts';
-import { enabledEnvironments, serviceEnvironments } from './environments.ts';
+import { DEFAULT_STAGING_PREFIX } from './environments.ts';
+import { enabledEnvironments, serviceEnvironments, stagingHost, effectiveDomains } from './environments.ts';
 import { satisfiesRange } from '@platfolio/contracts';
 import type { Manifest, ServiceSpec } from './schema.ts';
 
@@ -180,6 +181,85 @@ export function validateManifest(unknown: unknown): Issue[] {
           code: 'wildcard-conflict',
           message: `in "${env}": "${host}" is already covered by "*.${parent}" owned by service "${record.wildcard}"; the provider cannot overlap a wildcard with a concrete host on different services`,
         });
+      }
+    }
+  }
+
+  // 3b. Per-environment domains (D68). The host a service serves in each environment, said once. Derivation
+  // (`stagingHost`) is the fallback; a declaration wins it. Everything refused here is a case the model cannot
+  // state safely without a second copy of one fact, so it is refused rather than defaulted -- the project's
+  // standing rule. The prefix is read exactly as `buildPlan` reads it and hosts are resolved through the same
+  // `effectiveDomains` the plan uses, so the validator and the plan cannot disagree about a hostname.
+  {
+    const prefix = m.spec.dns?.stagingPrefix ?? DEFAULT_STAGING_PREFIX;
+    // A host claimed by more than one (service, environment) is two definitions of one binding. Recording EVERY
+    // public service's effective hosts lets a declared staging host collide with another service's *derived*
+    // host, which the brief names explicitly. But the refusal fires only when a DECLARATION is involved: with no
+    // `environmentDomains` anywhere, this reproduces the old world where derivation already gives each public
+    // service a distinct host, so existing platforms and templates are unaffected -- the collision check cannot
+    // newly refuse a tree that never declared a per-environment host.
+    type Claim = { service: string; environment: string; declared: boolean };
+    const claims = new Map<string, Claim[]>();
+    const addClaim = (host: string, c: Claim): void => {
+      const at = claims.get(host) ?? [];
+      at.push(c);
+      claims.set(host, at);
+    };
+    for (const env of enabled) {
+      for (const [name, svc] of servicesOf(m)) {
+        if (!svc.public || !scope.get(name)?.includes(env)) continue;
+        const declaredHere = svc.environmentDomains?.[env] !== undefined;
+        for (const host of effectiveDomains(svc, env, prefix)) {
+          if (!HOST.test(host)) continue; // host-form is reported in the declaration loop below and the base loop above
+          addClaim(host, { service: name, environment: env, declared: declaredHere });
+        }
+      }
+    }
+    const reported = new Set<string>();
+    for (const [host, at] of claims) {
+      if (at.length < 2 || !at.some((c) => c.declared)) continue;
+      const oneService = at.every((c) => c.service === at[0]!.service);
+      const key = oneService ? `${at[0]!.service}\u0000${host}` : `${host}`;
+      if (reported.has(key)) continue;
+      reported.add(key);
+      const message = oneService
+        ? `service "${at[0]!.service}" binds "${host}" in ${at.map((c) => `"${c.environment}"`).join(' and ')} -- one host cannot answer two environments (D57); name a distinct host per environment, or let derivation do it`
+        : `host "${host}" is bound by ${at.length} services in environment "${at[0]!.environment}" (${[...new Set(at.map((c) => c.service))].map((s) => `"${s}"`).join(', ')}) -- a declared host colliding with another service's host is two definitions of one binding`;
+      // The path names the participant that actually DECLARED the host, so the fix points at the line to edit.
+      const offender = at.find((c) => c.declared) ?? at[0]!;
+      issues.push({
+        path: `spec.services.${offender.service}.environmentDomains.${offender.environment}["${host}"]`,
+        code: 'environment-domains-conflict',
+        message,
+      });
+    }
+    for (const [name, svc] of servicesOf(m)) {
+      const where = serviceEnvironments(svc, enabled);
+      for (const [envName, declared] of Object.entries(svc.environmentDomains ?? {})) {
+        const path = `spec.services.${name}.environmentDomains.${envName}`;
+        if (!enabled.some((e) => e === envName)) {
+          issues.push({ path, code: 'environment-domains-unknown-environment', message: `service "${name}" declares per-environment hosts for "${envName}", which the platform does not enable (enabled: ${enabled.join(', ') || 'none'}) -- name an enabled environment, or drop the declaration` });
+        } else if (envName === 'production') {
+          issues.push({ path, code: 'environment-domains-production-is-domains', message: `service "${name}" declares \`environmentDomains.production\`, but production hosts already live in \`domains\` -- one list, one home (D50). Put production hosts in \`domains\`; this field is for environments whose host the rule derives (${where.filter((e) => e !== 'production').join(', ') || 'none'})` });
+        } else if (!where.some((e) => e === envName)) {
+          issues.push({ path, code: 'environment-domains-unplaced-environment', message: `service "${name}" declares hosts for "${envName}" but is not deployed there (it is in: ${where.join(', ') || 'none'}) -- dead configuration that reads like a decision (D56's rule, applied to hosts)` });
+        }
+        if (!Array.isArray(declared)) continue;
+        if (declared.length === 0) {
+          issues.push({ path, code: 'environment-domains-empty', message: `service "${name}" declares an empty host list for "${envName}"; a public service with no host in an environment it runs is unreachable there -- drop the key to let derivation apply, or name the hosts` });
+          continue;
+        }
+        // The derived list the declaration would replace. A declaration identical to it is a second copy of the
+        // rule it overrides -- refused, because it drifts the moment the prefix or the base host moves (D57).
+        const derived = svc.domains.map((h) => stagingHost(h, prefix));
+        if (envName !== 'production' && declared.length === derived.length && declared.every((h, i) => h === derived[i])) {
+          issues.push({ path, code: 'environment-domains-redundant', message: `service "${name}" declares hosts for "${envName}" identical to what derivation already produces (${derived.join(', ') || 'none'}) -- delete the declaration; a stated copy of \`stagingHost()\` is a second source of truth that moves when the prefix moves (D57)` });
+        }
+        for (const host of declared) {
+          if (!HOST.test(host)) {
+            issues.push({ path, code: 'host-form', message: `service "${name}" declares "${host}" as a "${envName}" host, which is not a valid hostname (no scheme, port, or path)` });
+          }
+        }
       }
     }
   }
