@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto';
 import { CONTRACT_VERSION, InfraPlanSchema, type InfraPlan } from '@platfolio/contracts';
-import { enabledEnvironments, serviceEnvironments } from './environments.ts';
-import { stagingHost } from './render.ts';
+import { effectiveDomains, enabledEnvironments, serviceEnvironments } from './environments.ts';
 import type { Manifest } from './schema.ts';
 
 /**
@@ -79,8 +78,11 @@ export function buildPlan(manifest: Manifest, config: InstanceConfig): InfraPlan
     const domains = services.flatMap((s) => {
       const svc = manifest.spec.services[s.name]!;
       if (!svc.public) return [];
-      return svc.domains.map((host) => ({
-        host: envName === 'production' ? host : stagingHost(host, stagingPrefix),
+      // Declared per-environment hosts (D68) win; absent them this is the old derivation exactly -- production
+      // hosts verbatim, every other environment through `stagingHost()`. `effectiveDomains` is the one home for
+      // that precedence, shared with `validateManifest`, so the plan and the validator never disagree.
+      return effectiveDomains(svc, envName, stagingPrefix).map((host) => ({
+        host,
         service: s.name,
         port: s.port,
         verificationName,

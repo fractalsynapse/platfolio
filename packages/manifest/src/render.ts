@@ -1,6 +1,6 @@
 import type { Manifest, ServiceSpec } from './schema.ts';
 import { requiredSecrets, type Issue } from './validate.ts';
-import { enabledEnvironments, serviceEnvironments } from './environments.ts';
+import { enabledEnvironments, serviceEnvironments, stagingHost, effectiveDomains } from './environments.ts';
 
 export interface Rendered {
   /** Path relative to the render root -> content. Byte-for-byte deterministic. */
@@ -32,6 +32,7 @@ export interface IntermediateService {
   replicas: number;
   limits?: { cpu: number; memoryMB: number } | undefined;
   domains: string[];
+  environmentDomains?: Record<string, string[]> | undefined;
   dependsOn: string[];
   environments: string[];
   entries: EnvEntry[];
@@ -82,6 +83,8 @@ export function toIntermediate(m: Manifest): Intermediate {
       replicas: svc.replicas,
       limits: svc.limits === undefined ? undefined : { cpu: svc.limits.cpu, memoryMB: svc.limits.memoryMB },
       domains: [...svc.domains].sort(),
+      ...(svc.environmentDomains && Object.keys(svc.environmentDomains).length > 0
+        ? { environmentDomains: svc.environmentDomains } : {}),
       dependsOn: [...svc.dependsOn].sort(),
       environments: serviceEnvironments(svc, enabled),
       entries: entriesFor(name, svc),
@@ -94,15 +97,11 @@ export function toIntermediate(m: Manifest): Intermediate {
 }
 
 /**
- * Staging host derived from a declared production host, rendered explicitly rather than left to
- * provider behaviour: one host cannot be claimed by two environments.
+ * Staging host derivation now lives in `environments.ts` (D68), the leaf both the plan builder and the
+ * validator resolve through, so one host is never derived two ways. Re-exported here to keep the package's
+ * public surface unchanged.
  */
-export function stagingHost(host: string, prefix: string): string {
-  if (host.startsWith('*.')) return `*.${prefix}${host.slice(2)}`;
-  const parts = host.split('.');
-  if (parts.length < 2) return `${prefix}${host}`;
-  return [`${prefix}${parts[0]}`, ...parts.slice(1)].join('.');
-}
+export { stagingHost };
 
 const yamlQuote = (s: string): string => `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 const tsString = (s: string): string => `'${s.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
@@ -191,10 +190,18 @@ export function renderRailwayIaC(m: Manifest): Rendered {
       // staging derivation is preserved for the checklist and the tenant's own DNS work.
       // Only the environments this service is actually placed in (D23): a production-only service must
       // not gain a staging host even in a comment, or the next reader will assume it has one.
-      const hosts = s.domains.flatMap((d) => [
-        ...(s.environments.includes('production') ? [`${d}:${s.port} (production)`] : []),
-        ...(s.environments.includes('staging') ? [`${stagingHost(d, prefix)}:${s.port} (staging)`] : []),
-      ]).join('; ');
+      // Resolved through `effectiveDomains` (D68) so this comment and `buildPlan` state one host the same
+      // way: a declared per-environment host appears here, not the name the rule would have guessed. With
+      // no declaration the interleaved per-host form below is byte-identical to what this line emitted before.
+      const hosts = s.environmentDomains === undefined
+        ? s.domains.flatMap((d) => [
+            ...(s.environments.includes('production') ? [`${d}:${s.port} (production)`] : []),
+            ...(s.environments.includes('staging') ? [`${stagingHost(d, prefix)}:${s.port} (staging)`] : []),
+          ]).join('; ')
+        : (['production', 'staging'] as const)
+            .filter((e) => s.environments.includes(e))
+            .flatMap((e) => effectiveDomains(s, e, prefix).map((h) => `${h}:${s.port} (${e})`))
+            .join('; ');
       L.push(`${pad}  // domains declared in the manifest, applied via the API, not this file: ${hosts}`);
     }
     L.push(s.replicas === 1 ? `${pad}    replicas: 1,` : `${pad}    replicas: ctx.environment === 'production' ? ${s.replicas} : 1,`);

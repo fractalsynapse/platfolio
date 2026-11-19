@@ -186,6 +186,20 @@ export function parseCompose(texts: string | string[], options: ComposeOptions =
     scanService(name, svc, issues);
     const svcX = isRec(svc['x-platfolio']) ? svc['x-platfolio'] as Rec : {};
 
+    // A map-shaped `domains` is refused by name, not dropped. The field is a list of hosts; the per-environment
+    // form is a DIFFERENT field (`environmentDomains`, D68) keyed by environment. Reading a map here would hit
+    // the `Array.isArray(...) ? ... : []` below and silently produce a service with no hosts -- one plan short,
+    // nothing malformed about it, exactly the "public: true got swallowed" shape this file has been fixed for
+    // before. Two spellings of one fact is the bug; the refusal names the field that owns the claim.
+    if ('domains' in svcX && !Array.isArray(svcX.domains)) {
+      issues.push({
+        path: `services.${name}.x-platfolio.domains`,
+        code: 'compose-domains-must-be-a-list',
+        message: `"${name}.x-platfolio.domains" is a map, but the production host list is a flat list. Per-environment hosts go in \`environmentDomains: { <environment>: [hosts] }\` (D68); \`domains\` itself may not be keyed by environment`,
+      });
+      continue;
+    }
+
     // A managed marker turns a service into a provider-provisioned resource: locally it is a container,
     // hosted it is the provider's managed equivalent. Same name, same interface, different guarantees.
     const managed = typeof svcX.managed === 'string' ? svcX.managed : undefined;
@@ -259,6 +273,9 @@ export function parseCompose(texts: string | string[], options: ComposeOptions =
       ...(Array.isArray(svcX.environments) ? { environments: svcX.environments } : {}),
       // Per-environment values (D56): environment name -> the entries of `environment` it replaces there.
       ...(isRec(svcX.environmentValues) ? { environmentValues: svcX.environmentValues as Record<string, Record<string, string>> } : {}),
+      // Per-environment hosts (D68): environment name -> the full host list that environment serves, replacing
+      // the derivation for that environment only. The sibling of `environmentValues`, same shape.
+      ...(isRec(svcX.environmentDomains) ? { environmentDomains: svcX.environmentDomains as Record<string, string[]> } : {}),
       ...(typeof svcX.ownership === 'string' ? { ownership: svcX.ownership } : {}),
       domains: Array.isArray(svcX.domains) ? svcX.domains : [],
       dependsOn: Array.isArray(svc.depends_on) ? svc.depends_on.map(String) : Object.keys(isRec(svc.depends_on) ? svc.depends_on as Rec : {}),
