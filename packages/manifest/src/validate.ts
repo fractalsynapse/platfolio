@@ -1,4 +1,5 @@
 import { ManifestSchema, RENDERER_VERSION, SUPPORTED_API_VERSIONS } from './schema.ts';
+import { DEFAULT_STAGING_PREFIX } from './environments.ts';
 import { enabledEnvironments, serviceEnvironments, stagingHost, effectiveDomains } from './environments.ts';
 import { satisfiesRange } from '@platfolio/contracts';
 import type { Manifest, ServiceSpec } from './schema.ts';
@@ -190,7 +191,7 @@ export function validateManifest(unknown: unknown): Issue[] {
   // standing rule. The prefix is read exactly as `buildPlan` reads it and hosts are resolved through the same
   // `effectiveDomains` the plan uses, so the validator and the plan cannot disagree about a hostname.
   {
-    const prefix = m.spec.dns?.stagingPrefix ?? 'staging';
+    const prefix = m.spec.dns?.stagingPrefix ?? DEFAULT_STAGING_PREFIX;
     // A host claimed by more than one (service, environment) is two definitions of one binding. Recording EVERY
     // public service's effective hosts lets a declared staging host collide with another service's *derived*
     // host, which the brief names explicitly. But the refusal fires only when a DECLARATION is involved: with no

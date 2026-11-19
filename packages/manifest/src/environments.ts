@@ -28,6 +28,23 @@ export function presentIn(m: Manifest, name: string, env: EnvName): boolean {
 }
 
 /**
+ * The staging prefix used when a composition's `dns` block does not state one.
+ *
+ * Three sites previously spelled this default themselves and two of them disagreed: `schema.ts` declares
+ * `stagingPrefix: z.string().min(1).default('staging-')` (which applies whenever `dns:` exists), while
+ * `build-plan.ts` and `validate.ts` fell back to `'staging'` when the whole `dns` block was absent. Because
+ * `stagingHost` concatenates without inserting a separator, `'staging'` produces `stagingapi.example.com` and
+ * `'staging-'` produces `staging-api.example.com` -- **two different hostnames for one tenant composition,
+ * depending on which code path resolved it.** A tenant with no `dns:` block would get a plan from one rule and
+ * rendered IaC from the other, which is the failure this file's own doc comment on `stagingHost` claims to
+ * prevent ("one fact, one home") while the default itself violated it.
+ *
+ * The dashed form wins because it is what `schema.ts` -- the declared contract -- already defaults to, and
+ * what the live `compose.yaml` hostnames (`staging-api.platfolio.dev`) were built with.
+ */
+export const DEFAULT_STAGING_PREFIX = 'staging-';
+
+/**
  * Staging host derived from a declared production host, rendered explicitly rather than left to
  * provider behaviour: one host cannot be claimed by two environments.
  *

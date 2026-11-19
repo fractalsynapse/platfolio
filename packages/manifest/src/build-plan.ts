@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { DEFAULT_STAGING_PREFIX } from './environments.ts';
 import { CONTRACT_VERSION, InfraPlanSchema, type InfraPlan } from '@platfolio/contracts';
 import { effectiveDomains, enabledEnvironments, serviceEnvironments } from './environments.ts';
 import type { Manifest } from './schema.ts';
@@ -41,7 +42,7 @@ export function buildPlan(manifest: Manifest, config: InstanceConfig): InfraPlan
   const database = manifest.spec.resources?.database;
   const storage = manifest.spec.resources?.storage;
   const declaredVolumes = manifest.spec.resources?.volumes ?? [];
-  const stagingPrefix = manifest.spec.dns?.stagingPrefix ?? 'staging';
+  const stagingPrefix = manifest.spec.dns?.stagingPrefix ?? DEFAULT_STAGING_PREFIX;
   const verificationName = `${platform}-verify`;
 
   const environments = enabled.map((envName) => {

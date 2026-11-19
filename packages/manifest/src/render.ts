@@ -1,4 +1,5 @@
 import type { Manifest, ServiceSpec } from './schema.ts';
+import { DEFAULT_STAGING_PREFIX } from './environments.ts';
 import { requiredSecrets, type Issue } from './validate.ts';
 import { enabledEnvironments, serviceEnvironments, stagingHost, effectiveDomains } from './environments.ts';
 
@@ -159,7 +160,7 @@ export function renderRailwayIaC(m: Manifest): Rendered {
   if (i.cache) { L.push(`  const ${cam(i.cache.name)} = redis(${tsString(i.cache.name)});`); ids.push(cam(i.cache.name)); }
   if (i.storage) { L.push(`  const ${cam(i.storage.name)} = bucket(${tsString(i.storage.name)}${i.storage.region ? `, { region: ${tsString(i.storage.region)} }` : ''});`); ids.push(cam(i.storage.name)); }
   for (const v of i.volumes) L.push(`  const ${cam(v.name)} = volume(${tsString(v.name)});`);
-  if (i.volumes.length) L.push('');  const prefix = m.spec.dns?.stagingPrefix ?? 'staging-';
+  if (i.volumes.length) L.push('');  const prefix = m.spec.dns?.stagingPrefix ?? DEFAULT_STAGING_PREFIX;
   for (const s of i.services) {
     const guarded = s.environments.length < enabled.length;
     const pad = guarded ? '    ' : '  ';

@@ -1,4 +1,5 @@
 import { CapabilitySchema, RequiredCapabilitySchema } from '@platfolio/contracts';
+import { DEFAULT_STAGING_PREFIX } from './environments.ts';
 import { z } from 'zod';
 
 /** Schema version this renderer understands. Bumped only by breaking manifest changes. */
@@ -159,7 +160,7 @@ export const ManifestSchema = z.object({
        * How a staging host is derived from a declared production host. Rendered explicitly rather than
        * left to provider magic: a service present in both environments cannot claim the same host twice.
        */
-      stagingPrefix: z.string().min(1).default('staging-'),
+      stagingPrefix: z.string().min(1).default(DEFAULT_STAGING_PREFIX),
     }).strict().optional(),
     lifecycle: z.object({
       onSuspend: z.enum(['scale-to-zero']).default('scale-to-zero'),

@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import { buildPlan } from '../src/build-plan.ts';
 import { parseCompose } from '../src/compose.ts';
 import { validateManifest } from '../src/validate.ts';
-import { effectiveDomains, stagingHost } from '../src/environments.ts';
+import { DEFAULT_STAGING_PREFIX, effectiveDomains, stagingHost } from '../src/environments.ts';
 import { parse, renderRailwayIaC } from '../src/index.ts';
 import type { Manifest } from '../src/schema.ts';
 
@@ -93,6 +93,39 @@ test('effectiveDomains is the whole rule, and the fallback is identity-free of t
     ['only.example.com'], 'a declaration replaces the whole derived list for that environment');
 });
 
+test('the staging prefix has ONE default: plan and rendered IaC cannot disagree (D68 follow-up)', () => {
+  // The defect this pins was found while adding per-environment domains, not caused by it: `build-plan.ts` and
+  // `validate.ts` fell back to `'staging'` when a composition had no `dns:` block at all, while `schema.ts`
+  // (which only applies when `dns:` IS present) and `render.ts` used `'staging-'`. Because stagingHost
+  // concatenates without inserting a separator, those are different HOSTNAMES -- `stagingapi.example.com` vs
+  // `staging-api.example.com`. A tenant with no dns block would get a plan naming one host and rendered IaC
+  // naming another, and no existing test noticed, because every fixture carried a dns block.
+  const m = loadedManifest('full-stack-manifest.yaml');
+  const noDns = structuredClone(m) as Manifest;
+  delete (noDns.spec as { dns?: unknown }).dns;
+  assert.equal(noDns.spec.dns, undefined, 'the probe requires the dns block to be genuinely absent');
+
+  const problems = validateManifest(noDns);
+  assert.equal(problems.filter((p) => p.code === 'compose-domains-must-be-a-list').length, 0, 'no spurious refusal');
+
+  const plan = buildPlan(noDns, { instanceId: 'i-nodefault', teamId: 't', images: pinned(noDns) });
+  const stagingHosts = plan.environments.find((e) => e.name === 'staging')?.domains.map((d) => d.host) ?? [];
+  assert.ok(stagingHosts.length > 0, 'the fixture binds staging domains, otherwise this test proves nothing');
+
+  const iac = renderRailwayIaC(noDns);
+  const text = Object.values(iac.files).join('\n');
+  for (const host of stagingHosts) {
+    assert.ok(text.includes(host), `the plan binds "${host}" but the rendered IaC never mentions it -- plan and render disagreed on the staging prefix default`);
+    assert.ok(!host.includes('staging-') || !text.includes(host.replace('staging-', 'staging')),
+      `both "staging-" and "staging" spellings appear for ${host}: two defaults are in play again`);
+  }
+
+  // And the constant is what the contract says, not what one call site happened to use.
+  const withDns = loadedManifest('full-stack-manifest.yaml');
+  const declared = withDns.spec.dns?.stagingPrefix ?? DEFAULT_STAGING_PREFIX;
+  assert.equal(declared, DEFAULT_STAGING_PREFIX, 'the schema default and the fallback constant must be one value');
+});
+
 // ---------------------------------------------------------------------------------------------
 // Backward compatibility, at the whole-plan level, with no environmentDomains anywhere.
 // ---------------------------------------------------------------------------------------------
@@ -102,7 +135,7 @@ test('a tenant-style composition with no per-environment domains produces the sa
   // environmentDomains is still exactly what the old inline derivation produced, in the same order.
   const m = loadedManifest('full-stack-manifest.yaml');
   const plan = buildPlan(m, { instanceId: 'i-tenant', teamId: 't', images: pinned(m) });
-  const prefix = m.spec.dns?.stagingPrefix ?? 'staging';
+  const prefix = m.spec.dns?.stagingPrefix ?? DEFAULT_STAGING_PREFIX;
   for (const env of plan.environments) {
     for (const d of env.domains) {
       const svc = m.spec.services[d.service]!;
