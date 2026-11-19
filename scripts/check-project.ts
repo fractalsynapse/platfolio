@@ -917,6 +917,40 @@ function readProject(config: string): { project?: Project; problems: string[] } 
   };
 }
 
+/**
+ * The instruction that questions must be asked with the blocking question tool must itself survive edits.
+ *
+ * Scope, stated plainly because overclaiming here would be its own defect: this verifies that AGENTS.md still
+ * carries the rule, in the section that governs asking, in terms that cannot be read as advisory. It cannot
+ * make an agent call a tool. Under multi-turn goal continuation a prose question is indistinguishable from no
+ * question at all -- the run simply proceeds -- so this rule is load-bearing in a way most of this file is not,
+ * and a deleted paragraph would be invisible until it had already cost the maintainer a decision.
+ */
+async function checkQuestionRule(): Promise<string[]> {
+  const out: string[] = [];
+  let text: string;
+  try {
+    text = await fs.readFile(path.join(ROOT, 'AGENTS.md'), 'utf8');
+  } catch {
+    return ['AGENTS.md: missing, so the question-tool rule cannot be verified'];
+  }
+  const section = text.split(/^## /m).find((s) => s.startsWith('Authority and scope'));
+  if (section === undefined) {
+    return ['AGENTS.md: no "## Authority and scope" section, so the question rule has no home and is unenforced'];
+  }
+  const lower = section.toLowerCase();
+  if (!lower.includes('question tool')) {
+    out.push('AGENTS.md "Authority and scope": the question-tool rule is absent. Asking must block on the tool, not on a reply.');
+  }
+  if (!/never ask in prose|do not ask in prose/i.test(section)) {
+    out.push('AGENTS.md "Authority and scope": the rule must forbid asking in prose explicitly; without that half, "ask a question" reads as advice about tone.');
+  }
+  if (!/blocking|blocks|pause/i.test(section)) {
+    out.push('AGENTS.md "Authority and scope": the rule must state why it exists (the tool call is what blocks). A reasonless rule is the first thing someone tidies away.');
+  }
+  return out;
+}
+
 async function checkTypecheckCoverage(): Promise<{ problems: string[]; summary: string }> {
   const problems: string[] = [];
   const manifest = JSON.parse(await fs.readFile(path.join(ROOT, 'package.json'), 'utf8')) as { scripts?: Record<string, string> };
@@ -1012,8 +1046,9 @@ async function checkTypecheckCoverage(): Promise<{ problems: string[]; summary: 
 const pythonProblems = await checkNoPython();
 const coverage = await checkTypecheckCoverage();
 const registerProblems = checkDecisionRegister(ROOT);
+const questionRuleProblems = await checkQuestionRule();
 
-const all = [...registerProblems, ...docProblems, ...skillProblems, ...workflowProblems, ...actionProblems, ...hygieneProblems, ...endpointProblems, ...projectProblems, ...overlayProblems, ...registryProblems, ...pythonProblems, ...coverage.problems];
+const all = [...questionRuleProblems, ...registerProblems, ...docProblems, ...skillProblems, ...workflowProblems, ...actionProblems, ...hygieneProblems, ...endpointProblems, ...projectProblems, ...overlayProblems, ...registryProblems, ...pythonProblems, ...coverage.problems];
 say(`skills checked: ${skills.length} (${skills.map((s) => s.name).join(', ')})`);
 say(`workflows linted: ${workflowProblems.length === 0 ? 'clean' : `${workflowProblems.length} problem(s)`}`);
 say(`action manifests checked: ${actionProblems.length === 0 ? 'clean' : `${actionProblems.length} problem(s)`}`);
@@ -1029,5 +1064,6 @@ if (all.length) {
   for (const p of all) console.error(` - ${p}`);
   process.exit(1);
 }
+say(`question rule (AGENTS.md): ${questionRuleProblems.length === 0 ? 'present, blocking, and reasoned' : `${String(questionRuleProblems.length)} problem(s)`}`);
 say(`decision register: ${registerProblems.length === 0 ? 'one table shape, unique ids, no orphan fragments' : `${registerProblems.length} problem(s)`}`);
 say('project checks passed: links and anchors resolve, skill metadata is consistent, workflows lint clean.');

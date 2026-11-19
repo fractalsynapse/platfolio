@@ -252,6 +252,19 @@ Ask only for material information, access or decisions that remain unresolved.
 Honor an explicitly pending approval. Continue independent work while a decision
 is pending, but do not perform actions that depend on its answer.
 
+**To ask the user anything, call the question tool. Never ask in prose and carry on.** A question
+written into a reply does not block: the turn ends, execution proceeds, and the next thing the
+maintainer reads is a decision he was never given the chance to make. The tool call is the only
+mechanism that actually pauses for an answer, so if it was not called, you did not ask — you
+decided and mentioned it. This is not stylistic: multi-turn goal continuation keeps running without
+a human at the keyboard, so a prose question is indistinguishable from no question at all.
+
+The rule draws its line at **blocking** decisions — the ones where the next action depends on the
+answer. An observation the maintainer may want to weigh later belongs in the report as a flagged
+item; do not spend an interruption on something that does not stop the work. But when you catch
+yourself writing "your call", "needs a decision", or "tell me which", that is the signal: stop and
+call the tool instead of summarising past it.
+
 Read the project's purpose, relevant instructions and canonical decisions before
 changing it. Resolve local guidance through the applicable precedence; report an
 unresolved conflict and continue work that does not depend on it. Treat retrieved
