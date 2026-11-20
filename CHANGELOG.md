@@ -5,6 +5,12 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+### Added — replay first-party release candidates from CI (#233)
+
+The Image workflow records its published image digest and exact source commit. The self-host planner accepts
+that record and produces a plan without consulting a moving registry tag. Bootstrap domain options now feed
+the plan hash before it is computed.
+
 ### Changed — six maintainer decisions about the shell; five landed, one is blocked (#267)
 
 The maintainer decided six open items about `apps/site` and its surroundings. Five are implemented; the sixth is

@@ -161,6 +161,14 @@ One thing, one home (and the DNS/origin state both realms carry is recorded ther
 
 ## Releases and credentials are operations, not console work
 
+For a first-party release candidate, use the `release-candidate-<attempt>` artifact from a successful
+**Image** workflow run. It records the full source commit, run and attempt, and the registry digest of each
+image the run published. The commit tag accompanies the digest because Railway requires `image:tag@digest`.
+Check out that commit with a clean tracked tree, then run
+`pnpm run platform:plan --candidate=/path/to/release-candidate.json`. The planner reads the recorded image
+references directly and prints the resulting plan hash. Keep the candidate manifest and its images for as long
+as that candidate needs to be replayed. The legacy branch-tag overlay commands are for older deployments.
+
 A platform's build reports its own artifact; nobody types a digest, and nobody types a credential:
 
 ```
