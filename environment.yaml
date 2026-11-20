@@ -316,6 +316,14 @@ variables:
     environments: all
     deployedTo: github:environment-secret
     note: "the same credential as DATABASE_URL, delivered as a provider reference rather than a literal (OD13); the platform resolves it from the environment's own database, so no one types it"
+  - name: PLATFOLIO_DEPLOYMENT_ENVIRONMENT
+    kind: value
+    secret: false
+    environments: all
+    service: api
+    required: false
+    deployedTo: railway:variable
+    note: "public deployment environment reported by /version, supplied at runtime by the plan or development overlay"
   - name: PLATFOLIO_DEPLOY_BUDGET
     kind: value
     secret: false
@@ -502,7 +510,7 @@ variables:
     secret: false
     environments: all
     deployedTo: host:shell
-    note: "reported by /healthz; set by the build, not the operator"
+    note: "build label reported as version by /version"
   - name: PLATFOLIO_WEB_CLIENT_ID
     kind: value
     secret: false

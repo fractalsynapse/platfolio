@@ -5,6 +5,11 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+### Fixed — report the deployment environment in `/version` (#272)
+
+The API reports its runtime `environment` alongside the existing `version` build label. The same image
+can report staging or production, and the hosted candidate smoke verifies the reported environment.
+
 ### Added — the hosted site joins the release candidate (#267)
 
 CI builds and smoke-tests the static site container and records the published image alongside the API in the

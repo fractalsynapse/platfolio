@@ -101,15 +101,14 @@ paths:
     get:
       operationId: getVersion
       tags: [operational]
-      summary: Which build this is, and which provider contract it speaks
+      summary: Report build identity and deployment environment
       description: |
-        The provider contract version is part of the build's identity: an operator comparing a tenant's
-        instance state against a control-plane version needs to know which contract produced it
-        (docs/design/02). Values come from the build environment, never from a request.
+        Build identity includes the provider contract version that produced instance state.
+        Deployment environment comes from runtime configuration.
       security: []
       responses:
         '200':
-          description: Build identity.
+          description: Build identity and deployment environment.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Version' }
@@ -2160,10 +2159,14 @@ components:
     Version:
       type: object
       additionalProperties: false
-      required: [name, version, commit, buildTime, providerContract]
+      required: [name, version, environment, commit, buildTime, providerContract]
       properties:
         name: { type: string, enum: [control-plane] }
-        version: { type: string, minLength: 1 }
+        version: { type: string, minLength: 1, description: 'Build label recorded in the image.' }
+        environment:
+          type: [string, 'null']
+          minLength: 1
+          description: Deployment environment configured at runtime. Null means it was unset or blank.
         commit:
           type: string
           pattern: '^[0-9a-f]{7,40}$'

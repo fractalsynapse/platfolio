@@ -14,6 +14,7 @@ export interface BootConfig {
   host: string;
   port: number;
   build: { version: string; commit: string; buildTime: string };
+  environment?: string | null;
   /**
    * Browser origins allowed to call this API cross-origin (see `cors.ts` for the contract). Absent or empty
    * means cross-origin use is **not enabled**: the safe default, and the reason a UI on another host needs its
@@ -47,6 +48,7 @@ export function configFromEnv(env: NodeJS.ProcessEnv): BootConfig {
     ...(env.PLATFOLIO_IDENTITY_JWKS_URI ? { jwksUri: env.PLATFOLIO_IDENTITY_JWKS_URI } : {}),
     host: env.HOST ?? '0.0.0.0',
     port: Number(env.PORT ?? 8080),
+    environment: env.PLATFOLIO_DEPLOYMENT_ENVIRONMENT?.trim() || null,
     // The cross-origin decision, forwarded always. `cors` absent from a BootConfig assembled by hand means the
     // same thing as an empty list -- cross-origin is not enabled -- so there is no second spelling of "no list"
     // for a caller to get wrong, and nothing here re-reads process.env.
@@ -193,7 +195,7 @@ export async function boot(config: BootConfig, fetchImpl: typeof fetch = fetch) 
     // that exists only in the operator's head. An empty list is passed through rather than dropped, so "no list"
     // has one spelling all the way down to the transport.
     server: { host: config.host, port: config.port, cors: { allowedOrigins: [...config.cors?.allowedOrigins ?? []] } },
-    extensions: buildCapabilities({ build: config.build }),
+    extensions: buildCapabilities({ build: config.build, environment: config.environment ?? null }),
     requiredServices: ['identity', 'server', 'store', 'extensions'],
   });
   ctx.identity.attachKeySource(new EndpointKeySource(identity, fetchImpl, config.jwksUri));

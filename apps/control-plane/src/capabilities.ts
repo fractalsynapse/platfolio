@@ -23,6 +23,7 @@ import { badRequest, bearerToken, notFound, send, unauthorized } from './respond
  */
 export interface CapabilityDeps {
   build: { version: string; commit: string; buildTime: string };
+  environment?: string | null;
   /** Injected so the controller can be tested without waiting on a wall clock. */
   now?: () => Date;
   dispatchTtlMs?: number;
@@ -210,6 +211,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
         method: 'GET', path: '/version', operationId: 'getVersion',
         handle: async () => send('getVersion', 200, {
           name: 'control-plane', version: deps.build.version, commit: deps.build.commit, buildTime: deps.build.buildTime,
+          environment: deps.environment ?? null,
           // Import, never retype: the contract version this build speaks is a fact about the code, and a
           // literal here would silently disagree with packages/contracts the day the contract moves.
           providerContract: { name: CONTRACT_NAME, version: CONTRACT_VERSION },

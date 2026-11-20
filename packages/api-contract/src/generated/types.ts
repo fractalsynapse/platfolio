@@ -4,7 +4,7 @@
  * hand, because every line reproduces from the specification.
  *
  * Source: apps/control-plane/openapi.yaml (OpenAPI 3.1.0, info.version 0.1.0)
- * Input digest: sha256/0488c298e6c8ebeb
+ * Input digest: sha256/53c92eabbd15c8b0
  *
  * Reproduce it with `pnpm run api:types`. `pnpm run api:types:check` fails when this file stops matching
  * what the committed spec produces, which is the only way a generated type deserves to be trusted.
@@ -249,7 +249,10 @@ export interface TeamWithRole {
 
 export interface Version {
   name: 'control-plane';
+  /** Build label recorded in the image. */
   version: string;
+  /** Deployment environment configured at runtime. Null means it was unset or blank. */
+  environment: (string | null);
   commit: string;
   buildTime: string;
   providerContract: {
