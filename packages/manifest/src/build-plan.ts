@@ -29,6 +29,8 @@ export interface InstanceConfig {
    * and that is the intended failure rather than a convenience.
    */
   images?: Record<string, { image: string; digest: string }>;
+  /** Bootstrap may omit domains or request provider-generated hosts. Both are part of desired state. */
+  domains?: 'omit' | 'generated';
 }
 
 // Template documentation values, e.g. sha256:1111... or sha2222...: a single repeated character is not what a
@@ -76,7 +78,10 @@ export function buildPlan(manifest: Manifest, config: InstanceConfig): InfraPlan
       });
 
     const placedNames = new Set(services.map((s) => s.name));
-    const domains = services.flatMap((s) => {
+    const domains = config.domains === 'omit' ? [] : services.flatMap((s) => {
+      if (config.domains === 'generated') {
+        return [{ host: `${s.name}.generated.up.railway.app`, service: s.name, port: s.port, verificationName: `${s.name}-verify` }];
+      }
       const svc = manifest.spec.services[s.name]!;
       if (!svc.public) return [];
       // Declared per-environment hosts (D68) win; absent them this is the old derivation exactly -- production

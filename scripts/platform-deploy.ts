@@ -27,6 +27,7 @@ import type { InfraPlan } from '../packages/contracts/src/infra.ts';
 import { secretWriteScope } from '../packages/contracts/src/infra.ts';
 import { physicalServiceName, RailwayInfraProvider } from '../packages/contracts/src/railway-provider.ts';
 import type { RailwayCredential, RailwayCredentialSource } from '../packages/contracts/src/railway-transport.ts';
+import { resolveCheckoutCandidate } from './platform-candidate.ts';
 
 const root = path.resolve(import.meta.dirname, '..');
 const arg = (name: string) => process.argv.some((a) => a === `--${name}` || a.startsWith(`--${name}=`));
@@ -46,8 +47,11 @@ const credentials: RailwayCredentialSource = {
 
 function loadManifest(): NonNullable<ReturnType<typeof parseCompose>['manifest']> {
   const base = fs.readFileSync(path.join(root, 'compose.yaml'), 'utf8');
-  const overlay = fs.readFileSync(path.join(root, 'compose.prod.yaml'), 'utf8');
-  const parsed = parseCompose([base, overlay]);
+  const candidate = value('candidate');
+  if (arg('candidate') && !candidate) throw new Error('Use --candidate=/path/to/release-candidate.json');
+  const parsed = candidate
+    ? parseCompose([base], { resolveArtifact: resolveCheckoutCandidate(candidate, root) })
+    : parseCompose([base, fs.readFileSync(path.join(root, 'compose.prod.yaml'), 'utf8')]);
   if (parsed.issues.length > 0) {
     console.error('  the renderer refused our own composition:');
     for (const i of parsed.issues) console.error(`    - ${i.path}: ${i.code} -- ${i.message}`);
@@ -65,6 +69,7 @@ function loadManifest(): NonNullable<ReturnType<typeof parseCompose>['manifest']
 
 function describePlan(plan: InfraPlan): void {
   console.log(`  plan: ${String(plan.environments.length)} environment(s), contract ${plan.contract}, provider ${plan.provider}`);
+  console.log(`  plan hash: ${plan.planHash}`);
   // The PHYSICAL names the provider will create (D57), from the same rule the provider applies. The rule is
   // deterministic now, so this needs no preview helper and no provider read at all: the script and the provider
   // compute the same string from the same two inputs, which is what makes "which service will staging actually
@@ -321,25 +326,8 @@ if (arg('from-state')) {
   console.log(`  composition patched: api issuer https://${authHost}/realms/platfolio, identity hostname ${authHost}`);
 }
 
-const plan = buildPlan(manifest, { instanceId: 'selfhost', teamId: 'platfolio' });
-
-if (arg('strip-domains')) {
-  for (const e of plan.environments) e.domains = [];
-  console.log('  custom domains stripped for this pass; Railway generated hosts will be used');
-}
-
-if (arg('generated-domains')) {
-  // A sentinel hostname ending in `.up.railway.app` makes the provider ask Railway to mint one and read the
-  // actual host back (railway-provider's createDomain does exactly that); the alternative is to sit without a
-  // URL until DNS lands at a registrar we do not control, which is E27 all over again.
-  for (const e of plan.environments) {
-    // Every planned service here is meant to be reachable -- the database is a `database`, not a service -- and
-    // `verificationName` is required by the plan schema even though a Railway-minted host never needs the TXT
-    // record (that is the custom-domain path, where it carries the DNS proof).
-    e.domains = e.services.map((s) => ({ host: `${s.name}.generated.up.railway.app`, service: s.name, port: s.port, verificationName: `${s.name}-verify` }));
-    console.log(`  requesting Railway-generated hosts for ${e.domains.map((d) => d.service).join(', ')}`);
-  }
-}
+const domains = arg('generated-domains') ? 'generated' : arg('strip-domains') ? 'omit' : undefined;
+const plan = buildPlan(manifest, { instanceId: 'selfhost', teamId: 'platfolio', ...(domains ? { domains } : {}) });
 
 /**
  * Deliver the credentials THIS composition declares, through the provider seam rather than by hand.

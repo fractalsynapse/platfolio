@@ -104,6 +104,7 @@ jobs:
 
       # Only pushes publish. A pull request gets a build and a smoke test, never a registry write.
       - name: Publish
+        id: publish
         # Pushes only: a pull request gets a build and a smoke test, never a registry write.
         if: github.event_name == 'push'
         env:
@@ -111,26 +112,50 @@ jobs:
           CR_PAT: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "$CR_PAT" | docker login "$REGISTRY" -u "$GITHUB_ACTOR" --password-stdin >/dev/null
-          SHORT="$(echo "${{ github.sha }}" | cut -c1-7)"
-          for tag in "sha-$SHORT" "${{ github.ref_name }}"; do
+          COMMIT_TAG="sha-$GITHUB_SHA"
+          for tag in "$COMMIT_TAG" "$GITHUB_REF_NAME"; do
             docker tag platfolio-control-plane:build "$REGISTRY/$IMAGE_NAME:$tag"
             # The digest comes out of the push itself. A plan pins sha256:..., never a mutable tag, and
             # re-deriving it locally would need a go-template whose braces collide with this repo's
             # workflow placeholder lint.
             PUSHED="$(docker push "$REGISTRY/$IMAGE_NAME:$tag")"
-            if [ "$tag" = "sha-$SHORT" ]; then
+            if [ "$tag" = "$COMMIT_TAG" ]; then
               DIGEST="$(printf '%s\n' "$PUSHED" | sed -n 's/.*digest: \(sha256:[0-9a-f]*\).*/\1/p' | head -1)"
             fi
           done
+          if ! [[ "${DIGEST:-}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo '::error::The registry push did not report a valid image digest.'
+            exit 1
+          fi
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+          echo "image=$REGISTRY/$IMAGE_NAME:$COMMIT_TAG" >> "$GITHUB_OUTPUT"
           # The digest is the whole point of publishing: a plan pins sha256:..., not a mutable tag.
           {
             echo "## Published image"
             echo ""
-            echo "- Reference: \`$REGISTRY/$IMAGE_NAME:sha-$SHORT\`"
-            echo "- **Pinned digest: \`${DIGEST:-unavailable}\`**"
+            echo "- Reference: \`$REGISTRY/$IMAGE_NAME:$COMMIT_TAG\`"
+            echo "- **Pinned digest: \`$DIGEST\`**"
             echo ""
             echo "Use the digest, never the tag: a tag is mutable and a plan that trusts one can be moved"
             echo "under a tenant. If this package is private, Railway cannot pull it until the package"
             echo "visibility is set to public (a maintainer action; the workflow token cannot change it)."
           } >> "$GITHUB_STEP_SUMMARY"
-          echo "  pinned digest: ${DIGEST:-unavailable}"
+          echo "  pinned digest: $DIGEST"
+
+      - name: Record the release candidate
+        if: github.event_name == 'push'
+        env:
+          API_IMAGE: ${{ steps.publish.outputs.image }}
+          API_DIGEST: ${{ steps.publish.outputs.digest }}
+        run: |
+          jq -n --arg sourceCommit "$GITHUB_SHA" --arg runId "$GITHUB_RUN_ID" --arg runAttempt "$GITHUB_RUN_ATTEMPT" \
+            --arg image "$API_IMAGE" --arg digest "$API_DIGEST" \
+            '{schemaVersion: 1, $sourceCommit, $runId, $runAttempt, images: {api: {$image, $digest} } }' \
+            > release-candidate.json
+      - name: Upload the release candidate
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-candidate-${{ github.run_attempt }}
+          path: release-candidate.json
+          if-no-files-found: error
