@@ -5,6 +5,11 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+### Fixed — report the exact release tag in `/version` (#272)
+
+Untagged builds report `version: null`. A candidate deployment can supply a SemVer release tag that
+points to the candidate commit, while reusing the images by digest.
+
 ### Added — the hosted site joins the release candidate (#267)
 
 CI builds and smoke-tests the static site container and records the published image alongside the API in the

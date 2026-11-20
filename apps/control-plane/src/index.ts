@@ -3,6 +3,7 @@ import { EndpointKeySource, IdentityConfigSchema, redactCredentialShaped } from 
 import { ROUTE_MANIFEST } from './routes.ts';
 import { buildCapabilities } from './capabilities.ts';
 import { describeAllowedOriginsConfig, parseAllowedOrigins, type CorsBootConfig } from './cors.ts';
+import { isReleaseTag } from './release-tag.ts';
 
 export { ROUTE_MANIFEST };
 export { ALLOWED_ORIGINS_ENV, describeAllowedOriginsConfig, parseAllowedOrigins, type CorsBootConfig } from './cors.ts';
@@ -13,7 +14,7 @@ export interface BootConfig {
   jwksUri?: string;
   host: string;
   port: number;
-  build: { version: string; commit: string; buildTime: string };
+  build: { version: string | null; commit: string; buildTime: string };
   /**
    * Browser origins allowed to call this API cross-origin (see `cors.ts` for the contract). Absent or empty
    * means cross-origin use is **not enabled**: the safe default, and the reason a UI on another host needs its
@@ -41,6 +42,10 @@ export function configFromEnv(env: NodeJS.ProcessEnv): BootConfig {
   // variables by scanning configuration for that shape, and a name that only ever appears as a constant is a
   // name the registry cannot see. The constant and this spelling are kept identical by the test that uses both.
   const allowedOrigins = parseAllowedOrigins(env.PLATFOLIO_ALLOWED_ORIGINS);
+  const releaseTag = env.PLATFOLIO_RELEASE_TAG || null;
+  if (releaseTag !== null && !isReleaseTag(releaseTag)) {
+    throw new Error('control-plane cannot start: PLATFOLIO_RELEASE_TAG must be a bare SemVer tag');
+  }
   return {
     issuer: env.PLATFOLIO_IDENTITY_ISSUER as string,
     audience: env.PLATFOLIO_IDENTITY_AUDIENCE as string,
@@ -52,7 +57,7 @@ export function configFromEnv(env: NodeJS.ProcessEnv): BootConfig {
     // for a caller to get wrong, and nothing here re-reads process.env.
     cors: { allowedOrigins },
     build: {
-      version: env.PLATFOLIO_VERSION ?? '0.0.0-dev',
+      version: releaseTag,
       commit: env.PLATFOLIO_COMMIT ?? '0'.repeat(40),
       buildTime: env.PLATFOLIO_BUILD_TIME ?? new Date(0).toISOString(),
     },

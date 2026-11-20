@@ -42,16 +42,15 @@ COPY packages/kernel ./packages/kernel
 COPY packages/api-contract ./packages/api-contract
 COPY packages/manifest ./packages/manifest
 COPY apps/control-plane ./apps/control-plane
-# Build identity is injected by CI and reported by /version, never inferred from the filesystem.
+# CI records the commit and build time; a verified release tag is supplied at deployment.
 # Defaults that satisfy the published schema. The inherited values here were `unknown`, copied from the
 # status-api Dockerfile, and the OpenAPI spec for /version requires a hex commit and a date-time build time --
 # so a container run without build args answered 500 with `response-violates-spec`. CI always passes them; this
 # is about the image a person runs by hand, and about a contract that must hold either way. A build identity
 # that is absent is reported as epoch-and-zeros, which is unmistakably synthetic; one that is a lie is not.
 ARG PLATFOLIO_COMMIT=0000000000000000000000000000000000000000
-ARG PLATFOLIO_VERSION=0.0.0-dev
 ARG PLATFOLIO_BUILD_TIME=1970-01-01T00:00:00.000Z
-ENV PLATFOLIO_COMMIT=$PLATFOLIO_COMMIT PLATFOLIO_VERSION=$PLATFOLIO_VERSION PLATFOLIO_BUILD_TIME=$PLATFOLIO_BUILD_TIME
+ENV PLATFOLIO_COMMIT=$PLATFOLIO_COMMIT PLATFOLIO_BUILD_TIME=$PLATFOLIO_BUILD_TIME
 # Everything the runtime reads must be owned by the unprivileged user, or the drop to `USER node` turns a
 # missing read permission into a MODULE_NOT_FOUND that looks like a packaging bug.
 RUN chown -R node:node /app

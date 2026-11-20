@@ -23,6 +23,7 @@ services:
       # or a literal this script overrides with what it measured. Anything else is a placeholder that looks
       # configured.
       PLATFOLIO_IDENTITY_AUDIENCE: platfolio-api
+      PLATFOLIO_RELEASE_TAG: ''
       # Issuer and JWKS are set by scripts/platform-deploy.ts from the host the provider actually granted,
       # because asserting them before DNS lands would bake in a URL that serves nothing (E27). They are listed
       # here so the inventory and the plan agree about which names this service needs.

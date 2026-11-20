@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createKernel, disposeKernel, type KernelContext } from '@platfolio/kernel';
 import { buildCapabilities } from '../src/capabilities.ts';
+import { boot, configFromEnv } from '../src/index.ts';
 import {
   CONTRACT_VERSION, createIdentityFixture, defaultIdentityConfig, reasonOf, signToken,
   type DispatchIntent, type StoreResult,
@@ -74,6 +75,39 @@ test('the route manifest matches the document, and both cover the same surface',
   assert.ok(ops.length >= 21, `expected the whole surface, got ${String(ops.length)} operations`);
   for (const bindingOp of ['publishCapability', 'shareCapability', 'revokeCapabilityShare', 'listBindings', 'bindCapability', 'unbindCapability', 'listConsumers', 'listAvailableCapabilities']) {
     assert.ok(ops.includes(bindingOp), `${bindingOp} is missing from the manifest`);
+  }
+});
+
+test('/version reports the release tag or null while retaining the build identity', async () => {
+  const buildEnv = {
+    PLATFOLIO_IDENTITY_ISSUER: fixture.issuer,
+    PLATFOLIO_IDENTITY_AUDIENCE: fixture.audience,
+    PLATFOLIO_IDENTITY_JWKS_URI: `${fixture.issuer}/certs`,
+    HOST: '127.0.0.1',
+    PORT: '0',
+    PLATFOLIO_COMMIT: build.commit,
+    PLATFOLIO_BUILD_TIME: build.buildTime,
+  };
+  for (const tag of ['1.2.3-rc.1+ci.001', '', undefined]) {
+    const app = await boot(configFromEnv({ ...buildEnv, PLATFOLIO_RELEASE_TAG: tag }));
+    try {
+      const response = await fetch(`http://127.0.0.1:${app.address.port}/version`);
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      againstSpec('getVersion', 200, body);
+      assert.deepEqual(body, {
+        name: 'control-plane',
+        version: tag || null,
+        commit: build.commit,
+        buildTime: build.buildTime,
+        providerContract: { name: 'infra.provider', version: CONTRACT_VERSION },
+      });
+    } finally {
+      await app.stop();
+    }
+  }
+  for (const invalid of ['staging', 'v1.2.3', '1.2.3-rc.01', '01.2.3', '1.2.3\n']) {
+    assert.throws(() => configFromEnv({ ...buildEnv, PLATFOLIO_RELEASE_TAG: invalid }), /must be a bare SemVer tag/);
   }
 });
 

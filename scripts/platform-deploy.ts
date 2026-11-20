@@ -34,15 +34,17 @@ const root = path.resolve(import.meta.dirname, '..');
 const arg = (name: string) => process.argv.some((a) => a === `--${name}` || a.startsWith(`--${name}=`));
 const value = (name: string) => process.argv.find((a) => a.startsWith(`--${name}=`))?.slice(`--${name}=`.length);
 const candidatePath = value('candidate');
+const releaseTag = value('release-tag');
 const verifyEnvironment = value('verify-candidate');
 const targetEnvironment = verifyEnvironment ?? value('environment');
 if (arg('candidate') && !candidatePath) throw new Error('Use --candidate=/path/to/release-candidate.json');
+if (arg('release-tag') && (!releaseTag || !candidatePath)) throw new Error('Use --release-tag=<semver> with --candidate');
 if (arg('environment') && !targetEnvironment) throw new Error('Use --environment=staging or another enabled environment');
 if (arg('verify-candidate') && (!candidatePath || !verifyEnvironment ||
-  process.argv.slice(2).some((flag) => !flag.startsWith('--candidate=') && !flag.startsWith('--verify-candidate=')))) {
+  process.argv.slice(2).some((flag) => !flag.startsWith('--candidate=') && !flag.startsWith('--verify-candidate=') && !flag.startsWith('--release-tag=')))) {
   throw new Error('Use --candidate=/path/to/release-candidate.json --verify-candidate=staging for a read-only hosted smoke test');
 }
-const candidate = candidatePath ? resolveCheckoutCandidate(candidatePath, root) : undefined;
+const candidate = candidatePath ? resolveCheckoutCandidate(candidatePath, root, releaseTag) : undefined;
 
 const token = process.env.RAILWAY_TOKEN ?? '';
 const workspaceId = process.env.RAILWAY_WORKSPACE_ID ?? '';
@@ -68,6 +70,11 @@ function loadManifest(): NonNullable<ReturnType<typeof parseCompose>['manifest']
     process.exit(1);
   }
   if (!parsed.manifest) { console.error('  no manifest produced'); process.exit(1); }
+  if (candidate?.releaseTag) {
+    const api = parsed.manifest.spec.services.api;
+    if (!api) throw new Error('The release candidate must define an API service');
+    api.env.PLATFOLIO_RELEASE_TAG = candidate.releaseTag;
+  }
   const issues = validateManifest(parsed.manifest);
   if (issues.length > 0) {
     console.error('  manifest validation refused:');

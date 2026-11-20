@@ -44,7 +44,7 @@ export async function verifyHostedCandidate(
   }
 
   const [apiVersion, siteVersion, readiness, overlay, landing, dashboard] = await Promise.all([
-    fetchHosted(apiOrigin, '/version').then((response) => response.json()) as Promise<{ commit?: unknown }>,
+    fetchHosted(apiOrigin, '/version').then((response) => response.json()) as Promise<{ commit?: unknown; version?: unknown }>,
     fetchHosted(siteOrigin, '/version.json').then((response) => response.json()) as Promise<{ commit?: unknown }>,
     fetchHosted(apiOrigin, '/readyz').then((response) => response.json()) as Promise<{ checks?: { name: string; status: string }[] }>,
     fetchHosted(siteOrigin, '/config.js').then((response) => response.text()),
@@ -54,6 +54,10 @@ export async function verifyHostedCandidate(
   ]);
   if (apiVersion.commit !== sourceCommit || siteVersion.commit !== sourceCommit) {
     throw new Error('The API and site must both serve the candidate commit');
+  }
+  const releaseTag = api.env.find(({ name }) => name === 'PLATFOLIO_RELEASE_TAG')?.literal || null;
+  if (apiVersion.version !== releaseTag) {
+    throw new Error(`The candidate API must report ${releaseTag ?? 'null'} as version. Check the deployed release tag.`);
   }
   if (!readiness.checks?.some((check) => check.name === 'database' && check.status === 'ok')) {
     throw new Error('The candidate API did not report its database ready');

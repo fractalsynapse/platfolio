@@ -436,6 +436,14 @@ variables:
     environments: all
     deployedTo: railway:variable
     note: "referenced by apps/control-plane/src/capabilities.ts, compose.dev.yaml, compose.yaml"
+  - name: PLATFOLIO_RELEASE_TAG
+    kind: value
+    secret: false
+    environments: all
+    service: api
+    required: false
+    deployedTo: railway:variable
+    note: "bare SemVer tag verified against the candidate commit by the self-host planner; empty for an untagged deployment"
   - name: PLATFOLIO_SCM_DRIVER
     kind: value
     secret: false
@@ -497,12 +505,6 @@ variables:
     environments: all
     deployedTo: ci:env
     note: "referenced by .github/actions/platfolio-managed/action.yml, .github/workflows/platfolio-managed.yml, apps/managed-action/src/main.ts, packages/manifest/src/render-install.ts"
-  - name: PLATFOLIO_VERSION
-    kind: value
-    secret: false
-    environments: all
-    deployedTo: host:shell
-    note: "reported by /healthz; set by the build, not the operator"
   - name: PLATFOLIO_WEB_CLIENT_ID
     kind: value
     secret: false

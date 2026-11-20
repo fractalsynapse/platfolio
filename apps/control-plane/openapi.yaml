@@ -101,11 +101,10 @@ paths:
     get:
       operationId: getVersion
       tags: [operational]
-      summary: Which build this is, and which provider contract it speaks
+      summary: Report the release version, build commit and provider contract
       description: |
-        The provider contract version is part of the build's identity: an operator comparing a tenant's
-        instance state against a control-plane version needs to know which contract produced it
-        (docs/design/02). Values come from the build environment, never from a request.
+        The release version is the SemVer tag on the running build's exact source commit.
+        Untagged candidates report null and are identified by their commit.
       security: []
       responses:
         '200':
@@ -2163,7 +2162,10 @@ components:
       required: [name, version, commit, buildTime, providerContract]
       properties:
         name: { type: string, enum: [control-plane] }
-        version: { type: string, minLength: 1 }
+        version:
+          type: [string, 'null']
+          minLength: 1
+          description: SemVer release tag for this build, or null for an untagged candidate.
         commit:
           type: string
           pattern: '^[0-9a-f]{7,40}$'

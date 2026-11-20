@@ -285,7 +285,10 @@ const HUMAN: Record<string, Partial<Entry>> = {
   PLATFOLIO_DB_URL: { kind: 'secret', required: false, service: 'api', note: 'the same credential as DATABASE_URL, delivered as a provider reference rather than a literal (OD13); the platform resolves it from the environment\'s own database, so no one types it' },
   PLATFOLIO_DB_MIGRATE: { kind: 'value', required: false, default: 'true', service: 'api', note: 'runs migrations at boot for the single-replica first-party deployment' },
   PLATFOLIO_RECONCILE_INTERVAL_MS: { kind: 'value', required: false, default: '60000', service: 'api' },
-  PLATFOLIO_VERSION: { kind: 'value', required: false, service: 'api', note: 'reported by /healthz; set by the build, not the operator' },
+  PLATFOLIO_RELEASE_TAG: {
+    kind: 'value', required: false, service: 'api', environments: 'all', deployedTo: 'railway:variable',
+    note: 'bare SemVer tag verified against the candidate commit by the self-host planner; empty for an untagged deployment',
+  },
   PLATFOLIO_EMAIL_DRIVER: { kind: 'value', required: false, default: 'none', enum: ['none', 'smtp', 'mailpit', 'memory'], service: 'api' },
   PLATFOLIO_EMAIL_FROM: { kind: 'value', required: false, default: 'platfolio@platfolio.dev', service: 'api' },
   PLATFOLIO_SMTP_HOST: { kind: 'value', required: false, service: 'api' },

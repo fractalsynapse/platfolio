@@ -170,6 +170,11 @@ Check out that commit with a clean tracked tree, then run
 references directly and prints the resulting plan hash. Keep the candidate manifest and its images for as long
 as that candidate needs to be replayed. The legacy API-only overlay cannot supply a full hosted plan.
 
+For a tagged release, fetch the tag and pass `--release-tag=<semver>` to both the candidate apply and
+the hosted smoke. The planner checks that the tag points to the candidate's exact source commit before it
+adds the tag to the runtime configuration. The image digests stay the same. `GET /version` reports that
+tag as `version`, or `null` for an untagged candidate. The `commit` field identifies either build.
+
 The site builds from the public production configuration in `compose.yaml`. Caddy serves the static artifact
 behind Railway's HTTPS proxy. On startup, the container renders the environment's public endpoint overlay
 before serving any request. The staged site uses `preview.platfolio.dev`, the staging API, and the staging

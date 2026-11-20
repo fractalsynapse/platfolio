@@ -22,7 +22,7 @@ import { badRequest, bearerToken, notFound, send, unauthorized } from './respond
  * singleton would only be honest in one of them.
  */
 export interface CapabilityDeps {
-  build: { version: string; commit: string; buildTime: string };
+  build: { version: string | null; commit: string; buildTime: string };
   /** Injected so the controller can be tested without waiting on a wall clock. */
   now?: () => Date;
   dispatchTtlMs?: number;
