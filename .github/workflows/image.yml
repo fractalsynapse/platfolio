@@ -31,7 +31,7 @@ env:
 
 jobs:
   build:
-    name: Build the control-plane image
+    name: Build and smoke-test candidate images
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

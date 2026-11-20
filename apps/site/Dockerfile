@@ -62,8 +62,8 @@ COPY packages/contracts ./packages/contracts
 COPY packages/api-contract ./packages/api-contract
 COPY packages/page-schema ./packages/page-schema
 COPY packages/manifest ./packages/manifest
-COPY packages/ui ./packages/ui
-COPY apps/site ./apps/site
+COPY --chown=node:node packages/ui ./packages/ui
+COPY --chown=node:node apps/site ./apps/site
 
 # D47, and the reason this is a build ARG rather than a literal: an unset origin means the site has no address,
 # and the app refuses to build instead of inventing one. `astro.config.mjs` reads the same name from the
