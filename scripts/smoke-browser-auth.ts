@@ -123,6 +123,7 @@ const { values: flags } = parseArgs({
     // the default because the local stack's UI is Vite on :5173 -- see `scripts/seed-identity.ts` and
     // `compose.dev.yaml`, which name the same origin.
     'ui-origin': { type: 'string', default: process.env.PLATFOLIO_ALLOWED_ORIGINS ?? LOOPBACK_UI_ORIGIN },
+    'sign-in-only': { type: 'boolean' },
     user: { type: 'string', default: process.env.KC_PKCE_USER ?? 'adrian' },
     password: { type: 'string', default: process.env.KC_USER_PASSWORD ?? 'platfolio-dev-only' },
     'admin-user': { type: 'string', default: process.env.KC_ADMIN_USER ?? 'platfolio-admin' },
@@ -140,6 +141,9 @@ const redirectUri = `${uiOrigin}/callback`;
 const WEB_CLIENT = WEB_CLIENT_ID;
 const API_CLIENT = API_CLIENT_ID;
 const issuer = `${idp}/realms/${realm}`;
+if (flags['sign-in-only'] && (!process.env.KC_PKCE_USER || !process.env.KC_USER_PASSWORD)) {
+  throw new Error('The candidate sign-in check needs KC_PKCE_USER and KC_USER_PASSWORD for a smoke user');
+}
 
 type Status = 'pass' | 'fail' | 'not-run';
 const results: Array<{ name: string; status: Status; detail: string }> = [];
@@ -254,6 +258,9 @@ async function authorize(opts: {
     // we got is what stops a refusal from being read as a silent success.
     const action = /<form id="kc-form-login"[^>]*action="([^"]+)"/.exec(html)?.[1];
     if (!action) return { verifier, params: {}, loginPageShown: false, status: 200, page: html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200) };
+    if (flags['sign-in-only'] && new URL(action.replace(/&amp;/g, '&')).origin !== new URL(issuer).origin) {
+      throw new Error('The candidate sign-in form points outside its configured issuer');
+    }
     loginPageShown = true;
     r = await fetch(action.replace(/&amp;/g, '&'), {
       method: 'POST',
@@ -275,7 +282,11 @@ async function authorize(opts: {
     target = new URL(l, target);
   }
   const params = Object.fromEntries(target.searchParams.entries());
-  const stateMismatch = params.state && params.state !== state ? `sent ${state}, got ${params.state}` : undefined;
+  const stateMismatch = (flags['sign-in-only'] || params.state) && params.state !== state
+    ? `sent ${state}, got ${params.state ?? '(missing)'}` : undefined;
+  if (flags['sign-in-only'] && target.origin + target.pathname !== redirectUri) {
+    throw new Error('The candidate sign-in did not redirect to its configured callback');
+  }
   return { verifier, ...(params.code === undefined ? {} : { code: params.code }), params, loginPageShown, status: r.status, ...(stateMismatch === undefined ? {} : { stateMismatch }) };
 }
 
@@ -308,6 +319,23 @@ try {
 check('discovery: issuer is the realm under test', disc.issuer === issuer, `${disc.issuer}`);
 check('discovery: S256 is offered', disc.code_challenge_methods_supported.includes('S256'), JSON.stringify(disc.code_challenge_methods_supported));
 check('discovery: an end_session_endpoint exists', typeof disc.end_session_endpoint === 'string' && disc.end_session_endpoint.length > 0, disc.end_session_endpoint);
+
+if (flags['sign-in-only']) {
+  const origin = new URL(issuer).origin;
+  if (disc.issuer !== issuer || [disc.authorization_endpoint, disc.token_endpoint].some((endpoint) => new URL(endpoint).origin !== origin)) {
+    throw new Error('Candidate sign-in discovered endpoints outside its configured issuer');
+  }
+  const login = await authorize();
+  check('candidate PKCE login returned a code with matching state', Boolean(login.code && login.loginPageShown && !login.stateMismatch), 'authorization code and redirect');
+  if (!login.code || login.stateMismatch) report();
+  const token = await exchange(login.code, login.verifier);
+  const accessToken = token.j.access_token;
+  check('candidate exchanged the code with its PKCE verifier', token.status === 200 && typeof accessToken === 'string', `HTTP ${token.status}`);
+  if (typeof accessToken !== 'string' || token.status !== 200) report();
+  const who = await fetch(`${api}/api/v1/whoami`, { headers: { authorization: `Bearer ${accessToken}` }, redirect: 'error' });
+  check('candidate API accepted the browser access token', who.status === 200, `HTTP ${who.status}`);
+  report();
+}
 
 /* ------------------------------------------------------------------ B */
 section('B. PKCE is mandatory at the authorization endpoint, not "offered by a well-behaved client"');

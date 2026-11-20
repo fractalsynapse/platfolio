@@ -638,5 +638,6 @@ against this file.
    winning the derivation; `packages/manifest/test/fixtures/site-per-env-compose.yaml` proves the exact stanza
    parses, validates and plans `preview.platfolio.dev` as the site's staging host, and the model changes are
    committed. **This does not deploy the site.** The digest blocker above still stands, so the site service is
-   expressible but not yet publishable, and no origin resolves. Until blocker one is settled the honest sentence
-   about the UI stays: built, gated, undeployed, unrendered.
+   expressible at that revision. The follow-up for #267 adds the site to the composition and publishes its image
+   through the release candidate workflow. The first Railway deployment, DNS verification, and hosted browser
+   checks remain separate acceptance steps.

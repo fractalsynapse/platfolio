@@ -26,7 +26,7 @@ services:
       # Issuer and JWKS are set by scripts/platform-deploy.ts from the host the provider actually granted,
       # because asserting them before DNS lands would bake in a URL that serves nothing (E27). They are listed
       # here so the inventory and the plan agree about which names this service needs.
-      PLATFOLIO_IDENTITY_ISSUER: https://auth.platfolio.dev/realms/platfolio
+      PLATFOLIO_IDENTITY_ISSUER: &production-issuer https://auth.platfolio.dev/realms/platfolio
       PLATFOLIO_IDENTITY_JWKS_URI: https://auth.platfolio.dev/realms/platfolio/protocol/openid-connect/certs
       # Where platfolio's own UI is served from, said ONCE (D52). Two consumers read this one name: the API's
       # CORS policy (`apps/control-plane/src/cors.ts`, which refuses to boot on a malformed entry), and
@@ -36,10 +36,9 @@ services:
       # cross-origin while the realm refused to redirect to it, or the reverse, and no gate in this repository
       # could see the disagreement because each file was internally consistent.
       # `platfolio.dev` is the UI host; `api.platfolio.dev` below and `auth.platfolio.dev` on `identity` are the
-      # API and identity hosts (#199 verified and certificate-issued those two). The UI is a third host, and it
-      # is not a host this composition describes -- which is exactly why the API has to be told its origin
-      # instead of deriving it: nothing here can look up a hostname it does not itself host.
-      PLATFOLIO_ALLOWED_ORIGINS: https://platfolio.dev
+      # API and identity hosts (#199 verified and certificate-issued those two). The site and CORS share
+      # the origin through the same YAML anchor, which the Keycloak seeder also reads from the API config.
+      PLATFOLIO_ALLOWED_ORIGINS: &production-site-origin https://platfolio.dev
       # Its own schema, not `public`: the identity provider shares this database instance (see `identity`), and
       # two applications writing migrations into one schema is a collision waiting for its first upgrade.
       PLATFOLIO_DB_SCHEMA: platfolio
@@ -102,14 +101,40 @@ services:
       # is not production's either. A value map is the honest place to say so.
       environmentValues:
         staging:
-          PLATFOLIO_IDENTITY_ISSUER: https://auth.platfolio.dev/realms/platfolio-staging
+          PLATFOLIO_IDENTITY_ISSUER: &staging-issuer https://auth.platfolio.dev/realms/platfolio-staging
           PLATFOLIO_IDENTITY_JWKS_URI: https://auth.platfolio.dev/realms/platfolio-staging/protocol/openid-connect/certs
           # The staging UI host is `preview.platfolio.dev`. Do not read that as the `preview` environment below
           # (which is pull-request previews, and disabled): it is the hostname the maintainer chose for the
           # staging page. What matters to this file is that the two environments answer different origins,
           # because the same string decides both which page may call this API and where its code may land.
-          PLATFOLIO_ALLOWED_ORIGINS: https://preview.platfolio.dev
+          PLATFOLIO_ALLOWED_ORIGINS: &staging-site-origin https://preview.platfolio.dev
 
+  site:
+    image: ghcr.io/fractalsynapse/platfolio-site
+    expose: ['4321']
+    environment: &production-site-config
+      PLATFOLIO_SITE_ORIGIN: *production-site-origin
+      PLATFOLIO_URL: https://api.platfolio.dev
+      PLATFOLIO_IDENTITY_ISSUER: *production-issuer
+    build:
+      context: .
+      dockerfile: apps/site/Dockerfile
+      args: *production-site-config
+    healthcheck:
+      test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:4321/version.json').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+    deploy:
+      resources:
+        limits: { cpus: '1', memory: 256M }
+    x-platfolio:
+      public: true
+      domains: [platfolio.dev]
+      environmentDomains:
+        staging: [preview.platfolio.dev]
+      environmentValues:
+        staging:
+          PLATFOLIO_SITE_ORIGIN: *staging-site-origin
+          PLATFOLIO_URL: https://staging-api.platfolio.dev
+          PLATFOLIO_IDENTITY_ISSUER: *staging-issuer
 
   identity:
     # Upstream Keycloak, pinned by digest (D29/D30 law 3: a tag is a thing that moves). `ownership: external`

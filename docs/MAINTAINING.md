@@ -163,11 +163,29 @@ One thing, one home (and the DNS/origin state both realms carry is recorded ther
 
 For a first-party release candidate, use the `release-candidate-<attempt>` artifact from a successful
 **Image** workflow run. It records the full source commit, run and attempt, and the registry digest of each
-image the run published. The commit tag accompanies the digest because Railway requires `image:tag@digest`.
+image the run published. Hosted candidates contain both `api` and `site`. The commit tag accompanies the
+digest because Railway requires `image:tag@digest`.
 Check out that commit with a clean tracked tree, then run
 `pnpm run platform:plan --candidate=/path/to/release-candidate.json`. The planner reads the recorded image
 references directly and prints the resulting plan hash. Keep the candidate manifest and its images for as long
-as that candidate needs to be replayed. The legacy branch-tag overlay commands are for older deployments.
+as that candidate needs to be replayed. The legacy API-only overlay cannot supply a full hosted plan.
+
+The site builds from the public production configuration in `compose.yaml`. Caddy serves the static artifact
+behind Railway's HTTPS proxy. On startup, the container renders the environment's public endpoint overlay
+before serving any request. The staged site uses `preview.platfolio.dev`, the staging API, and the staging
+Keycloak realm, all from the same composition. Registry pull access and DNS must be in place before running a
+hosted smoke check.
+
+Render only staging with `pnpm run platform:plan --candidate=/path/to/release-candidate.json --environment=staging`.
+Add `--apply` to that command when the staging deployment is authorized. The resulting plan includes the
+staging domains and excludes production.
+
+With the candidate already deployed and a staging smoke account supplied through `KC_PKCE_USER` and
+`KC_USER_PASSWORD`, run `pnpm run platform:plan --candidate=/path/to/release-candidate.json --verify-candidate=staging`.
+Supply the Railway workspace and credential through `RAILWAY_WORKSPACE_ID` and `RAILWAY_TOKEN`. The check
+reads the provider's image references and live status, confirms the commit on both hosts, and completes a
+PKCE authorization-code exchange and authenticated API request. It exercises the sign-in protocol with HTTP
+requests. The shell's browser hydration and accessibility checks are separate.
 
 A platform's build reports its own artifact; nobody types a digest, and nobody types a credential:
 

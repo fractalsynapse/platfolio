@@ -51,7 +51,7 @@ services:
       HOST: '0.0.0.0'
       # The issuer must match byte-for-byte what the token carries -- exact match is D4's cross-tenant rule,
       # so this is a value an operator reads, not a default that may drift.
-      PLATFOLIO_IDENTITY_ISSUER: http://localhost:8081/realms/platfolio
+      PLATFOLIO_IDENTITY_ISSUER: &development-issuer http://localhost:8081/realms/platfolio
       PLATFOLIO_IDENTITY_AUDIENCE: platfolio-api
       PLATFOLIO_IDENTITY_JWKS_URI: http://identity:8080/realms/platfolio/protocol/openid-connect/certs
       # The platform file's value is a hosted UI origin; locally there is no hosted UI, and the browser that
@@ -64,7 +64,7 @@ services:
       # `docker compose` merges this map over the platform file's, so the hosted origin does not survive here --
       # and `x-platfolio.environmentValues.staging` never reaches this stack at all, because the local runtime
       # has no environments.
-      PLATFOLIO_ALLOWED_ORIGINS: http://localhost:5173
+      PLATFOLIO_ALLOWED_ORIGINS: &development-site-origin http://localhost:5173
       PLATFOLIO_DB_URL: postgresql://postgres:platfolio-dev-only@main:5432/platfolio
       PLATFOLIO_DB_SCHEMA: platfolio
       # Migrate-on-boot is a local convenience. Production runs `pnpm run db:migrate` as a separate step,
@@ -110,6 +110,16 @@ services:
         condition: service_started
       mailpit:
         condition: service_started
+
+  site:
+    image: platfolio-site:dev
+    ports: ['5173:4321']
+    environment: &development-site-config
+      PLATFOLIO_SITE_ORIGIN: *development-site-origin
+      PLATFOLIO_URL: http://localhost:8082
+      PLATFOLIO_IDENTITY_ISSUER: *development-issuer
+    build:
+      args: *development-site-config
 
   identity:
     # `start-dev`, on the SAME Postgres instance as the control plane and in its own schema: the topology the
