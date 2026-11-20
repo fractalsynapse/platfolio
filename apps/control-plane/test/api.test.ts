@@ -78,23 +78,18 @@ test('the route manifest matches the document, and both cover the same surface',
   }
 });
 
-test('/version reports the runtime environment independently of the build label', async () => {
+test('/version reports the release tag or null while retaining the build identity', async () => {
   const buildEnv = {
     PLATFOLIO_IDENTITY_ISSUER: fixture.issuer,
     PLATFOLIO_IDENTITY_AUDIENCE: fixture.audience,
     PLATFOLIO_IDENTITY_JWKS_URI: `${fixture.issuer}/certs`,
     HOST: '127.0.0.1',
     PORT: '0',
-    NODE_ENV: 'production',
-    PLATFOLIO_VERSION: 'staging',
     PLATFOLIO_COMMIT: build.commit,
     PLATFOLIO_BUILD_TIME: build.buildTime,
   };
-  for (const environment of ['staging', 'production', 'development', undefined, '  ']) {
-    const app = await boot(configFromEnv({
-      ...buildEnv,
-      PLATFOLIO_DEPLOYMENT_ENVIRONMENT: environment,
-    }));
+  for (const tag of ['1.2.3-rc.1+ci.001', '', undefined]) {
+    const app = await boot(configFromEnv({ ...buildEnv, PLATFOLIO_RELEASE_TAG: tag }));
     try {
       const response = await fetch(`http://127.0.0.1:${app.address.port}/version`);
       assert.equal(response.status, 200);
@@ -102,8 +97,7 @@ test('/version reports the runtime environment independently of the build label'
       againstSpec('getVersion', 200, body);
       assert.deepEqual(body, {
         name: 'control-plane',
-        version: buildEnv.PLATFOLIO_VERSION,
-        environment: environment?.trim() || null,
+        version: tag || null,
         commit: build.commit,
         buildTime: build.buildTime,
         providerContract: { name: 'infra.provider', version: CONTRACT_VERSION },
@@ -111,6 +105,9 @@ test('/version reports the runtime environment independently of the build label'
     } finally {
       await app.stop();
     }
+  }
+  for (const invalid of ['staging', 'v1.2.3', '1.2.3-rc.01', '01.2.3', '1.2.3\n']) {
+    assert.throws(() => configFromEnv({ ...buildEnv, PLATFOLIO_RELEASE_TAG: invalid }), /must be a bare SemVer tag/);
   }
 });
 

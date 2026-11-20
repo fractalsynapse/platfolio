@@ -70,8 +70,6 @@ services:
       # Migrate-on-boot is a local convenience. Production runs `pnpm run db:migrate` as a separate step,
       # because replicas boot concurrently and two of them issuing the same DDL is an outage.
       PLATFOLIO_DB_MIGRATE: 'true'
-      PLATFOLIO_DEPLOYMENT_ENVIRONMENT: development
-      PLATFOLIO_VERSION: 0.0.0-local
       PLATFOLIO_COMMIT: "0000000000000000000000000000000000000000"
       # Quoted on purpose: an unquoted all-digit scalar is read as a *number*, which then failed the pattern
       # for a commit SHA -- the fourth YAML-scalar defect in this project, and the reason the compose file is

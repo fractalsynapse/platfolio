@@ -316,14 +316,6 @@ variables:
     environments: all
     deployedTo: github:environment-secret
     note: "the same credential as DATABASE_URL, delivered as a provider reference rather than a literal (OD13); the platform resolves it from the environment's own database, so no one types it"
-  - name: PLATFOLIO_DEPLOYMENT_ENVIRONMENT
-    kind: value
-    secret: false
-    environments: all
-    service: api
-    required: false
-    deployedTo: railway:variable
-    note: "public deployment environment reported by /version, supplied at runtime by the plan or development overlay"
   - name: PLATFOLIO_DEPLOY_BUDGET
     kind: value
     secret: false
@@ -444,6 +436,14 @@ variables:
     environments: all
     deployedTo: railway:variable
     note: "referenced by apps/control-plane/src/capabilities.ts, compose.dev.yaml, compose.yaml"
+  - name: PLATFOLIO_RELEASE_TAG
+    kind: value
+    secret: false
+    environments: all
+    service: api
+    required: false
+    deployedTo: railway:variable
+    note: "bare SemVer tag verified against the candidate commit by the self-host planner; empty for an untagged deployment"
   - name: PLATFOLIO_SCM_DRIVER
     kind: value
     secret: false
@@ -505,12 +505,6 @@ variables:
     environments: all
     deployedTo: ci:env
     note: "referenced by .github/actions/platfolio-managed/action.yml, .github/workflows/platfolio-managed.yml, apps/managed-action/src/main.ts, packages/manifest/src/render-install.ts"
-  - name: PLATFOLIO_VERSION
-    kind: value
-    secret: false
-    environments: all
-    deployedTo: host:shell
-    note: "build label reported as version by /version"
   - name: PLATFOLIO_WEB_CLIENT_ID
     kind: value
     secret: false

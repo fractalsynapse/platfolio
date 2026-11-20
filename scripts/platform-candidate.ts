@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import { isReleaseTag } from '../apps/control-plane/src/release-tag.ts';
 
 interface CandidateImage {
   image: string;
@@ -59,12 +60,32 @@ export function candidateArtifactResolver(candidate: ReleaseCandidate, checkoutC
   };
 }
 
-export function resolveCheckoutCandidate(path: string, cwd: string) {
+function requireCandidateReleaseTag(tag: string, sourceCommit: string, cwd: string): string {
+  if (!isReleaseTag(tag)) throw new Error('The candidate release tag must be a bare SemVer tag');
+  let taggedCommit: string;
+  try {
+    taggedCommit = execFileSync('git', ['rev-parse', '--verify', `refs/tags/${tag}^{commit}`], {
+      cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+  } catch {
+    throw new Error(`Release tag ${tag} does not resolve to a commit in this checkout. Fetch the tag before planning.`);
+  }
+  if (taggedCommit !== sourceCommit) {
+    throw new Error(`Release tag ${tag} points to ${taggedCommit}, but the candidate was built from ${sourceCommit}`);
+  }
+  return tag;
+}
+
+export function resolveCheckoutCandidate(path: string, cwd: string, releaseTag?: string) {
   const candidate = readReleaseCandidate(path);
   const git = (args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
   const resolveArtifact = candidateArtifactResolver(candidate, git(['rev-parse', 'HEAD']));
   if (git(['status', '--porcelain', '--untracked-files=no'])) {
     throw new Error('Check out the candidate commit with a clean tracked tree before planning a release candidate');
   }
-  return { sourceCommit: candidate.sourceCommit, resolveArtifact };
+  return {
+    sourceCommit: candidate.sourceCommit,
+    resolveArtifact,
+    releaseTag: releaseTag === undefined ? null : requireCandidateReleaseTag(releaseTag, candidate.sourceCommit, cwd),
+  };
 }

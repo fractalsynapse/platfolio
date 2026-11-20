@@ -101,14 +101,14 @@ paths:
     get:
       operationId: getVersion
       tags: [operational]
-      summary: Report build identity and deployment environment
+      summary: Report the release version, build commit and provider contract
       description: |
-        Build identity includes the provider contract version that produced instance state.
-        Deployment environment comes from runtime configuration.
+        The release version is the SemVer tag on the running build's exact source commit.
+        Untagged candidates report null and are identified by their commit.
       security: []
       responses:
         '200':
-          description: Build identity and deployment environment.
+          description: Build identity.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Version' }
@@ -2159,14 +2159,13 @@ components:
     Version:
       type: object
       additionalProperties: false
-      required: [name, version, environment, commit, buildTime, providerContract]
+      required: [name, version, commit, buildTime, providerContract]
       properties:
         name: { type: string, enum: [control-plane] }
-        version: { type: string, minLength: 1, description: 'Build label recorded in the image.' }
-        environment:
+        version:
           type: [string, 'null']
           minLength: 1
-          description: Deployment environment configured at runtime. Null means it was unset or blank.
+          description: SemVer release tag for this build, or null for an untagged candidate.
         commit:
           type: string
           pattern: '^[0-9a-f]{7,40}$'

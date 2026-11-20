@@ -5,10 +5,10 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
-### Fixed — report the deployment environment in `/version` (#272)
+### Fixed — report the exact release tag in `/version` (#272)
 
-The API reports its runtime `environment` alongside the existing `version` build label. The same image
-can report staging or production, and the hosted candidate smoke verifies the reported environment.
+Untagged builds report `version: null`. A candidate deployment can supply a SemVer release tag that
+points to the candidate commit, while reusing the images by digest.
 
 ### Added — the hosted site joins the release candidate (#267)
 

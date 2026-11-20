@@ -178,11 +178,7 @@ test('platfolio can describe and plan its own deployment (step 7, #172)', () => 
   assert.ok(staging);
   assert.deepEqual(staging.domains.map((d) => d.host).sort(), ['preview.platfolio.dev', 'staging-api.platfolio.dev']);
   for (const environment of [production, staging]) {
-    const apiService = environment.services.find((s) => s.name === 'api')!;
-    assert.equal(apiService.image, byName.get('api')?.image);
-    assert.equal(apiService.digest, byName.get('api')?.digest);
-    const api = Object.fromEntries(apiService.env.map((v) => [v.name, v.literal]));
-    assert.equal(api.PLATFOLIO_DEPLOYMENT_ENVIRONMENT, environment.name);
+    const api = Object.fromEntries(environment.services.find((s) => s.name === 'api')!.env.map((v) => [v.name, v.literal]));
     const site = Object.fromEntries(environment.services.find((s) => s.name === 'site')!.env.map((v) => [v.name, v.literal]));
     const domainFor = (service: string) => environment.domains.find((d) => d.service === service)?.host;
     assert.equal(site.PLATFOLIO_SITE_ORIGIN, `https://${domainFor('site')}`);

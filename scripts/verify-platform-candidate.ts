@@ -44,7 +44,7 @@ export async function verifyHostedCandidate(
   }
 
   const [apiVersion, siteVersion, readiness, overlay, landing, dashboard] = await Promise.all([
-    fetchHosted(apiOrigin, '/version').then((response) => response.json()) as Promise<{ commit?: unknown; environment?: unknown }>,
+    fetchHosted(apiOrigin, '/version').then((response) => response.json()) as Promise<{ commit?: unknown; version?: unknown }>,
     fetchHosted(siteOrigin, '/version.json').then((response) => response.json()) as Promise<{ commit?: unknown }>,
     fetchHosted(apiOrigin, '/readyz').then((response) => response.json()) as Promise<{ checks?: { name: string; status: string }[] }>,
     fetchHosted(siteOrigin, '/config.js').then((response) => response.text()),
@@ -55,8 +55,9 @@ export async function verifyHostedCandidate(
   if (apiVersion.commit !== sourceCommit || siteVersion.commit !== sourceCommit) {
     throw new Error('The API and site must both serve the candidate commit');
   }
-  if (apiVersion.environment !== environmentName) {
-    throw new Error(`The candidate API must report ${environmentName} in /version. Check PLATFOLIO_DEPLOYMENT_ENVIRONMENT.`);
+  const releaseTag = api.env.find(({ name }) => name === 'PLATFOLIO_RELEASE_TAG')?.literal || null;
+  if (apiVersion.version !== releaseTag) {
+    throw new Error(`The candidate API must report ${releaseTag ?? 'null'} as version. Check the deployed release tag.`);
   }
   if (!readiness.checks?.some((check) => check.name === 'database' && check.status === 'ok')) {
     throw new Error('The candidate API did not report its database ready');
@@ -69,7 +70,7 @@ export async function verifyHostedCandidate(
   if (/<script\b/i.test(landing) || !/<astro-island\b/i.test(dashboard)) {
     throw new Error('The candidate did not serve the expected landing and dashboard pages');
   }
-  console.log(`  ${environmentName}: Railway image references, build identity, deployment environment, database and site routes match the candidate`);
+  console.log(`  ${environmentName}: Railway image references, build identity, database and site routes match the candidate`);
 
   execFileSync(process.execPath, ['--import', 'tsx', fileURLToPath(new URL('./smoke-browser-auth.ts', import.meta.url)),
     '--sign-in-only', '--base', issuer.origin, '--realm', realmPath[1], '--api', apiOrigin.origin, '--ui-origin', siteOrigin.origin],
