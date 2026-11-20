@@ -59,6 +59,32 @@ jobs:
             --tag platfolio-control-plane:build \
             .
 
+      - name: Build the site image
+        id: site
+        run: |
+          SITE_IMAGE=$(docker compose config --format json | jq -er '.services.site.image')
+          docker compose build --build-arg PLATFOLIO_COMMIT="$GITHUB_SHA" site
+          echo "image=$SITE_IMAGE" >> "$GITHUB_OUTPUT"
+
+      - name: Smoke test the site image
+        env:
+          SITE_IMAGE: ${{ steps.site.outputs.image }}
+        run: |
+          docker run -d --rm --name site-smoke --publish 127.0.0.1::4321 "$SITE_IMAGE"
+          trap 'docker stop site-smoke >/dev/null' EXIT
+          address=$(docker port site-smoke 4321/tcp)
+          origin="http://$address"
+          for i in $(seq 1 30); do
+            if curl --fail --silent "$origin/version.json" > site-version.json; then break; fi
+            sleep 1
+          done
+          jq -e --arg sha "$GITHUB_SHA" '.commit == $sha' site-version.json
+          curl --fail --silent "$origin/" > site-landing.html
+          if grep -q '<script' site-landing.html; then exit 1; fi
+          curl --fail --silent "$origin/dashboard" | grep -q '<astro-island'
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' "$origin/callback?state=smoke")" = 200
+          curl --fail --silent "$origin/config.js" | grep -F 'window.__PLATFOLIO_SITE_CONFIG__'
+
       # The image answers its own healthcheck during the run, so a green job means the container serves --
       # not merely that it assembled. This is the difference the project keeps insisting on.
       - name: Fail-closed check (no identity config, the container must refuse to start)
@@ -110,47 +136,40 @@ jobs:
         env:
           REGISTRY: ghcr.io
           CR_PAT: ${{ secrets.GITHUB_TOKEN }}
+          SITE_IMAGE: ${{ steps.site.outputs.image }}
         run: |
           echo "$CR_PAT" | docker login "$REGISTRY" -u "$GITHUB_ACTOR" --password-stdin >/dev/null
           COMMIT_TAG="sha-$GITHUB_SHA"
-          for tag in "$COMMIT_TAG" "$GITHUB_REF_NAME"; do
-            docker tag platfolio-control-plane:build "$REGISTRY/$IMAGE_NAME:$tag"
-            # The digest comes out of the push itself. A plan pins sha256:..., never a mutable tag, and
-            # re-deriving it locally would need a go-template whose braces collide with this repo's
-            # workflow placeholder lint.
-            PUSHED="$(docker push "$REGISTRY/$IMAGE_NAME:$tag")"
-            if [ "$tag" = "$COMMIT_TAG" ]; then
-              DIGEST="$(printf '%s\n' "$PUSHED" | sed -n 's/.*digest: \(sha256:[0-9a-f]*\).*/\1/p' | head -1)"
+          publish() {
+            local service="$1" source="$2" repository="$3" pushed digest
+            local image="$repository:$COMMIT_TAG"
+            docker tag "$source" "$image"
+            pushed=$(docker push "$image")
+            digest=$(printf '%s\n' "$pushed" | sed -n 's/.*digest: \(sha256:[0-9a-f]*\).*/\1/p' | head -1)
+            if ! [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+              echo "::error::The $service push did not report a valid image digest."
+              exit 1
             fi
-          done
-          if ! [[ "${DIGEST:-}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-            echo '::error::The registry push did not report a valid image digest.'
-            exit 1
-          fi
-          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
-          echo "image=$REGISTRY/$IMAGE_NAME:$COMMIT_TAG" >> "$GITHUB_OUTPUT"
-          # The digest is the whole point of publishing: a plan pins sha256:..., not a mutable tag.
-          {
-            echo "## Published image"
-            echo ""
-            echo "- Reference: \`$REGISTRY/$IMAGE_NAME:$COMMIT_TAG\`"
-            echo "- **Pinned digest: \`$DIGEST\`**"
-            echo ""
-            echo "Use the digest, never the tag: a tag is mutable and a plan that trusts one can be moved"
-            echo "under a tenant. If this package is private, Railway cannot pull it until the package"
-            echo "visibility is set to public (a maintainer action; the workflow token cannot change it)."
-          } >> "$GITHUB_STEP_SUMMARY"
-          echo "  pinned digest: $DIGEST"
+            docker tag "$source" "$repository:$GITHUB_REF_NAME"
+            docker push "$repository:$GITHUB_REF_NAME"
+            printf '%s_image=%s\n%s_digest=%s\n' "$service" "$image" "$service" "$digest" >> "$GITHUB_OUTPUT"
+            printf -- '- %s: `%s@%s`\n' "$service" "$image" "$digest" >> "$GITHUB_STEP_SUMMARY"
+          }
+          echo '## Published images' >> "$GITHUB_STEP_SUMMARY"
+          publish api platfolio-control-plane:build "$REGISTRY/$IMAGE_NAME"
+          publish site "$SITE_IMAGE" "$SITE_IMAGE"
 
       - name: Record the release candidate
         if: github.event_name == 'push'
         env:
-          API_IMAGE: ${{ steps.publish.outputs.image }}
-          API_DIGEST: ${{ steps.publish.outputs.digest }}
+          API_IMAGE: ${{ steps.publish.outputs.api_image }}
+          API_DIGEST: ${{ steps.publish.outputs.api_digest }}
+          SITE_IMAGE: ${{ steps.publish.outputs.site_image }}
+          SITE_DIGEST: ${{ steps.publish.outputs.site_digest }}
         run: |
           jq -n --arg sourceCommit "$GITHUB_SHA" --arg runId "$GITHUB_RUN_ID" --arg runAttempt "$GITHUB_RUN_ATTEMPT" \
-            --arg image "$API_IMAGE" --arg digest "$API_DIGEST" \
-            '{schemaVersion: 1, $sourceCommit, $runId, $runAttempt, images: {api: {$image, $digest} } }' \
+            --arg apiImage "$API_IMAGE" --arg apiDigest "$API_DIGEST" --arg siteImage "$SITE_IMAGE" --arg siteDigest "$SITE_DIGEST" \
+            '{schemaVersion: 1, $sourceCommit, $runId, $runAttempt, images: {api: {image: $apiImage, digest: $apiDigest}, site: {image: $siteImage, digest: $siteDigest} } }' \
             > release-candidate.json
       - name: Upload the release candidate
         if: github.event_name == 'push'

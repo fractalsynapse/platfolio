@@ -1,0 +1,12 @@
+{
+	admin off
+}
+
+:4321 {
+	root * /app/apps/site/dist
+	header /config.js Cache-Control "no-store"
+	header /version.json Cache-Control "no-store"
+	file_server {
+		disable_canonical_uris
+	}
+}

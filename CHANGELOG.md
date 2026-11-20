@@ -5,6 +5,12 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+### Added — the hosted site joins the release candidate (#267)
+
+CI builds and smoke-tests the static site container and records the published image alongside the API in the
+same candidate. The platform and development compositions now include the site. The hosted smoke checks the
+candidate's staging deployment and its browser sign-in configuration.
+
 ### Added — replay first-party release candidates from CI (#233)
 
 The Image workflow records its published image digest and exact source commit. The self-host planner accepts

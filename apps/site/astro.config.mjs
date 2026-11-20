@@ -15,13 +15,11 @@ import react from '@astrojs/react';
  * rebuild on every endpoint change can ignore that file entirely; a deploy that ships one artifact to several
  * environments cannot.
  *
- * ## No composition entry here, and why that is not an oversight
+ * ## Hosted configuration
  *
  * platfolio's own UI is meant to be a service *inside* the platfolio project, beside `api` and `identity` (D62).
- * Saying so in this repository means a `compose.yaml` service, a generated digest in the generated overlay, and
- * DNS — the follow-on step, and #267 item 3 measured exactly where it stops (the renderer refuses a first-party
- * `build:` service whose image has not been reported yet, D54). Until that entry exists, this app builds,
- * type-checks and is gated, and nothing deploys it.
+ * `compose.yaml` supplies the production build arguments and environment-specific runtime endpoints. The
+ * release candidate carries the site digest, and Railway serves the site on the domains the plan names (D54, D68).
  *
  * ## There is no `vite.resolve.alias` in this file, and that is the decision (#267 item 1)
  *

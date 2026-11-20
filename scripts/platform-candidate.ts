@@ -59,12 +59,12 @@ export function candidateArtifactResolver(candidate: ReleaseCandidate, checkoutC
   };
 }
 
-export function resolveCheckoutCandidate(path: string, cwd: string): (service: string) => string {
+export function resolveCheckoutCandidate(path: string, cwd: string) {
   const candidate = readReleaseCandidate(path);
   const git = (args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
   const resolveArtifact = candidateArtifactResolver(candidate, git(['rev-parse', 'HEAD']));
   if (git(['status', '--porcelain', '--untracked-files=no'])) {
     throw new Error('Check out the candidate commit with a clean tracked tree before planning a release candidate');
   }
-  return resolveArtifact;
+  return { sourceCommit: candidate.sourceCommit, resolveArtifact };
 }

@@ -28,10 +28,21 @@ import { secretWriteScope } from '../packages/contracts/src/infra.ts';
 import { physicalServiceName, RailwayInfraProvider } from '../packages/contracts/src/railway-provider.ts';
 import type { RailwayCredential, RailwayCredentialSource } from '../packages/contracts/src/railway-transport.ts';
 import { resolveCheckoutCandidate } from './platform-candidate.ts';
+import { verifyHostedCandidate } from './verify-platform-candidate.ts';
 
 const root = path.resolve(import.meta.dirname, '..');
 const arg = (name: string) => process.argv.some((a) => a === `--${name}` || a.startsWith(`--${name}=`));
 const value = (name: string) => process.argv.find((a) => a.startsWith(`--${name}=`))?.slice(`--${name}=`.length);
+const candidatePath = value('candidate');
+const verifyEnvironment = value('verify-candidate');
+const targetEnvironment = verifyEnvironment ?? value('environment');
+if (arg('candidate') && !candidatePath) throw new Error('Use --candidate=/path/to/release-candidate.json');
+if (arg('environment') && !targetEnvironment) throw new Error('Use --environment=staging or another enabled environment');
+if (arg('verify-candidate') && (!candidatePath || !verifyEnvironment ||
+  process.argv.slice(2).some((flag) => !flag.startsWith('--candidate=') && !flag.startsWith('--verify-candidate=')))) {
+  throw new Error('Use --candidate=/path/to/release-candidate.json --verify-candidate=staging for a read-only hosted smoke test');
+}
+const candidate = candidatePath ? resolveCheckoutCandidate(candidatePath, root) : undefined;
 
 const token = process.env.RAILWAY_TOKEN ?? '';
 const workspaceId = process.env.RAILWAY_WORKSPACE_ID ?? '';
@@ -47,14 +58,13 @@ const credentials: RailwayCredentialSource = {
 
 function loadManifest(): NonNullable<ReturnType<typeof parseCompose>['manifest']> {
   const base = fs.readFileSync(path.join(root, 'compose.yaml'), 'utf8');
-  const candidate = value('candidate');
-  if (arg('candidate') && !candidate) throw new Error('Use --candidate=/path/to/release-candidate.json');
   const parsed = candidate
-    ? parseCompose([base], { resolveArtifact: resolveCheckoutCandidate(candidate, root) })
+    ? parseCompose([base], { resolveArtifact: candidate.resolveArtifact })
     : parseCompose([base, fs.readFileSync(path.join(root, 'compose.prod.yaml'), 'utf8')]);
   if (parsed.issues.length > 0) {
     console.error('  the renderer refused our own composition:');
     for (const i of parsed.issues) console.error(`    - ${i.path}: ${i.code} -- ${i.message}`);
+    if (!candidate) console.error('  use --candidate=/path/to/release-candidate.json from the Image workflow for the full hosted composition');
     process.exit(1);
   }
   if (!parsed.manifest) { console.error('  no manifest produced'); process.exit(1); }
@@ -327,7 +337,11 @@ if (arg('from-state')) {
 }
 
 const domains = arg('generated-domains') ? 'generated' : arg('strip-domains') ? 'omit' : undefined;
-const plan = buildPlan(manifest, { instanceId: 'selfhost', teamId: 'platfolio', ...(domains ? { domains } : {}) });
+const plan = buildPlan(manifest, {
+  instanceId: 'selfhost', teamId: 'platfolio',
+  ...(domains ? { domains } : {}),
+  ...(targetEnvironment ? { environment: targetEnvironment } : {}),
+});
 
 /**
  * Deliver the credentials THIS composition declares, through the provider seam rather than by hand.
@@ -379,19 +393,24 @@ describePlan(plan);
 // A dry run must stay a dry run: it renders and validates the plan and asks for nothing, which is the whole
 // reason it is the default. Requiring provider credentials before this check turned `platform:plan` into a
 // credentialed operation -- a regression I introduced while moving this block and caught by running it.
-if (!arg('apply') && !arg('deliver-secrets')) {
+if (!arg('apply') && !arg('deliver-secrets') && !verifyEnvironment) {
   console.log('\n  DRY RUN -- nothing was created or changed. Re-run with --apply.');
   process.exit(0);
 }
 
 if (!token || !workspaceId) {
-  console.error('  --apply and --deliver-secrets both need RAILWAY_TOKEN and RAILWAY_WORKSPACE_ID in the environment');
+  console.error('  Railway apply, secret delivery, and hosted verification need RAILWAY_TOKEN and RAILWAY_WORKSPACE_ID');
   process.exit(1);
 }
 
 // Keycloak's cold start against a shared Postgres runs past the provider's default three-minute
 // window, and timing out a deploy that is merely slow would leave a half-deployed first-party stack.
 const provider = new RailwayInfraProvider({ credentials, workspaceId, deployBudget: Number(process.env.PLATFOLIO_DEPLOY_BUDGET ?? 4), deployTimeoutMs: Number(process.env.PLATFOLIO_DEPLOY_TIMEOUT_MS ?? 600_000) });
+
+if (verifyEnvironment && candidate) {
+  await verifyHostedCandidate(plan, verifyEnvironment, candidate.sourceCommit, provider);
+  process.exit(0);
+}
 
 // Credential delivery is the same hosting operation through the same seam as the apply, so it shares this one
 // provider instance rather than constructing a second with its own budget and wiring.

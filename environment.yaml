@@ -447,7 +447,7 @@ variables:
     secret: false
     environments: all
     required: true
-    deployedTo: host:shell
+    deployedTo: railway:variable
     note: "the origin platfolio's own UI is served from, read by `apps/site` (D65). It is not `PLATFOLIO_ALLOWED_ORIGINS`: that is the list the API *admits*, this is the one address this document is published at, and the browser needs it because the realm's redirect URIs are `<origin>/callback` (`CALLBACK_PATH` in `scripts/browser-auth.ts`). A deploy that has not answered this question has no UI to point at, and `apps/site` refuses to build rather than invent one (D47)"
   - name: PLATFOLIO_SMTP_HOST
     kind: value

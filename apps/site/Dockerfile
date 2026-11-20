@@ -1,4 +1,4 @@
-# platfolio's own web shell (D65), as an image: the Astro build, then `astro preview` serving the artifact.
+# platfolio's own web shell (D65), built with Astro and served by Caddy behind Railway's HTTPS proxy.
 #
 # Single stage, like apps/control-plane/Dockerfile, for the reason that file records: an earlier two-stage build
 # copied installed workspace links and then re-copied sources over them, and every problem it caused appeared at
@@ -10,6 +10,7 @@
 # `environment.yaml` rather than remembered here. A deployment that must re-point one artifact at run time gets
 # `dist/config.js` rewritten at start by `apps/site/src/tools/render-runtime-config.ts` (see the ENTRYPOINT below and the header of
 # apps/site/src/lib/site-config.ts); that is the mechanism, not a hostname in this file (D47).
+FROM caddy:2-alpine@sha256:003a97808e781aa9f7e75cc2f43d34d461099031faf5e20faefb9f61126836f0 AS static-server
 FROM node:22-bookworm-slim
 
 WORKDIR /app
@@ -73,8 +74,11 @@ ARG PLATFOLIO_IDENTITY_ISSUER
 ARG PLATFOLIO_WEB_CLIENT_ID
 ENV PLATFOLIO_SITE_ORIGIN=$PLATFOLIO_SITE_ORIGIN PLATFOLIO_URL=$PLATFOLIO_URL PLATFOLIO_IDENTITY_ISSUER=$PLATFOLIO_IDENTITY_ISSUER PLATFOLIO_WEB_CLIENT_ID=$PLATFOLIO_WEB_CLIENT_ID
 RUN pnpm --filter @platfolio/site run build
+ARG PLATFOLIO_COMMIT=0000000000000000000000000000000000000000
+RUN node -e 'require("node:fs").writeFileSync("apps/site/dist/version.json", JSON.stringify({ commit: process.env.PLATFOLIO_COMMIT }))'
 
-RUN chown -R node:node /app
+COPY --from=static-server /usr/bin/caddy /usr/local/bin/caddy
+RUN chown -R node:node /app/apps/site/dist
 EXPOSE 4321
 USER node
 WORKDIR /app/apps/site
@@ -87,19 +91,5 @@ WORKDIR /app/apps/site
 #    absolute http(s) URL with a host, or is plain http on a machine this deploy does not own, the renderer exits 1
 #    and the container does **not** serve: a UI that quietly kept its build-time origin is a UI whose operator
 #    believes they re-pointed it, and the failure would surface later as a browser talking to the wrong plane.
-# 2. **Serve the artifact.** `astro preview` reads `dist/`, which is what the build produced.
-#
-# Measured on 2026-11-17, on this file: `docker build` exits 0 (the legacy builder; BuildKit's activity file could
-# not be written in this sandbox), and the container was run and answered -- `/` 200 with **zero** `<script>`
-# elements and zero island markers, `/dashboard` 200 with exactly one `<astro-island>` whose serialized props are
-# the five endpoint fields and nothing credential-shaped, `/callback` 200, `/config.js` 200 carrying the overlay
-# rendered from that container's environment. The refusal was also observed for real: with `PLATFOLIO_URL` pointed
-# at a plain-http non-loopback host, the container printed the named problem and never served.
-#
-# Two limits this file cannot retire on its own. `astro preview` is Astro's *development* preview server, not the
-# static server a deployment wants in front of a public origin -- choosing that (a hardened static server, an edge,
-# or `output: 'server'` with a Node adapter, which is the runtime-config answer D65 priced) belongs with the
-# composition entry, and is deliberately not decided here. And no browser executed a single byte of what was
-# served: hydration, one React root, focus order and the 320 px containers remain unobserved, which is what 11
-# §9.7/§9.8 exist to cover.
-ENTRYPOINT ["sh", "-c", "node /app/apps/site/src/tools/render-runtime-config.ts > /app/apps/site/dist/config.js && exec pnpm --filter @platfolio/site run preview --host 0.0.0.0 --port 4321"]
+# 2. **Serve the artifact.** Caddy serves only `dist/` and keeps the exact `/callback` path for PKCE.
+ENTRYPOINT ["sh", "-c", "node /app/apps/site/src/tools/render-runtime-config.ts > /app/apps/site/dist/config.js && exec caddy run --config /app/apps/site/Caddyfile --adapter caddyfile"]

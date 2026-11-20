@@ -134,7 +134,9 @@ test('platfolio can describe and plan its own deployment (step 7, #172)', () => 
   }
   const base = fs.readFileSync(path.join(dir, 'compose.yaml'), 'utf8');
   const overlay = fs.readFileSync(path.join(dir, 'compose.prod.yaml'), 'utf8');
-  const parsed = parseCompose([base, overlay]);
+  const parsed = parseCompose([base, overlay], {
+    resolveArtifact: (service) => service === 'site' ? `ghcr.io/platfolio-fixtures/site:ci@sha256:${DIGEST_PIN}` : undefined,
+  });
   // This used to assert the OPPOSITE -- "the tree cannot describe a deployable self-host" -- because the
   // overlay pinned a digest belonging to a deleted service and had no image of its own. #172 changed that:
   // the pin is now read from the registry by scripts/render-platform-overlay.ts, so the composition renders.
@@ -146,7 +148,7 @@ test('platfolio can describe and plan its own deployment (step 7, #172)', () => 
   assert.equal(validateManifest(parsed.manifest).length, 0, JSON.stringify(validateManifest(parsed.manifest)));
 
   const services = Object.keys(parsed.manifest.spec.services).sort();
-  assert.deepEqual(services, ['api', 'identity'], 'the control plane and its identity provider, and no more');
+  assert.deepEqual(services, ['api', 'identity', 'site']);
 
   // 'selfhost' here is the INSTANCE id, which the provider turns into the Railway project name
   // `platfolio-selfhost` (measured, and the live project carries that name). It is not a path: renaming it
@@ -158,7 +160,7 @@ test('platfolio can describe and plan its own deployment (step 7, #172)', () => 
 
   // Every planned service is pinned by digest -- the rule that refused a placeholder for a tenant (#84) is
   // applied to ourselves, which is the only way to know it is a rule and not a tenant-facing formality.
-  for (const name of ['api', 'identity']) {
+  for (const name of services) {
     const s = byName.get(name);
     assert.ok(s, `${name} missing from the plan`);
     assert.match(s.digest, /^sha256:[0-9a-f]{64}$/, `${name} has no digest pin`);
@@ -170,18 +172,25 @@ test('platfolio can describe and plan its own deployment (step 7, #172)', () => 
   assert.equal(byName.get('identity')?.command, '/opt/keycloak/bin/kc.sh start', 'a list-valued command must survive to the plan, joined with quoting where needed');
   assert.equal(byName.get('api')?.command, undefined, 'the api service has no command override');
 
-  // One shared database, wired into both applications by reference -- the same `references` mechanism a tenant
-  // uses, and each selects its own schema so neither can move the other's migrations.
+  const hosted = production.domains.map((d) => d.host).sort();
+  assert.deepEqual(hosted, ['api.platfolio.dev', 'auth.platfolio.dev', 'platfolio.dev']);
+  const staging = plan.environments.find((e) => e.name === 'staging');
+  assert.ok(staging);
+  assert.deepEqual(staging.domains.map((d) => d.host).sort(), ['preview.platfolio.dev', 'staging-api.platfolio.dev']);
+  for (const environment of [production, staging]) {
+    const api = Object.fromEntries(environment.services.find((s) => s.name === 'api')!.env.map((v) => [v.name, v.literal]));
+    const site = Object.fromEntries(environment.services.find((s) => s.name === 'site')!.env.map((v) => [v.name, v.literal]));
+    const domainFor = (service: string) => environment.domains.find((d) => d.service === service)?.host;
+    assert.equal(site.PLATFOLIO_SITE_ORIGIN, `https://${domainFor('site')}`);
+    assert.equal(site.PLATFOLIO_SITE_ORIGIN, api.PLATFOLIO_ALLOWED_ORIGINS);
+    assert.equal(site.PLATFOLIO_URL, `https://${domainFor('api')}`);
+    assert.equal(site.PLATFOLIO_IDENTITY_ISSUER, api.PLATFOLIO_IDENTITY_ISSUER);
+  }
+
+  // The API and Keycloak use separate schemas in the same production database.
   assert.deepEqual(production.databases.map((d) => `${d.name}:${d.kind}`), ['main:postgres']);
   for (const [service, variable] of [['api', 'PLATFOLIO_DB_URL'], ['identity', 'KC_DB_URL_HOST'], ['identity', 'KC_DB_PASSWORD']] as const) {
-    // The hostname rule that made this assertion necessary: during D50 an edit to the composition silently
-  // removed `public: true` from the api service, and the plan quietly dropped api.platfolio.dev -- a valid
-  // plan with one fewer reachable service, and nothing in the suite noticed. Both of platfolio's own hosts
-  // must appear, because losing one is indistinguishable from never having wanted it.
-  const hosted = (plan.environments[0]?.domains ?? []).map((d) => d.host).sort();
-  assert.deepEqual(hosted, ['api.platfolio.dev', 'auth.platfolio.dev'], `platfolio's own plan must expose both hosts, got ${JSON.stringify(hosted)}`);
-
-  const refs = byName.get(service)?.references ?? [];
+    const refs = byName.get(service)?.references ?? [];
     assert.ok(refs.some((r) => r.variable === variable && r.database === 'main'), `${service} is not wired to the shared database`);
     // #198, asserted rather than commented: a driver that needs components gets components, each naming a
     // SOURCE variable on the database service, and nothing is handed a postgres:// URL it cannot parse.
