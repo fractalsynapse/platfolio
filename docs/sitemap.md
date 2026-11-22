@@ -26,7 +26,7 @@ Navigation follows the [object model](design/17-object-model.md).
 | `/docs/self-host` | MVP | Explain how to run a supported platform locally with Docker Compose from the same manifest, including how to verify a standalone restore. |
 | `/docs/api` | Later | Provide a web reference derived from the OpenAPI contract. |
 | `/sign-in` | MVP | Start Keycloak sign-in and preserve the intended in-site destination. Include an account-creation path for new users. |
-| `/callback` | MVP | Complete the browser sign-in exchange and return to the intended dashboard destination with the session available to the dashboard. |
+| `/callback` | MVP | Complete the browser sign-in exchange and open the requested dashboard route with the in-memory session available to the dashboard. |
 | `/dashboard` | MVP | Show the signed-in person's teams and give a new user a clear path to create one. Surface invitations when that flow is enabled. |
 | `/dashboard/create-team` | MVP | Create a team and establish its slug and initial owner. Continue to subscription or setup as appropriate. |
 | `/dashboard/invitations` | Later | Show and accept invitations matched to the person's verified email before team membership exists. |
@@ -45,7 +45,7 @@ Paths in this table are relative to `/dashboard/teams/:team`.
 | `/members` | Later | Show membership and roles. Give owners invitation controls and show whether invitations were sent. |
 | `/connections` | MVP | Connect the GitHub App and the tenant's Railway workspace. Show granted access, where the provider credential lives, what can be verified, and how to revoke the connection. |
 | `/activity` | Later | Show the team audit trail with links to authorized instances and environments. The backend audit trail is required for operations from the start. |
-| `/billing` | MVP | Subscribe to the management plan, see instance limits and billing state, and manage cancellation. Direct users to the instance's export path and show the applicable access window. Railway charges remain with the provider. |
+| `/billing` | MVP | Subscribe to the management plan, see instance limits and billing state, and manage cancellation. Show what a cancellation does to managed operations, the remaining export window, and a link to each affected instance's Lifecycle page. Railway charges remain with the provider. |
 
 Team connections are reusable during onboarding. The selected repository and Railway project are visible on the instance. In managed mode, Platfolio holds a provider grant and the broker refuses reads of secret values. In self-custody the team retains the provider grant and runs privileged operations in its own pipeline. See [custody tiers](design/04-execution-plane-github-workflows.md#custody-tiers-and-what-the-runner-is-for-d24) and [billing and lifecycle](design/06-billing-and-lifecycle.md).
 
@@ -56,11 +56,11 @@ Paths in this table are relative to `/dashboard/teams/:team/instances/:instance`
 | Path suffix | Scope | Purpose |
 | --- | --- | --- |
 | `/` | MVP | Show the instance's template and source commit, repository, provider project, and state of each environment. Surface the most relevant next action. |
-| `/setup` | MVP | Resume the connection and first deploy. Show the reviewable install PR, approvals, plan validation, workflow progress, and first verification. Link to the exact step or environment that needs attention. |
-| `/dependencies` | Later | Show what the instance consumes and provides, explicit shares, and affected consumers. Surface any binding the MVP identity setup needs within `/setup` or the relevant environment's configuration. |
-| `/lifecycle` | MVP | Export the stack and guide the owner through leaving Platfolio. Show what keeps running, what is retained, and which dependencies block removal. Full managed teardown can follow the MVP export and eject flow. When available, show its requested and verified outcomes distinctly. |
+| `/setup` | MVP | Resume the connection and first deploy. Show the reviewable install PR, approvals, plan validation, workflow progress, and first verification. Show when the subscription, entitlement, or instance limit blocks activation and link to Billing. Link other blockers to the exact step or environment that needs attention. |
+| `/dependencies` | Later | Show what the instance consumes and provides, explicit shares, and affected consumers. Include shared identity bindings when managed team realms are supported. |
+| `/lifecycle` | MVP | Export the stack and guide the owner through leaving Platfolio. Explain what happens to compute, data, workflows, and provider access. Distinguish suspending managed compute with data retained from ejecting a stack that keeps running. Show dependency blockers and the verified outcome of each action. Full managed teardown can follow MVP. |
 
-Make export available before cancellation and during the documented access window. Include the applied configuration, secret names, data export and restore instructions, and the steps to run independently. Ejection and audit stay available under the [target architecture's access guarantees](design/00-target-architecture.md#2-invariants). See the [ejection design](design/06-billing-and-lifecycle.md).
+Give the authorized owner access to the same Lifecycle route before cancellation and throughout the documented export window after paid management access ends. Include the applied configuration, secret names, data export and restore instructions, and the steps to run independently. Ejection and audit stay available under the [target architecture's access guarantees](design/00-target-architecture.md#2-invariants). See the [ejection design](design/06-billing-and-lifecycle.md).
 
 ## Environment workspace
 
@@ -68,28 +68,31 @@ Paths in this table are relative to `/dashboard/teams/:team/instances/:instance/
 
 | Path suffix | Scope | Purpose |
 | --- | --- | --- |
-| `/` | MVP | Show services, observed health, desired and applied revisions, and the latest runner result for this environment. Show when and how the state was observed. |
-| `/deployments` | MVP | Show the latest deploy and its GitHub run and commit check. Add full history and confirmed manual deploy or redeploy actions when their APIs and provider wiring support them. |
+| `/` | MVP | Show services, observed health, desired and applied revisions, and the latest deployment result for this environment, with its GitHub run and commit check. Show when and how each result was observed. |
+| `/deployments` | Later | Show full deployment history for the environment. Add confirmed manual deploy or redeploy actions when their APIs and provider wiring support them. |
 | `/deployments/:dispatchId` | Later | Link directly to a deployment record with the requested action, plan and artifact identity, GitHub run, reported result, and provider verification. |
-| `/configuration` | MVP | Show the environment's settings, required secret names, and application identity mode. Distinguish presence from healthy behavior. Guide users to complete configuration in their provider or runner. Show a write-only delivery form where supported. |
-| `/domains` | MVP | For services with public endpoints, show generated URLs and the provider's required DNS records, including TXT verification. Track DNS verification and certificate issuance separately. |
+| `/configuration` | MVP | List every required secret by name. Report presence separately and show a green verification check only after the deployed service is verified healthy. Guide users to configure values in their provider or runner. Let the team configure its own OIDC issuer for the tenant application. Offer write-only secret delivery when supported. |
+| `/domains` | MVP | For services with public endpoints, show generated URLs and let the team attach a custom hostname for the environment. Show the exact copyable DNS records returned by the provider, including the required verification TXT. Track DNS verification and certificate issuance separately, and show when HTTPS is ready. |
 
 A production link contains `/environments/production` even when the operator last viewed staging. Use the environment declared in the plan and show it in action confirmations. See [domains and DNS](design/12-domains-and-dns.md) and the [OpenAPI contract](../apps/control-plane/openapi.yaml).
 
+Bring-your-own OIDC satisfies the MVP identity criterion. Preserve native authentication for platforms that declare it. Managed team realms and shared-realm setup follow MVP under [identity decision OI1](design/05-identity.md#identity-decisions-accepted-2026-11-07).
+
 ## Navigation and UI constraints
 
-- Keep Astro for the site and one React island for the dashboard (D65). Direct links to tenant routes must work on a fresh page load, and post-sign-in navigation must preserve the session under the in-memory token policy (D67).
+- Keep Astro for the site and one React island for the dashboard (D65). The static host must serve the dashboard shell for direct visits to tenant paths. After the callback exchange, open the intended in-site route without a document reload so the dashboard can use the in-memory session. A hard reload triggers sign-in again and returns to the same authorized route under D67.
 - Use full pages for durable destinations and sheets for short actions such as inviting a member or entering a secret. Use the same component contracts at every supported width. Keep secret values out of URLs, drafts, replayed signals, and page documents.
 - Compose template-specific views with the build-time component registry. A worker can omit Domains and a shared identity instance can emphasize Dependencies. The [open UI decisions](design/11-ui-components-and-page-model.md#open-decisions) still govern where template-specific page documents are authored.
-- Use the generated SDK for dashboard data. Ship with polling and show observation age. A deployment request stays pending until the runner reports and the relevant verification succeeds. Keep partial application and unavailable verification visible.
+- Use the generated SDK for dashboard data and a single freshness primitive. Ship with polling, show the source and age of observations, and keep the same routes when D64's event transport lands. Distinguish pending work, reported failure or partial application, unavailable verification, and verified success.
 - Authorize reads and mutations through the API and resolve route slugs in the signed-in person's scope. Give an authorized member actionable role feedback where policy allows. A URL alone grants no access.
 
 See the [normative UI rules](ui-architecture.md), [UI framework specification](design/11-ui-components-and-page-model.md), and [decision register](design/01-product-and-decisions.md#decision-register).
 
 ## MVP delivery and acceptance
 
-1. **Sign in and navigate.** Finish browser sign-in, team creation and selection, and deep links. Reuse the current instance viewer for team, instance, and environment pages. Verify that an operator opening an environment URL can sign in and land on that environment.
-2. **Install and verify one real tenant instance.** From Connections and Create Instance, connect the tenant's GitHub repository and Railway workspace, review the install PR in GitHub, and follow the first verified deploy in Setup. Verify staging and production, services, a database, and reachable generated domains. Exercise an ordinary push and see the result in both GitHub and the environment's deployment view.
-3. **Complete the remaining MVP journeys.** Subscribe at team level, verify the required-secret checklist and supported tenant identity setup, and attach a custom domain through the DNS panel. Cancel, export, and restore the stack independently. Run the same manifest locally with Docker Compose.
+1. **Sign in and subscribe (criterion 1).** In a browser without a session, open a nested environment URL directly on the static host, sign in, and confirm authenticated data loads at that URL. Hard-reload it and verify that signing in again returns to the same destination. Exercise new account signup, team creation, and subscription. Confirm the control plane requires an active or trialing plan, the relevant entitlement, and available instance capacity before reporting an active instance.
+2. **Install and verify one real tenant instance (criteria 2–5).** Authorize the GitHub App for the tenant's repository and connect Railway. Confirm Platfolio opens one reviewable install PR with the managed workflow files and targets a project in the tenant's workspace. Follow the first verified deploy in Setup. Verify staging and production, services, a database, and reachable generated domains. Check the environment overview shows what was applied and why. Push through the normal branch workflow and check the GitHub commit status and matching environment overview. Run staging after production and confirm the production overview still shows its own latest result.
+3. **Configure and verify the deployed environment (criteria 6–8).** Confirm that setting a required secret reports presence without turning the health-gated check green. Verify the deployed service becomes healthy before the check turns green. Configure the tenant's OIDC issuer and verify sign-in to the deployed application. Attach a custom domain, publish the provider's DNS records including the TXT, and verify HTTPS works after the certificate is issued.
+4. **Leave and restore independently (criteria 9–10).** Cancel the management subscription, reach Lifecycle as an authorized owner within the export window, and export the applied stack and data restore instructions. Follow the instructions and verify the stack can run without Platfolio. Run the same manifest locally with Docker Compose.
 
-The [product acceptance criteria](design/01-product-and-decisions.md#mvp-scope-observable) and [delivery plan](design/09-delivery-plan.md) define MVP. The route map already has API building blocks for teams, instances, plan registration, dispatches, latest attestations, and bindings. Resumable installation, GitHub commit checks, domain management, billing, and export still need contract or integration work. Live secret delivery and redeploy also need hosted provider wiring. Design new operations in OpenAPI before exposing their controls.
+The [product acceptance criteria](design/01-product-and-decisions.md#mvp-scope-observable) and [delivery plan](design/09-delivery-plan.md) define MVP. The route map already has API building blocks for teams, instances, plan registration, dispatches, instance-wide latest attestations, and bindings. The environment overview needs an environment-scoped deployment result, including its GitHub run and commit check. Resumable installation, custom-domain attachment, billing, and post-cancellation export also need contract or integration work. Live secret delivery and redeploy need hosted provider wiring. Design new operations in OpenAPI before exposing their controls.
