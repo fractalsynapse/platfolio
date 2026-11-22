@@ -54,6 +54,29 @@ tags:
     description: Operations that require a verified token.
 
 paths:
+  /status:
+    get:
+      operationId: getStatus
+      tags: [operational]
+      summary: Check that the API is serving requests
+      description: Fixed liveness response for deployment probes.
+      security: []
+      responses:
+        '200':
+          description: The API is serving requests.
+          headers:
+            Cache-Control:
+              schema: { type: string, enum: [no-store] }
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [status]
+                properties:
+                  status: { type: string, enum: [ok] }
+              example: { status: ok }
+
   /healthz:
     get:
       operationId: getHealth

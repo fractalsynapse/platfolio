@@ -9,6 +9,13 @@ async function fetchHosted(origin: URL, path: string): Promise<Response> {
   return response;
 }
 
+async function verifyStatus(origin: URL): Promise<void> {
+  const response = await fetchHosted(origin, '/status');
+  if (response.status !== 200 || await response.text() !== '{"status":"ok"}') {
+    throw new Error(`${origin.origin}/status must return HTTP 200 and {"status":"ok"}`);
+  }
+}
+
 export async function verifyHostedCandidate(
   plan: InfraPlan,
   environmentName: string,
@@ -51,6 +58,8 @@ export async function verifyHostedCandidate(
     fetchHosted(siteOrigin, '/').then((response) => response.text()),
     fetchHosted(siteOrigin, '/dashboard').then((response) => response.text()),
     fetchHosted(siteOrigin, '/callback'),
+    verifyStatus(apiOrigin),
+    verifyStatus(siteOrigin),
   ]);
   if (apiVersion.commit !== sourceCommit || siteVersion.commit !== sourceCommit) {
     throw new Error('The API and site must both serve the candidate commit');
@@ -70,7 +79,7 @@ export async function verifyHostedCandidate(
   if (/<script\b/i.test(landing) || !/<astro-island\b/i.test(dashboard)) {
     throw new Error('The candidate did not serve the expected landing and dashboard pages');
   }
-  console.log(`  ${environmentName}: Railway image references, build identity, database and site routes match the candidate`);
+  console.log(`  ${environmentName}: Railway image references, build identity, status probes, database and site routes match the candidate`);
 
   execFileSync(process.execPath, ['--import', 'tsx', fileURLToPath(new URL('./smoke-browser-auth.ts', import.meta.url)),
     '--sign-in-only', '--base', issuer.origin, '--realm', realmPath[1], '--api', apiOrigin.origin, '--ui-origin', siteOrigin.origin],

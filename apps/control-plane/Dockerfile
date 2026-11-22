@@ -58,5 +58,5 @@ EXPOSE 8080
 USER node
 # node can reach its own health endpoint, so the image needs no curl/wget to be checkable.
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:8080/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+  CMD node -e "fetch('http://127.0.0.1:8080/status').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 CMD ["node", "apps/control-plane/src/index.ts"]

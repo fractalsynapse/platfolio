@@ -73,10 +73,13 @@ jobs:
           trap 'docker stop site-smoke >/dev/null' EXIT
           address=$(docker port site-smoke 4321/tcp)
           origin="http://$address"
+          status=""
           for i in $(seq 1 30); do
-            if curl --fail --silent "$origin/version.json" > site-version.json; then break; fi
+            if status=$(curl --fail --silent "$origin/status") && [ "$status" = '{"status":"ok"}' ]; then break; fi
             sleep 1
           done
+          test "$status" = '{"status":"ok"}'
+          curl --fail --silent "$origin/version.json" > site-version.json
           jq -e --arg sha "$GITHUB_SHA" '.commit == $sha' site-version.json
           curl --fail --silent "$origin/" > site-landing.html
           if grep -q '<script' site-landing.html; then exit 1; fi
@@ -94,8 +97,7 @@ jobs:
           echo "$out" | grep -qi "cannot start" || { echo "container started without identity config -- fail-closed is broken"; exit 1; }
       - name: Smoke test the built container
         # A shape-only JWKS stands in for a realm here: this step proves the image boots, binds, serves
-        # /healthz and reads its build identity -- NOT that signatures verify. That is proven against a real
-        # Keycloak in the Compose stack and in the live tenant run, and CI cannot substitute for either.
+        # /status and reads its build identity. The Compose stack and live smoke exercise Keycloak signatures.
         run: |
           set -e
           node -e "require('http').createServer((q,s)=>{s.writeHead(200,{'content-type':'application/json'});s.end('{\"keys\":[{\"kty\":\"RSA\",\"kid\":\"ci-smoke\",\"alg\":\"RS256\",\"use\":\"sig\",\"n\":\"AKd-pem3OaiXvBmXb-mPAmgLBFLmAWhVNxXfkRDBMUWXQ7oJrbnVjhFHwOTb-wsBAwEAAQ\",\"e\":\"AQAB\"}]}')}).listen(9911)" &
@@ -109,14 +111,11 @@ jobs:
             platfolio-control-plane:build
           ok=""
           for i in $(seq 1 30); do
-            if docker exec cp-smoke node -e "fetch('http://127.0.0.1:8080/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"; then ok=1; break; fi
+            if docker exec cp-smoke node -e "fetch('http://127.0.0.1:8080/status').then(async r=>process.exit(r.status===200 && (await r.json()).status==='ok'?0:1)).catch(()=>process.exit(1))"; then ok=1; break; fi
             sleep 2
           done
-          if [ -z "$ok" ]; then echo "healthz never answered"; docker logs cp-smoke; exit 1; fi
-          # /healthz only proves something is listening. These two prove the API is actually mounted: /version
-          # answers with the build identity baked in by this workflow, and an unauthenticated data route answers
-          # 401 rather than 404 -- which is exactly the check that was missing when a container came up with a
-          # listener and zero registered routes.
+          if [ -z "$ok" ]; then echo "/status never returned ok"; docker logs cp-smoke; exit 1; fi
+          # Confirm /version serves the candidate commit and the anonymous data request receives HTTP 401.
           version=$(docker exec cp-smoke node -e "fetch('http://127.0.0.1:8080/version').then(r=>r.text()).then(t=>process.stdout.write(t))")
           echo "  /version -> $version"
           jq -e --arg sha "$GITHUB_SHA" 'has("version") and .version == null and .commit == $sha' <<< "$version"

@@ -25,7 +25,7 @@ test('the shipped spec is internally true', () => {
   assert.equal(new Set(ops.map((o) => o.operationId)).size, ops.length, 'operationIds are unique');
   // The public half declares itself explicitly rather than by omission -- that is what the security check is for.
   const publicOps = ops.filter((o) => Array.isArray(o.security) && o.security.length === 0).map((o) => o.operationId).sort();
-  assert.deepEqual(publicOps, ['getHealth', 'getReady', 'getVersion'], 'only liveness and build identity are unauthenticated');
+  assert.deepEqual(publicOps, ['getHealth', 'getReady', 'getStatus', 'getVersion'], 'only operational probes and build identity are unauthenticated');
   for (const guarded of ops.filter((o) => !publicOps.includes(o.operationId))) {
     assert.ok(guarded.security !== 'undeclared' && guarded.security.includes('bearerJwt'), `${guarded.operationId} must declare bearerJwt`);
   }

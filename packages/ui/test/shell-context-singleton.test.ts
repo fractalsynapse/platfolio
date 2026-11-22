@@ -125,11 +125,9 @@ test('the transport the context hands over routes from the generated table, not 
     ['delete', 'get', 'post', 'put'],
     'the method vocabulary changed shape -- re-read the generated table before this island ships, because the transport builds requests from these values',
   );
-  // Measured on this tree: 33 of 36 operations sit under `/api/v1/`, and the three that do not are the
-  // operational trio the control plane answers without a version prefix. Listed apart rather than excluded by a
-  // looser predicate, so a fourth unversioned path names itself as new work in the spec instead of passing.
+  // List the operational routes explicitly so each unversioned path is reviewed against the OpenAPI spec.
   const unversioned = [...new Set(entries.map((entry) => entry.path).filter((p) => !p.startsWith('/api/v1/')))].sort();
-  assert.deepEqual(unversioned, ['/healthz', '/readyz', '/version'], 'a path outside the versioned prefix reached the table this island routes from; if the spec grew one, re-read apps/control-plane/openapi.yaml (D41) before relaxing this');
+  assert.deepEqual(unversioned, ['/healthz', '/readyz', '/status', '/version'], 'the generated table must expose the operational routes declared in OpenAPI');
   assert.equal(table.listInstances?.path, '/api/v1/instances', 'the operation the dashboard screen declares must be routable from this table');
 
   const push = entries.map((entry) => entry.path).filter((p) => /events|stream|subscribe|socket/i.test(p));

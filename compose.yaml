@@ -53,7 +53,7 @@ services:
       PLATFOLIO_EMAIL_FROM: platfolio@platfolio.dev
       PLATFOLIO_SMTP_STARTTLS: require
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/status').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
       timeout: 3s
       retries: 3
@@ -112,17 +112,22 @@ services:
 
   site:
     image: ghcr.io/fractalsynapse/platfolio-site
-    expose: ['4321']
-    environment: &production-site-config
+    expose: [&site-port '4321']
+    environment:
       PLATFOLIO_SITE_ORIGIN: *production-site-origin
-      PLATFOLIO_URL: https://api.platfolio.dev
+      PLATFOLIO_URL: &production-api-url https://api.platfolio.dev
       PLATFOLIO_IDENTITY_ISSUER: *production-issuer
+      # Railway sends its health probe to PORT.
+      PORT: *site-port
     build:
       context: .
       dockerfile: apps/site/Dockerfile
-      args: *production-site-config
+      args:
+        PLATFOLIO_SITE_ORIGIN: *production-site-origin
+        PLATFOLIO_URL: *production-api-url
+        PLATFOLIO_IDENTITY_ISSUER: *production-issuer
     healthcheck:
-      test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:4321/version.json').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:4321/status').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
     deploy:
       resources:
         limits: { cpus: '1', memory: 256M }

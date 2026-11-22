@@ -166,7 +166,6 @@ test('platfolio can describe and plan its own deployment (step 7, #172)', () => 
     assert.match(s.digest, /^sha256:[0-9a-f]{64}$/, `${name} has no digest pin`);
     assert.ok(s.healthPath.length > 0, `${name} has no health path, so the provider cannot tell live from present`);
   }
-  assert.equal(byName.get('api')?.healthPath, '/healthz');
   // The command finding from #172: Keycloak is pointless without its start command, and the renderer had been
   // dropping every list-valued Compose `command` on the floor.
   assert.equal(byName.get('identity')?.command, '/opt/keycloak/bin/kc.sh start', 'a list-valued command must survive to the plan, joined with quoting where needed');
@@ -178,8 +177,13 @@ test('platfolio can describe and plan its own deployment (step 7, #172)', () => 
   assert.ok(staging);
   assert.deepEqual(staging.domains.map((d) => d.host).sort(), ['preview.platfolio.dev', 'staging-api.platfolio.dev']);
   for (const environment of [production, staging]) {
-    const api = Object.fromEntries(environment.services.find((s) => s.name === 'api')!.env.map((v) => [v.name, v.literal]));
-    const site = Object.fromEntries(environment.services.find((s) => s.name === 'site')!.env.map((v) => [v.name, v.literal]));
+    const apiService = environment.services.find((s) => s.name === 'api')!;
+    const siteService = environment.services.find((s) => s.name === 'site')!;
+    assert.equal(apiService.healthPath, '/status');
+    assert.equal(siteService.healthPath, '/status');
+    const api = Object.fromEntries(apiService.env.map((v) => [v.name, v.literal]));
+    const site = Object.fromEntries(siteService.env.map((v) => [v.name, v.literal]));
+    assert.equal(site.PORT, String(siteService.port));
     const domainFor = (service: string) => environment.domains.find((d) => d.service === service)?.host;
     assert.equal(site.PLATFOLIO_SITE_ORIGIN, `https://${domainFor('site')}`);
     assert.equal(site.PLATFOLIO_SITE_ORIGIN, api.PLATFOLIO_ALLOWED_ORIGINS);
