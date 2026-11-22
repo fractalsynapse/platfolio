@@ -1,0 +1,42 @@
+# platfolio's managed-deployment action (D30, #123). Composite, and shipped from this repository: the
+# workflow that consumes it is generated into a tenant repository and pins this one by commit SHA, so a
+# force-push to a tag cannot change what runs in a tenant's account.
+name: platfolio managed
+description: Apply the desired state platfolio dispatched, with this repository's own credentials.
+author: platfolio
+inputs:
+  action: { description: 'apply | check | drift | suspend | export', required: true }
+  environment: { description: 'Target environment name', required: true }
+  instance_id: { description: 'platfolio instance', required: true }
+  dispatch_id: { description: 'One dispatch, echoed in the attestation', required: true }
+  nonce: { description: 'Single-use value platfolio issued', required: true }
+  plan_hash: { description: 'Digest of the plan this dispatch must apply', required: true }
+  platfolio_url: { description: 'Control-plane origin', required: true }
+outputs:
+  outcome: { description: 'ok | partial | failed | noop', value: '${{ steps.run.outputs.outcome }}' }
+  changed: { description: 'Count of resources reported live', value: '${{ steps.run.outputs.changed }}' }
+runs:
+  using: composite
+  steps:
+    - name: Run the dispatch
+      id: run
+      shell: bash
+      # Inputs are NOT environment variables inside a composite action: `${{ inputs.x }}` is a template
+      # expression and the node process sees only env. The first real run proved it -- exit 2 from
+      # "PLATFOLIO_URL is required" while the workflow passed the input correctly. Mapping is mandatory for
+      # what the script reads, and forbidden for what it must inherit: RAILWAY_TOKEN and
+      # PLATFOLIO_DISPATCH_TOKEN arrive from the calling step's env. Values are quoted because an unquoted
+      # `${{ ... }}` inside a flow mapping is what made this manifest unparseable.
+      # The bundle is generated from apps/managed-action by `pnpm run action:bundle` and committed so the
+      # action needs no package installation at run time. `pnpm run action:check` fails CI if it drifts,
+      # which is the same rule that governs a generated Compose prod overlay (D29).
+      env:
+        PLATFOLIO_URL: '${{ inputs.platfolio_url }}'
+        INPUT_ACTION: '${{ inputs.action }}'
+        INPUT_ENVIRONMENT: '${{ inputs.environment }}'
+        INPUT_INSTANCE_ID: '${{ inputs.instance_id }}'
+        INPUT_DISPATCH_ID: '${{ inputs.dispatch_id }}'
+        INPUT_NONCE: '${{ inputs.nonce }}'
+        INPUT_PLAN_HASH: '${{ inputs.plan_hash }}'
+      run: node "$GITHUB_ACTION_PATH/dist/managed-action.mjs"
+branding: { icon: 'box', color: 'blue' }

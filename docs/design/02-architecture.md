@@ -54,7 +54,7 @@ packages/ui          shared React components (web + future mobile)
 packages/page-schema declarative page/scene documents rendered by packages/ui
 packages/sdk         generated typed client from the OpenAPI spec
 actions/platfolio    the pinned GitHub Action(s) the customer runs (its own release train)
-templates/           platform catalog entries (manifest + generated artifacts), Apache-2.0 (D18)
+templates              the published `fractalsynapse/platfolio-*` repositories, read through the scm seam (D60) -- not a directory in this tree
 vendor/cordis        vendored framework copy (OD6) with a sync policy
 ops/                 compose, Railway IaC for platfolio's own stack, runbooks
 ```

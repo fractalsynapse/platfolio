@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
-import { InfraPlanSchema, type InfraPlan } from '@platfolio/contracts';
-import { enabledEnvironments, serviceEnvironments } from './environments.ts';
-import { stagingHost } from './render.ts';
+import { DEFAULT_STAGING_PREFIX } from './environments.ts';
+import { CONTRACT_VERSION, InfraPlanSchema, type InfraPlan } from '@platfolio/contracts';
+import { effectiveDomains, enabledEnvironments, serviceEnvironments } from './environments.ts';
 import type { Manifest } from './schema.ts';
 
 /**
@@ -29,6 +29,10 @@ export interface InstanceConfig {
    * and that is the intended failure rather than a convenience.
    */
   images?: Record<string, { image: string; digest: string }>;
+  /** Bootstrap may omit domains or request provider-generated hosts. Both are part of desired state. */
+  domains?: 'omit' | 'generated';
+  /** Limit an operator apply to one declared environment. */
+  environment?: string;
 }
 
 // Template documentation values, e.g. sha256:1111... or sha2222...: a single repeated character is not what a
@@ -39,13 +43,17 @@ const PLACEHOLDER = /^sha256:([0-9a-f])\1{63}$/;
 export function buildPlan(manifest: Manifest, config: InstanceConfig): InfraPlan {
   const platform = manifest.metadata.name;
   const enabled = enabledEnvironments(manifest);
+  const selected = enabled.filter((name) => config.environment === undefined || name === config.environment);
+  if (config.environment !== undefined && selected.length === 0) {
+    throw new Error(`Environment "${config.environment}" is not enabled`);
+  }
   const database = manifest.spec.resources?.database;
   const storage = manifest.spec.resources?.storage;
   const declaredVolumes = manifest.spec.resources?.volumes ?? [];
-  const stagingPrefix = manifest.spec.dns?.stagingPrefix ?? 'staging';
+  const stagingPrefix = manifest.spec.dns?.stagingPrefix ?? DEFAULT_STAGING_PREFIX;
   const verificationName = `${platform}-verify`;
 
-  const environments = enabled.map((envName) => {
+  const environments = selected.map((envName) => {
     const services = Object.entries(manifest.spec.services)
       .filter(([, svc]) => serviceEnvironments(svc, enabled).includes(envName))
       .map(([name, svc]) => {
@@ -66,18 +74,27 @@ export function buildPlan(manifest: Manifest, config: InstanceConfig): InfraPlan
           // Staging is a duplicate that sleeps by default (D23): one replica, never the production count.
           replicas: envName === 'production' ? svc.replicas : 1,
           limits,
-          env: Object.entries(svc.env).map(([key, value]) => ({ name: key, literal: value })),
+          // Base values first, then this environment's overrides (D56). Applied here, in the one place that
+          // knows which environment it is building, so no consumer has to re-derive an effective value.
+          env: Object.entries({ ...svc.env, ...(svc.environmentValues?.[envName] ?? {}) })
+            .map(([key, value]) => ({ name: key, literal: value })),
           secrets: svc.secrets.map((s) => ({ name: s.name, source: s.source })),
           references: svc.references ?? [],
         };
       });
 
     const placedNames = new Set(services.map((s) => s.name));
-    const domains = services.flatMap((s) => {
+    const domains = config.domains === 'omit' ? [] : services.flatMap((s) => {
+      if (config.domains === 'generated') {
+        return [{ host: `${s.name}.generated.up.railway.app`, service: s.name, port: s.port, verificationName: `${s.name}-verify` }];
+      }
       const svc = manifest.spec.services[s.name]!;
       if (!svc.public) return [];
-      return svc.domains.map((host) => ({
-        host: envName === 'production' ? host : stagingHost(host, stagingPrefix),
+      // Declared per-environment hosts (D68) win; absent them this is the old derivation exactly -- production
+      // hosts verbatim, every other environment through `stagingHost()`. `effectiveDomains` is the one home for
+      // that precedence, shared with `validateManifest`, so the plan and the validator never disagree.
+      return effectiveDomains(svc, envName, stagingPrefix).map((host) => ({
+        host,
         service: s.name,
         port: s.port,
         verificationName,
@@ -86,17 +103,17 @@ export function buildPlan(manifest: Manifest, config: InstanceConfig): InfraPlan
 
     return {
       name: envName,
-      ...(envName === 'staging' && enabled.includes('production') ? { cloneFrom: 'production' } : {}),
       services,
       domains,
-      // Declared in every environment: the provider provisions a template database once and places it in the
-      // duplicate, which is the behaviour measured live rather than an assumption (service names are
-      // project-wide).
+      // Declared in EVERY environment that places the service, because each environment gets its own database
+      // and the provider provisions it there (D57). This used to be justified the other way round -- "the
+      // provider provisions one and the duplicate receives it" -- and what the duplicate received was
+      // production's connection string, which is why staging could not reach a database it appeared to have.
       databases: database && placedNames.size ? [{ name: database.name, kind: database.kind }] : [],
       buckets: storage && placedNames.size ? [{ name: storage.name, ...(storage.region ? { region: storage.region } : {}) }] : [],
       volumes: declaredVolumes
         .filter((v) => placedNames.has(v.service))
-        .map((v) => ({ name: v.name, service: v.service, mountPath: v.mountPath, ...(v.sizeGB ? { sizeMB: v.sizeGB * 1024 } : {}) })),
+        .map((v) => ({ name: v.name, service: v.service, mountPath: v.mountPath, ...(v.sizeGB ? { sizeMB: v.sizeGB * 1024 } : {}), ...(v.retention ? { retention: v.retention } : {}) })),
     };
   });
 
@@ -104,10 +121,11 @@ export function buildPlan(manifest: Manifest, config: InstanceConfig): InfraPlan
     instanceId: config.instanceId,
     teamId: config.teamId,
     provider: config.provider ?? 'railway',
-    contract: '1.0.0',
+    // D59: the version a plan carries is the derived one, not a number this builder maintains.
+    contract: CONTRACT_VERSION,
     // Hash of the rendered desired state, so a re-apply of an unchanged manifest is idempotent.
     planHash: createHash('sha256').update(JSON.stringify({ platform, version: manifest.metadata.version, environments })).digest('hex'),
-    manifestRef: { platform, version: manifest.metadata.version },
+    manifestRef: { template: platform, version: manifest.metadata.version },
     environments,
   };
 

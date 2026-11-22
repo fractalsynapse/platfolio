@@ -3,21 +3,23 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
-import { InfraPlanSchema, planIssues } from '@platfolio/contracts';
-import { RailwayInfraProvider, samplePlan } from '@platfolio/contracts';
+import { EnvironmentPlanSchema, InfraPlanSchema, planIssues } from '@platfolio/contracts';
+import { RailwayInfraProvider } from '@platfolio/contracts';
 import { RailwayMock } from '../../../packages/contracts/test/railway-mock.ts';
-import { buildPlan, parse } from '../src/index.ts';
+import { buildPlan, parse, validateManifest } from '../src/index.ts';
 
-// Tests run from the repository root (pnpm test); templates live there, not beside the package.
-const dir = path.resolve('templates');
-const raw = (f: string) => fs.readFileSync(path.join(dir, f, 'manifest.yaml'), 'utf8');
+// Tests run from the repository root (pnpm test); the fixtures live under this package's test tree, and they are
+// fixtures -- not the published templates, which are repositories read through the source-control seam
+// (packages/manifest/test/templates.test.ts).
+const dir = path.resolve('packages/manifest/test/fixtures');
+const raw = (f: string) => fs.readFileSync(path.join(dir, f + '-manifest.yaml'), 'utf8');
 function loaded(name: string) {
   const result = parse(raw(name));
-  if (!result.manifest) throw new Error(`template "templates/${name}" did not parse: ${JSON.stringify(result.issues)}`);
+  if (!result.manifest) throw new Error(`fixture "packages/manifest/test/fixtures/${name}-manifest.yaml" did not parse: ${JSON.stringify(result.issues)}`);
   return result.manifest;
 }
-const webApp = loaded('example-web-app');
-const fullStack = loaded('example-full-stack');
+const webApp = loaded('web-app');
+const fullStack = loaded('full-stack');
 
 /** Real coordinates a release pipeline would have produced. */
 function realDigest(seed: string): string {
@@ -33,18 +35,42 @@ test('a manifest becomes a plan the contract accepts', () => {
   assert.doesNotThrow(() => InfraPlanSchema.parse(plan));
   assert.deepEqual(planIssues(plan), [], JSON.stringify(planIssues(plan)));
   assert.equal(plan.provider, 'railway');
-  assert.equal(plan.manifestRef.platform, 'example-web-app');
+  assert.equal(plan.manifestRef.template, 'example-web-app');
   assert.match(plan.planHash, /^[a-f0-9]{16,64}$/, 'planHash is a real digest, so re-applies are idempotent');
 });
 
-test('placement, replicas and staging duplication follow the environment model', () => {
+test('placement and replicas follow the environment model, and no environment is declared as a copy of another', () => {
   const plan = buildPlan(webApp, { instanceId: 'inst-a2', teamId: 'team-a2', images: pinned(['api', 'worker']) });
   const prod = plan.environments.find((e) => e.name === 'production')!;
   const staging = plan.environments.find((e) => e.name === 'staging')!;
   assert.equal(prod.services.length, 2, 'api and worker in production');
-  assert.equal(staging.cloneFrom, 'production', 'staging is a duplicate, not a parallel tree (E25)');
+  assert.equal(staging.services.length, 2, 'staging declares the services IT runs -- declared, not derived from production');
+  assert.equal('cloneFrom' in staging, false, 'a built plan carries no clone source (D57)');
+  // The assertion above alone is VACUOUS, and measuring it said so: re-emitting `cloneFrom` in the builder
+  // changed nothing, because zod strips a key the schema does not declare. So the load-bearing check is on the
+  // contract -- if the field comes back to the schema, a builder that emits it stops being a bug and becomes a
+  // mechanism, which is exactly how staging got production's database in the first place.
+  const environmentShape = (EnvironmentPlanSchema as unknown as { shape: Record<string, unknown> }).shape;
+  assert.equal('cloneFrom' in environmentShape, false, 'the environment schema has no clone source to emit or honour (D57)');
+  // And the consequence of stripping rather than rejecting is stated where it can be checked: an old plan
+  // document carrying `cloneFrom` parses to a plan that has none, so the provider cannot act on it.
+  const stale = InfraPlanSchema.safeParse({ ...plan, environments: [{ ...staging, cloneFrom: 'production' }, prod] });
+  assert.equal(stale.success, true, 'a pre-D57 document still parses');
+  assert.equal(stale.success && 'cloneFrom' in stale.data.environments[0]!, false, 'and arrives without the field');
   assert.equal(prod.services.find((s) => s.name === 'api')!.replicas, 2);
-  assert.equal(staging.services.find((s) => s.name === 'api')!.replicas, 1, 'a duplicate never inherits production replicas');
+  assert.equal(staging.services.find((s) => s.name === 'api')!.replicas, 1, 'staging never inherits production’s replica count (D23)');
+});
+
+test('planHash describes the plan the provider receives, not the builder’s intermediate object (D57)', () => {
+  // Why this belongs to a change that deleted a plan field: the hash is taken over the environments the builder
+  // assembled and is then handed to a provider that receives the PARSED plan. A field the schema does not
+  // declare -- `cloneFrom` until now, anything like it later -- would move the hash while changing nothing the
+  // provider can see, which is an idempotency marker that disagrees with its own plan.
+  const plan = buildPlan(webApp, { instanceId: 'inst-hash', teamId: 'team-hash', images: pinned(Object.keys(webApp.spec.services)) });
+  const recomputed = createHash('sha256')
+    .update(JSON.stringify({ platform: webApp.metadata.name, version: webApp.metadata.version, environments: plan.environments }))
+    .digest('hex');
+  assert.equal(plan.planHash, recomputed, 'the hash and the parsed plan agree -- an undeclarable field cannot ride in one and not the other');
 });
 
 test('resources carry over: database, bucket with region, volume in MB on its service', () => {
@@ -128,15 +154,32 @@ test('the whole chain composes: manifest -> plan -> provider wires the reference
     'environments.staging.services.api.secrets.APP_API_SIGNING_KEY',
   ], 'each failure names its environment -- a duplicate step would tell a tenant nothing');
 
+  // The PLAN still carries the logical names -- that is the point of the deterministic rule -- but the
+  // PROJECT holds `{name}-{environment}` for every environment, production included (D57).
   const prod = plan.environments.find((e) => e.name === 'production')!;
-  const dbServiceId = [...mock.services.values()].find((s) => s.name === prod.databases[0]!.name);
-  assert.ok(dbServiceId, `the declared database "${prod.databases[0]!.name}" was provisioned from the manifest`);
-  const apiId = [...mock.services.values()].find((s) => s.name === 'api');
+  const dbServiceId = [...mock.services.values()].find((s) => s.name === `${prod.databases[0]!.name}-production`);
+  assert.ok(dbServiceId, `the declared database "${prod.databases[0]!.name}-production" was provisioned from the manifest`);
+  const apiId = [...mock.services.values()].find((s) => s.name === 'api-production');
   assert.ok(apiId, 'the app service from the manifest exists');
   const instanceKey = [...mock.instances.keys()].find((k) => k.endsWith(`:${apiId.id}`));
   assert.ok(instanceKey, 'the app service has an instance in the environment');
   const wired = mock.instances.get(instanceKey!);
   assert.ok(wired?.variables.has('DATABASE_URL'), 'the reference reached the app service as a variable name');
+
+  // ...and the other environment got its OWN pair of them. This is the property the manifest->provider chain
+  // used to fail: staging declared the same names, the project could hold each name only once, and what staging
+  // actually received was production's database (D57).
+  const stagingDb = [...mock.services.values()].find((s) => s.name === 'app-db-staging');
+  assert.ok(stagingDb, 'staging’s database was provisioned as its own service');
+  assert.notEqual(stagingDb.id, dbServiceId.id, 'two environments, two databases');
+  const stagingApi = [...mock.services.values()].find((s) => s.name === 'api-staging');
+  assert.ok(stagingApi, 'staging’s app service is its own too');
+  assert.notEqual(stagingApi.id, apiId.id);
+  assert.deepEqual(
+    [...new Set(mock.writtenVariables.filter((w) => w.name === 'DATABASE_URL').map((w) => w.value))].sort(),
+    ['${{app-db-production.DATABASE_URL}}', '${{app-db-staging.DATABASE_URL}}'],
+    'each environment’s connection reference names the database it owns -- never the other one’s',
+  );
   // Names are asserted, never values: the wiring is provider-resolved by construction.
   // What must never appear is a RESOLVED credential. A verification token is different: it is a public DNS
   // value the tenant has to publish, surfaced deliberately in domain records (measured in the domain work).
@@ -153,5 +196,77 @@ test('a manifest built plan carries the staging host and its production replica 
   const hosts = [prod.domains[0]?.host, staging.domains[0]?.host];
   assert.equal(new Set(hosts).size, 2, 'the two environments never claim one host');
   assert.ok(hosts.every((h) => typeof h === 'string' && h.length > 0), JSON.stringify(hosts));
-  assert.deepEqual(staging.databases, prod.databases, 'a database is declared in both; the provider places it once and the duplicate receives it (measured live)');
+  assert.deepEqual(staging.databases, prod.databases, 'the same database is DECLARED in both environments, because each one gets its own service -- the provider provisions it per environment and never shares one (D57)');
+});
+
+/**
+ * D56: a staging environment needs staging CONFIGURATION, not merely a staging copy. Before per-environment
+ * values, `mode: development` bought a second environment whose values duplicated production's -- two
+ * environments, one truth, and the arrangement that quietly pointed our staging control plane at production's
+ * identity realm.
+ */
+test('per-environment overrides reach the plan for the environment they name, and only that one', () => {
+  const api = webApp.spec.services.api!;
+  const manifest = {
+    ...webApp,
+    spec: {
+      ...webApp.spec,
+      services: {
+        ...webApp.spec.services,
+        api: {
+          ...api,
+          environments: ['production', 'staging'],
+          environmentValues: { staging: { PLATFOLIO_IDENTITY_ISSUER: 'https://auth.example.com/realms/platfolio-staging' } },
+        },
+      },
+    },
+  } as typeof webApp;
+
+  const plan = buildPlan(manifest, { instanceId: 'inst-env', teamId: 'team-env', images: pinned(['api', 'worker']) });
+  const serviceIn = (name: string) => plan.environments.find((e) => e.name === name)!.services.find((s) => s.name === 'api')!;
+  const literal = (name: string, key: string) => serviceIn(name).env.find((e) => e.name === key)?.literal;
+
+  assert.equal(literal('staging', 'PLATFOLIO_IDENTITY_ISSUER'), 'https://auth.example.com/realms/platfolio-staging',
+    'the override is what staging gets');
+  assert.equal(literal('production', 'PLATFOLIO_IDENTITY_ISSUER'), api.env.PLATFOLIO_IDENTITY_ISSUER,
+    'production keeps the base value -- an override leaking into production is a downgrade wearing a feature');
+  assert.doesNotThrow(() => InfraPlanSchema.parse(plan));
+});
+
+test('an override that changes what a deployment runs changes the plan hash', () => {
+  const api = webApp.spec.services.api!;
+  const manifest = {
+    ...webApp,
+    spec: { ...webApp.spec, services: { ...webApp.spec.services, api: { ...api, environmentValues: { staging: { PLATFOLIO_DB_SCHEMA: 'platfolio_stage' } } } } },
+  } as typeof webApp;
+  const options = { instanceId: 'inst-hash', teamId: 'team-hash', images: pinned(['api', 'worker']) };
+  assert.notEqual(buildPlan(webApp, options).planHash, buildPlan(manifest, options).planHash,
+    'configuration is part of the version decision; a hash that ignored it would let a release be pinned to a lie');
+});
+
+test('validate refuses an override for an environment the service is not placed in, and a credential name in a value map', () => {
+  const api = webApp.spec.services.api!;
+  const bad = {
+    ...webApp,
+    spec: {
+      ...webApp.spec,
+      services: {
+        ...webApp.spec.services,
+        api: {
+          ...api,
+          environments: ['production'],
+          environmentValues: {
+            // Not placed in staging: dead configuration that reads like a decision.
+            staging: { PLATFOLIO_IDENTITY_ISSUER: 'https://auth.example.com/realms/ghost' },
+            // Credential-shaped NAMES belong in `secrets` whatever the value -- D4 grants no exception to the
+            // staging copy of a configuration map.
+            production: { STRIPE_WEBHOOK_SECRET: 'whsec_this_is_not_a_real_value' },
+          },
+        },
+      },
+    },
+  } as typeof webApp;
+  const codes = validateManifest(bad).map((i) => i.code);
+  assert.ok(codes.includes('environment-values-unplaced-environment'), JSON.stringify(codes));
+  assert.ok(codes.includes('environment-value-is-secret-name'), JSON.stringify(codes));
 });

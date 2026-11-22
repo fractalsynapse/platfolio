@@ -38,7 +38,13 @@ export const AttestationSchema = z.object({
   instanceId: z.string().min(1),
   environment: z.string().min(1),
   action: z.enum(['apply', 'check', 'drift', 'suspend', 'export']),
-  result: z.enum(['ok', 'failed', 'noop']),
+  /**
+   * `partial` was added for D37: a three-of-four apply is neither success nor failure. It widens a
+   * response union, which tightens anything switching exhaustively over it. Nothing outside this
+   * repository consumes it yet, so this lands as a minor with the widening stated in the changelog
+   * rather than filed under "additive", because the two claims are not the same claim.
+   */
+  result: z.enum(['ok', 'partial', 'failed', 'noop']),
   errorCode: z.string().min(1).optional(),
   resources: z.array(AttestationResourceSchema).max(200),
   release: z.object({ version: z.string().min(1), commitSha: z.string().length(40), imageDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/) }).strict().optional(),
@@ -47,6 +53,8 @@ export const AttestationSchema = z.object({
 }).strict().superRefine((a, ctx) => {
   if (a.result === 'ok' && a.errorCode) ctx.addIssue({ code: 'custom', path: ['errorCode'], message: 'a successful attestation must not carry an error code' });
   if (a.result === 'failed' && !a.errorCode) ctx.addIssue({ code: 'custom', path: ['errorCode'], message: 'a failed attestation must name an error code' });
+  if (a.result === 'partial' && !a.errorCode) ctx.addIssue({ code: 'custom', path: ['errorCode'], message: 'a partial attestation must say what did not complete' });
+  if (a.result === 'partial' && a.resources.length === 0) ctx.addIssue({ code: 'custom', path: ['resources'], message: 'partial with nothing landed is failed, not partial' });
   if (a.result === 'ok' && a.action === 'apply' && a.resources.length === 0) ctx.addIssue({ code: 'custom', path: ['resources'], message: 'an ok apply must report at least one resource' });
 });
 

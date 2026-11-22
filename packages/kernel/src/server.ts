@@ -1,0 +1,274 @@
+import { Context, Service } from 'cordis';
+import { createServer, type IncomingMessage, type RequestListener } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { z } from 'zod';
+import { applyCors, CorsConfigSchema, corsPolicyOf, corsPreflightResponse, describeCorsPolicy, type CorsPolicy } from './cors.ts';
+
+/**
+ * HTTP transport as a capability (`ctx.server`).
+ *
+ * Cordis ships no server at this tag -- the reference tree has no listener, no router, no request abstraction
+ * (verified against `examples/cordis` @ v4.0.0-rc.12) -- so the seam is ours. It is deliberately thin: sockets,
+ * listen/close, and method+path dispatch. Anything that knows an operationId belongs above it, in the app,
+ * because the framework boundary must not acquire opinions about the API.
+ *
+ * The lifecycle point that matters here: the listener is closed by a disposer *yielded from* `[Service.init]`,
+ * which is how Cordis expresses "stop". A server that never closes is a test suite that hangs, and a disposer
+ * registered outside the fiber's effect scope is one that never runs.
+ */
+export const ServerConfigSchema = z.object({
+  host: z.string().min(1).default('127.0.0.1'),
+  /** 0 means "any free port", which is what tests and the local Compose probe want. */
+  port: z.number().int().min(0).max(65535).default(8080),
+  bodyLimitBytes: z.number().int().min(1024).max(8_388_608).default(1_048_576),
+  shutdownGraceMs: z.number().int().min(0).max(30_000).default(5_000),
+  /**
+   * Cross-origin policy (see `cors.ts`). Deliberately *data*, not behaviour: the transport keeps no opinion
+   * about the API, it applies whatever list the composition root decided on. Absent, or an empty list, means
+   * cross-origin use is not enabled -- same-origin only, which is the default every deployment gets unless an
+   * operator names the origins that may call it.
+   */
+  cors: CorsConfigSchema.optional(),
+}).strict();
+
+export interface RouteDefinition {
+  method: string;
+  /** Colon parameters in the spec's own notation: `/api/v1/instances/{instanceId}`. */
+  path: string;
+  operationId: string;
+  /**
+   * The context arrives per request rather than being captured at registration. That is not ceremony: a route
+   * table built before the other capabilities are live either holds a half-initialised object or a mutable
+   * holder someone must remember to fill, and both fail later and quieter than this does.
+   */
+  handle: (request: Request, params: Record<string, string>, context: import('./extension.ts').KernelContext) => Promise<Response_>;
+}
+
+export interface Request {
+  method: string;
+  path: string;
+  url: string;
+  query: URLSearchParams;
+  headers: IncomingMessage['headers'];
+  /**
+   * Parsed JSON body, or undefined. Reading and size-limiting happens in the transport because a capability
+   * that reads the stream itself gets no bound, and an unbounded read on a public endpoint is an outage
+   * waiting for one curious caller. `raw` stays available for the rare handler that needs the stream.
+   */
+  body: unknown;
+  /** Why a body was rejected, so a handler can answer 400 with the reason instead of guessing. */
+  bodyError?: string;
+  raw: IncomingMessage;
+}
+
+export interface Response_ {
+  status: number;
+  body: unknown;
+  headers?: Record<string, string>;
+}
+
+export type RequestHandler = (request: Request) => Promise<Response_ | undefined>;
+
+export class ServerService extends Service<z.infer<typeof ServerConfigSchema>> {
+  static inject = [] as const;
+  static provide = 'server' as const;
+  static Config = ServerConfigSchema;
+
+  readonly config: z.infer<typeof ServerConfigSchema>;
+  private server: ReturnType<typeof createServer> | undefined;
+  private readonly routes: RouteDefinition[] = [];
+  private fallback: RequestHandler | undefined;
+  /**
+   * Built once at construction, not per request: the origin list is a deployment fact, and a bogus entry throws
+   * here while the process is still deciding whether to start rather than quietly narrowing what it accepts
+   * once traffic has arrived. `undefined` is the state cross-origin use is not enabled at all.
+   */
+  private readonly cors: CorsPolicy | undefined;
+
+  constructor(ctx: Context, config: z.infer<typeof ServerConfigSchema>) {
+    super(ctx, 'server');
+    this.config = config;
+    this.cors = corsPolicyOf(config.cors);
+  }
+
+  /** Routes are collected before listen, and matched per request so a late registration still takes. */
+  addRoute(route: RouteDefinition): void {
+    if (this.routes.some((r) => r.method === route.method && r.path === route.path)) {
+      // Cordis reports a duplicate *service* eagerly but says nothing about a duplicate route, so the router
+      // does: two handlers for one method+path means one of them is dead code that looks alive.
+      throw new Error(`route ${route.method} ${route.path} is already registered`);
+    }
+    this.routes.push(route);
+  }
+
+  setFallback(handler: RequestHandler): void {
+    this.fallback = handler;
+  }
+
+  /** How many routes have been registered. Read by the composition root after every capability is installed. */
+  get routeCount(): number {
+    return this.routes.length;
+  }
+
+  get listening(): boolean {
+    return this.server?.listening === true;
+  }
+
+  get address(): { host: string; port: number } {
+    const info = this.server?.address() as AddressInfo | undefined;
+    if (!info) throw new Error('server is not listening yet -- await the plugin before reading its address');
+    return { host: String(info.address), port: info.port };
+  }
+
+  /**
+   * Exposed for tests: one dispatch, no socket, so route logic is checkable without a listener.
+   *
+   * The cross-origin decision lives *here* rather than in the listener, so that the socket path and this path
+   * cannot disagree -- a CORS rule that only exists on one of the two request paths is a rule that goes untested
+   * half the time. A preflight is answered before route matching because it is not an operation: it carries no
+   * credential, matches no handler, and a browser may not send anything else it is not allowed to send.
+   */
+  async dispatch(request: Request): Promise<Response_> {
+    const preflight = corsPreflightResponse(this.cors, request, this.methodsFor(request.path));
+    if (preflight !== undefined) return preflight;
+    return applyCors(await this.dispatchRoute(request), this.cors, request);
+  }
+
+  /** The route table itself: match, fall through to the composition's fallback, then answer 404. */
+  private async dispatchRoute(request: Request): Promise<Response_> {
+    for (const route of this.routes) {
+      if (route.method !== request.method.toUpperCase()) continue;
+      const params = matchPath(route.path, request.path);
+      if (params === null) continue;
+      return route.handle(request, params, this.ctx);
+    }
+    const through = await this.fallback?.(request);
+    if (through) return through;
+    return { status: 404, body: { error: 'not-found', message: `no route for ${request.method} ${request.path}` } };
+  }
+
+  /**
+   * Which methods this path actually registers. A preflight is granted only for a method the route table has,
+   * which keeps the answer true by construction: adding a route needs no second list anywhere, and a method that
+   * does not exist cannot be preflighted into existing.
+   */
+  private methodsFor(path: string): string[] {
+    const out: string[] = [];
+    for (const route of this.routes) {
+      if (matchPath(route.path, path) !== null && !out.includes(route.method.toUpperCase())) out.push(route.method.toUpperCase());
+    }
+    return out;
+  }
+
+  async *[Service.init](): AsyncGenerator<() => Promise<void>, void, void> {
+    const listener: RequestListener = (req, res) => {
+      void (async () => {
+        const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
+        const readBody = async (): Promise<{ body: unknown; bodyError?: string }> => {
+          if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'DELETE') return { body: undefined };
+          const chunks: Buffer[] = [];
+          let size = 0;
+          for await (const chunk of req) {
+            size += (chunk as Buffer).length;
+            if (size > this.config.bodyLimitBytes) {
+              req.destroy();
+              return { body: undefined, bodyError: `request body exceeds ${String(this.config.bodyLimitBytes)} bytes` };
+            }
+            chunks.push(chunk as Buffer);
+          }
+          if (chunks.length === 0) return { body: undefined };
+          const text = Buffer.concat(chunks).toString('utf8');
+          try {
+            return { body: JSON.parse(text) as unknown };
+          } catch {
+            return { body: undefined, bodyError: 'request body is not valid JSON' };
+          }
+        };
+        const { body, bodyError } = await readBody();
+        const response = await this.dispatch({
+          method: req.method ?? 'GET', path: url.pathname, url: req.url ?? '/', query: url.searchParams,
+          headers: req.headers, body, ...(bodyError === undefined ? {} : { bodyError }), raw: req,
+        });
+        // 204 means no body, so sending `null` would be a lie the client has to special-case. The spec
+        // declares which operations answer 204; the transport respects it.
+        if (response.status === 204 || response.status === 304) {
+          res.writeHead(response.status, { 'cache-control': 'no-store', ...(response.headers ?? {}) });
+          res.end();
+          return;
+        }
+        const payload = JSON.stringify(response.body ?? null);
+        res.writeHead(response.status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...(response.headers ?? {}) });
+        res.end(payload);
+      })().catch((error: unknown) => {
+        // A handler that throws must not leave the socket hanging and must not crash the process: Cordis has
+        // no shutdown story at this tag, so the transport is the place that decides.
+        this.ctx.logger.error(`server: handler threw for ${req.method} ${req.url}: ${(error as Error).message ?? String(error)}`);
+        // The reason is included, redacted and bounded. An opaque 500 sent me reading framework source to find
+        // one missing field; the same dead end is waiting for the next operator. Credential-shaped text is
+        // stripped, so this cannot leak a token that appeared inside an error string.
+        const reason = (error instanceof Error ? error.message : String(error)).slice(0, 200)
+          .replace(/(gh[pousr]_|github_pat_|Bearer |access_token=)[A-Za-z0-9._~+/=-]{6,}/g, '$1' + '[redacted]');
+        // CORS applies here too. This branch never passes through `dispatch`, so without this line a browser
+        // facing a thrown handler sees a connection error instead of the 500 the API chose -- the one response
+        // shape an SPA most needs to be able to read.
+        const failure = applyCors({ status: 500, body: { error: 'internal', message: reason } }, this.cors, { headers: req.headers });
+        if (!res.headersSent) res.writeHead(failure.status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...(failure.headers ?? {}) });
+        res.end(JSON.stringify(failure.body));
+      });
+    };
+    const server = createServer(listener);
+    server.timeout = 30_000;
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(this.config.port, this.config.host, () => {
+        server.removeListener('error', reject);
+        resolve();
+      });
+    });
+    this.server = server;
+    const actual = (server.address() as AddressInfo).port;
+    // The origin list is stated before traffic, in the log an operator reads: the count and the non-secret shape
+    // of what is in force, and the reason when nothing is. A deployment that silently became same-origin-only is
+    // indistinguishable from one that was configured, unless somebody says which it is.
+    this.ctx.logger.info(describeCorsPolicy(this.cors));
+    this.ctx.logger.info(`server listening on ${this.config.host}:${String(actual)}`);
+    yield async () => {
+      await new Promise<void>((resolve) => {
+        // Sockets held open by a keep-alive client would block close() forever; destroy them after the grace
+        // so a shutdown is bounded. This is the whole reason the disposer exists.
+        const timer = setTimeout(() => {
+          server.closeAllConnections?.();
+          resolve();
+        }, this.config.shutdownGraceMs);
+        server.close(() => {
+          clearTimeout(timer);
+          resolve();
+        });
+      });
+      this.server = undefined;
+      this.ctx.logger.info('server closed');
+    };
+  }
+}
+
+/** `{name}` segments bind; anything else must match literally. Trailing slashes are not a second route. */
+export function matchPath(pattern: string, path: string): Record<string, string> | null {
+  const patternParts = pattern.split('/').filter(Boolean);
+  const pathParts = path.split('/').filter(Boolean);
+  if (patternParts.length !== pathParts.length) return null;
+  const params: Record<string, string> = {};
+  for (let i = 0; i < patternParts.length; i += 1) {
+    const want = patternParts[i] ?? '';
+    const got = pathParts[i] ?? '';
+    const param = /^\{(\w+)\}$/.exec(want);
+    if (param) params[param[1] ?? ''] = decodeURIComponent(got);
+    else if (want !== got) return null;
+  }
+  return params;
+}
+
+declare module 'cordis' {
+  interface Context {
+    server: ServerService;
+  }
+}

@@ -1,0 +1,2243 @@
+openapi: 3.1.0
+info:
+  title: platfolio control-plane API
+  version: 0.1.0
+  description: |
+    The control plane's public HTTP surface. **This file is the validation mechanism, not documentation**
+    (D41): `pnpm run api:check` fails if a handler exists without an operation here, if an operation here has
+    no route, or if a response body does not validate against its schema below.
+
+    Scope of this revision is [16 § Slice 1](../docs/design/16-foundation-build-order.md): liveness, the
+    build identity, and one authenticated operation that proves token **verification** rather than token
+    parsing. Instance, team, dispatch and secret operations are deliberately absent — they arrive with the
+    records that make them truthful, and an API designed before its data model is a description of a hope.
+
+    What authenticated means here: a bearer JWT whose signature, `iss`, `aud`, `exp`/`nbf` and `sub` have been
+    checked against JWKS pinned to the configured issuer (the `identity.provider` seam, docs/design/10). A
+    token that merely decodes is unauthenticated, and a claim of identity from one is the failure mode this
+    whole slice exists to make impossible.
+
+    The secret rule holds here too (D4): no operation accepts, returns or echoes a secret **value**. Names,
+    presence and provenance only, from the API up.
+
+    Cross-origin calls are **not in this document, deliberately**. A CORS preflight — `OPTIONS` carrying
+    `Access-Control-Request-Method` — presents no credential, matches no operation and has no response schema a
+    client may depend on: it is transport negotiation, like `Content-Length`. `operationsOf` reads every method
+    key under a path as an operation, so one `options:` entry per path would add ~30 phantom endpoints to the
+    contract, to `ROUTE_MANIFEST` and to the policy table in order to describe something no caller is permitted
+    to call directly. It is answered in the HTTP transport instead (`packages/kernel/src/cors.ts`), which grants a
+    preflight only for a method the route table really registers for that path. Two things *are* for a client
+    author: this API authenticates with `Authorization: Bearer` and never with cookies, so
+    `Access-Control-Allow-Credentials` is not sent and a UI must present its own token; and which browser origins
+    may call at all is deployment configuration — `PLATFOLIO_ALLOWED_ORIGINS`, unset meaning same-origin only.
+
+    **Shared shapes are generated, not typed here.** The components marked `# GENERATED` in
+    `components.schemas` are written by `pnpm run spec:gen` from the StandardSchema definitions in
+    `packages/contracts` (#247), so the document is a build artifact for those shapes: changing one means
+    changing the definition, and `pnpm run spec:check` fails the build if the committed text is not what the
+    schemas produce. The prose a schema cannot state -- field descriptions, `format: date-time`, examples --
+    lives in `packages/api-contract/src/spec-annotations.ts`, keyed by component and property path, which is
+    the only place it can be edited without being undone. `paths:`, security, responses and the components
+    with no code-side definition (`Slug`, `CurrentPerson`, `Health`, `Ready`, `ReadinessCheck`,
+    `TeamWithRole`, `Version`, `Whoami`, `Error`) stay hand-written, and are listed with a reason in
+    `UNMATCHED_COMPONENTS`.
+
+  contact:
+    name: platfolio
+servers:
+  - url: http://localhost:8080
+    description: local Compose stack (docker compose up — Postgres, Keycloak, control-plane)
+tags:
+  - name: operational
+    description: Unauthenticated liveness and build identity. Safe to probe; carries no tenant data.
+  - name: identity
+    description: Operations that require a verified token.
+
+paths:
+  /status:
+    get:
+      operationId: getStatus
+      tags: [operational]
+      summary: Check that the API is serving requests
+      description: Fixed liveness response for deployment probes.
+      security: []
+      responses:
+        '200':
+          description: The API is serving requests.
+          headers:
+            Cache-Control:
+              schema: { type: string, enum: [no-store] }
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [status]
+                properties:
+                  status: { type: string, enum: [ok] }
+              example: { status: ok }
+
+  /healthz:
+    get:
+      operationId: getHealth
+      tags: [operational]
+      summary: Liveness
+      description: |
+        Fixed payload on purpose: an operator can compare instances without reading a value that varies per
+        deployment. `livenessToken` is a digest of commit and version — it identifies the build without
+        exposing the version string in environments where that is unwanted, and it is not a credential.
+      security: []
+      responses:
+        '200':
+          description: Process is up.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Health' }
+              example: { status: ok, livenessToken: c914f7c467eeb7e4 }
+
+  /readyz:
+    get:
+      operationId: getReady
+      tags: [operational]
+      summary: Readiness, per dependency, with honest absence
+      description: |
+        Every declared dependency reports one of `ok`, `degraded`, `failed`, or `not-configured`. The last is
+        not a synonym for `ok`: a control plane that starts happily without its database is how a deployment
+        reaches a green dashboard and a red reality. `status` is `ready` only when no check is `failed`, and
+        a `degraded` check must carry a `detail` a human can act on.
+
+        This endpoint answers 503 when not ready, so a load balancer can act on it.
+      security: []
+      responses:
+        '200':
+          description: Ready to serve.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Ready' }
+        '503':
+          description: 'Not ready. Same shape, with status not-ready and the failing or degraded checks named.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Ready' }
+
+  /version:
+    get:
+      operationId: getVersion
+      tags: [operational]
+      summary: Report the release version, build commit and provider contract
+      description: |
+        The release version is the SemVer tag on the running build's exact source commit.
+        Untagged candidates report null and are identified by their commit.
+      security: []
+      responses:
+        '200':
+          description: Build identity.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Version' }
+
+  /api/v1/whoami:
+    get:
+      operationId: getWhoami
+      tags: [identity]
+      summary: Echo the claims of the verified token — the smallest proof that verification works
+      description: |
+        Returns the claims **after** signature and validity checks, not the parsed payload. Two properties
+        make this endpoint worth having at all:
+
+        - A forged, expired, wrong-audience, wrong-issuer or signature-mismatched token yields **401**, not a
+          body. An endpoint that decodes and echoes would pass a naive test and be the weakest link in the
+          platform, which is precisely the mistake #159 documents for the runner path.
+        - The `sub` here is a platfolio-user subject from platfolio's own realm. It is never accepted as, and
+          never carries, authority over tenant infrastructure: platfolio-user identity and tenant identity do
+          not share a realm, audience or token (docs/design/05). A token for this API must be useless against
+          a tenant's provider — and `tenantAuthority: false` states that refusal as data rather than as policy.
+
+        Echoed claims are allow-listed. Unknown claim names are not returned, so a token cannot use this API to
+        smuggle content into a log or a UI.
+      security:
+        - bearerJwt: []
+      responses:
+        '200':
+          description: Verified identity.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Whoami' }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          description: Token verified but lacks a required scope for this operation.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: insufficient-scope, message: 'token lacks the platfolio.user scope' }
+
+  /api/v1/me:
+    get:
+      operationId: getCurrentPerson
+      summary: The person behind this token, their proofs, and their teams
+      description: |
+        The CLI needs this before anything else: `platfolio login` ends by asking who the platform thinks I
+        am (#177, D44). A person may hold several proofs -- this realm, a tenant IdP later -- and the answer
+        lists them without ever exposing a token, plus the teams each membership grants.
+
+        Note what is absent: no email taken from the request, no team chosen by the caller. The issuer and
+        subject come from the verified claims, and teams are read from membership. A client that could name
+        its own team would be asserting its own authorization.
+      security:
+        - bearerJwt: []
+      responses:
+        '200':
+          description: The authenticated person.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CurrentPerson' }
+              example: { personId: person-1f7c, kind: human, identities: [{ issuer: 'http://localhost:8081/realms/platfolio', subject: '47c7105c' }], teams: [{ teamId: team-f4e9, name: dev-workspace, role: owner }] }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+
+  /api/v1/teams/{teamId}/invitations:
+    parameters:
+      - { name: teamId, in: path, required: true, schema: { type: string, minLength: 1 } }
+    get:
+      operationId: listInvitations
+      summary: Pending and historic invitations for a team
+      description: |
+        Owner-only, and deliberately so: a pending invitation carries an email address, and showing that to
+        every member turns a workspace into a people directory nobody asked for.
+      security:
+        - bearerJwt: []
+      responses:
+        '200':
+          description: The team's invitations, newest first.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Invitation' } }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      operationId: createInvitation
+      summary: Invite a person by address, and send the mail that tells them
+      description: |
+        An invitation is an intent that someone should become a member (D44). It is NOT a membership: no
+        person row, no identity, and no role exists until that address is asserted by an identity provider
+        and the invitation is accepted.
+
+        The response separates two things that are easy to conflate -- whether the record was created, and
+        whether the transport took the message. A created invitation whose mail failed is still an invitation
+        (the row records the failure), and returning 500 for it would lose the fact that someone was invited.
+      security:
+        - bearerJwt: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [email]
+              properties:
+                email: { type: string, minLength: 3, maxLength: 320 }
+                role: { type: string, enum: [owner, member], default: member }
+                ttlDays: { type: integer, minimum: 1, maximum: 90, default: 14 }
+            example: { email: new-hire@example.com, role: member }
+      responses:
+        '201':
+          description: Invited. Delivery is reported, not assumed.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [invitation, delivery]
+                properties:
+                  invitation: { $ref: '#/components/schemas/Invitation' }
+                  delivery:
+                    type: object
+                    additionalProperties: false
+                    required: [sent]
+                    properties:
+                      sent: { type: boolean }
+                      reason: { type: string, maxLength: 300 }
+              example: { invitation: { id: inv-1, teamId: team-1, email: new-hire@example.com, role: member, state: pending, invitedBy: person-1, createdAt: '2026-11-12T00:00:00.000Z', expiresAt: '2026-11-26T00:00:00.000Z' }, delivery: { sent: true } }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: A pending invitation for that address already exists in this team.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/teams/{teamId}/invitations/{invitationId}:
+    parameters:
+      - { name: teamId, in: path, required: true, schema: { type: string, minLength: 1 } }
+      - { name: invitationId, in: path, required: true, schema: { type: string, minLength: 1 } }
+    delete:
+      operationId: revokeInvitation
+      summary: Withdraw a pending invitation
+      description: |
+        An accepted invitation cannot be revoked, because at that point it is a membership: remove the member
+        instead. Two different verbs for two different states, so a caller cannot accidentally do the other
+        thing.
+      security:
+        - bearerJwt: []
+      responses:
+        '204':
+          description: Withdrawn, with no body.
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The invitation is already accepted, revoked or expired.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/me/invitations:
+    get:
+      operationId: listMyInvitations
+      summary: Invitations addressed to the email my identity provider asserts
+      description: |
+        The claim path, and the reason there is no token in an invitation. The address is read from verified
+        claims -- never from the request -- so a forwarded invitation email grants its reader nothing. What
+        they can do is sign in with an identity that asserts the same address.
+      security:
+        - bearerJwt: []
+      responses:
+        '200':
+          description: Pending invitations for this verified address, across every team.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Invitation' } }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '409':
+          description: |
+            The identity behind this token asserts no verified address, so there is nothing to match against.
+            Stated rather than returning an empty list, because "no invitations" and "you cannot be matched"
+            are different answers and the user can act on only one of them.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/me/invitations/{invitationId}/accept:
+    parameters:
+      - { name: invitationId, in: path, required: true, schema: { type: string, minLength: 1 } }
+    post:
+      operationId: acceptInvitation
+      summary: Accept an invitation addressed to my verified address
+      description: |
+        The body is empty on purpose. Everything that decides this -- who I am, which address the IdP asserts,
+        which invitation I mean -- comes from the token and the path.
+      security:
+        - bearerJwt: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+      responses:
+        '200':
+          description: A member now.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [teamId, role, personId]
+                properties:
+                  teamId: { type: string }
+                  role: { type: string, enum: [owner, member] }
+                  personId: { type: string }
+              example: { teamId: team-1, role: member, personId: person-9 }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Already accepted, withdrawn, expired, or addressed to a different verified address.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/teams:
+    get:
+      operationId: listTeams
+      summary: The teams this person belongs to, with the role each membership carries
+      description: |
+        The CLI's first screen after login (`platfolio teams list`). Derived from membership rows joined to
+        teams -- never from a `teamId` a caller supplied, which would be the caller asserting its own scope.
+      security:
+        - bearerJwt: []
+      responses:
+        '200':
+          description: Teams and roles. Empty for an authenticated person who belongs to nothing yet.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: false
+                  required: [teamId, name, role]
+                  properties:
+                    teamId: { type: string }
+                    name: { $ref: '#/components/schemas/Slug' }
+                    role: { type: string, enum: [owner, member] }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+    post:
+      operationId: createTeam
+      summary: Create a team and become its owner
+      description: |
+        D44's other half: in an open SaaS, adding a teammate cannot be an admin task, and creating the team in
+        the first place cannot be one either. Until this existed the only way a team came into being was a seed
+        script.
+
+        The caller becomes the **owner** in the same operation, because a team nobody owns has no one who can
+        invite, share, or destroy anything in it -- and no way to get out of that state. Deliberately NOT a row
+        in `POLICY`: that table answers "may this person do this in that team", and here there is no team yet.
+        Guarding creation is authentication plus the verified person from #177; inventing a policy entry with no
+        team to apply it to would stretch the table past what it means.
+
+        The name is the first half of every instance address (`team/name`, D45), so it is a slug, unique across
+        the platform, normalised on write, and enforced in the schema, the database and the shared suite.
+      security:
+        - bearerJwt: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name]
+              properties:
+                name: { $ref: '#/components/schemas/Slug' }
+            example: { name: acme }
+      responses:
+        '201':
+          description: Created, and the caller owns it.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TeamWithRole' }
+              example: { teamId: team-1f7c2b, name: acme, role: owner }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '409':
+          description: That name belongs to another team. Names are platform-unique because they are addressable.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/instances:
+    get:
+      operationId: listInstances
+      summary: The caller's platforms, oldest first
+      description: |
+        Filtered by team membership, never returned whole. Ordered by creation, not by recency: a tenant's
+        platform list should not reshuffle when something reconciles -- ordering contracts belong in the
+        interface, which the store conformance suite learned the hard way.
+
+        An authenticated caller who belongs to no team receives an empty list rather than an error, which is
+        the same answer a member of an empty team gets. Distinguishing the two would leak membership.
+      security:
+        - bearerJwt: []
+      responses:
+        '200':
+          description: Instances the caller's teams own. May be empty; emptiness is not an error.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/InstanceResponse' }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+    post:
+      operationId: createInstance
+      summary: Begin hosting a platform
+      description: |
+        Creates a record; provisioning is the controllers job. An instance is not "live" because this returned
+        201, and no field here implies progress -- `state` starts at `pending` and only a verified apply moves it
+        (D30 law 1: an action that cannot be verified returns a reference, not a claim).
+      security:
+        - bearerJwt: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [teamId, name, template]
+              properties:
+                teamId: { type: string, minLength: 1 }
+                name: { type: string, minLength: 1, maxLength: 80, pattern: '^[a-z0-9]([a-z0-9-]{0,78}[a-z0-9])?$' }
+                template: { type: string, minLength: 1, description: "Catalog identifier, e.g. starter-web" }
+                templateRef:
+                  type: object
+                  additionalProperties: false
+                  required: [repo, commitSha]
+                  properties:
+                    repo: { type: string, minLength: 3, maxLength: 200 }
+                    commitSha: { type: string, pattern: '^[0-9a-f]{40}$' }
+            example: { teamId: team-1f7c2b, name: marketing, template: starter-web }
+      responses:
+        '201':
+          description: Instance recorded.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Instance' }
+        '400':
+          description: The request did not match the schema -- names, never values.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          description: |
+            No such team, or a team the caller is not a member of. One answer for both, because 403 would
+            confirm the team exists (#173).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/instances/{instanceId}:
+    delete:
+      operationId: destroyInstance
+      summary: Remove the managed service -- owner-only, and refused while anything depends on it
+      description: |
+        The reason #176 exists. `GET /api/v1/instances/{id}/consumers` answers "what breaks if I remove this",
+        and this is the verb that consults the answer before doing anything. A destroy that strands a running
+        application is refused with **409 naming the consumers** -- not accepted with a warning, because an API
+        that says yes to a destructive operation it knows is unsafe has made the tenant's outage its own.
+
+        Scope, stated because the parts this does NOT touch are what a future implementer will get wrong (D36,
+        extended by D43): platfolio manages the **hosted service on infrastructure the tenant owns**. It never
+        deletes a repository, a branch, a workflow, or anything else in the tenant's development path. Losing a
+        customer's source through a control-plane call would be unrecoverable in a way nothing here is.
+
+        202, not 200: this records the decision and moves the state to `deprovisioning`. **Actual provider
+        teardown is not wired** -- removing a Railway environment is a dispatch the action executes and attests,
+        and that is execution-plane work (#196 tracks it). An endpoint reporting completed destruction it has
+        not performed is the kind of lie this platform cannot tell, because a tenant reads it as licence to
+        reclaim their own compute.
+      security:
+        - bearerJwt: []
+      responses:
+        '202':
+          description: Removal recorded; execution follows through the dispatch path.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [instanceId, state, recorded]
+                properties:
+                  instanceId: { type: string }
+                  state: { type: string, enum: [deprovisioning] }
+                  recorded: { type: boolean, const: true }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Something still depends on this instance.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+    parameters:
+      - name: instanceId
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+    get:
+      operationId: getInstance
+      summary: One instance, as recorded
+      security:
+        - bearerJwt: []
+      responses:
+        '200':
+          description: The instance, with one state row per environment (#179).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InstanceResponse' }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          description: No such instance for this principal.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/instances/{instanceId}/plan:
+    parameters:
+      - name: instanceId
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+    put:
+      operationId: putPlan
+      summary: Record the desired state and the digest a runner must satisfy
+      description: |
+        The plan is stored with the digest `buildPlan` computed for it. The API does not re-derive a hash: a
+        second implementation of a truth that has one home is the bug that made every honest attestation fail
+        with 400 once already.
+      security:
+        - bearerJwt: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [plan]
+              properties:
+                plan:
+                  type: object
+                  description: An InfraPlan, whose own `planHash` is the authority. Carries topology and digests; never a credential value (D4).
+      responses:
+        '200':
+          description: Stored, with the hash future dispatches will require.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [instanceId, planHash]
+                properties:
+                  instanceId: { type: string }
+                  planHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+              example: { instanceId: inst-1f7c2b, planHash: '5f976b5435bf434e00000000000000000000000000000000000000000000abcd' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          description: No such instance.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/instances/{instanceId}/plan/from-repository:
+    parameters:
+      - name: instanceId
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+    post:
+      operationId: registerPlanFromRepository
+      summary: Build and record the desired state from the tenant's own repository
+      description: |
+        The missing middle (#172). Until now the plan arrived already built, which meant a human holding a
+        checkout: `open-install-pr.ts --platform <local directory>` read the MAINTAINER's filesystem and the
+        tenant's repository was never consulted. This operation makes platfolio do the reading itself --
+        `compose.yaml` (plus the pinned overlay, if the platform has one) fetched from the commit the instance
+        already cites, parsed with the same manifest package the CLI and the tests use, and registered exactly
+        as `PUT …/plan` would.
+
+        What is deliberately NOT here:
+
+        - **No re-derived digest.** `buildPlan` computes `planHash`, and the recorded value is the one a runner
+          must satisfy. The API re-hashing a plan would recreate the bug that made every honest attestation
+          fail with 400 -- two implementations of a truth that has one home.
+        - **No floating refs.** The read is against `templateRef.commitSha`, the pinned identity the instance
+          carries (D29/D30, law 3). A branch name would let a plan be built from content that no longer exists
+          by the time it is applied.
+        - **No unpinned first-party images.** The manifest renderer refuses them (#84) and this operation
+          propagates that refusal as a 400 quoting the renderer, rather than deploying a moving tag and
+          reporting success.
+
+        The response names the blob SHA GitHub reported for each file, so an operator can confirm the plan was
+        built from the bytes they think they pushed.
+      security:
+        - bearerJwt: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                path:
+                  type: string
+                  description: Manifest location within the repository. Default `compose.yaml`.
+                  default: compose.yaml
+                overlayPath:
+                  type: string
+                  description: >-
+                    The pinned production overlay. Default `compose.prod.yaml`. Absent is allowed only when
+                    every service in `path` already carries a digest; otherwise the refusal says which service
+                    is unpinned.
+                  default: compose.prod.yaml
+      responses:
+        '200':
+          description: The plan is recorded; a runner may now be asked to satisfy this digest.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [instanceId, planHash, source, summary]
+                properties:
+                  instanceId: { type: string, minLength: 1 }
+                  planHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+                  source:
+                    type: object
+                    additionalProperties: false
+                    required: [repo, ref, files]
+                    properties:
+                      repo: { type: string, minLength: 3 }
+                      ref: { type: string, pattern: '^[0-9a-f]{40}$' }
+                      files:
+                        type: array
+                        minItems: 1
+                        description: Every file that contributed to the plan, with GitHub's blob identity.
+                        items:
+                          type: object
+                          additionalProperties: false
+                          required: [path, blobSha]
+                          properties:
+                            path: { type: string, minLength: 1 }
+                            blobSha: { type: string, pattern: '^[0-9a-f]{40}$' }
+                            size: { type: integer, minimum: 0 }
+                  summary:
+                    type: object
+                    additionalProperties: false
+                    required: [services, environments]
+                    properties:
+                      services: { type: integer, minimum: 0 }
+                      databases: { type: integer, minimum: 0 }
+                      environments:
+                        type: array
+                        items: { type: string, minLength: 1 }
+                  warnings:
+                    type: array
+                    description: >-
+                      Non-fatal truths the caller must see -- an unpinned public image, a reference the provider
+                      could not verify. Never used to soften a failure into a pass.
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [code, message]
+                      properties:
+                        code: { type: string, minLength: 1 }
+                        message: { type: string, minLength: 1 }
+        '400':
+          description: >-
+            The instance cites no commit, or the documents it names cannot become a plan: unpinned first-party
+            image, invalid manifest, unreadable Compose. The message quotes the reason the renderer gave.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: >-
+            The platfolio GitHub App installation cannot see the repository (#130) -- distinct from a missing
+            path on purpose, because the fix is a different action entirely.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          description: >-
+            Source control is not configured for this platfolio deployment. Reported rather than emulated: an
+            empty plan would claim a platform that nobody described.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+
+  /api/v1/instances/{instanceId}/dispatches/{dispatchId}/trigger:
+    parameters:
+      - name: instanceId
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+      - name: dispatchId
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+    post:
+      operationId: triggerDispatch
+      summary: Ask the tenant's own repository to run the work platfolio just decided
+      description: |
+        The other half of the middle. Creating a dispatch records platfolio's INTENT; nothing happens until the
+        tenant's workflow runs, because the tenant's credentials are the only ones that may touch the tenant's
+        provider account (D24). This call asks GitHub to run it.
+
+        Two measured properties shape it:
+
+        - GitHub enumerates workflows from the DEFAULT branch only (#149), so an install PR that was never
+          merged and a misspelled workflow name are the identical 404. The message says both, because guessing
+          which one wasted a whole debugging pass the first time.
+        - A dispatch is single-use: `GET …/dispatches/{id}` consumes it and a second read answers 409. So a
+          trigger after consumption is refused here too -- re-dispatching would leave a runner fetching a plan
+          that no longer exists.
+      security:
+        - bearerJwt: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [ref]
+              properties:
+                ref:
+                  type: string
+                  minLength: 1
+                  description: >-
+                    Branch or tag GitHub should run on. Not the plan's commit: a workflow run belongs to a
+                    branch, and the digest it must satisfy travels as an input.
+                workflow:
+                  type: string
+                  description: Workflow file name. Default `platfolio-managed.yml`.
+                  default: platfolio-managed.yml
+      responses:
+        '202':
+          description: >-
+            GitHub accepted the request. Acceptance is not completion: the outcome arrives later as an
+            attestation, which platfolio verifies against the provider before it believes anything.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [instanceId, dispatchId, repo, ref, workflow, state]
+                properties:
+                  instanceId: { type: string, minLength: 1 }
+                  dispatchId: { type: string, minLength: 1 }
+                  repo: { type: string, minLength: 3 }
+                  ref: { type: string, minLength: 1 }
+                  workflow: { type: string, minLength: 1 }
+                  state: { type: string, const: requested }
+        '400':
+          description: The instance cites no repository, or the dispatch's plan has no digest to pass along.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: Unknown instance or dispatch, or a dispatch belonging to a different team.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: The dispatch was already consumed by a runner fetch, or is not in a triggerable state.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '502':
+          description: >-
+            GitHub refused the run. The provider's own words are passed through, redacted: an operator debugging
+            a refused dispatch needs the reason, not a status code.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '503':
+          description: Source control is not configured for this platfolio deployment.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+  /api/v1/instances/{instanceId}/artifacts:
+    parameters:
+      - name: instanceId
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+    post:
+      operationId: reportArtifact
+      summary: Report what the platform's own build published
+      description: |
+        The release pipeline's one required interaction with platfolio (D54), and the reason a fork needs no
+        pin file. A service declared with `build:` is compiled by the tenant, and its digest is a fact about the
+        registry rather than about source control -- so it is reported here instead of committed, which is the
+        difference between a value that goes stale silently and one that every build re-asserts.
+
+        `plan/from-repository` reads these records to fill in the digest. A platform that has never reported one
+        is refused with the service named, because the true cause is a pipeline that has not run, not a
+        malformed document.
+
+        Deliberately NOT checked here: whether the digest exists in the registry. platfolio holds no tenant
+        registry credentials, and today's 404 becomes tomorrow's 403. The artifact becomes load-bearing where
+        the contract already has verification: the plan hash a runner must attest against is derived from it,
+        and D30 law 1 means platfolio deploys trusting the report and then proves the result from the
+        provider's own state.
+      security:
+        - bearerJwt: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [service, image, digest]
+              properties:
+                service:
+                  type: string
+                  minLength: 1
+                  maxLength: 60
+                  description: The compose service name this artifact belongs to.
+                image:
+                  type: string
+                  minLength: 3
+                  maxLength: 300
+                  description: Repository without tag or digest, e.g. `ghcr.io/acme/widget`.
+                digest:
+                  type: string
+                  pattern: '^sha256:[0-9a-f]{64}$'
+                  description: The immutable identity. A tag is not accepted, because a tag is a thing that moves.
+                sourceRef:
+                  type: string
+                  pattern: '^[0-9a-f]{40}$'
+                  description: Commit the artifact was built from, when the builder knows it.
+                version:
+                  type: string
+                  minLength: 1
+                  maxLength: 80
+      responses:
+        '201':
+          description: Recorded. The newest report per (instance, service) replaces the previous one.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [instanceId, service, image, digest, reportedAt]
+                properties:
+                  instanceId: { type: string, minLength: 1 }
+                  service: { type: string, minLength: 1 }
+                  image: { type: string, minLength: 3 }
+                  digest: { type: string, pattern: '^sha256:[0-9a-f]{64}$' }
+                  reportedAt: { type: string, minLength: 1 }
+        '400':
+          description: A digest that is not `sha256:` plus 64 hex, an unknown shape, or a body that is not an object.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/instances/{instanceId}/secrets:
+    parameters:
+      - name: instanceId
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+    get:
+      operationId: listSecretPresence
+      summary: Which declared credentials are filled in -- presence, never value
+      description: |
+        Presence is the only claim platfolio can honestly make about a secret (D4, D53). The provider redacts
+        secret values on read -- measured, `{ value: null }` even moments after a write -- so "the variable
+        exists" is the strongest available statement, and also the one an operator needs: the difference between
+        "this install is incomplete" and "this install works".
+
+        The names are not free-floating. They come from the registered plan's own `secrets` declarations, so this
+        endpoint cannot be used to probe a tenant's environment for variables the platform never asked for.
+      security:
+        - bearerJwt: []
+      parameters:
+        - name: environment
+          in: query
+          required: true
+          schema: { type: string, minLength: 1 }
+        - name: service
+          in: query
+          required: true
+          schema: { type: string, minLength: 1 }
+      responses:
+        '200':
+          description: One entry per declared secret name for that service and environment.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [instanceId, environment, service, presence]
+                properties:
+                  instanceId: { type: string, minLength: 1 }
+                  environment: { type: string, minLength: 1 }
+                  service: { type: string, minLength: 1 }
+                  presence:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [name, state]
+                      properties:
+                        name: { type: string, minLength: 1 }
+                        state: { type: string, enum: [set, missing, unverifiable] }
+        '400':
+          description: No plan registered for this instance, or the environment/service is not in it.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '501':
+          description: The selected provider cannot read presence. Said so, rather than answered as `missing`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/instances/{instanceId}/secrets/{name}:
+    parameters:
+      - name: instanceId
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+      - name: name
+        in: path
+        required: true
+        schema: { type: string, minLength: 1, maxLength: 120 }
+    put:
+      operationId: putSecret
+      summary: Deliver one credential into the tenant's own provider environment
+      description: |
+        Write-through, not custody (D53). The value crosses this request and goes to the provider: platfolio does
+        not store it, does not echo it, does not log it, and cannot read it back -- which is why the success
+        response is 204 with no body, and why confirmation is presence asked for separately by name.
+
+        Owner-only. A member may deploy a platform; substituting the credential a service runs with is a
+        different kind of act, and D43's reasoning applies one layer down.
+
+        `platfolio-held` custody -- platfolio storing the value and serving it at boot -- stays forbidden by D4.
+        This path is the alternative to it, not a version of it.
+
+        WHERE the value lands is decided by the platform description, not by the caller: the registered plan's
+        `secrets` entry for this service in this environment carries the source, and `source: shared-variable`
+        means the provider writes at environment scope and attaches the declaring service -- two calls, the
+        second being what makes the credential readable. A name the description never declared is refused as
+        `secret-not-declared`; no registered plan at all is `no-plan`.
+
+        204 means the provider accepted the write. `verified` is deliberately absent: inviting a retry loop
+        against a provider that redacts values would make the API encourage polling for something that cannot be
+        observed.
+      security:
+        - bearerJwt: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [service, environment, value]
+              properties:
+                service:
+                  type: string
+                  minLength: 1
+                  maxLength: 60
+                environment:
+                  type: string
+                  minLength: 1
+                  maxLength: 60
+                value:
+                  type: string
+                  minLength: 1
+                  maxLength: 8192
+                  description: The credential. Never returned by any endpoint; never written to the audit record.
+                refresh:
+                  type: string
+                  enum: [suppress, auto]
+                  description: |
+                    What the write does to the RUNNING service. The default, `suppress`, writes the variable and
+                    leaves the container alone -- the behaviour every delivery had before this field existed, and
+                    still the default, because a platform that cannot read a value back (D4) must not silently
+                    restart things on a write that changed nothing.
+
+                    `auto` sends the write without Railway's `skipDeploys` suppression and lets the provider's own
+                    comparison decide. Measured 2026-11-15 in docs/research/: a changed value started a new
+                    deployment on its own; an identical value started nothing. So the restart is triggered by the
+                    party that holds the value, and platfolio never stores, reads, or hashes one -- which is the
+                    tradeoff this design accepts in exchange for keeping D4 intact.
+      responses:
+        '204':
+          description: Delivered to the provider. No body, because there is nothing platfolio is allowed to say back.
+        '400':
+          description: An empty value, or a name that is not a variable name.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          description: The caller is not an owner of this team.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: Unknown instance, or an environment/service that does not exist in the tenant's project.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '501':
+          description: The selected provider cannot deliver secrets.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '502':
+          description: The provider refused. Its words are forwarded, redacted -- the only evidence available.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+  /api/v1/instances/{instanceId}/dispatches:
+    parameters:
+      - name: instanceId
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+    post:
+      operationId: createDispatch
+      summary: Issue a single-use instruction for the managed workflow
+      description: |
+        Returns the dispatch intent the workflow passes to GitHub as inputs. The nonce is the freshness token
+        the runner must echo back; the plan hash is what it must still find on the way to the provider.
+      security:
+        - bearerJwt: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                action: { type: string, enum: [apply, check, drift, suspend, export], default: apply }
+                environment: { type: string, minLength: 1, maxLength: 60, default: production }
+            example: { action: apply, environment: production }
+      responses:
+        '201':
+          description: Dispatch issued.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [intent]
+                properties:
+                  intent: { $ref: '#/components/schemas/DispatchIntent' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          description: No plan registered for this instance yet.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/instances/{instanceId}/dispatches/{dispatchId}:
+    parameters:
+      - name: instanceId
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+      - name: dispatchId
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+    get:
+      operationId: getDispatchPlan
+      summary: The plan a runner is authorised to apply -- exactly once
+      description: |
+        Consumes the dispatch. A second read is a replay, not a retry: it answers 409 so a duplicated or
+        retried GitHub job cannot apply the same plan twice. This is the property the store enforces
+        conditionally in SQL, which is why it holds across processes rather than within one.
+      security:
+        - bearerJwt: []
+      responses:
+        '200':
+          description: The plan and the hash it must match.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [plan, planHash, issuedAt, expiresAt]
+                properties:
+                  plan: { type: object }
+                  planHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+                  issuedAt: { type: string, format: date-time }
+                  expiresAt: { type: string, format: date-time }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          description: Unknown dispatch, or a dispatch belonging to another instance.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: Already consumed -- this dispatch has a runner, or had one that died mid-apply.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/attestations:
+    post:
+      operationId: postAttestation
+      summary: A runner reports what happened
+      description: |
+        Accepted once per dispatch, and only if it agrees with that dispatch on nonce, plan hash, action and
+        environment. Policy lives in `checkAttestationPolicy`, shared by every store implementation, because a
+        security decision must not be re-implemented per driver.
+
+        Today the caller is authenticated by a shared secret, so `actorKind` defaults to `shared-secret` rather
+        than implying a verified repository binding (#159). The read-back rule is what makes a false claim
+        harmless, and that is a thinner defence than it sounds like.
+      security:
+        - bearerJwt: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Attestation' }
+      responses:
+        '202':
+          description: Recorded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [accepted, dispatchId, result]
+                properties:
+                  accepted: { type: boolean, const: true }
+                  dispatchId: { type: string }
+                  result: { type: string, enum: [ok, partial, failed, noop] }
+        '400':
+          description: Refused by the acceptance policy, or malformed. The reason is machine-readable.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '409':
+          description: This dispatch has already been attested.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/instances/{instanceId}/latest-attestation:
+    parameters:
+      - name: instanceId
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+    get:
+      operationId: getLatestAttestation
+      summary: The most recent result for this instance, newest first
+      description: |
+        A claim that agrees with something is still only a claim: the control plane verifies against the
+        provider before presenting it as state. This endpoint returns the record; the reconciliation is
+        elsewhere on purpose.
+      security:
+        - bearerJwt: []
+      responses:
+        '200':
+          description: The latest attestation.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AttestationRecord' }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          description: Nothing has attested for this instance.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/audit:
+    get:
+      operationId: listAudit
+      summary: What the platform did to the caller's platforms, and who did it
+      description: |
+        Newest first, bounded by `limit`, and filtered to rows about instances the caller's teams own -- an
+        audit trail is a disclosure surface. Detail carries ids and reason codes, never payloads, and never a
+        credential: the store refuses an over-long detail value as a value rather than throwing, because an
+        audit write that aborts the loop it is recording makes the trail less trustworthy, not more.
+      security:
+        - bearerJwt: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        '200':
+          description: Audit entries.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/AuditEntry' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+
+
+  /api/v1/capabilities:
+    get:
+      operationId: listAvailableCapabilities
+      summary: What this team may bind to right now
+      description: |
+        The caller's own offers plus anything another team has shared with them (D42). Discovery is the
+        *consequence* of a share, so revoking withdraws both at once -- an offer that cannot be bound should not
+        remain in a list someone will try to bind to.
+      security:
+        - bearerJwt: []
+      parameters:
+        - { name: capability, in: query, required: false, schema: { type: string, maxLength: 60 } }
+      responses:
+        '200':
+          description: Offers available to the caller's teams. May be empty.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/CapabilityOffer' }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+
+  /api/v1/instances/{instanceId}/capability:
+    parameters:
+      - { name: instanceId, in: path, required: true, schema: { type: string, minLength: 1 } }
+    post:
+      operationId: publishCapability
+      summary: Record that this instance offers a capability to other platforms
+      description: |
+        Publishing is what makes an instance a shared service rather than a private one (D42): the manifest
+        already declares `provides:`, and this records it so platfolio can answer questions about it. Outputs
+        are names and kinds with a placement state -- there is no field for a value, and the absence is the
+        rule (D4). Idempotent by (instance, capability): republishing refreshes the outputs.
+      security:
+        - bearerJwt: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [capability]
+              properties:
+                capability: { type: string, minLength: 1, maxLength: 60 }
+                outputs:
+                  type: array
+                  maxItems: 40
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [output, kind]
+                    properties:
+                      output: { type: string, minLength: 1, maxLength: 80 }
+                      kind: { type: string, enum: [url, value, secret] }
+                      state: { type: string, enum: [not-issued, issued-and-placed, placement-unknown, re-issue-required], default: not-issued }
+            example: { capability: identity, outputs: [{ output: issuer, kind: url, state: issued-and-placed }, { output: client_secret, kind: secret }] }
+      responses:
+        '200':
+          description: Offer recorded.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CapabilityOffer' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/instances/{instanceId}/capability/{capability}/shares:
+    parameters:
+      - { name: instanceId, in: path, required: true, schema: { type: string, minLength: 1 } }
+      - { name: capability, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 60 } }
+    # Only PUT lives here. Revocation addresses the share itself -- see the path below -- because the
+    # transport does not read a DELETE body (a body on a method whose semantics are "delete this resource"
+    # invites two sources of truth), and a revoke that cannot say *which* share it means is a foot-gun.
+    put:
+      operationId: shareCapability
+      summary: Let another team bind to this capability
+      description: |
+        The explicit grant behind D42. A capability that is merely reachable is not offered: without this row,
+        a cross-team bind is refused, which is what stops any instance in the system from pointing at someone
+        else's identity provider and being handed its configuration.
+      security:
+        - bearerJwt: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [toTeamId]
+              properties:
+                toTeamId: { type: string, minLength: 1, maxLength: 120, description: 'A team id, or `*` to offer it to every team. Recorded, never implied.' }
+            example: { toTeamId: team-2f7c }
+      responses:
+        '200':
+          description: Shared.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CapabilityShare' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/instances/{instanceId}/capability/{capability}/shares/{toTeamId}:
+    parameters:
+      - { name: instanceId, in: path, required: true, schema: { type: string, minLength: 1 } }
+      - { name: capability, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 60 } }
+      - name: toTeamId
+        in: path
+        required: true
+        schema: { type: string, minLength: 1, maxLength: 120 }
+        description: The team whose grant is withdrawn, or `*` for the open offer.
+    delete:
+      operationId: revokeCapabilityShare
+      summary: Withdraw a share without breaking the consumer that already relies on it
+      description: |
+        Revocation ages existing bindings to `stale` rather than deleting them (D42): a running application keeps
+        working, the intent is withdrawn, and the gap becomes visible instead of silent. A deleted binding would
+        leave the consumer pointing at a URL nothing recorded -- the exact failure this table exists to prevent.
+      security:
+        - bearerJwt: []
+      responses:
+        '200':
+          description: Revoked.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [revoked]
+                properties:
+                  revoked: { type: boolean, const: true }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/instances/{instanceId}/bindings:
+    parameters:
+      - { name: instanceId, in: path, required: true, schema: { type: string, minLength: 1 } }
+    get:
+      operationId: listBindings
+      summary: What this platform consumes
+      security:
+        - bearerJwt: []
+      responses:
+        '200':
+          description: Bindings, oldest first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/BindingRecord' }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/instances/{instanceId}/bindings/{capability}:
+    parameters:
+      - { name: instanceId, in: path, required: true, schema: { type: string, minLength: 1 } }
+      - { name: capability, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 60 } }
+    put:
+      operationId: bindCapability
+      summary: Consume another platform's capability
+      description: |
+        Validated by `checkBindingPolicy` before anything is written: the offer must exist, every destination
+        the consumer declares must be satisfied by an output the provider actually publishes (a binding that
+        cannot fill its own variables is a broken promise, not a partial success), self-binding is refused, and
+        a cross-team bind needs a live share.
+      security:
+        - bearerJwt: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [providerInstanceId, destinations]
+              properties:
+                providerInstanceId: { type: string, minLength: 1 }
+                destinations:
+                  type: array
+                  maxItems: 40
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [output, into]
+                    properties:
+                      output: { type: string, minLength: 1, maxLength: 80 }
+                      into:
+                        type: array
+                        minItems: 1
+                        maxItems: 20
+                        items: { type: string, minLength: 1, maxLength: 120 }
+            example: { providerInstanceId: inst-410f, destinations: [{ output: issuer, into: [OIDC_ISSUER] }] }
+      responses:
+        '200':
+          description: Bound.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BindingRecord' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      operationId: unbindCapability
+      summary: Stop consuming a capability
+      description: |
+        204 on success, and 404 when there was no such binding. Nothing is destroyed here -- the consumer's
+        configuration is theirs to remove; this withdraws platfolio's record of the dependency.
+      security:
+        - bearerJwt: []
+      responses:
+        '204':
+          description: Unbound.
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/instances/{instanceId}/consumers:
+    parameters:
+      - { name: instanceId, in: path, required: true, schema: { type: string, minLength: 1 } }
+    get:
+      operationId: listConsumers
+      summary: What breaks if this platform is removed
+      description: |
+        The question the teardown issues (#106, #107) were opened to ask, which was unanswerable before #177 --
+        the wiring existed only inside rendered manifests. A destroy consults this before it goes anywhere
+        (D43), and a non-empty list is the reason it refuses.
+      security:
+        - bearerJwt: []
+      responses:
+        '200':
+          description: Consumers of this instance's capabilities, oldest first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/BindingRecord' }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ---------------------------------------------------------------- redeploy
+  # Added as a PATH ONLY, with every schema inline: component generation in this document is owned by another
+  # change in flight, so a second writer touching `components:` would be a merge nobody would notice until the
+  # generated types disagreed with the spec. If this operation survives review, its response body belongs in
+  # components beside the other instance-scoped results, and the inline shape should be replaced then.
+  /api/v1/instances/{instanceId}/redeploy:
+    parameters:
+      - name: instanceId
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+    post:
+      operationId: redeployInstance
+      summary: Restart a running service so it picks up configuration it does not hold
+      description: |
+        The capability this API did not have: a way to say "redeploy", separately from "apply this
+        description". Measured on Railway, 2026-11-15 (`docs/research/railway-variable-value-redeploy-2026-11-15.md`,
+        arms A-D against our own `api-staging`):
+
+        - a variable written with `skipDeploys: true` started NO deployment in 120s;
+        - a variable whose VALUE changed, written without that suppression, started one on its own;
+        - writing the SAME value again started nothing -- the provider diffs values server-side;
+        - an explicit `serviceInstanceDeploy` was visible in the deployment list, which is what makes the
+          other three observations trustworthy rather than inferred.
+
+        Two consequences, and they are why this endpoint exists in this shape.
+
+        **1. Composition changes already work, and this is not for them.** A variable name added or removed
+        moves `planHash`, and `applyPlan` deploys deliberately afterwards. That is a normal software deployment,
+        exactly as intended.
+
+        **2. A VALUE change is not detectable by platfolio, and never will be.** D4 forbids reading configuration
+        back: `variables()` returns values and is refused, and `environment.config` answers names with values
+        redacted. So the platform cannot answer "did this change" -- and the measurement says it does not have
+        to, because the provider already knows. What platfolio can and must provide is the verb for whoever does
+        know: the operator who just rotated a credential, or the `PUT …/secrets/{name}` call that wrote a new
+        value and left the running container holding the old one, because Railway resolves `${{…}}` references
+        at WRITE time. The gap that started this (`api-staging` booting with an empty `PLATFOLIO_DB_URL` until a
+        human redeployed it, #242) is that gap.
+
+        The tradeoff accepted, stated rather than buried: a refresh asked for when nothing actually changed still
+        costs a container bounce, and the response cannot say whether it was needed. The alternative -- platfolio
+        keeping a digest of every delivered value so it could diff them itself -- would store secret-derived
+        material in our database, which is the D4 line this design refuses to cross. A needless restart is
+        cheaper than a credential shadow.
+
+        `service` is the LOGICAL name from the platform description (`api`), not the provider's row
+        (`api-production`): the physical name is derived by the same rule everywhere (D57), and making a tenant
+        name a provider artifact would leak an implementation detail into the contract. Omitted, the whole named
+        environment is refreshed. Environments are never inferred from each other, and a staging name cannot
+        touch a production row -- asserted in `packages/contracts/test/railway-redeploy.test.ts`.
+
+        202, not 200: a restart is asynchronous and this call returns the REQUEST, not a settled state.
+        `verified` therefore means "a new deployment was observed for every service asked about" -- read back from
+        the provider's deployment identity, not from the mutation's own boolean, which is measured to be `true`
+        for a call that produced no new deployment. Where it is false, `refused` and `budgetSkipped` say which
+        names did not move: a refresh that restarted half an environment must not read as success.
+
+        Member-level authority, not owner-level: a member may already deploy the platform (D43), and a restart
+        grants nothing new. Writing the VALUE stays owner-only and lives at `PUT …/secrets/{name}`.
+      security:
+        - bearerJwt: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [environment]
+              properties:
+                environment: { type: string, minLength: 1, enum: [production, staging, preview] }
+                service: { type: string, minLength: 1, maxLength: 120 }
+      responses:
+        '202':
+          description: Restart requested for the named environment; per-service outcome reported by physical name.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [instanceId, environment, services, refused, budgetSkipped, verified]
+                properties:
+                  instanceId: { type: string }
+                  environment: { type: string }
+                  services:
+                    type: array
+                    description: Physical names the provider was asked to redeploy, in the order it acted.
+                    items: { type: string }
+                  refused:
+                    type: array
+                    description: Names it could not act on -- no such service, no instance here, or a deploy the provider accepted without starting.
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [service, code, reason]
+                      properties:
+                        service: { type: string }
+                        code:
+                          type: string
+                          enum: [no-project, no-environment, no-service, not-in-environment, deployment-unchanged]
+                        reason: { type: string }
+                  budgetSkipped:
+                    type: array
+                    description: 'Names suppressed because the provider''s deploy ceiling was already spent. Distinct from `refused`: this is "not allowed to", not "nothing there".'
+                    items: { type: string }
+                  verified:
+                    type: boolean
+                    description: True only when every service asked about was observed to have a NEW deployment id.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '501':
+          description: The selected provider cannot restart a service; the operation is absent from its advertised set.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [error, message]
+                properties:
+                  error: { type: string, const: provider-cannot-redeploy }
+                  message: { type: string }
+        '502':
+          description: The provider refused. Its words are forwarded, redacted -- the only evidence available.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+
+components:
+  securitySchemes:
+    bearerJwt:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        Access token issued by platfolio's Keycloak realm. Verified against JWKS pinned to the configured
+        issuer; `RS256` only, and `alg: none` or an HMAC-shaped token is refused regardless of what the
+        attacker's header claims (algorithm-confusion is the reason the allowed set is checked, not assumed).
+
+  responses:
+    Forbidden:
+      description: |
+        The caller is a member of the team and can see the resource, but the action needs a higher role (#178).
+        403 rather than the 404 used for non-members: hiding existence protects people who have no right to
+        know it, and is useless advice to someone who already does.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: conflict, message: 'capability.share requires the owner role on this team' }
+
+    NotFound:
+      description: |
+        No such resource, or a resource belonging to a team the caller is not a member of -- one answer for
+        both, because the difference is itself information (#173).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: not-found, message: 'no such resource for this principal' }
+
+    BadRequest:
+      description: 'The request was well-formed HTTP but did not satisfy the schema: names and reasons, never values.'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: invalid-request, message: 'plan must carry the bare 64-hex planHash computed by buildPlan' }
+
+    Unauthenticated:
+      description: No token, a token that failed verification, or one that is expired or not yet valid.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: unauthenticated, message: 'token signature does not match the pinned issuer key set' }
+      headers:
+        WWW-Authenticate:
+          description: The challenge, so a client can distinguish "no credentials" from "bad credentials".
+          schema: { type: string }
+          example: 'Bearer realm="platfolio", error="invalid_token"'
+
+  schemas:
+    Slug:
+      type: string
+      minLength: 1
+      maxLength: 40
+      pattern: '^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$'
+      description: Repository-style slug. Lowercase alphanumerics with interior hyphens -- it is a URL segment and a CLI argument (D45).
+
+    TeamWithRole:
+      type: object
+      additionalProperties: false
+      required: [teamId, name, role]
+      properties:
+        teamId: { type: string, minLength: 1 }
+        name: { $ref: '#/components/schemas/Slug' }
+        role: { type: string, enum: [owner, member] }
+
+    Invitation:
+      # GENERATED by scripts/gen-api-spec.ts from InvitationSchema (packages/contracts). Do not hand-edit: pnpm run spec:check fails on a difference, and the prose lives in packages/api-contract/src/spec-annotations.ts.
+      type: object
+      required: [id, teamId, email, role, state, invitedBy, createdAt, expiresAt]
+      properties:
+        id: { type: string, minLength: 1 }
+        teamId: { type: string, minLength: 1 }
+        email: { type: string, description: 'Normalised (trimmed and case-folded) on write.', minLength: 3, maxLength: 320 }
+        role: { type: string, enum: [owner, member] }
+        state: { type: string, enum: [pending, accepted, revoked, expired], default: pending }
+        invitedBy: { type: string, minLength: 1 }
+        createdAt: { type: string, format: date-time, minLength: 1 }
+        expiresAt: { type: string, format: date-time, minLength: 1 }
+        acceptedBy: { type: string }
+        acceptedAt: { type: string, format: date-time }
+        revokedAt: { type: string, format: date-time }
+        emailReceipt:
+          type: string
+          description: 'The transport''s receipt, so delivery is a fact about the row (D46).'
+          maxLength: 200
+        emailError: { type: string, maxLength: 300 }
+      additionalProperties: false
+
+    CurrentPerson:
+      type: object
+      additionalProperties: false
+      required: [personId, kind, identities, teams]
+      properties:
+        personId: { type: string, minLength: 1 }
+        kind: { type: string, enum: [human, service] }
+        identities:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [issuer, subject]
+            properties:
+              issuer: { type: string }
+              subject: { type: string }
+        teams:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [teamId, name, role]
+            properties:
+              teamId: { type: string }
+              name: { type: string }
+              role: { type: string, enum: [owner, member] }
+
+    CapabilityOffer:
+      # GENERATED by scripts/gen-api-spec.ts from CapabilityOfferSchema (packages/contracts). Do not hand-edit: pnpm run spec:check fails on a difference, and the prose lives in packages/api-contract/src/spec-annotations.ts.
+      type: object
+      required: [instanceId, teamId, capability, outputs, publishedAt]
+      properties:
+        instanceId: { type: string, minLength: 1 }
+        teamId: { type: string, minLength: 1 }
+        capability: { type: string, minLength: 1, maxLength: 60 }
+        outputs:
+          type: array
+          default: []
+          items:
+            type: object
+            required: [output, kind, state]
+            properties:
+              output: { type: string, minLength: 1, maxLength: 80 }
+              kind: { type: string, enum: [url, value, secret] }
+              state:
+                type: string
+                enum: [not-issued, issued-and-placed, placement-unknown, re-issue-required]
+                default: not-issued
+            additionalProperties: false
+        publishedAt: { type: string, format: date-time, minLength: 1 }
+      additionalProperties: false
+
+    CapabilityShare:
+      # GENERATED by scripts/gen-api-spec.ts from CapabilityShareSchema (packages/contracts). Do not hand-edit: pnpm run spec:check fails on a difference, and the prose lives in packages/api-contract/src/spec-annotations.ts.
+      type: object
+      required: [instanceId, capability, toTeamId, sharedAt, sharedBy]
+      properties:
+        instanceId: { type: string, minLength: 1 }
+        capability: { type: string, minLength: 1, maxLength: 60 }
+        toTeamId: { type: string, minLength: 1, maxLength: 120 }
+        sharedAt: { type: string, format: date-time, minLength: 1 }
+        sharedBy: { type: string, minLength: 1, maxLength: 200 }
+      additionalProperties: false
+
+    BindingRecord:
+      # GENERATED by scripts/gen-api-spec.ts from BindingRecordSchema (packages/contracts). Do not hand-edit: pnpm run spec:check fails on a difference, and the prose lives in packages/api-contract/src/spec-annotations.ts.
+      type: object
+      required: [consumerInstanceId, capability, providerInstanceId, destinations, state, boundAt, boundBy]
+      properties:
+        consumerInstanceId: { type: string, minLength: 1 }
+        capability: { type: string, minLength: 1, maxLength: 60 }
+        providerInstanceId: { type: string, minLength: 1 }
+        destinations:
+          type: array
+          default: []
+          items:
+            type: object
+            required: [output, into]
+            properties:
+              output: { type: string, minLength: 1, maxLength: 80 }
+              into:
+                type: array
+                minItems: 1
+                items: { type: string, minLength: 1, maxLength: 120 }
+            additionalProperties: false
+        state: { type: string, enum: [bound, stale], default: bound }
+        boundAt: { type: string, format: date-time, minLength: 1 }
+        boundBy: { type: string, minLength: 1, maxLength: 200 }
+      additionalProperties: false
+
+    Instance:
+      # GENERATED by scripts/gen-api-spec.ts from InstanceSchema (packages/contracts). Do not hand-edit: pnpm run spec:check fails on a difference, and the prose lives in packages/api-contract/src/spec-annotations.ts.
+      type: object
+      required: [id, teamId, name, template, state, provider, createdAt, updatedAt]
+      properties:
+        id: { type: string, minLength: 1 }
+        teamId: { type: string, minLength: 1 }
+        name:
+          type: string
+          description: >-
+            The half of `team/name` a person types (D45). Slug rules, enforced in the schema and the
+            database: a name needing escapes or a disambiguating id is a name that will break in a
+            URL, a CLI argument, or a shell.
+          pattern: '^[a-z0-9]([a-z0-9-]{0,39}[a-z0-9])?$'
+          minLength: 1
+          maxLength: 40
+        template:
+          type: string
+          description: >-
+            The template this instance was created from. Formerly the field `platform`, which stored
+            a template id -- D45.
+          minLength: 1
+        templateRef:
+          type: object
+          required: [repo, commitSha]
+          properties:
+            repo: { type: string, minLength: 3, maxLength: 200 }
+            commitSha:
+              type: string
+              description: 'Pinned by commit, never by a movable tag (D30 law 3).'
+              pattern: '^[0-9a-f]{40}$'
+          additionalProperties: false
+        state:
+          type: string
+          description: >-
+            The rollup, not the truth: production's state when a production environment exists,
+            otherwise the worst among the environments (#179). `InstanceResponse.environments` is
+            what actually happened per place.
+          enum: [pending, provisioning, live, degraded, paused, failed, deprovisioning, removed]
+        provider: { type: string, enum: [railway, fake], default: railway }
+        desiredPlanHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        lastAppliedPlanHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        createdAt: { type: string, format: date-time, minLength: 1 }
+        updatedAt: { type: string, format: date-time, minLength: 1 }
+      additionalProperties: false
+
+    InstanceResponse:
+      # GENERATED by scripts/gen-api-spec.ts from InstanceSchema + InstanceEnvironmentStateSchema (packages/contracts). Do not hand-edit: pnpm run spec:check fails on a difference, and the prose lives in packages/api-contract/src/spec-annotations.ts.
+      type: object
+      required: [id, teamId, name, template, state, provider, createdAt, updatedAt, environments]
+      properties:
+        id: { type: string, minLength: 1 }
+        teamId: { type: string, minLength: 1 }
+        name:
+          type: string
+          description: >-
+            The half of `team/name` a person types (D45). Slug rules, enforced in the schema and the
+            database: a name needing escapes or a disambiguating id is a name that will break in a
+            URL, a CLI argument, or a shell.
+          pattern: '^[a-z0-9]([a-z0-9-]{0,39}[a-z0-9])?$'
+          minLength: 1
+          maxLength: 40
+        template:
+          type: string
+          description: >-
+            The template this instance was created from. Formerly the field `platform`, which stored
+            a template id -- D45.
+          minLength: 1
+        templateRef:
+          type: object
+          required: [repo, commitSha]
+          properties:
+            repo: { type: string, minLength: 3, maxLength: 200 }
+            commitSha:
+              type: string
+              description: 'Pinned by commit, never by a movable tag (D30 law 3).'
+              pattern: '^[0-9a-f]{40}$'
+          additionalProperties: false
+        state:
+          type: string
+          description: >-
+            The rollup, not the truth: production's state when a production environment exists,
+            otherwise the worst among the environments (#179). `InstanceResponse.environments` is
+            what actually happened per place.
+          enum: [pending, provisioning, live, degraded, paused, failed, deprovisioning, removed]
+        provider: { type: string, enum: [railway, fake], default: railway }
+        desiredPlanHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        lastAppliedPlanHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        createdAt: { type: string, format: date-time, minLength: 1 }
+        updatedAt: { type: string, format: date-time, minLength: 1 }
+        environments:
+          type: array
+          description: >-
+            One row per environment the instance has. The assembled response always carries it; it
+            is empty until the first reconcile.
+          items:
+            type: object
+            required: [instanceId, environment, state, updatedAt]
+            properties:
+              instanceId: { type: string, minLength: 1 }
+              environment: { type: string, minLength: 1, maxLength: 60 }
+              state:
+                type: string
+                description: >-
+                  What the controller last verified for this environment, which is the only sense in which
+                  `live` means anything (#179).
+                enum: [pending, provisioning, live, degraded, paused, failed, deprovisioning, removed]
+              appliedPlanHash: { type: string }
+              attestationId: { type: string }
+              updatedAt: { type: string, format: date-time, minLength: 1 }
+            additionalProperties: false
+      additionalProperties: false
+
+    DispatchIntent:
+      # GENERATED by scripts/gen-api-spec.ts from DispatchIntentSchema (packages/contracts). Do not hand-edit: pnpm run spec:check fails on a difference, and the prose lives in packages/api-contract/src/spec-annotations.ts.
+      # The dispatch as the runner reads it, not the row: `nonce` and `planHash` are what the workflow carries
+      # back, and the intent expires -- `expiresAt` is enforced at the boundary, not documented.
+      type: object
+      required: [instanceId, teamId, dispatchId, nonce, planHash, action, environment, issuedAt, expiresAt]
+      properties:
+        instanceId: { type: string, minLength: 1 }
+        teamId: { type: string, minLength: 1 }
+        dispatchId: { type: string, minLength: 1 }
+        nonce: { type: string, minLength: 16, maxLength: 64 }
+        planHash: { type: string, pattern: '^[a-f0-9]{16,64}$' }
+        action: { type: string, enum: [apply, check, drift, suspend, export] }
+        environment: { type: string, minLength: 1 }
+        issuedAt: { type: string, format: date-time, minLength: 1 }
+        expiresAt: { type: string, format: date-time, minLength: 1 }
+      additionalProperties: false
+
+    Attestation:
+      # GENERATED by scripts/gen-api-spec.ts from AttestationSchema (packages/contracts). Do not hand-edit: pnpm run spec:check fails on a difference, and the prose lives in packages/api-contract/src/spec-annotations.ts.
+      # The attestation a runner reports, before it is stored. `receivedAt` and the actor appear on
+      # `AttestationRecord`, because when the control plane heard about it is a fact about this service, not
+      # a fact the runner gets to assert.
+      type: object
+      required: [dispatchId, nonce, planHash, instanceId, environment, action, result, resources, durationMs, finishedAt]
+      properties:
+        dispatchId: { type: string, minLength: 1 }
+        nonce: { type: string, minLength: 16 }
+        planHash: { type: string, pattern: '^[a-f0-9]{16,64}$' }
+        instanceId: { type: string, minLength: 1 }
+        environment: { type: string, minLength: 1 }
+        action: { type: string, enum: [apply, check, drift, suspend, export] }
+        result: { type: string, enum: [ok, partial, failed, noop] }
+        errorCode: { type: string, minLength: 1 }
+        resources:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            required: [kind, name, externalId, status]
+            properties:
+              kind: { type: string, enum: [service, database, bucket, volume, domain, environment] }
+              name: { type: string, minLength: 1 }
+              externalId: { type: string, minLength: 1 }
+              status:
+                type: string
+                enum: [pending, building, deploying, live, failed, crashed, sleeping, awaiting-approval, removed]
+            additionalProperties: false
+        release:
+          type: object
+          required: [version, commitSha, imageDigest]
+          properties:
+            version: { type: string, minLength: 1 }
+            commitSha:
+              type: string
+              description: >-
+                The commit the release was built from. Seven to forty hex characters: a short SHA is a
+                display form, a full one is an anchor.
+              minLength: 40
+              maxLength: 40
+            imageDigest: { type: string, pattern: '^sha256:[0-9a-f]{64}$' }
+          additionalProperties: false
+        durationMs: { type: integer, minimum: 0, maximum: 9007199254740991 }
+        finishedAt: { type: string, format: date-time, minLength: 1 }
+      additionalProperties: false
+
+    AttestationRecord:
+      # GENERATED by scripts/gen-api-spec.ts from AttestationRecordSchema (packages/contracts). Do not hand-edit: pnpm run spec:check fails on a difference, and the prose lives in packages/api-contract/src/spec-annotations.ts.
+      # Written out rather than composed with allOf: `additionalProperties: false` inside one allOf member
+      # rejects the fields declared only in the other member, so a correct response fails validation. The
+      # duplication is what the definition produces -- `AttestationRecordSchema` extends `AttestationSchema` --
+      # and a generated client would otherwise receive a type it cannot satisfy.
+      type: object
+      required: [dispatchId, nonce, planHash, instanceId, environment, action, result, resources, durationMs, finishedAt, receivedAt, actorKind]
+      properties:
+        dispatchId: { type: string, minLength: 1 }
+        nonce: { type: string, minLength: 16 }
+        planHash: { type: string, pattern: '^[a-f0-9]{16,64}$' }
+        instanceId: { type: string, minLength: 1 }
+        environment: { type: string, minLength: 1 }
+        action: { type: string, enum: [apply, check, drift, suspend, export] }
+        result: { type: string, enum: [ok, partial, failed, noop] }
+        errorCode: { type: string, minLength: 1 }
+        resources:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            required: [kind, name, externalId, status]
+            properties:
+              kind: { type: string, enum: [service, database, bucket, volume, domain, environment] }
+              name: { type: string, minLength: 1 }
+              externalId: { type: string, minLength: 1 }
+              status:
+                type: string
+                enum: [pending, building, deploying, live, failed, crashed, sleeping, awaiting-approval, removed]
+            additionalProperties: false
+        release:
+          type: object
+          required: [version, commitSha, imageDigest]
+          properties:
+            version: { type: string, minLength: 1 }
+            commitSha:
+              type: string
+              description: >-
+                The commit the release was built from. Seven to forty hex characters: a short SHA is a
+                display form, a full one is an anchor.
+              minLength: 40
+              maxLength: 40
+            imageDigest: { type: string, pattern: '^sha256:[0-9a-f]{64}$' }
+          additionalProperties: false
+        durationMs: { type: integer, minimum: 0, maximum: 9007199254740991 }
+        finishedAt: { type: string, format: date-time, minLength: 1 }
+        receivedAt: { type: string, format: date-time, minLength: 1 }
+        actorKind: { type: string, enum: [runner, operator, shared-secret], default: shared-secret }
+        actorRef: { type: string, maxLength: 200 }
+      additionalProperties: false
+
+    AuditEntry:
+      # GENERATED by scripts/gen-api-spec.ts from AuditEntrySchema (packages/contracts). Do not hand-edit: pnpm run spec:check fails on a difference, and the prose lives in packages/api-contract/src/spec-annotations.ts.
+      type: object
+      required: [id, at, actorKind, actorRef, action, target, detail]
+      properties:
+        id: { type: string, minLength: 1 }
+        at: { type: string, format: date-time, minLength: 1 }
+        actorKind: { type: string, enum: [user, runner, controller, system] }
+        actorRef: { type: string, maxLength: 200 }
+        action: { type: string, minLength: 1, maxLength: 120 }
+        target: { type: string, minLength: 1, maxLength: 200 }
+        detail:
+          type: object
+          description: 'Structured, bounded, and never a credential: reason codes and ids, not payloads (D4).'
+          default: {}
+          additionalProperties:
+            anyOf:
+                - { type: string, maxLength: 300 }
+                - { type: number }
+                - { type: boolean }
+      additionalProperties: false
+
+    Health:
+      type: object
+      additionalProperties: false
+      required: [status, livenessToken]
+      properties:
+        status: { type: string, enum: [ok] }
+        livenessToken:
+          type: string
+          pattern: '^[0-9a-f]{16}$'
+          description: sha256(commit + version), truncated. Not a credential.
+
+    Ready:
+      type: object
+      additionalProperties: false
+      required: [status, checks]
+      properties:
+        status: { type: string, enum: [ready, not-ready] }
+        checks:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/ReadinessCheck' }
+    ReadinessCheck:
+      type: object
+      additionalProperties: false
+      required: [name, status]
+      properties:
+        name:
+          type: string
+          description: Dependency identifier, stable across builds (`database`, `identity`).
+        status: { type: string, enum: [ok, degraded, failed, not-configured] }
+        detail:
+          type: string
+          description: |
+            Present for `degraded` and `failed`, and it must not contain a credential, DSN or connection
+            string — names and reasons only (D4).
+
+    Version:
+      type: object
+      additionalProperties: false
+      required: [name, version, commit, buildTime, providerContract]
+      properties:
+        name: { type: string, enum: [control-plane] }
+        version:
+          type: [string, 'null']
+          minLength: 1
+          description: SemVer release tag for this build, or null for an untagged candidate.
+        commit:
+          type: string
+          pattern: '^[0-9a-f]{7,40}$'
+        buildTime: { type: string, format: date-time }
+        providerContract:
+          type: object
+          additionalProperties: false
+          required: [name, version]
+          properties:
+            name: { type: string, enum: [infra.provider] }
+            version: { type: string, pattern: '^[0-9]+\.[0-9]+\.[0-9]+' }
+
+    Whoami:
+      type: object
+      additionalProperties: false
+      required: [subject, issuer, audience, clientId, scope, expiresAt, tenantAuthority]
+      properties:
+        subject: { type: string, minLength: 1, description: 'The token `sub`. Never a secret.' }
+        issuer: { type: string, description: 'The `iss` that was checked against the pinned issuer.' }
+        audience:
+          type: array
+          items: { type: string }
+          minItems: 1
+          description: 'The `aud` claim(s) that satisfied the required audience.'
+        clientId: { type: string, description: 'Authorized party (`azp` or `client_id`).' }
+        scope:
+          type: array
+          items: { type: string }
+          description: Empty when the token carries none; absence is not the same as `all`.
+        expiresAt: { type: string, format: date-time }
+        tenantAuthority:
+          type: boolean
+          const: false
+          description: |
+            Always false, and asserted rather than implied: this token authenticates a platfolio user to
+            platfolio and confers no authority over tenant infrastructure (docs/design/05 invariants).
+
+    Error:
+      type: object
+      additionalProperties: false
+      required: [error, message]
+      properties:
+        error:
+          type: string
+          description: Machine-readable code. Stable, so clients branch on it rather than on prose.
+        message:
+          type: string
+          maxLength: 300
+          description: |
+            Human-readable, and credential-safe by construction: the server redacts credential-shaped text
+            before writing it (the same `redactCredentialShaped` rule the managed action applies to
+            attestation fields).

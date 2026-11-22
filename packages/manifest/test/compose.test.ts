@@ -36,10 +36,10 @@ services:
     image: postgres:16
     x-platfolio: { managed: postgres }
 x-platfolio:
-  metadata: { name: demo, version: 1.0.0, title: Demo, summary: A demo platform }
+  metadata: { name: demo, version: 1.0.0, title: Demo, summary: A demo platform, kind: web, mode: development }
   environments:
     production: { enabled: true, branch: main }
-    staging: { enabled: false }
+    staging: { enabled: true, branch: staging }
     preview: { enabled: false }
   release: { registryImage: ghcr.io/acme/demo, tagPattern: "v*" }
 `;
@@ -49,8 +49,13 @@ const overlay = (name = 'web', image = 'ghcr.io/acme/demo') =>
 
 const codes = (docs: string[]) => parseCompose(docs).issues.map((i) => i.code);
 
-test('the authored file alone refuses: no pinned image, no hosted plan', () => {
-  assert.deepEqual(codes([BASE]), ['compose-image-unpinned']);
+test('the authored file alone refuses, and now says which half is missing (D54)', () => {
+  // The label changed from `compose-image-unpinned` to `no-artifact` for a BUILT service, because the two cases
+  // need different answers: an upstream image with no digest is a document defect, while a build with no
+  // reported artifact means "run your pipeline once". Same refusal, sharper reason -- the assertion moved
+  // because the message improved, not because the rule weakened.
+  assert.deepEqual(codes([BASE]), ['no-artifact']);
+  assert.match(parseCompose([BASE]).issues[0]!.message, /publish one/, 'the reason must name the action');
 });
 
 test('the generated overlay supplies the pin and the merge is clean', () => {
@@ -119,24 +124,173 @@ test('a Compose document reaches the same plan the manifest format does', () => 
   assert.deepEqual(plan.environments[0]!.services[0]!.references, [{ variable: 'DATABASE_URL', database: 'db' }]);
 });
 
-test('platfolio\'s own service is describable in this format (step 7)', () => {
+test('platfolio can describe and plan its own deployment (step 7, #172)', () => {
   const root = path.resolve('.');
-  const dir = path.join(root, 'apps', 'status-api');
+  // The platform files sit at the repository root now (D50): platfolio is described the way a
+  // tenant is, which is the point -- this test reads the same paths the deploy tool reads.
+  const dir = root;
   if (!fs.existsSync(path.join(dir, 'compose.yaml'))) {
-    assert.fail('apps/status-api/compose.yaml is the reference case for D29; it must stay in the tree');
+    assert.fail('compose.yaml is the reference case for D29; it must stay in the tree');
   }
-  const docs = [fs.readFileSync(path.join(dir, 'compose.yaml'), 'utf8'), fs.readFileSync(path.join(dir, 'compose.prod.yaml'), 'utf8')];
-  const parsed = parseCompose(docs);
-  assert.deepEqual(parsed.issues, [], JSON.stringify(parsed.issues));
-  assert.equal(parsed.manifest!.metadata.name, 'platfolio-control-plane');
-  assert.equal(validateManifest(parsed.manifest!).length, 0);
-  const plan = buildPlan(parsed.manifest!, { instanceId: 'control-plane', teamId: 'platfolio' });
-  assert.match(plan.environments[0]!.services[0]!.digest, /^sha256:[0-9a-f]{64}$/);
-  assert.equal(plan.environments[0]!.services[0]!.healthPath, '/healthz');
+  const base = fs.readFileSync(path.join(dir, 'compose.yaml'), 'utf8');
+  const overlay = fs.readFileSync(path.join(dir, 'compose.prod.yaml'), 'utf8');
+  const parsed = parseCompose([base, overlay], {
+    resolveArtifact: (service) => service === 'site' ? `ghcr.io/platfolio-fixtures/site:ci@sha256:${DIGEST_PIN}` : undefined,
+  });
+  // This used to assert the OPPOSITE -- "the tree cannot describe a deployable self-host" -- because the
+  // overlay pinned a digest belonging to a deleted service and had no image of its own. #172 changed that:
+  // the pin is now read from the registry by scripts/render-platform-overlay.ts, so the composition renders.
+  // The assertion is inverted rather than deleted, and the history is here because the previous state was a
+  // real finding, not a mistake to erase.
+  assert.deepEqual(parsed.issues.map((x) => x.code), [], JSON.stringify(parsed.issues.map((x) => x.code)));
+  assert.ok(parsed.manifest, 'the self-host composition must produce a manifest');
+  assert.equal(parsed.manifest.metadata.name, 'platfolio-control-plane');
+  assert.equal(validateManifest(parsed.manifest).length, 0, JSON.stringify(validateManifest(parsed.manifest)));
+
+  const services = Object.keys(parsed.manifest.spec.services).sort();
+  assert.deepEqual(services, ['api', 'identity', 'site']);
+
+  // 'selfhost' here is the INSTANCE id, which the provider turns into the Railway project name
+  // `platfolio-selfhost` (measured, and the live project carries that name). It is not a path: renaming it
+  // would look for a different project rather than move a directory.
+  const plan = buildPlan(parsed.manifest, { instanceId: 'selfhost', teamId: 'platfolio' });
+  const production = plan.environments.find((e) => e.name === 'production');
+  assert.ok(production, 'the composition enables production');
+  const byName = new Map(production.services.map((s) => [s.name, s]));
+
+  // Every planned service is pinned by digest -- the rule that refused a placeholder for a tenant (#84) is
+  // applied to ourselves, which is the only way to know it is a rule and not a tenant-facing formality.
+  for (const name of services) {
+    const s = byName.get(name);
+    assert.ok(s, `${name} missing from the plan`);
+    assert.match(s.digest, /^sha256:[0-9a-f]{64}$/, `${name} has no digest pin`);
+    assert.ok(s.healthPath.length > 0, `${name} has no health path, so the provider cannot tell live from present`);
+  }
+  // The command finding from #172: Keycloak is pointless without its start command, and the renderer had been
+  // dropping every list-valued Compose `command` on the floor.
+  assert.equal(byName.get('identity')?.command, '/opt/keycloak/bin/kc.sh start', 'a list-valued command must survive to the plan, joined with quoting where needed');
+  assert.equal(byName.get('api')?.command, undefined, 'the api service has no command override');
+
+  const hosted = production.domains.map((d) => d.host).sort();
+  assert.deepEqual(hosted, ['api.platfolio.dev', 'auth.platfolio.dev', 'platfolio.dev']);
+  const staging = plan.environments.find((e) => e.name === 'staging');
+  assert.ok(staging);
+  assert.deepEqual(staging.domains.map((d) => d.host).sort(), ['preview.platfolio.dev', 'staging-api.platfolio.dev']);
+  for (const environment of [production, staging]) {
+    const apiService = environment.services.find((s) => s.name === 'api')!;
+    const siteService = environment.services.find((s) => s.name === 'site')!;
+    assert.equal(apiService.healthPath, '/status');
+    assert.equal(siteService.healthPath, '/status');
+    const api = Object.fromEntries(apiService.env.map((v) => [v.name, v.literal]));
+    const site = Object.fromEntries(siteService.env.map((v) => [v.name, v.literal]));
+    assert.equal(site.PORT, String(siteService.port));
+    const domainFor = (service: string) => environment.domains.find((d) => d.service === service)?.host;
+    assert.equal(site.PLATFOLIO_SITE_ORIGIN, `https://${domainFor('site')}`);
+    assert.equal(site.PLATFOLIO_SITE_ORIGIN, api.PLATFOLIO_ALLOWED_ORIGINS);
+    assert.equal(site.PLATFOLIO_URL, `https://${domainFor('api')}`);
+    assert.equal(site.PLATFOLIO_IDENTITY_ISSUER, api.PLATFOLIO_IDENTITY_ISSUER);
+  }
+
+  // The API and Keycloak use separate schemas in the same production database.
+  assert.deepEqual(production.databases.map((d) => `${d.name}:${d.kind}`), ['main:postgres']);
+  for (const [service, variable] of [['api', 'PLATFOLIO_DB_URL'], ['identity', 'KC_DB_URL_HOST'], ['identity', 'KC_DB_PASSWORD']] as const) {
+    const refs = byName.get(service)?.references ?? [];
+    assert.ok(refs.some((r) => r.variable === variable && r.database === 'main'), `${service} is not wired to the shared database`);
+    // #198, asserted rather than commented: a driver that needs components gets components, each naming a
+    // SOURCE variable on the database service, and nothing is handed a postgres:// URL it cannot parse.
+    if (service === 'identity') {
+      assert.ok(refs.every((r) => typeof r.output === 'string' && r.output.length > 0), 'every identity reference must name its source variable');
+      assert.equal(refs.find((r) => r.variable === 'KC_DB_URL'), undefined, 'a postgres:// URL must not be handed to a JDBC consumer');
+    }
+  }
 });
 
 test('the generated prod overlay is deterministic, which is what makes drift detectable', () => {
   const pins = { web: { image: 'ghcr.io/acme/demo', tag: '1.0.0', digest: `sha256:${DIGEST_OTHER}` } };
   assert.equal(overlay('web'), overlay('web'));
   assert.notEqual(overlay('web'), renderProdOverlay(BASE, pins), 'a different pin produces a different file');
+});
+
+test('x-platfolio carries volume retention from the Compose document', async () => {
+  // The hibernate pattern has to be authorable where everything else is authored, or it stays a provider
+  // capability nobody can declare. A mount is the identity that survives its service, so retention is
+  // declared on the volume entry and reaches the plan unchanged.
+  const { parseCompose } = await import('../src/compose.ts');
+  const { applyInventory } = await import('../src/index.ts');
+  const base = `
+name: hibernate-demo
+services:
+  worker:
+    image: ghcr.io/acme/worker@sha256:` + 'a'.repeat(64) + `
+    expose: ["8080"]
+x-platfolio:
+  resources:
+    volumes:
+      - { name: state, service: worker, mountPath: /var/lib/state, retention: survive }
+  metadata: { name: hibernate-demo, version: 0.1.0, title: Hibernate demo, summary: s, kind: web, mode: hosted }
+  environments: { production: { enabled: true }, staging: { enabled: false }, preview: { enabled: false } }
+`;
+  const parsed = parseCompose(base);
+  assert.deepEqual(parsed.issues.map((i) => i.code), [], JSON.stringify(parsed.issues));
+  const declared = parsed.manifest!.spec.resources.volumes;
+  assert.equal(declared.length, 1);
+  assert.equal(declared[0]!.retention, 'survive');
+  void applyInventory;
+});
+
+test('mergeVolumes collapses a declaration and a mount that describe the same disk', async () => {
+  const { mergeVolumes } = await import('../src/compose.ts');
+  const declared = [{ name: 'job-state', service: 'queue', mountPath: '/var/lib/state', sizeGB: 5, retention: 'survive' }];
+  const mounts = [{ name: 'job-state', service: 'queue', mountPath: '/var/lib/state' }];
+  const merged = mergeVolumes({ volumes: declared }, mounts);
+  assert.equal(merged.length, 1, 'two views of one disk must not become two plan entries -- the second carried no retention and teardown could delete it');
+  assert.equal(merged[0]!.retention, 'survive', 'the declaration wins every field it states');
+
+  // The aliasing that made this a real bug: mutating the mount list must not touch the declared array.
+  const resources = { volumes: [...declared] };
+  mergeVolumes(resources, mounts);
+  assert.equal(resources.volumes.length, 1, 'the merge must not mutate the caller array');
+
+  // A mount nobody declared is still a volume -- created with the default retention, not dropped.
+  const onlyMount = mergeVolumes({ volumes: [] }, [{ name: 'scratch', service: 'queue', mountPath: '/tmp/scratch' }]);
+  assert.equal(onlyMount.length, 1);
+  assert.equal(onlyMount[0]!.retention, undefined, 'undeclared means the default, and the default is deletion with the instance');
+});
+
+/**
+ * Docker appends `command` to the image ENTRYPOINT. Railway's `startCommand` replaces both and runs in a
+ * shell. Measured on 2026-11-13 by running one description on each: the full path in `command` worked on
+ * Railway and exited instantly locally; the bare argument worked locally and produced `Unknown option:
+ * '/opt/keycloak/bin/kc.sh'`. Composing both halves is the only form with one meaning in two runtimes,
+ * which is what "the same specification for all four platforms" (D50) has to mean to be true.
+ */
+test('entrypoint and command compose into one provider start command, in the order a shell would run them', () => {
+  const compose = [
+    'name: composed',
+    'services:',
+    '  app:',
+    '    image: example/app:1.0.0@sha256:' + DIGEST_PIN,  // a real-shaped digest: #84 refuses a placeholder, and it correctly refused this fixture
+    "    entrypoint: ['/usr/local/bin/app']",
+    "    command: ['serve', '--config', '/etc/app.conf']",
+    '    expose: ["8080"]',
+    '    x-platfolio: { public: true, domains: [app.example.com] }',
+    'x-platfolio:',
+    '  metadata: { name: composed, version: 1.0.0, title: Composed, summary: s, kind: web, mode: hosted }',
+    '  environments:',
+    '    production: { enabled: true, branch: main }',
+    '    staging: { enabled: false }',
+    '    preview: { enabled: false }',
+    '  release: { registryImage: example/app, tagPattern: "v*" }',
+  ].join('\n');
+  const parsed = parseCompose(compose);
+  assert.ok(parsed.manifest, JSON.stringify(parsed.issues));
+  const service = buildPlan(parsed.manifest!, { instanceId: 'i', teamId: 't' }).environments[0]!.services[0]!;
+  assert.equal(service.command, '/usr/local/bin/app serve --config /etc/app.conf');
+
+  // Entrypoint with no command is still a start command: Docker would run the entrypoint alone, and the
+  // provider needs the same process spelled out.
+  const entryOnly = compose.replace("    command: ['serve', '--config', '/etc/app.conf']\n", '');
+  const parsed2 = parseCompose(entryOnly);
+  assert.ok(parsed2.manifest, JSON.stringify(parsed2.issues));
+  assert.equal(buildPlan(parsed2.manifest!, { instanceId: 'i', teamId: 't' }).environments[0]!.services[0]!.command, '/usr/local/bin/app');
 });

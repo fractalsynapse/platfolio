@@ -1,0 +1,24 @@
+{
+  "name": "@platfolio/site",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "platfolio's own web shell (D65): an Astro site that renders packages/ui, with the dashboard as one React island. `@platfolio/ui` is a declared workspace dependency (#267 item 1): the alias in astro.config.mjs and the `paths` in tsconfig.json that stood in for the edge are both gone, so the dependency graph, the bundler and the type-checker now agree about who depends on whom — which is what makes a filtered install correct and the Dockerfile's whole-workspace install no longer necessary.",
+  "license": "Apache-2.0",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview"
+  },
+  "dependencies": {
+    "@astrojs/react": "^6.0.6",
+    "@platfolio/ui": "workspace:*",
+    "astro": "^6.4.8",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0"
+  }
+}

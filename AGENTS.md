@@ -15,20 +15,233 @@ selections it has already made are recorded, not improvised:
 | Kind of fact | Canonical location |
 | --- | --- |
 | Accepted decisions and open ones | [docs/design/01 § Decision register](docs/design/01-product-and-decisions.md) |
+| Entity model and its known limits (persons, teams, instances, templates, bindings) | [docs/design/17-object-model.md](docs/design/17-object-model.md) — labelled implemented / contract-only / absent |
 | Goal, invariants, and what is out of scope | [docs/design/00-target-architecture.md](docs/design/00-target-architecture.md) — check a change against it before implementing |
 | Architecture and contracts | [docs/design/README.md](docs/design/README.md), then [02](docs/design/02-architecture.md), [03](docs/design/03-manifest-spec.md), [10](docs/design/10-cordis-kernel-and-extension-seams.md) |
 | Verified provider constraints and evidence | [docs/platfolio-feasibility.md](docs/platfolio-feasibility.md), [docs/research/](docs/research/) |
 | Vendored framework provenance and rules | [vendor/CORDIS.md](vendor/CORDIS.md) |
 | Change, review, check and release policy | [docs/MAINTAINING.md](docs/MAINTAINING.md) |
 | Project-specific procedures | [.agents/skills/README.md](.agents/skills/README.md) |
+| Control-plane API design (the validation mechanism itself) | [apps/control-plane/openapi.yaml](apps/control-plane/openapi.yaml) — spec first, then the handler |
+| UI architecture rules (normative; rationale and contracts live in [11](docs/design/11-ui-components-and-page-model.md)) | [docs/ui-architecture.md](docs/ui-architecture.md) — the six rules, the gate that enforces each, and the open UI-OD decisions |
+| Every environment variable: custody, environments, obligations and wiring -- one registry per platform, at its root | [environment.yaml](environment.yaml) — the central registry (D52, and D33's obligations since D58), enforced by `pnpm run environment:registry`: one definition per variable, one spelling of everywhere, one file per platform |
 
-Status: design phase, with the contract layer implemented. `packages/contracts`, `packages/manifest`,
-`packages/kernel` and `packages/page-schema` exist and are tested (98 tests); there is no service, no
-deployed resource and no external provider approval yet, so do not describe planned behavior as
-delivered. Provider-specific claims need a live check, and CI substitutes for none of them.
+Status: foundation poured, interfaces first (D40, [16](docs/design/16-foundation-build-order.md)). Slices 1
+and 2 of that plan are delivered (test count: run `pnpm run test`; the number ages within a week and has been wrong in this file repeatedly): `apps/control-plane` boots on the vendored runtime with
+Keycloak-verified bearer auth, persistent records (`Store` as a capability with a Postgres implementation and
+an in-memory double under one conformance suite, gated in CI against a live database), a controller
+that turns accepted attestations into stored state, and capability bindings that make shared services
+queryable (#176): what an instance offers, which teams may consume it, and who depends on it -- the question a
+destroy must ask first -- and `DELETE /api/v1/instances/{id}` now asks it (#196): a destroy that would strand a
+consumer is refused 409 with the dependants named. It records `deprovisioning` and returns 202; **provider
+teardown is not wired**, and the endpoint says so, because a tenant reading "destroyed" would reclaim their
+own compute. There is **one API**: `apps/control-plane`, validated against the OpenAPI
+document (D41). `apps/status-api` -- the first-draft service that predates it -- was **deleted** rather than
+kept beside it, because two services where one is intended means two request paths and only one of them checked.
+An older Railway container still runs that deleted service's image and remains the target of *tenant* repos until
+the cutover, so the historical claim stands: a real GitHub-initiated dispatch ran end to end against it. It
+cannot be rebuilt from this tree; the replacement is deployed and answering at `api.platfolio.dev` (#172).
+
+Team membership is enforced at the capability boundary (#173): handlers receive a resolved scope or never
+run, cross-team reads answer 404 rather than 403 so existence is not leakable, and the route table itself is
+walked by a test so a future instance-scoped route cannot skip the guard. Roles are enforced from one table
+(`POLICY[action] = minimumRole`, #178), so `owner` and `member` differ: sharing a capability and destroying an
+instance are owner-only, and a new route must name its action or the coverage test fails.
+Teams are self-service now (#195): `POST /api/v1/teams` makes the caller its owner, and a team name is a
+platform-unique slug because it is the first half of every address. Instances are addressed `team/name` with slug names unique per team, carry `template`/`templateRef` (#180, D45),
+report state **per environment** with `Instance.state` as a stated rollup (#179) -- staging degraded next to
+production live is a real Tuesday, not a contradiction to average away -- and carry **configuration** per
+environment inside the platform description (`environmentValues`, D56): platfolio's own staging runs against its
+own Keycloak realm on the same issuer host, because a second environment whose values are a copy of the first is
+a second copy of the truth, not a second environment. `check-contracts.ts --update` refuses a
+breaking baseline refresh without `--ack-breaking`, and says which bump the change implies. Platform email is the
+same seam shape (D46, #187): `smtp` in production, Mailpit in the local stack, an in-memory double in tests,
+one conformance suite each side of `EmailTransport`/`MailboxReader` -- a relay cannot be read back and the
+contract says so rather than pretending. `email:smoke` proves the hand-written SMTP client against a real
+server, and CI runs it. Invitations are built on it (#186): an owner invites by address, the invited
+person claims it against the address their IdP asserts -- no token in the link, so a forwarded email grants
+nothing.
+
+Platfolio's operations are **API operations** (D48): a state change or a provider action that exists only in a
+script is a gap, not a design -- `POST /api/v1/instances/{id}/plan/from-repository` and `…/dispatches/{id}/trigger`
+exist because reading a tenant's repository from a maintainer's shell was invisible to `api:check`, to the scope
+guard and to the audit trail. The seam now has two drivers, which is what proved the contract was provider-shaped:
+`github-app` (Contents API + workflow dispatch) and **`git`** (`GitScm`: reads at any ref over HTTPS/SSH, any
+forge; refuses to dispatch, because that is not a git concept). `PLATFOLIO_SCM_DRIVER` selects one. Measured end
+to end against the real forge -- `plan/from-repository` on `fractalsynapse/platfolio` returned the same blob
+SHAs `git hash-object` computes locally. Three more operations came after them, for the same reason: `POST …/artifacts` (a release reports its digest
+instead of committing one -- D54, which closed #217 and removed `compose.prod.yaml` as a requirement for a
+fork), `PUT …/secrets/{name}` (deliver a credential through to the tenant's provider and keep nothing -- D53),
+and `GET …/secrets` (presence: set / missing / unverifiable, never the value). `open-install-pr.ts` still
+renders the install PR itself (that remaining logic is #213), but it no longer reads a maintainer's filesystem:
+the platform description now arrives from a repository at a ref through the same seam, defaulting to the
+repository the PR lands in (`--template=<name>` reads a published template from the catalog instead), so a dry
+run can report the platform of the repository it names rather than the one the operator happens to have
+checked out (D60).
+
+What is still **not** delivered, stated because the earlier version of this paragraph was the first thing an
+agent read and it had gone stale: no Stripe integration, no CLI, and no tenant on either service. The web UI is
+no longer in that list: `apps/site` exists since 2026-11-17 (D65's shell -- see the UI rule below), but it is
+**built and gated**. The composition and release candidate workflow include the site. Hosted acceptance still
+requires a published candidate, Railway pull access, DNS and the browser checks.
+A person is now a `persons` row with proofs in `identities`, and membership attaches to the person (#177), so a
+second issuer or a machine client does not need a parallel authorization scheme.
+The control plane is **deployed and answering on a public HTTPS host**, built by this repository, with its
+database created and migrated by its own plan (#172's first run). It is not yet the live service for tenants:
+Keycloak now boots (its JDBC DSN is wired as verified `references[].output` components, #198), and
+`api.platfolio.dev` / `auth.platfolio.dev` are **verified and certificate-issued** (#199 closed), the realm is
+seeded, and `identity:smoke` passes 11/11 **against those public URLs** — including a token minted by the **peer realm** refused as `unknown-key`, which is D4 proven beyond loopback in both directions (11/11 on production and staging, #251). The cross-issuer check no longer depends on a master-realm admin token: that was a weak proxy for the invariant (the threat is one tenant’s credential arriving at another tenant’s control plane, not an administrator’s). That check also proved to be a coin flip: flipping the last character of a 342-character RS256 signature decodes to identical bytes on many signatures, so the forged token was sometimes still valid; it now flips a mid-signature character and refuses to run unless the bytes actually changed. **#248’s stated cause was wrong and is recorded here so nobody re-inherits it:** production’s master-realm admin was never unreachable. `400 invalid_grant` appeared only when an operator script fell back to its loopback default password (`platfolio-dev-only`) against a live host — three scripts did, silently — and I filed that as lost infrastructure and planned a service stop, a `bootstrap-admin user` one-off and a credential rotation on top of a problem that did not exist. `scripts/identity-credentials.ts` now *refuses* a loopback-default credential against a non-loopback host, naming the file and variable to supply, and never prints a value or its length. The compose rename to the 26.x `KC_BOOTSTRAP_ADMIN_*` pair is declaration correctness for **new** deployments only (26.8 creates that admin only when the master realm does not yet exist) and recovers nothing on a running one. The sole master-realm user is still flagged `is_temporary_admin=true`; replacing it means rotating a live credential, which is the maintainer’s call — **and he has made it (2026-11-15): leave it alone for now, and here is the procedure for when it is done**, step-by-step with evidence tiers, in [docs/design/05 § Rotating the temporary Keycloak admin](docs/design/05-identity.md#rotating-the-temporary-keycloak-admin-runbook). Re-checked read-only the same day: the account still authenticates (token endpoint 200), is still the realm's only user, still flagged temporary. `platfolio-web` (public, PKCE S256, no ROPC, exact `<origin>/callback`) is now present in both hosted realms, with origins read from `compose.yaml` — but `platfolio.dev` and `preview.platfolio.dev` **do not resolve yet**, so browser auth is configured and read back, not exercised against a live UI. What #172 still needs is the cutover: the three template
+repositories pointing at `api.platfolio.dev` (a `PLATFOLIO_URL` repository variable each, D47) and one install
+PR watched end to end. platfolio's own repository already dispatches there, and its hosting description now sits
+at the root exactly like a tenant's (D50) -- `selfhost/` and the separate root `docker-compose.yml` are gone, so
+the platform is described once and developed as an overlay. The published image digest is now looked up rather than typed (`platform:overlay:check`), so
+`compose.prod.yaml` carries a real pin -- having previously carried a *real digest of the deleted
+service's bytes*, which every check passed. The renderer still refuses an unpinned first-party service rather
+than accepting a placeholder (#84), and `platform-deploy.ts --dry-run` is how you find out before a provider
+call does. A service that finished is not a service that runs: `live` requires something active behind the deployment, and an exited one reads `stopped` with the provider's own word kept as `rawStatus` (#202 follow-up). Do not describe planned behavior as delivered, and prefer the evidence
+tier a claim actually holds: measured, tested, or designed-and-unexercised. Provider-specific claims need a
+live check, and CI substitutes for none of them.
+Secrets are **delivered, never held** (D53): `PUT …/secrets/{name}` writes through to the provider and keeps
+nothing, `GET …/secrets` answers `set | missing | unverifiable` -- and `unverifiable` is a real answer, because
+presence is a question about the provider, not about our database. A success response is 204 with no body, the
+value appears in no read-back and no audit row, and `platfolio-held` custody stays forbidden (D4). The
+development overlay is a separate layer with its own gate (D50/D51): `docker compose -f compose.yaml
+-f compose.dev.yaml up`, never a second platform description.
+
 Run `pnpm run verify` for the whole gate set. The skills under
 `.agents/skills/` inherited from the starter package stay identical to their source; project
 guidance is added beside them, never by editing them.
+
+## Testing happens on real projects (D49)
+
+**Every test that exercises a deployed platform runs against one of the four things platfolio is actually
+meant to host** — nothing else, and nothing invented for the purpose:
+
+| Project | Why it is a test target |
+| --- | --- |
+| `fractalsynapse/platfolio-starter-web` | `kind: web`, `mode: development` — a frontend plus a queryable backend, changed by someone |
+| `fractalsynapse/platfolio-starter-worker` | `kind: worker`, `mode: development` — accepts no connections, and that is the rule |
+| `fractalsynapse/platfolio-shared-identity` | `kind: web`, `mode: hosted` — one platform, many consumers, nothing developed here |
+| `fractalsynapse/platfolio` | **the platform managing itself** — managed hosting of platfolio is a shipping option, so it is a first-class test subject, not a special case |
+
+Those four are the three project types platfolio supports, plus itself. A new GitHub repository, Railway
+project, or "sample" app created to make a test pass is a defect: it is never used in anger, it drifts from the
+templates everyone actually forks, and it hides the fact that the real projects were not exercised. Extra
+projects also cost the templates directly — a probe repo that works because it was hand-fitted proves nothing
+about a fork.
+
+**The boundary, stated because a literal reading would break the system.** This rule is about *targets*:
+deployed, provisioned, externally visible things. It does not abolish test doubles, and the project's own
+history says why. `railway-mock`, `MemoryScm`, the fake infra provider, the in-memory `Store`,
+`MemoryEmailTransport` and the parse fixtures under `packages/manifest/test/fixtures/` are the **second
+implementation that proves a seam is not accidentally provider-shaped** ([10 § The seams](docs/design/10-cordis-kernel-and-extension-seams.md)) —
+they run with no credentials and no network, they are what let CI assert a 403 shape at 3am, and deleting them
+would not make anything more real. What is not acceptable is a *real* thing that exists only for tests.
+
+Two consequences that are enforced rather than hoped for:
+
+- **Synthetic identities do not squat the publishing org.** A fake repository in a unit test is named under
+  `platfolio-fixtures/…`, never `fractalsynapse/…`: when a test's invented name is indistinguishable from a
+  real one, nobody can tell a fixture from an asset — and `fractalsynapse/widgets` had been passing as both.
+  `check-project.ts` fails the build on any org repository named in code or config that is not one of the four
+  (or the two published image repositories).
+- **`pnpm run verify` is the only test surface.** Anything that needs a fifth project is a sign the thing being
+  tested is not the thing being shipped.
+
+## Repository layout: one thing, one home
+
+Duplication here has already caused a near-downgrade (two prod overlays, one forgotten) and a stale-pin loop.
+The layout is therefore explicit, and a new file goes where its **kind** goes:
+
+| Path | What lives there | Rule it enforces |
+| --- | --- | --- |
+| `packages/manifest/src/template-catalog.ts` | The template catalog: which published repository *is* which template, and which files of it platfolio reads | **D60: a template is a repository, not a directory.** Read through the source-control seam, anonymously, because these repositories are public and open source and always will be. Adding a template means a repository plus one entry here -- never a copy under this tree |
+| `packages/manifest/test/fixtures/` | Manifest fixtures the tests and [03](docs/design/03-manifest-spec.md) parse | Test input is not a catalog entry, and does not live at the top level. Fixtures are not projects (D49) |
+| `compose.yaml` + `compose.prod.yaml` (repository root) | platfolio's own platform description and generated pin | **D50: one hosting specification for all four platforms.** The root is where a tenant's platform lives, so it is where ours lives too -- `selfhost/` was a special case and it made platfolio's architecture differ from the templates' |
+| `environment.yaml` (one per platform: this repository's root, and each published template's root) | The **environment registry**: every variable that platform reads or deploys -- custody (`secret`), `environments` (`development` / `staging` / `production` / `all`), obligations (`kind`, `service`, `required`, `default`, `enum`, `rotate`) and wiring (`database`, `output`, `from`), plus `deployedTo` and `note` | **D58: one file per platform, one definition per variable.** `applyInventory` merges it into the plan, so it is an input, not documentation. A name is not a custody claim (`PLATFOLIO_DB_URL` carries a password); **no registry file is ever a discovery source**, and `environment:registry` fails a duplicate name, a second spelling of the full set, an obligation that contradicts itself, or a registry that parses to zero rows. The published platforms' registries are checked where they live: `packages/manifest/test/templates.test.ts` reads them over the seam and applies the same obligation predicate (D60) |
+| `compose.dev.yaml` | the local development topology (database container, Mailpit, source mount, `start-dev`, published ports) as an **overlay** | Dev convenience is a separate layer, not a second definition of the platform. `docker compose -f compose.yaml -f compose.dev.yaml up` |
+| `apps/<name>/` | Source, Dockerfile, `package.json` -- the deployable artifact itself | Deployment *shape* does not live with the app |
+| `packages/contracts/` | Capability interfaces, DTO schemas, conformance suites, provider implementations | Framework-free; the only place a seam is defined |
+| `packages/kernel/` | The only package permitted to import Cordis (D15) | Plugin wiring, never business rules |
+| `apps/<name>/openapi.yaml` | The HTTP contract of the app it sits beside (D41) | The spec is the app's own file, not a documentation folder |
+| `docs/ui-architecture.md` | The six UI architecture rules as MUST/MUST NOT, each with the gate that enforces it and the incident that prices it | **One authority for the rules.** Rationale, full contracts and the eleven CI gates stay in [11](docs/design/11-ui-components-and-page-model.md); neither file restates the other |
+| `.agents/skills/ui-architecture/` | The project skill an agent loads before building or reviewing UI: the six rules compressed, the commands that check them, the stop conditions | Routing, not restatement -- the skill points at `docs/ui-architecture.md` and at the open `UI-OD` decisions it must not resolve |
+| `packages/contracts/api.json` | The generated **public-surface baseline** of the contracts package -- structured data (`schema`, `version`, `bump`, `digest`, `declarations[]`) | Lives with what it measures; `check-contracts` writes it, and a deterministic gate may only read data. It was markdown until the maintainer asked why a test parses prose: the header regexes and the ``` fence meant a writer change could make the reader see zero declarations, which reads as "no drift" |
+| `packages/contracts/railway-graphql-schema.json` | Captured provider schema, evidence for `graphql:check` | Provider evidence sits with the provider implementation |
+| `db/` | Forward-only migrations and Postgres init scripts | Readiness comes from the migrations ledger |
+| `platform-templates`, `platforms/`, `apps/status-api`, `api/`, `samples/`, `selfhost/`, root `docker-compose.yml`, `.platfolio/`, `templates/` | **gone** (Nov 2026): see CHANGELOG | A directory with one member that duplicates another app's file was the bug; a second API that duplicates the first is the same bug with an endpoint surface; a second `environment.yaml` describing the same variables in a second schema was the same bug again; and a bundled `templates/` that duplicated three published repositories was the same bug with a publisher and a parity gate attached (D60) |
+| `examples/` | Third-party reference clones (Cordis at its tag, a scaffold). Gitignored | Reference material is not project source |
+| *nowhere tracked* | A generated provider hostname (D47) | An environment's endpoints are configuration: `vars.PLATFOLIO_URL`, or `--url=` when opening an install PR |
+
+If a change would create a second copy of a fact -- a digest, a service definition, a schema, a permission
+list -- fix the ownership instead of adding a file and keeping them in step.
+
+## API rule: design in OpenAPI first, and let the spec validate
+
+Every control-plane HTTP operation is **designed before it is implemented**, in
+`apps/control-plane/openapi.yaml`. The specification is not documentation that drifts behind the code; it is
+the validation mechanism for every endpoint:
+
+- **Nothing is added to the API by writing a handler.** A route that is not in the spec fails
+  `pnpm run api:check`, and an operation in the spec with no route fails it too. Both directions are checked,
+  because one-sided validation only catches half the drift.
+- **Responses are validated against the spec**, not against a second hand-written schema. Where a shape is
+  shared with a capability contract, the StandardSchema definition stays the source and the spec is generated
+  or compared against it — never re-invented (see the seam rule: one shape, one definition).
+- **Auth is described, not assumed.** Every operation declares its security scheme; an endpoint that requires
+  no auth is an explicit, reviewable exception rather than an oversight.
+- `pnpm run api:check` runs inside `pnpm run verify`, so a spec that has become fiction fails the gate that
+  every merge must pass.
+
+This exists because an API invented in handlers becomes a description of one implementation, and a platform
+whose value is pluggability needs the contract to be the thing that is checked.
+
+## UI rule: six architecture rules, each with the gate that holds it
+
+Normative statements are [docs/ui-architecture.md](docs/ui-architecture.md); rationale, full contracts and the
+eleven CI gates are [11](docs/design/11-ui-components-and-page-model.md). Build or review any UI through the
+[ui-architecture skill](.agents/skills/ui-architecture/SKILL.md). `packages/ui` **now exists** (2026-11-15: the
+component contract, design tokens as CSS custom properties per D63, the five layout primitives, the signals
+registry, the SDK seam) and **now has its first screens**: six registered components in
+`.tsx`, one screen document, and the gate set from `ui:check` (read its output: gates that cannot run report NOT RUN rather than passing). #259 is closed:
+`packages/ui/tsconfig.json` carries `jsx: react-jsx` plus `lib: [..., "DOM"]`, and `pnpm run typecheck` runs
+**all three** projects now — the root DOM-free one, `packages/ui`, and `apps/site` — so a `.tsx` is compiled by CI, while `document` in `packages/contracts` or
+`apps/control-plane` is still TS2584. `scripts/check-project.ts` now fails the build unless the union of the
+type-check projects' file lists equals the source tree on disk, so an exclude list cannot become a silent skip.
+**`apps/site` exists since 2026-11-17**, and it is D65's shell: Astro static output, `@platfolio/ui` reached through
+a declared `workspace:*` edge (since #267 item 1, which deleted the `astro.config.mjs` alias and the `tsconfig.json`
+`paths` that had stood in for the edge — the graph and the bundler now agree, which is what makes
+`pnpm install --filter @platfolio/site...` correct, and the Dockerfile uses it), `/` emitting zero client JavaScript (measured in
+`dist/`, not inferred from config), `/dashboard` mounting `InstanceListScreen` as **one** island that calls
+`createShellContext` once, and `/callback` exchanging the PKCE code while rendering nothing. The browser's half of
+the auth policy was moved out of `scripts/browser-auth.ts` into `packages/ui/src/web/browser-auth-policy.ts`,
+because a client bundle that reaches the operator script reaches `node:crypto` — the script re-exports it, so there
+is still one definition of each fact. `packages/api-client` **still does not exist**, and 11 §6 says it should not
+be created: the SDK is `packages/ui/src/sdk/`. The site service uses the CI candidate's image. Hosted browser
+hydration and accessibility evidence is still pending, and the instance list is the only screen. `ui:check`
+§9.7, §9.8 and §9.9 stay NOT RUN.
+
+| # | Rule (one line) | What enforces it |
+| --- | --- | --- |
+| 1 | Components reach the API only through the SDK, with types generated from `apps/control-plane/openapi.yaml`; a hand-written client or a hand-copied DTO is forbidden (#247 at a higher altitude) | `spec:check`, `api:check`, `api:types:check` — all real and green today |
+| 2 | Responsive comes from the **container**, not the window: five layout primitives with a containment matrix **plus the content primitives (`ui-prose`, `ui-columns`) that own a document's measure and column threshold**, no width `@media`, no `isMobile` prop; every capability reachable at 360 px, desktop adds simultaneity not features | `ui:check` §9.3 runs today over `.ts` **and** `.tsx` and over all four generated sheets (tokens, layout, content, components — the count is asserted, so a new sheet cannot escape the gate); §D65 refuses a width query or a hand-declared `container-type` in app CSS, which is the half that let `apps/site` ship its own breakpoint until #267 item 5; §9.11 runs today per screen (the degradation is a `floorSlots` field on each primitive, so parity is arithmetic over declarations); §9.7 is NOT RUN — the components exist, the 320/1280 px containers do not exist without a browser |
+| 3 | Signals are typed and each declares `retention: 'replay' \| 'transient'` with **no default**; side-effecting or credential-shaped payloads are transient by rule; late-mount tested both ways | `ui:check` §9.4 runs today (`packages/ui/src/signals.ts`, retention required with no default; credential-shaped payloads refused as `replay`). No stringly-typed bus, ever |
+| 4 | Drafts are client-only, allowlisted per field, TTL'd, wiped on sign-out and submit, **never synced**, and never able to hold a secret value (D4/D53) | one exported `isValueBearingKey`/`findValueBearingProps` + `packages/page-schema/test/secrets-panel.test.ts` — real today and it now catches credential-shaped names (`token`, `apiKey`, `clientSecret`) it previously missed; the residual limit is that a name test cannot see a secret under a neutral key, stated in [the rules doc](docs/ui-architecture.md#open-gaps-this-file-refuses-to-paper-over) |
+| 5 | Real-time is honest **and now a required capability (D64)**: one SDK freshness primitive whose transport is swappable at build time — `poll` today, `events` when §4's operations land in the spec — and since no push channel exists today, no `EventSource`/`WebSocket`/"live" pill; every render shows its age; polling is never styled as push | `api:check` (the operation cannot hide) + 11 §9.10 — specified; the push operations are **required work** (D64), designed first in `openapi.yaml` (D41) by whoever owns it, and absent until a live check says otherwise |
+| 6 | **Pluggable means build-time, never runtime-loaded**: no dynamic import of UI code, no server-supplied component registry. [10's Tier 2 boundary](docs/design/10-cordis-kernel-and-extension-seams.md#the-collision-and-the-resolution) is a security property (D13/D14) | closed component union + strict `PageSchema` (`packages/page-schema`) — real today; `ui:check` §9.6 runs today (build-time registry, immutability proved by *attempting* the widening after `Object.freeze` was shown to be theatre); §9.5 runs today: 6 ids resolve, each with a props schema, a stored document re-validates and invalid prop sets are refused at validation (with 2 named-accepted, because props validation checks kind and not enumeration membership) |
+
+The first `packages/ui` commit is the **contract package and its gates, not a screen**: a gate added after four
+screens exist audits nothing (11 § Consequences for the plan). Four `UI-OD` decisions remain open and belong to
+the maintainer — an agent does not settle one in code; three were answered (UI-OD6 → D63 and UI-OD2 → D64 on
+2026-11-15; UI-OD1 → D65 on 2026-11-16: **the web shell is Astro, the dashboard one React island inside it**), and all three are
+recorded, with his reasons, in [11 § Closed UI-OD decisions](docs/design/11-ui-components-and-page-model.md#closed-ui-od-decisions) rather than deleted.
+
+**Two gate fixes came out of the screens, and are recorded rather than buried.** §9.2's source filter read
+`rel.endsWith('.ts')` while the walk had been widened, so a `fetch` planted in a screen was invisible to the gate
+whose job is to find it — the mutation said PASS and that was the finding. And gate §R5's state-word search fired
+on `aria-live`, the attribute 11 §8 *mandates*; it now refuses the word in copy and permits that attribute, and
+both directions are falsified. Neither was widened to accommodate a violation: the first was a hole, the second a
+false positive on the compliant case.
 
 ## Authority and scope
 
@@ -37,6 +250,19 @@ provided; skills supply procedures within that authority and cannot enlarge it.
 Ask only for material information, access or decisions that remain unresolved.
 Honor an explicitly pending approval. Continue independent work while a decision
 is pending, but do not perform actions that depend on its answer.
+
+**To ask the user anything, call the question tool. Never ask in prose and carry on.** A question
+written into a reply does not block: the turn ends, execution proceeds, and the next thing the
+maintainer reads is a decision he was never given the chance to make. The tool call is the only
+mechanism that actually pauses for an answer, so if it was not called, you did not ask — you
+decided and mentioned it. This is not stylistic: multi-turn goal continuation keeps running without
+a human at the keyboard, so a prose question is indistinguishable from no question at all.
+
+The rule draws its line at **blocking** decisions — the ones where the next action depends on the
+answer. An observation the maintainer may want to weigh later belongs in the report as a flagged
+item; do not spend an interruption on something that does not stop the work. But when you catch
+yourself writing "your call", "needs a decision", or "tell me which", that is the signal: stop and
+call the tool instead of summarising past it.
 
 Read the project's purpose, relevant instructions and canonical decisions before
 changing it. Resolve local guidance through the applicable precedence; report an

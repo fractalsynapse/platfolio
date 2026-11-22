@@ -1,0 +1,63 @@
+---
+/**
+ * The shared page shell.
+ *
+ * Nothing below is a design language: every value comes from `packages/ui/src/tokens.ts` through the generated
+ * `tokens.css` (D63 — one place for colour, spacing and type; this file imports the sheet rather than restating
+ * it), and `scripts/check-ui.ts` §D65 reads this app's styles for exactly that line.
+ *
+ * ## The one thing here that is about D65 rather than HTML
+ *
+ * `scriptSrc` is set only by a page that hydrates. `/` passes nothing and therefore ships no JavaScript at all —
+ * which is the claim Astro was chosen for, and `apps/site/test/build-output.test.ts` measures it in `dist/`
+ * instead of inferring it from this file. The overlay it loads (`/config.js`) carries endpoints, never a
+ * credential, and `public/config.js` is tracked as a comment because a committed origin is D47's failure.
+ */
+import '../styles/site.css';
+
+interface Props {
+  title: string;
+  description?: string;
+  /** A page that mounts an island names the overlay here; a page that ships no JavaScript leaves it undefined. */
+  scriptSrc?: string;
+}
+
+const {
+  title,
+  description = 'Managed hosting of standalone platforms on infrastructure the tenant owns.',
+  scriptSrc,
+} = Astro.props;
+const origin = Astro.site ?? new URL(Astro.request.url).origin;
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={new URL(Astro.url.pathname, origin)} />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="site-brand" href="/">platfolio</a>
+      <nav aria-label="Primary">
+        <a href="/dashboard">Dashboard</a>
+      </nav>
+    </header>
+    {/* The document column is a packages/ui primitive, not a rule in this app's stylesheet: `ui-prose` carries
+        the measure (--ui-measure-content), the block rhythm, and the container its children query (11 §2, rule 2,
+        #267 item 5). What site.css owns now is this shell's furniture -- header, footer, padding -- and no
+        breakpoint at all, which is the thing gate §D65 refuses in app CSS. */}
+    <main class="ui-prose">
+      <slot />
+    </main>
+    <footer class="site-footer">
+      <p>
+        platfolio runs on infrastructure its tenants own. The repository is
+        <a href="https://github.com/fractalsynapse/platfolio">fractalsynapse/platfolio</a>.
+      </p>
+    </footer>
+    {scriptSrc !== undefined ? <script is:inline src={scriptSrc}></script> : null}
+  </body>
+</html>

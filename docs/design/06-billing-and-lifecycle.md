@@ -72,6 +72,31 @@ Events to ingest at minimum: `checkout.session.completed`, `invoice.paid`, `invo
 `entitlements.active_entitlement_summary.updated`, `customer.updated`, `charge.dispute.created`,
 `charge.refunded`, `radar.early_fraud_warning.created`.
 
+## Hibernation: destroyed compute, kept state (D36, measured)
+
+Scale-to-zero is not the only cheap state. A volume outlives the service mounted on it — measured on the live
+API, and visible today in this dev workspace as a `postgres-volume` whose database service is long gone — and
+`volumeInstanceUpdate` re-attaches a survivor to a fresh service at a new mount. So a platform can be taken
+apart entirely and rebuilt around its own data.
+
+Three consequences, each because the alternative was worse:
+
+- **Retention is per volume and opt-in** (`retention: 'instance' | 'survive'`). `deleteInstance` kept removing
+  every volume in the project, which would have destroyed the state this exists to keep; it now takes
+  `retainMounts` and reports what it kept in `retained`. Mounts, not names — Railway names volumes
+  `<service>-volume` itself and ignores the plan's label, so an option keyed on either one would silently
+  match nothing the other called it.
+- **Deletion is scheduled, not immediate.** A successful `volumeDelete` leaves the volume listed with
+  `isPendingDeletion: true` and a `deletedAt` about two days out. "We asked" must not be reported as "it is
+  gone", which is the same honesty rule as #111's accounting.
+- **Orphans are a billing surface.** An unattached volume costs money and shows no symptom, and Railway's
+  project-token tier can create volumes but not delete them. So creation, deletion and retention all sit in
+  the workspace tier, and the platform needs a "these volumes belong to nothing" report before hibernation
+  ships — otherwise the money-saving feature quietly spends money.
+
+Evidence and the correction this forced to #107's diagnosis:
+[railway-volume-lifecycle-2026-11-10.md](../research/railway-volume-lifecycle-2026-11-10.md).
+
 ## Provisioning gates
 
 An instance may not go `active` until: subscription state is `active`/`trialing` **and** an

@@ -1,0 +1,88 @@
+# Managed by platfolio. Review before merging.
+# Deleting this file stops platfolio managing the stack; ordinary deploys keep working,
+# because the push triggers below are the same ones your own workflow used.
+name: platfolio managed
+
+on:
+  workflow_dispatch:
+    inputs:
+      instance_id: { required: true, type: string }
+      dispatch_id: { required: true, type: string }
+      nonce: { required: true, type: string, description: "single-use, echoed back in the attestation" }
+      plan_hash: { required: true, type: string }
+      action: { required: true, type: choice, options: [apply, check, drift, suspend, export] }
+      environment: { required: true, type: choice, options: [production, staging] }
+  push:
+    branches:
+      - main
+      - staging
+  pull_request:
+    branches:
+      - main
+      - staging
+    types: [opened, synchronize, reopened]
+
+permissions:
+  checks: write
+  contents: read
+  id-token: write
+  statuses: write
+
+concurrency:
+  group: platfolio-${{ inputs.dispatch_id || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  tests:
+    name: your checks (starter -- add steps here)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      # Add test steps below. Until you do, this job is a no-op gate in front of the managed deploy.
+      - name: No project checks configured yet
+        run: echo "platfolio installed this starter; add your own test steps in jobs.tests.steps"
+
+  managed:
+    name: platfolio ${{ inputs.action || (github.event_name == 'pull_request' && 'check' || 'apply') }}
+    if: github.event_name == 'workflow_dispatch' || inputs.instance_id != ''
+    needs: tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check the platfolio control-plane endpoint is configured
+        env:
+          PLATFOLIO_URL: ${{ vars.PLATFOLIO_URL }}
+        run: |
+          if [ -z "$PLATFOLIO_URL" ]; then
+            echo "::error::repository variable PLATFOLIO_URL is unset -- set it to the platfolio control-plane origin given with your install request,"
+            echo "::error::for example https://api.example.com. See README.md, managed by platfolio."
+            exit 1
+          fi
+          echo "reporting to the platfolio control plane configured for this repository"
+
+      - name: Apply desired state with this repository's own credentials
+        id: apply
+        uses: fractalsynapse/platfolio/.github/actions/platfolio-managed@d40412fd727f4af1405afdc7898ffcf753ae37b7
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          PLATFOLIO_DISPATCH_TOKEN: ${{ secrets.PLATFOLIO_DISPATCH_TOKEN }}
+          RAILWAY_WORKSPACE_ID: 82ba4aff-61f3-4b19-b863-8b650ebb66b2
+        with:
+          action: ${{ inputs.action || (github.event_name == 'pull_request' && 'check' || 'apply') }}
+          environment: ${{ inputs.environment }}
+          instance_id: ${{ inputs.instance_id }}
+          dispatch_id: ${{ inputs.dispatch_id }}
+          nonce: ${{ inputs.nonce }}
+          plan_hash: ${{ inputs.plan_hash }}
+          platfolio_url: ${{ vars.PLATFOLIO_URL }}
+
+      - name: Report the outcome for platfolio to verify by read-back
+        if: always()
+        run: echo "outcome=${{ steps.apply.outcome }}"
+        # The runner posts a signed attestation to platfolio from the action above; the control
+        # plane treats it as a claim and re-verifies against the provider before advancing.
+

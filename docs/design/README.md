@@ -11,19 +11,23 @@ the check before implementing and 01 as the record of what was decided.
 | # | Document | Answers |
 | --- | --- | --- |
 | [00](00-target-architecture.md) | **Target architecture and invariants** | The end-state capability list, the rules that are never traded, deferrals with their build conditions, and what is out of the goal entirely. Capabilities only — no business or commercial material |
-| [01](01-product-and-decisions.md) | Product definition and decision register | What platfolio is, who it is for, the tenancy model, MVP scope, non-goals, the accepted decisions D1–D11, open decisions OD1–OD5 |
+| [01](01-product-and-decisions.md) | Product definition and decision register | What platfolio is, who it is for, the tenancy model, MVP scope, non-goals, and the register of accepted decisions (the D-series — cite it, do not copy its count, the numbers age) plus the previously-open OD items as they closed |
 | [02](02-architecture.md) | Architecture | The three planes and their asymmetric privileges, control-plane layout, the controller loop, data model, trust boundaries |
 | [03](03-manifest-spec.md) | Platform Manifest specification | The contract every artifact is rendered from; the secret `value_source` enum; rendering targets; versioning; how a platform is added |
 | [04](04-execution-plane-github-workflows.md) | Execution plane | GitHub App + install PR + pinned action + attestation; token custody; failure modes; bring-your-own-CD |
-| [05](05-identity.md) | Identity | Three identity planes and the six invariants that keep platfolio users away from tenant users; the identity host; TreeDX/ArcNexus specifics |
+| [05](05-identity.md) | Identity | Three identity planes and the six invariants that keep platfolio users away from tenant users; the identity host; TreeDX/ArcNexus specifics; and the runbook for rotating the hosted Keycloak's temporary master-realm admin when the maintainer decides to |
 | [06](06-billing-and-lifecycle.md) | Billing and lifecycle | Entitlements, the state machine with Stripe's verified numbers, suspend/delete/eject, abuse, merchant of record, data-protection posture |
 | [07](07-interfaces-api-mcp-mobile.md) | Interfaces | API-first rules, auth grants, the MCP surface, and what makes the mobile app cheap instead of a rewrite |
 | [08](08-distribution-and-licensing.md) | Distribution and licensing | Artifacts that ship, the reframed binaries promise, provenance, the D18 license decision and what remains under it, self-hosted support policy |
 | [09](09-delivery-plan.md) | Delivery plan | Milestone 0 experiments with pass criteria (E1–E12), M1–M6 with observable acceptance, prerequisites P1–P8, standing risks, pending decisions |
 | [10](10-cordis-kernel-and-extension-seams.md) | Cordis kernel and extension seams | What Cordis actually is (read from source), where it fits, the two-tier extension model that keeps the zero-secret invariant true, twelve capability seams, contract-derived versioning, eight named risks, OD6–OD7 |
-| [11](11-ui-components-and-page-model.md) | UI components and page model | Cordis is not the frontend answer; the component-library rules that make mobile cheap; pages as data with one deliberate escape hatch; app-store prerequisites |
+| [11](11-ui-components-and-page-model.md) | UI framework specification | The component, layout and signal contracts with CI gates and a per-screen conformance checklist; container-query layout primitives; the real-time mechanisms and the push operations that do not exist yet; the native-vehicle fork table left to the maintainer. The six rules themselves are normative one level up, in [../ui-architecture.md](../ui-architecture.md) |
 | [12](12-domains-and-dns.md) | Domains and DNS | Records are read from the provider, never synthesised; the tenant always manages their own DNS |
 | [13](13-compose-first-and-execution.md) | Compose-first authoring and execution split | The manifest is a Compose document plus `x-platfolio`; platfolio acts, the tenant's pipeline executes |
+| [14](14-first-connect-runbook.md) | First connect runbook | The ordered M2 steps with the two browser-only consent actions marked, and the assumption each later step is meant to falsify |
+| [15](15-managed-action-brief.md) | The managed action brief | State at the handoff point, the sequence #123 must implement, the open design questions, and the constraints that do not bend |
+| [16](16-foundation-build-order.md) | Foundation build order | Interfaces first: why identity and the API are one build, the four slices to a self-hosted platfolio, and the rule that keeps us out of side bugs |
+| [17](17-object-model.md) | Object model | Persons, teams, instances and templates in plain terms; what is implemented, contract-only, or absent, and the five places the model will not stretch |
 
 Evidence base, not restated here:
 

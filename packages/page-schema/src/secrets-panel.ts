@@ -1,5 +1,5 @@
 import { requiredSecrets, serviceEnvironments, enabledEnvironments, type Manifest } from '@platfolio/manifest';
-import { PageSchema, type Node, type Page, type SecretGroup } from './page.ts';
+import { PageSchema, findValueBearingProps, type Node, type Page, type SecretGroup } from './page.ts';
 
 export interface PanelCapabilities {
   /** D21: sealing is what makes the relay safe, so its absence changes the UI, not just the copy. */
@@ -135,17 +135,4 @@ export function buildSecretsPanel(m: Manifest, instance: PanelInstance, caps: Pa
   const valueProps = findValueBearingProps(parsed);
   if (valueProps.length) throw new Error(`built panel carries value-bearing props: ${valueProps.join(', ')}`);
   return parsed;
-}
-
-function findValueBearingProps(node: unknown, path = ''): string[] {
-  const found: string[] = [];
-  if (Array.isArray(node)) { node.forEach((n, i) => found.push(...findValueBearingProps(n, `${path}[${i}]`))); return found; }
-  if (node && typeof node === 'object') {
-    for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
-      const at = path ? `${path}.${key}` : key;
-      if (/value/i.test(key) && !/satisfied|labelValue/i.test(key)) found.push(at);
-      if (value && typeof value === 'object') found.push(...findValueBearingProps(value, at));
-    }
-  }
-  return found;
 }

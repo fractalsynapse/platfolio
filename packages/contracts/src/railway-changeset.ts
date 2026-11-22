@@ -101,5 +101,5 @@ export function buildDesiredGraph(plan: InfraPlan, environment: EnvironmentPlan)
     }));
   }
 
-  return { project: { name: plan.manifestRef.platform }, resources };
+  return { project: { name: plan.manifestRef.template }, resources };
 }

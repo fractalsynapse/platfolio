@@ -7,6 +7,11 @@ import { RAILWAY_ENDPOINT, type RailwayCredential, type RailwayCredentialSource,
  *
  * - `serviceCreate` / `variableUpsert` / `serviceInstanceDeploy` / instance reads require an
  *   **environment-scoped** credential; a workspace credential gets `Not Authorized` (measured).
+ * - `serviceCreate` and `templateDeployV2` REFUSE a service name the project already holds
+ *   (`A service named "api" already exists in this project`, measured against the live API): service names are
+ *   unique per project, not per environment, and no mutation places an existing service into a further
+ *   environment. That is the fact the provider's per-environment naming rule is built on (D57), and a double
+ *   that let the call through would let a provider share one service -- one database -- across environments.
  * - `serviceDelete` / `projectDelete` / token minting require the **workspace** credential.
  * - `variables()` — the one query that returns secret values — throws here, so any provider that tries to
  *   read values through it fails loudly in CI instead of leaking quietly in production.
@@ -26,14 +31,45 @@ export interface MockOptions {
   templateRevealAfter?: number;
   /** A template deploy accepted but whose service never surfaces -- the stuck-provisioning case. */
   templateNeverReveals?: boolean;
+  /** Report a successful deployment with nothing running behind it: the exit-0 case measured on our own
+   *  stack on 2026-11-12, where Railway called a stopped Keycloak "completed". */
+  completedOnly?: boolean;
   /** Refuse serviceDelete for template-created services, modelling #80's survivor. */
   refuseTemplateServiceDelete?: boolean;
+  /**
+   * Make `serviceUpdate` answer with the OLD name and change nothing. Not invented: it is the measured shape of
+   * this API's silent no-op (`serviceInstanceUpdate` on an environment with no instance returns `true` and places
+   * nothing, E25), and a rename is only safe if the provider checks the name back rather than trusting the call.
+   */
+  renameDoesNothing?: boolean;
+  /** Model a partial delete: projectDelete answers true but the project remains readable (#111). */
+  keepProjectAfterDelete?: boolean;
   /** Fail the first N serviceDelete calls for template services, to test the retry. */
   templateDeleteFailures?: number;
 }
 
 interface MockService { id: string; projectId: string; name: string }
-interface MockInstance { instanceId: string; limits?: { cpu: number; memoryMB: number }; settledDomains?: boolean | undefined; verifiedDomains?: boolean | undefined; status: string | null; image: string; numReplicas: number; domains: string[]; polls: number; variables: Set<string> }
+/**
+ * The variables a Railway Postgres template actually creates, read from `environment.config` on the live
+ * service provisioned for platfolio's own deployment (2026-11-12). Values are redacted by the API -- names are
+ * all that is available, and all that a name-existence check needs.
+ *
+ * The double carries them because #198 added that check: a mock with an empty variable set would either refuse
+ * every wiring or verify nothing, and the point is that a typo surfaces as `reference-output-missing` rather
+ * than as a service that cannot find its database.
+ */
+export const TEMPLATE_DATABASE_VARIABLES = [
+  'DATABASE_URL', 'DATABASE_PUBLIC_URL', 'PGDATA', 'PGDATABASE', 'PGHOST', 'PGPASSWORD', 'PGPORT', 'PGUSER',
+  'POSTGRES_DB', 'POSTGRES_PASSWORD', 'POSTGRES_USER', 'RAILWAY_DEPLOYMENT_DRAINING_SECONDS',
+  'RUNTIME_LOCK_WAIT_SECONDS', 'SSL_CA_CERT_DAYS', 'SSL_CERT_DAYS', 'SSL_REQUIRE',
+] as const;
+
+/**
+ * `deploymentId` is the identity the double hands back for `latestDeployment { id }`. The provider compares it
+ * before and after a redeploy to answer `verified` from observation instead of from the mutations own boolean,
+ * so a double without an identity would make every redeploy assertion vacuous.
+ */
+interface MockInstance { instanceId: string; limits?: { cpu: number; memoryMB: number }; settledDomains?: boolean | undefined; verifiedDomains?: boolean | undefined; status: string | null; image: string; numReplicas: number; domains: string[]; polls: number; variables: Set<string>; deploymentId?: string }
 
 export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
   readonly endpoint = RAILWAY_ENDPOINT;
@@ -41,6 +77,25 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
   readonly environments = new Map<string, { id: string; projectId: string; name: string }>();
   readonly services = new Map<string, MockService>();
   readonly instances = new Map<string, MockInstance>();
+  /**
+   * Environment-scoped variables, keyed `${environmentId}:${name}` -- what Railway calls a shared variable.
+   * Kept separate from service variables on purpose: the provider must write the value HERE and then attach it,
+   * and a double that merged the two would let a one-call implementation pass every assertion while leaving a
+   * credential the declaring service cannot read.
+   */
+  readonly sharedVariables = new Map<string, string>();
+  /**
+   * Service variable values, kept so a later write can be compared against them.
+   *
+   * This is a deliberate, bounded breach of the rule platfolio enforces on ITSELF: the real provider holds
+   * the value and diffs against it, and a double that cannot do that cannot be used to test the claim "the
+   * provider decides whether a value changed". It is confined here -- in the transport fake, in memory, never
+   * serialised, never reachable from `environment.config` (which stays value-redacted) or from
+   * `variables()` (which still throws). The provider under test never reads it back; it only writes.
+   */
+  readonly variableValues = new Map<string, string>();
+  /** Which services see each environment-scoped variable: `${environmentId}:${name}` -> serviceIds. */
+  readonly sharedAttachments = new Map<string, Set<string>>();
   readonly tokens = new Map<string, { id: string; projectId: string; environmentId: string; name: string }>;
   readonly buckets = new Map<string, string>();
   readonly certRetries: string[] = [];
@@ -48,7 +103,7 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
   readonly takenDomains = new Set<string>();
   readonly domainCreates: string[] = [];
   /** Template deploys recorded so tests can assert the composed name and the grant used. */
-  volumes: { id: string; projectId: string; name: string; serviceId: string; mountPath: string }[] = [];
+  volumes: { id: string; projectId: string; name: string; serviceId: string; environmentId: string; mountPath: string }[] = [];
   /** How many template-created services are still hidden (diagnostics for tests). */
   hiddenServiceCount(): number { return this.hiddenServices.size; }
   /** Services hidden until read N times, so single-shot lookups fail as they do live (#77). */
@@ -56,25 +111,60 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
   readonly templateServiceIds = new Set<string>();
   private templateDeleteAttempts = new Map<string, number>();
   readonly templateDeploys: { templateId: string; serviceName: string; credentialKind: string }[] = [];
+  /**
+   * Every successful `serviceUpdate` that changed a name, in order. The legacy-shape path is a rename rather
+   * than a recreate, so what a test has to see is WHICH row moved from WHICH name to WHICH name: the final
+   * name set alone cannot distinguish "the row holding production's data was renamed" from "that row was
+   * deleted and a fresh one created under the same name", and those are opposite claims about data.
+   *
+   * `at` is the position in `operations` when the rename landed. Reference expressions are expanded by the
+   * provider AT WRITE TIME (measured: docs/research/railway-token-and-sealing-2026-11-08.md), so "the rename
+   * happened before the reference was written" is the property that decides whether the rewritten value points
+   * at the service that now exists. Ordering is the whole claim, so it is recorded rather than inferred from
+   * two separately ordered arrays.
+   */
+  readonly renames: { id: string; from: string; to: string; at: number }[] = [];
+  /**
+   * Every `environmentCreate` input, in order. A test asserts against this that platfolio never creates an
+   * environment from a source (D57) -- the double still implements the source, because the real API does, and
+   * recording the call is how "we stopped doing that" stays checked instead of merely unfashionable.
+   */
+  readonly environmentCreates: { name: string; sourceEnvironmentId?: string }[] = [];
 
   deploys = 0;
   readonly operations: string[] = [];
-  readonly writtenVariables: { name: string; value: string }[] = [];
+  /**
+   * Every variable write, with WHERE it landed. A reference expression like `${{app-db.DATABASE_URL}}` is only
+   * proof of isolation when you know which service in which environment received it, and a flat name/value log
+   * could not say (D57). Values are the ones the test itself wrote -- this double holds no real credentials.
+   */
+  /**
+   * `at` is the position in `operations` when the write landed. A rename only fixes a reference expression if
+   * the rewrite happens AFTER it -- Railway expands the expression at write time -- so ordering between a
+   * `serviceUpdate` and a `variableUpsert` is an assertion a test has to be able to make, not a property it
+   * has to infer from two separately ordered arrays.
+   */
+  readonly writtenVariables: { name: string; value: string; environmentId: string; serviceId?: string; skipDeploys?: boolean; at: number }[] = [];
   readonly denied: string[] = [];
   private sequence = 0;
 
   private readonly workspaceToken = 'mock-workspace-token-AAAAAAAAAAAAAAAAAAAA';
   private readonly projectToken = 'mock-project-token-BBBBBBBBBBBBBBBBBBBBBBBB';
-  private readonly options: Required<Pick<MockOptions, 'secretsPresent' | 'settleAfter' | 'outcome'>> & MockOptions;
+  private readonly options: Required<Pick<MockOptions, 'secretsPresent' | 'settleAfter' | 'outcome' | 'completedOnly'>> & MockOptions;
 
   constructor(options: MockOptions = {}) {
     // Every option has to be listed here: the normalization below silently drops unknown keys, which is how
     // templateNeverReveals looked "ignored" -- the guard was correct and never received the flag. A double
     // that drops its own configuration is the same failure class as a stub that passes vacuously.
     this.options = {
+      completedOnly: options.completedOnly ?? false,
       templateRevealAfter: options.templateRevealAfter ?? 2,
       templateNeverReveals: options.templateNeverReveals ?? false,
       refuseTemplateServiceDelete: options.refuseTemplateServiceDelete ?? false,
+      renameDoesNothing: options.renameDoesNothing ?? false,
+      // Not a whitelist entry: the constructor rebuilds options, and a flag left out here is silently
+      // undefined -- the exact bug that once made a test vacuous. Any new option must be threaded through.
+      keepProjectAfterDelete: options.keepProjectAfterDelete ?? false,
       templateDeleteFailures: options.templateDeleteFailures ?? 0,
       secretsPresent: options.secretsPresent ?? true,
       settleAfter: options.settleAfter ?? 1,
@@ -104,6 +194,37 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
 
   // --- transport -----------------------------------------------------------------------------
 
+  /**
+   * The measured deployment semantics of a variable write.
+   *
+   * Evidence: docs/research/railway-variable-value-redeploy-2026-11-15.md (our own api-staging).
+   *   A  skipDeploys:true, value changed  -> no deployment in 120s
+   *   B  skipDeploys omitted, changed    -> Railway started one on its own
+   *   D  skipDeploys omitted, identical  -> no deployment
+   * So the restart is the PROVIDER'S decision, made against the value it holds. The double reproduces that
+   * decision rule, not a constant: always-deploy would let a suppressing provider look correct, and
+   * never-deploy would make the refresh path untestable.
+   */
+  private applyMeasuredDeploySemantics(
+    environmentId: string,
+    serviceId: string,
+    name: string,
+    value: string,
+    skipDeploys: boolean,
+  ): void {
+    const key = `${environmentId}:${serviceId}:${name}`;
+    const prior = this.variableValues.get(key);
+    const changed = prior !== undefined && prior !== value;
+    this.variableValues.set(key, value);
+    if (skipDeploys || !changed) return;
+    const instance = this.instances.get(`${environmentId}:${serviceId}`);
+    if (!instance) return;
+    this.deploys += 1;
+    instance.deploymentId = `dep-${String(this.deploys)}`;
+    instance.status = 'DEPLOYING';
+    instance.polls = 0;
+  }
+
   async graphql<T>(args: { query: string; variables?: Record<string, unknown>; credential: RailwayCredential; operation: string }): Promise<T> {
     const { operation, credential } = args;
     this.operations.push(`${operation}:${credential.kind}`);
@@ -111,7 +232,7 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
 
     // The measured authorization split. Getting this wrong is how a provider "works" against a fake and
     // fails on the first real call.
-    const needsProject = ['serviceCreate', 'serviceInstanceUpdate', 'serviceInstanceLimitsUpdate', 'variableUpsert', 'serviceInstanceDeploy', 'environment.serviceInstances', 'environment.config', 'serviceDomainCreate', 'customDomainCreate', 'customDomainIssueCertificate'];
+    const needsProject = ['serviceCreate', 'serviceInstanceUpdate', 'serviceInstanceLimitsUpdate', 'variableUpsert', 'serviceInstanceDeploy', 'environment.serviceInstances', 'environment.config', 'serviceDomainCreate', 'customDomainCreate', 'customDomainIssueCertificate', 'sharedVariableConfigure'];
     const needsWorkspace = ['projects', 'project', 'projectCreate', 'projectUpdate', 'projectDelete', 'project.environments', 'environmentCreate', 'project.services', 'projectTokenCreate', 'projectTokens', 'projectTokenDelete', 'serviceDelete', 'project.buckets', 'bucketCreate', 'project.bucketsList'];
     if (needsProject.includes(operation) && credential.kind !== 'project') {
       this.denied.push(operation);
@@ -132,23 +253,58 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
       environmentCreate: ['projectId', 'name', 'sourceEnvironmentId', 'skipInitialDeploys', 'applyChangesInBackground', 'ephemeral', 'stageInitialChanges'],
       projectTokenCreate: ['projectId', 'environmentId', 'name'],
       serviceCreate: ['projectId', 'environmentId', 'name', 'source', 'templateId', 'templateServiceId', 'variables', 'branch', 'icon', 'registryCredentials'],
+      // Captured from the introspected schema, not guessed: `Mutation.serviceUpdate(id: String!, input:
+      // ServiceUpdateInput!)` returns `Service!`, and `ServiceUpdateInput` has exactly two fields -- `icon` and
+      // `name`. That is why a rename is a SERVICE-level operation: `ServiceInstanceUpdateInput` carries no
+      // `name` at all, and `ServiceInstance` has `serviceId`/`serviceName` but no name of its own.
+      serviceUpdate: ['icon', 'name'],
       serviceInstanceUpdate: ['numReplicas', 'healthcheckPath', 'healthcheckTimeout', 'source', 'startCommand', 'buildCommand', 'preDeployCommand', 'region', 'restartPolicyType', 'sleepApplication', 'watchPatterns', 'cronSchedule', 'dockerfilePath', 'buildpacks', 'nixpacksPlan'],
       variableUpsert: ['projectId', 'environmentId', 'serviceId', 'name', 'value', 'skipDeploys'],
+      // Captured from `SharedVariableConfigureInput`: there is NO value field here, only which services the
+      // already-written environment-scoped variable is enabled or disabled for. Any provider that treats this
+      // call as the write is wrong, and the double refuses it rather than quietly agreeing.
+      sharedVariableConfigure: ['projectId', 'environmentId', 'name', 'enabledServiceIds', 'disabledServiceIds'],
       serviceDomainCreate: ['environmentId', 'serviceId', 'targetPort'],
       customDomainCreate: ['projectId', 'environmentId', 'serviceId', 'domain', 'targetPort'],
       serviceInstanceLimitsUpdate: ['environmentId', 'serviceId', 'memoryGB', 'vCPUs'],
     };
-    const inputKey = ['projectCreate', 'projectUpdate', 'environmentCreate', 'projectTokenCreate', 'serviceCreate', 'serviceInstanceUpdate', 'variableUpsert', 'serviceDomainCreate', 'customDomainCreate', 'serviceInstanceLimitsUpdate'].includes(operation) ? 'input' : null;
+    /**
+     * Which input fields the API REQUIRES, per operation. Captured from live introspection: every field of
+     * `SharedVariableConfigureInput` is NON_NULL, including BOTH `enabledServiceIds` and `disabledServiceIds` --
+     * so an attachment call that omits the empty second list is not a shorthand, it is an invalid mutation.
+     *
+     * This map exists because the allowlist above can only reject names that ARE present. It happily accepted
+     * the omission my provider code shipped, and the live API answered `Variable "$input" got invalid value`:
+     * a double that agrees with a wrong assumption is worse than no double, because it converts a bug into
+     * evidence. Requiredness is the other half of a schema, and I had only modelled half of it.
+     */
+    const requiredFields: Record<string, string[]> = {
+      sharedVariableConfigure: ['projectId', 'environmentId', 'name', 'enabledServiceIds', 'disabledServiceIds'],
+      // From the same captured introspection: `EnvironmentCreateInput` requires projectId and name and NOTHING
+      // else -- `sourceEnvironmentId` is optional, which is the schema's own answer to the claim that a second
+      // environment has to be made from a first one (D57). A provider that stops passing a source must still be
+      // able to create the environment.
+      environmentCreate: ['projectId', 'name'],
+    };
+
+    const inputKey = ['projectCreate', 'projectUpdate', 'environmentCreate', 'projectTokenCreate', 'serviceCreate', 'serviceUpdate', 'serviceInstanceUpdate', 'variableUpsert', 'serviceDomainCreate', 'customDomainCreate', 'serviceInstanceLimitsUpdate', 'sharedVariableConfigure'].includes(operation) ? 'input' : null;
     if (inputKey) {
       const allowed = inputFields[operation];
       const payload = (v[inputKey] ?? {}) as Record<string, unknown>;
       const unknown = allowed ? Object.keys(payload).filter((k) => !allowed.includes(k)) : [];
       if (unknown.length) throw new Error(`railway ${operation}: Field ${JSON.stringify(unknown[0])} is not defined by ${operation} input (the real API rejects this)`);
+      // Requiredness, for operations whose captured input is all-NON_NULL. The name allowlist above cannot
+      // catch an omission, and an omission is what the live API threw on: my double validated my own
+      // misreading rather than the provider, which is how a bug becomes evidence.
+      const missing = (requiredFields[operation] ?? []).filter((k) => payload[k] === undefined);
+      if (missing.length) {
+        throw new Error(`railway ${operation}: Field ${JSON.stringify(missing[0])} of type String! is not defined. Expected a value (the real API rejects an absent NON_NULL input field)`);
+      }
     }
 
     // Guard the class of bug E26 exposed: mutations returning an OBJECT are rejected by the real API
     // unless they select a subfield. The mock used to accept the query and never notice.
-    const objectReturning = ['projectCreate', 'environmentCreate', 'serviceCreate', 'projectUpdate', 'serviceDomainCreate', 'customDomainCreate'];
+    const objectReturning = ['projectCreate', 'environmentCreate', 'serviceCreate', 'projectUpdate', 'serviceUpdate', 'serviceDomainCreate', 'customDomainCreate', 'sharedVariableConfigure'];
     // Match the *field's* own closing paren, not the mutation's variable list -- a first version used
     // `/\)\s*\{/`, which the outer `mutation (...) {` always satisfied, so the guard could not fail.
     const fieldSelection = new RegExp(`${operation}\\s*\\([^)]*\\)\\s*\\{`);
@@ -189,10 +345,14 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
         return { projectUpdate: true } as T;
       }
       case 'projectDelete': {
-        this.projects.delete(v.id as string);
+        // #111's orphan branch needs a partial delete to exist: a projectDelete that returns true while the
+        // project stays readable. Without it, everything unremoved lands in releasedWithProject and the
+        // provider could claim a clean teardown without the survivor case ever being exercised.
+        if (!this.options.keepProjectAfterDelete) this.projects.delete(v.id as string);
         return { projectDelete: true } as T;
       }
       case 'project.environments': {
+        if (!this.projects.has(v.projectId as string)) throw new Error(`railway project.environments: Project not found [INTERNAL_SERVER_ERROR]`);
         const projectId = v.projectId as string;
         const nodes = [...this.environments.values()].filter((e) => e.projectId === projectId).map((node) => ({ node }));
         return { project: { environments: { edges: nodes } } } as T;
@@ -201,8 +361,15 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
         const input = v.input as { projectId: string; name: string; sourceEnvironmentId?: string };
         const id = `env-${this.sequence++}`;
         this.environments.set(id, { id, projectId: input.projectId, name: input.name });
+        // Recorded so a test can hold the provider to the rule: platfolio never creates an environment from a
+        // source, because the source's services -- including its database -- arrive with it (D57).
+        this.environmentCreates.push({ name: input.name, ...(input.sourceEnvironmentId ? { sourceEnvironmentId: input.sourceEnvironmentId } : {}) });
         if (input.sourceEnvironmentId) {
-          // A clone carries configuration; the provider documents that sealed values are not copied.
+          // Kept because the live API does this, not because platfolio asks for it. Measured on our own project
+          // when staging was created from production: the duplicated environment's `api` and `main` carried the
+          // SAME service ids as production's, and staging's api then timed out on a DSN that pointed at a
+          // database it does not own. So the copy is faithful -- including the part that makes it dangerous:
+          // the serviceId travels, only the instance is new.
           for (const [key, instance] of this.instances) {
             if (!key.startsWith(`${input.sourceEnvironmentId}:`)) continue;
             const cloneKey = `${id}:${key.split(':')[1]}`;
@@ -215,25 +382,64 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
         return { environmentCreate: { id } } as T;
       }
       case 'project.volumes': {
+        if (!this.projects.has(v.projectId as string)) throw new Error(`railway project.volumes: Project not found [INTERNAL_SERVER_ERROR]`);
         const projectId = v.projectId as string;
         return { project: { volumes: { edges: this.volumes.filter((x) => x.projectId === projectId).map((node) => ({ node })) } } } as T;
       }
       case 'volumeCreate': {
-        const input = v.input as { projectId: string; environmentId: string; serviceId: string; mountPath: string };
+        const input = v.input as { projectId: string; environmentId: string; serviceId: string, mountPath: string };
         if (!this.services.has(input.serviceId)) throw new Error('railway volumeCreate: unknown service [NOT_FOUND]');
+        if (!this.instances.has(`${input.environmentId}:${input.serviceId}`)) {
+          // The captured schema makes `VolumeInstance.environmentId` NON_NULL: a volume instance belongs to one
+          // environment's service. Attaching one where the service does not run is not a thing the API does, and
+          // a double that allowed it would let a shared disk pass as per-environment storage (D57).
+          throw new Error('railway volumeCreate: service has no instance in this environment [NOT_FOUND]');
+        }
         const id = `vol-${String(this.sequence).padStart(4, '0')}`;
         this.sequence += 1;
-        this.volumes.push({ id, projectId: input.projectId, name: `volume-${id}`, serviceId: input.serviceId, mountPath: input.mountPath });
-        return { volumeCreate: { id, name: `volume-${id}` } } as T;
+        // Named like the real API, which derives `<service>-volume` and ignores whatever label the plan used.
+        // The double used to invent `volume-<id>`, and that difference is what made a match-by-name provider
+        // path look fine in CI and be dead code against production. With per-environment services the derived
+        // name differs per environment too, which is the honest consequence of the naming rule.
+        const owner = this.services.get(input.serviceId);
+        const volumeName = `${owner?.name ?? 'orphan'}-volume`;
+        this.volumes.push({ id, projectId: input.projectId, name: volumeName, serviceId: input.serviceId, environmentId: input.environmentId, mountPath: input.mountPath });
+        return { volumeCreate: { id, name: volumeName } } as T;
+      }
+      case 'environment.volumeInstances': {
+        // Scoped to the ENVIRONMENT, not to the project: `VolumeInstance.environmentId` is NON_NULL, so asking
+        // what is mounted here must not answer with what is mounted somewhere else. The double used to filter
+        // by project, which made production's surviving disk visible to staging's re-attach path.
+        const environmentId = v.environmentId as string;
+        return {
+          environment: {
+            volumeInstances: {
+              edges: this.volumes.filter((x) => x.environmentId === environmentId).map((x) => ({
+                node: { volumeId: x.id, serviceId: x.serviceId, mountPath: x.mountPath, volume: { name: x.name } },
+              })),
+            },
+          },
+        } as T;
+      }
+      case 'volumeInstanceUpdate': {
+        const input = v.input as { serviceId: string; mountPath: string };
+        const target = this.volumes.find((x) => x.id === v.volumeId);
+        if (!target) throw new Error('railway volumeInstanceUpdate: no such volume [NOT_FOUND]');
+        // Read-back must change what the next query reports, or this double cannot tell an applied re-attach
+        // from the silent `true` that Railway itself returns for an unplaced instance.
+        target.serviceId = input.serviceId;
+        target.mountPath = input.mountPath;
+        return { volumeInstanceUpdate: true } as T;
       }
       case 'volumeDelete': {
         const volumeId = v.volumeId as string;
-        const before = this.volumes.length;
+        const volumesBefore = this.volumes.length;
         this.volumes = this.volumes.filter((x) => x.id !== volumeId);
-        if (this.volumes.length === before) throw new Error('railway volumeDelete: no such volume [NOT_FOUND]');
+        if (this.volumes.length === volumesBefore) throw new Error('railway volumeDelete: no such volume [NOT_FOUND]');
         return { volumeDelete: true } as T;
       }
       case 'project.services': {
+        if (!this.projects.has(v.projectId as string)) throw new Error(`railway project.services: Project not found [INTERNAL_SERVER_ERROR]`);
         const projectId = v.projectId as string;
         // Async provisioning modelled honestly (#77): a template-created service is invisible until it has
         // been read a few times, so a provider that lists once, immediately, gets nothing and must wait.
@@ -252,8 +458,15 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
       }
       case 'serviceCreate': {
         const input = v.input as { projectId: string; environmentId: string; name: string; source: { image: string } };
-        const existing = [...this.services.values()].find((s) => s.projectId === input.projectId && s.name === input.name);
-        const id = existing?.id ?? `svc-${this.sequence++}`;
+        // Measured against the live API: a name the project already holds is REFUSED, whatever environment the
+        // call names -- `A service named "api" already exists in this project`. The double used to accept the
+        // call and hand back the existing service, which is how a provider could "place" a second environment's
+        // api by pointing it at production's service and still pass every test. Names are the only thing that
+        // keeps two environments' services apart (D57), so the double enforces the one fact that makes the rule
+        // necessary.
+        const clash = [...this.services.values()].find((s) => s.projectId === input.projectId && s.name === input.name);
+        if (clash) throw new Error(`railway serviceCreate: A service named "${input.name}" already exists in this project [UNPROCESSABLE]`);
+        const id = `svc-${this.sequence++}`;
         this.services.set(id, { id, projectId: input.projectId, name: input.name });
         this.instances.set(`${input.environmentId}:${id}`, {
           instanceId: `inst-${this.sequence++}`,
@@ -265,6 +478,29 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
           variables: new Set(this.options.secretsPresent ? ['STRIPE_WEBHOOK_SECRET'] : []),
         });
         return { serviceCreate: { id } } as T;
+      }
+      case 'serviceUpdate': {
+        const input = v.input as { name?: string; icon?: string };
+        const service = this.services.get(v.id as string);
+        if (!service) throw new Error('railway serviceUpdate: service not found [NOT_FOUND]');
+        // The measured silent no-op, in this mutation's shape: the call answers, the object comes back, and the
+        // name did not move. A provider that trusts the call rather than the answer provisions on top of a row
+        // that never changed.
+        if (this.options.renameDoesNothing) return { serviceUpdate: { id: service.id, name: service.name } } as T;
+        if (input.name !== undefined && input.name !== service.name) {
+          // DERIVED, not measured for this mutation: service names are unique per project (measured against
+          // `serviceCreate` and `templateDeployV2`), and the uniqueness is a property of the project's service
+          // set rather than of the call that changes it, so a rename onto a held name cannot be accepted. The
+          // provider refuses before ever asking, so no test depends on this refusal -- it exists so that a
+          // future change which DID rely on the API to arbitrate fails here instead of passing on an
+          // assumption. Uniqueness on rename has not been observed on the live API and must not be quoted as
+          // if it had.
+          const clash = [...this.services.values()].find((s) => s.projectId === service.projectId && s.name === input.name);
+          if (clash) throw new Error(`railway serviceUpdate: A service named "${input.name}" already exists in this project [UNPROCESSABLE]`);
+          this.renames.push({ id: service.id, from: service.name, to: input.name, at: this.operations.length });
+          service.name = input.name;
+        }
+        return { serviceUpdate: { id: service.id, name: service.name } } as T;
       }
       case 'serviceInstanceUpdate': {
         const key = `${v.environmentId}:${v.serviceId}`;
@@ -315,6 +551,10 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
         const name = spec.name ?? 'Postgres';
         this.templateDeploys.push({ templateId: input.templateId, serviceName: name, credentialKind: credential.kind });
         if (!this.projects.has(input.projectId)) throw new Error('railway templateDeployV2: project not found [NOT_FOUND]');
+        // Same project-unique name rule as serviceCreate (measured), because a template deploy creates a service
+        // too: a provider that asked for a second `app-db` would get a refusal live and a second database here.
+        const clash = [...this.services.values()].find((s) => s.projectId === input.projectId && s.name === name);
+        if (clash) throw new Error(`railway templateDeployV2: A service named "${name}" already exists in this project [UNPROCESSABLE]`);
         const serviceId = `svc-${this.sequence++}`;
         this.services.set(serviceId, { id: serviceId, name, projectId: input.projectId });
         // Measured: a template deploy provisions AND deploys on its own -- the instance came up
@@ -326,7 +566,9 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
           numReplicas: 1,
           domains: [],
           polls: 0,
-          variables: new Set(Object.keys(spec.variables ?? {})),
+          // The measured template variables are merged in (#198): reference outputs are checked against
+          // what the provider can actually see, and an empty set here would make the check vacuous.
+          variables: new Set([...Object.keys(spec.variables ?? {}), ...TEMPLATE_DATABASE_VARIABLES]),
         });
         this.templateServiceIds.add(serviceId);
         this.hiddenServices.set(serviceId, this.options.templateNeverReveals ? Number.MAX_SAFE_INTEGER : (this.options.templateRevealAfter ?? 2));
@@ -349,19 +591,56 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
         return { customDomainIssueCertificate: true } as T;
       }
       case 'variableUpsert': {
-        const input = v.input as { environmentId: string; serviceId: string; name: string; value: string };
+        const input = v.input as { environmentId: string; serviceId?: string; name: string; value: string; skipDeploys?: boolean };
+        // Railway defaults this to false, and the default is the whole story (see
+        // applyMeasuredDeploySemantics): an UNSUPPRESSED write whose value differs starts a deployment, and
+        // an unsuppressed write of the identical value does not. Measured 2026-11-15 against our own
+        // api-staging, arms A/B/D. A double that ignored the flag would let the provider be tested against
+        // a fiction.
+        const skip = input.skipDeploys === true;
+        // Omitting serviceId is exactly how Railway distinguishes a shared variable from a service one.
+        if (!input.serviceId) {
+          if (!this.environments.has(input.environmentId)) throw new Error('railway variableUpsert: no environment [NOT_FOUND]');
+          this.sharedVariables.set(`${input.environmentId}:${input.name}`, input.value);
+          this.writtenVariables.push({ name: input.name, value: input.value, environmentId: input.environmentId, skipDeploys: skip, at: this.operations.length });
+          return { variableUpsert: true } as T;
+        }
         const instance = this.instances.get(`${input.environmentId}:${input.serviceId}`);
         if (!instance) throw new Error('railway variableUpsert: no instance [NOT_FOUND]');
         instance.variables.add(input.name);
-        this.writtenVariables.push({ name: input.name, value: input.value });
+        this.writtenVariables.push({ name: input.name, value: input.value, environmentId: input.environmentId, serviceId: input.serviceId, skipDeploys: skip, at: this.operations.length });
+        this.applyMeasuredDeploySemantics(input.environmentId, input.serviceId, input.name, input.value, skip);
         return { variableUpsert: true } as T;
+      }
+      case 'sharedVariableConfigure': {
+        const input = v.input as { environmentId: string; name: string; enabledServiceIds?: string[]; disabledServiceIds?: string[] };
+        const key = `${input.environmentId}:${input.name}`;
+        if (!this.sharedVariables.has(key)) {
+          // The real API cannot attach a variable that was never written at this scope. Modelling the refusal is
+          // what stops a provider calling configure alone and describing that as delivery.
+          throw new Error(`railway sharedVariableConfigure: no shared variable "${input.name}" in this environment [NOT_FOUND]`);
+        }
+        const attached = this.sharedAttachments.get(key) ?? new Set<string>();
+        for (const id of input.disabledServiceIds ?? []) attached.delete(id);
+        for (const id of input.enabledServiceIds ?? []) attached.add(id);
+        this.sharedAttachments.set(key, attached);
+        return { sharedVariableConfigure: { id: `sv-${this.sequence++}` } } as T;
       }
       case 'environment.config': {
         const environmentId = v.environmentId as string;
         const services: Record<string, { variables: Record<string, { value: null }> }> = {};
         for (const [key, instance] of this.instances) {
           if (!key.startsWith(`${environmentId}:`)) continue;
-          services[key.split(':')[1]!] = { variables: Object.fromEntries([...instance.variables].map((name) => [name, { value: null }])) };
+          const serviceId = key.split(':')[1]!;
+          // What the service actually sees: its own variables PLUS every environment-scoped variable attached to
+          // it. Values stay redacted exactly as the real API does, and a shared variable that was written but
+          // never attached is deliberately absent -- that is the failure a correct delivery has to avoid.
+          const visible = new Set(instance.variables);
+          for (const [sharedKey, attached] of this.sharedAttachments) {
+            if (!sharedKey.startsWith(`${environmentId}:`)) continue;
+            if (attached.has(serviceId)) visible.add(sharedKey.slice(environmentId.length + 1));
+          }
+          services[serviceId] = { variables: Object.fromEntries([...visible].map((name) => [name, { value: null }])) };
         }
         return { environment: { config: { services } } } as T;
       }
@@ -371,6 +650,12 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
         if (!instance) throw new Error('railway serviceInstanceDeploy: no instance [NOT_FOUND]');
         this.deploys += 1;
         instance.polls = 0;
+        // A fresh deployment identity per deploy, as the real API gives one (measured against our own staging
+        // service on 2026-11-15: `deployments(input:)` returns a distinct id and createdAt per restart).
+        // Without it, a provider that verifies a restart by comparing deployment identity could never see
+        // movement and would answer `verified: false` for a restart that did happen -- the mirror image of the
+        // failure that matters more, which is answering `true` for one that did not.
+        instance.deploymentId = `dep-${String(this.deploys)}`;
         instance.status = 'DEPLOYING';
         return { serviceInstanceDeploy: true } as T;
       }
@@ -396,7 +681,14 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
               serviceId: key.split(':')[1],
               numReplicas: instance.numReplicas,
               source: { image: instance.image },
-              latestDeployment: { status: instance.status },
+              latestDeployment: { status: instance.status, id: instance.deploymentId },
+              // What is actually RUNNING. The real API returns this (measured 2026-11-12 on our own
+              // deployment: a service whose process had exited still showed an older SUCCESS deployment as
+              // active), and a mock that always invented an active deployment would let the provider keep
+              // mapping "finished" to "live" forever. `completedOnly` simulates the exit-0 case.
+              activeDeployments: instance.status === 'SUCCESS' && this.options.completedOnly === false
+                ? [{ status: 'SUCCESS' }]
+                : [],
               // Mirrors the measured API: custom status is an object, service syncStatus an enum.
               domains: {
                 // Records mirror Railway's disclosure: a routing host that is NOT the service hostname,
@@ -419,8 +711,8 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
                       dnsRecords: [{
                         fqdn: domain, hostlabel: label, zone,
                         recordType: 'DNS_RECORD_TYPE_CNAME',
-                        requiredValue: '1ggsepht.up.railway.app',
-                        ...(verified ? { currentValue: '1ggsepht.up.railway.app' } : {}),
+                        requiredValue: 'verify-target.up.railway.app',
+                        ...(verified ? { currentValue: 'verify-target.up.railway.app' } : {}),
                         status: verified ? 'DNS_RECORD_STATUS_PROPAGATED' : 'DNS_RECORD_STATUS_REQUIRES_UPDATE',
                         purpose: 'DNS_RECORD_PURPOSE_TRAFFIC_ROUTE',
                       }],
@@ -449,6 +741,14 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
         return { customDomainCreate: { id: `dom-${this.sequence++}`, domain: input.domain } } as T;
       }
       case 'serviceDelete': {
+        // Measured, and narrower than my first version of this rule. A template-created database is refused
+        // while its volume exists; an ORDINARY service with an attached volume deletes fine (probed 2026-11-10:
+        // `hibernate-a` deleted with its volume intact and the volume survived). The double used to refuse
+        // every attached volume, which encoded an over-generalisation from one database case and would have
+        // made the provider's blanket volumes-first ordering look like a requirement instead of a caution.
+        if (this.templateServiceIds.has(v.id as string) && this.volumes.some((x) => x.serviceId === v.id)) {
+          throw new Error('railway serviceDelete: Problem processing request [UNPROCESSABLE]');
+        }
         if (this.options.refuseTemplateServiceDelete && this.templateServiceIds.has(v.id as string)) {
           throw new Error('railway serviceDelete: Bad Access for template-created service [FORBIDDEN]');
         }
@@ -467,6 +767,7 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
         return { serviceDelete: true } as T;
       }
       case 'project.buckets': {
+        if (!this.projects.has(v.projectId as string)) throw new Error(`railway project.buckets: Project not found [INTERNAL_SERVER_ERROR]`);
         const ids = (this.options.buckets ?? []).map((id) => ({ node: { id } }));
         return { project: { buckets: ids.length ? { edges: ids } : null } } as T;
       }

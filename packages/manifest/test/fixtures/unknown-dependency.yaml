@@ -1,6 +1,6 @@
 apiVersion: platfolio.dev/v1alpha1
 kind: Platform
-metadata: { name: bad, version: 1.0.0, title: Bad, summary: unknown dependency, archetype: api-service }
+metadata: { name: bad, version: 1.0.0, title: Bad, summary: unknown dependency, kind: web, mode: hosted }
 spec:
   requires: { platfolio: ">=0.1.0 <1" }
   identity: { mode: none, clients: [] }

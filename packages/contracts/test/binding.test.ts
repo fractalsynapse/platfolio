@@ -91,16 +91,23 @@ test('the team summary is what lets a UI say "two of three consumers are stale"'
   assert.deepEqual([row!.ok, row!.total], [3, 3]);
   const stale = summarise([base, { ...other, providerGeneration: '00000000' }, { ...fresh, providerGeneration: '00000000' }], [IDENTITY]);
   assert.equal(stale[0]!.attention.length, 2);
+  // The fixture an earlier version of this test built and then never used: when the supplier's value
+  // changes, every consumer of it belongs in attention -- that is the summary's whole reason to exist.
+  const rotatedRow = summarise([base, other, fresh], rotated);
+  assert.equal(rotatedRow[0]!.attention.length, 3, 'a rotated supplier value should surface on every consumer of it');
   assert.equal(stale[0]!.ok, 1);
 });
 
-test('the two reference templates describe a provider and a consumer of the same capability', async () => {
+test('the two reference fixtures describe a provider and a consumer of the same capability', async () => {
+  // `packages/manifest/test/fixtures/`, not a bundled template directory: these are manifest fixtures for tests and docs.
+  // A template is a published repository, read through the source-control seam (D60) -- the naming split is the point,
+  // and this test's own title used to argue against it.
   const fs = await import('node:fs');
   const path = await import('node:path');
   const { parse } = await import('../../manifest/src/index.ts');
-  const read = (name: string) => fs.readFileSync(path.resolve('templates', name, 'manifest.yaml'), 'utf8');
-  const provider = parse(read('example-full-stack')).manifest!;
-  const consumer = parse(read('example-web-app')).manifest!;
+  const read = (name: string) => fs.readFileSync(path.resolve('packages/manifest/test/fixtures', name + '-manifest.yaml'), 'utf8');
+  const provider = parse(read('full-stack')).manifest!;
+  const consumer = parse(read('web-app')).manifest!;
 
   assert.equal(provider.spec.provides?.name, 'identity');
   assert.ok(provider.spec.provides?.outputs.some((o) => o.output === 'issuer' && o.kind === 'url'));

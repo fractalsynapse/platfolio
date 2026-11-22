@@ -4,7 +4,7 @@ Two architecture principles, decided 2026-11-09. They change how a platform is *
 allowed to **act**, and they are recorded together because each constrains the other: Compose makes hosting
 legible to developers, and the workflow split makes it safe to let developers' pipelines be the deploy path.
 
-Accepted by the maintainer after the first real end-to-end deployment (`apps/status-api`, deployed by
+Accepted by the maintainer after the first real end-to-end deployment (`apps/control-plane`, deployed by
 `RailwayInfraProvider.applyPlan` and reachable over HTTPS). Step 7 is explicitly deferred to serve as the
 test of this document rather than an example written to fit it.
 
@@ -168,7 +168,7 @@ onboarding checklist gets invented per platform. So the model gains an inventory
 own repository and built up over time:
 
 ```yaml
-# .platfolio/environment.yaml (or x-platfolio.environment inside the Compose document)
+# environment.yaml at the platform root (D58), or an x-platfolio.environment array inside the Compose document
 - name: DATABASE_URL
   kind: reference            # resolved by the provider; never a value here
   service: web

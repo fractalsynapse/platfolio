@@ -84,14 +84,14 @@ the resolved digest, one service, one generated domain, no databases or buckets.
 
 ```
 verified: true   services: [["status","live"]]   failures: []
-domains: [{"host":"status-production-54d3.up.railway.app","dnsStatus":"verified",
+domains: [{"host":"<generated-railway-host>","dnsStatus":"verified",
           "certificateStatus":"issued","targetService":"status"}]
 ```
 
 Reached from outside the platform:
 
 ```
-GET https://status-production-54d3.up.railway.app/healthz -> {"status":"ok","livenessToken":"492fdecb32aea42b"}
+GET https://<generated-railway-host>/healthz -> {"status":"ok","livenessToken":"492fdecb32aea42b"}
 GET .../version -> {"name":"status-api","version":"staging","commit":"f546d785bb4c0695b744272c17181d6cc8fb2107",
                     "buildTime":"2026-11-09T18:33:32Z","providerContract":{"name":"infra.provider","version":"1.0.0"}}
 GET .../nope    -> 404      TLS: issuer=Let's Encrypt, subject=CN=*.up.railway.app

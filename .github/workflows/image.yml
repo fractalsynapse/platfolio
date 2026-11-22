@@ -27,11 +27,11 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  IMAGE_NAME: ${{ github.repository }}-status-api
+  IMAGE_NAME: ${{ github.repository }}-control-plane
 
 jobs:
   build:
-    name: Build the control-plane image
+    name: Build and smoke-test candidate images
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -40,70 +40,139 @@ jobs:
       # tested, so the frozen install inside the image is load-bearing rather than cosmetic.
       - name: Validate the build context
         run: |
-          test -f apps/status-api/Dockerfile || { echo "Dockerfile missing"; exit 1; }
-          grep -q "frozen-lockfile" apps/status-api/Dockerfile || { echo "image install is not lockfile-frozen"; exit 1; }
+          test -f apps/control-plane/Dockerfile || { echo "Dockerfile missing"; exit 1; }
+          grep -q "frozen-lockfile" apps/control-plane/Dockerfile || { echo "image install is not lockfile-frozen"; exit 1; }
+          # Runtime files the app reads. Asserted here because their absence is invisible to `docker build`
+          # and fatal on the first validated request: without api/ every spec-checked response 500s on ENOENT,
+          # and without db/ PLATFOLIO_DB_MIGRATE=true cannot migrate.
+          test -f apps/control-plane/openapi.yaml || { echo "the OpenAPI document is missing from the app it governs"; exit 1; }
+          grep -q "^COPY apps/control-plane ./apps/control-plane" apps/control-plane/Dockerfile || { echo "the Dockerfile does not copy the app, so it cannot ship the app's own openapi.yaml"; exit 1; }
+          grep -q "^COPY db ./db" apps/control-plane/Dockerfile || { echo "Dockerfile does not ship db/ -- migrations cannot run"; exit 1; }
 
       - name: Build
         run: |
           docker build \
-            --file apps/status-api/Dockerfile \
+            --file apps/control-plane/Dockerfile \
             --build-arg PLATFOLIO_COMMIT="${{ github.sha }}" \
-            --build-arg PLATFOLIO_VERSION="${{ github.ref_name }}" \
             --build-arg PLATFOLIO_BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            --tag platfolio-status-api:build \
+            --tag platfolio-control-plane:build \
             .
+
+      - name: Build the site image
+        id: site
+        run: |
+          SITE_IMAGE=$(docker compose config --format json | jq -er '.services.site.image')
+          docker compose build --build-arg PLATFOLIO_COMMIT="$GITHUB_SHA" site
+          echo "image=$SITE_IMAGE" >> "$GITHUB_OUTPUT"
+
+      - name: Smoke test the site image
+        env:
+          SITE_IMAGE: ${{ steps.site.outputs.image }}
+        run: |
+          docker run -d --rm --name site-smoke --publish 127.0.0.1::4321 "$SITE_IMAGE"
+          trap 'docker stop site-smoke >/dev/null' EXIT
+          address=$(docker port site-smoke 4321/tcp)
+          origin="http://$address"
+          status=""
+          for i in $(seq 1 30); do
+            if status=$(curl --fail --silent "$origin/status") && [ "$status" = '{"status":"ok"}' ]; then break; fi
+            sleep 1
+          done
+          test "$status" = '{"status":"ok"}'
+          curl --fail --silent "$origin/version.json" > site-version.json
+          jq -e --arg sha "$GITHUB_SHA" '.commit == $sha' site-version.json
+          curl --fail --silent "$origin/" > site-landing.html
+          if grep -q '<script' site-landing.html; then exit 1; fi
+          curl --fail --silent "$origin/dashboard" | grep -q '<astro-island'
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' "$origin/callback?state=smoke")" = 200
+          curl --fail --silent "$origin/config.js" | grep -F 'window.__PLATFOLIO_SITE_CONFIG__'
 
       # The image answers its own healthcheck during the run, so a green job means the container serves --
       # not merely that it assembled. This is the difference the project keeps insisting on.
-      - name: Smoke test the built container
+      - name: Fail-closed check (no identity config, the container must refuse to start)
         run: |
-          docker run -d --rm --name status-smoke -p 8080:8080 \
-            -e PLATFOLIO_COMMIT="${{ github.sha }}" \
-            -e PLATFOLIO_VERSION="${{ github.ref_name }}" \
-            -e PLATFOLIO_BUILD_TIME="ci" \
-            platfolio-status-api:build
+          set -e
+          out=$(docker run --rm platfolio-control-plane:build 2>&1 || true)
+          echo "$out" | tail -3
+          echo "$out" | grep -qi "cannot start" || { echo "container started without identity config -- fail-closed is broken"; exit 1; }
+      - name: Smoke test the built container
+        # A shape-only JWKS stands in for a realm here: this step proves the image boots, binds, serves
+        # /status and reads its build identity. The Compose stack and live smoke exercise Keycloak signatures.
+        run: |
+          set -e
+          node -e "require('http').createServer((q,s)=>{s.writeHead(200,{'content-type':'application/json'});s.end('{\"keys\":[{\"kty\":\"RSA\",\"kid\":\"ci-smoke\",\"alg\":\"RS256\",\"use\":\"sig\",\"n\":\"AKd-pem3OaiXvBmXb-mPAmgLBFLmAWhVNxXfkRDBMUWXQ7oJrbnVjhFHwOTb-wsBAwEAAQ\",\"e\":\"AQAB\"}]}')}).listen(9911)" &
+          JWKS_PID=$!
+          sleep 1
+          docker run -d --rm --name cp-smoke -p 8080:8080 \
+            -e PLATFOLIO_IDENTITY_ISSUER=http://host.docker.internal:9911/realms/platfolio \
+            -e PLATFOLIO_IDENTITY_AUDIENCE=platfolio-api \
+            -e PLATFOLIO_IDENTITY_JWKS_URI=http://host.docker.internal:9911/realms/platfolio/protocol/openid-connect/certs \
+            -e HOST=0.0.0.0 -e PORT=8080 \
+            platfolio-control-plane:build
+          ok=""
           for i in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:8080/healthz >/dev/null 2>&1; then break; fi
+            if docker exec cp-smoke node -e "fetch('http://127.0.0.1:8080/status').then(async r=>process.exit(r.status===200 && (await r.json()).status==='ok'?0:1)).catch(()=>process.exit(1))"; then ok=1; break; fi
             sleep 2
-            if [ "$i" = "30" ]; then echo "healthz never answered"; docker logs status-smoke; exit 1; fi
           done
-          echo "  healthz: $(curl -fsS http://127.0.0.1:8080/healthz)"
-          echo "  version: $(curl -fsS http://127.0.0.1:8080/version)"
-          curl -fsS http://127.0.0.1:8080/version | grep -q '"commit":"${{ github.sha }}"' \
-            || { echo "build identity not reported"; exit 1; }
-          curl -fsS http://127.0.0.1:8080/version | grep -q '"providerContract"' \
-            || { echo "provider contract not reported"; exit 1; }
-          docker stop status-smoke
+          if [ -z "$ok" ]; then echo "/status never returned ok"; docker logs cp-smoke; exit 1; fi
+          # Confirm /version serves the candidate commit and the anonymous data request receives HTTP 401.
+          version=$(docker exec cp-smoke node -e "fetch('http://127.0.0.1:8080/version').then(r=>r.text()).then(t=>process.stdout.write(t))")
+          echo "  /version -> $version"
+          jq -e --arg sha "$GITHUB_SHA" 'has("version") and .version == null and .commit == $sha' <<< "$version"
+          code=$(docker exec cp-smoke node -e "fetch('http://127.0.0.1:8080/api/v1/instances').then(r=>process.stdout.write(String(r.status)))")
+          echo "  unauthenticated GET /api/v1/instances -> $code"
+          [ "$code" = "401" ] || { echo "expected 401 from the auth guard, got $code -- routes are not registered or the guard is not applied"; docker logs cp-smoke; exit 1; }
+          echo "container healthy"
+          docker stop cp-smoke
+          kill $JWKS_PID 2>/dev/null || true
 
       # Only pushes publish. A pull request gets a build and a smoke test, never a registry write.
       - name: Publish
+        id: publish
         # Pushes only: a pull request gets a build and a smoke test, never a registry write.
         if: github.event_name == 'push'
         env:
           REGISTRY: ghcr.io
           CR_PAT: ${{ secrets.GITHUB_TOKEN }}
+          SITE_IMAGE: ${{ steps.site.outputs.image }}
         run: |
           echo "$CR_PAT" | docker login "$REGISTRY" -u "$GITHUB_ACTOR" --password-stdin >/dev/null
-          SHORT="$(echo "${{ github.sha }}" | cut -c1-7)"
-          for tag in "sha-$SHORT" "${{ github.ref_name }}"; do
-            docker tag platfolio-status-api:build "$REGISTRY/$IMAGE_NAME:$tag"
-            # The digest comes out of the push itself. A plan pins sha256:..., never a mutable tag, and
-            # re-deriving it locally would need a go-template whose braces collide with this repo's
-            # workflow placeholder lint.
-            PUSHED="$(docker push "$REGISTRY/$IMAGE_NAME:$tag")"
-            if [ "$tag" = "sha-$SHORT" ]; then
-              DIGEST="$(printf '%s\n' "$PUSHED" | sed -n 's/.*digest: \(sha256:[0-9a-f]*\).*/\1/p' | head -1)"
+          COMMIT_TAG="sha-$GITHUB_SHA"
+          publish() {
+            local service="$1" source="$2" repository="$3" pushed digest
+            local image="$repository:$COMMIT_TAG"
+            docker tag "$source" "$image"
+            pushed=$(docker push "$image")
+            digest=$(printf '%s\n' "$pushed" | sed -n 's/.*digest: \(sha256:[0-9a-f]*\).*/\1/p' | head -1)
+            if ! [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+              echo "::error::The $service push did not report a valid image digest."
+              exit 1
             fi
-          done
-          # The digest is the whole point of publishing: a plan pins sha256:..., not a mutable tag.
-          {
-            echo "## Published image"
-            echo ""
-            echo "- Reference: \`$REGISTRY/$IMAGE_NAME:sha-$SHORT\`"
-            echo "- **Pinned digest: \`${DIGEST:-unavailable}\`**"
-            echo ""
-            echo "Use the digest, never the tag: a tag is mutable and a plan that trusts one can be moved"
-            echo "under a tenant. If this package is private, Railway cannot pull it until the package"
-            echo "visibility is set to public (a maintainer action; the workflow token cannot change it)."
-          } >> "$GITHUB_STEP_SUMMARY"
-          echo "  pinned digest: ${DIGEST:-unavailable}"
+            docker tag "$source" "$repository:$GITHUB_REF_NAME"
+            docker push "$repository:$GITHUB_REF_NAME"
+            printf '%s_image=%s\n%s_digest=%s\n' "$service" "$image" "$service" "$digest" >> "$GITHUB_OUTPUT"
+            printf -- '- %s: `%s@%s`\n' "$service" "$image" "$digest" >> "$GITHUB_STEP_SUMMARY"
+          }
+          echo '## Published images' >> "$GITHUB_STEP_SUMMARY"
+          publish api platfolio-control-plane:build "$REGISTRY/$IMAGE_NAME"
+          publish site "$SITE_IMAGE" "$SITE_IMAGE"
+
+      - name: Record the release candidate
+        if: github.event_name == 'push'
+        env:
+          API_IMAGE: ${{ steps.publish.outputs.api_image }}
+          API_DIGEST: ${{ steps.publish.outputs.api_digest }}
+          SITE_IMAGE: ${{ steps.publish.outputs.site_image }}
+          SITE_DIGEST: ${{ steps.publish.outputs.site_digest }}
+        run: |
+          jq -n --arg sourceCommit "$GITHUB_SHA" --arg runId "$GITHUB_RUN_ID" --arg runAttempt "$GITHUB_RUN_ATTEMPT" \
+            --arg apiImage "$API_IMAGE" --arg apiDigest "$API_DIGEST" --arg siteImage "$SITE_IMAGE" --arg siteDigest "$SITE_DIGEST" \
+            '{schemaVersion: 1, $sourceCommit, $runId, $runAttempt, images: {api: {image: $apiImage, digest: $apiDigest}, site: {image: $siteImage, digest: $siteDigest} } }' \
+            > release-candidate.json
+      - name: Upload the release candidate
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-candidate-${{ github.run_attempt }}
+          path: release-candidate.json
+          if-no-files-found: error

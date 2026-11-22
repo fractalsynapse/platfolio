@@ -1,0 +1,282 @@
+# platfolio, described the way platfolio describes everything else (D29): plain Compose for topology,
+# x-platfolio for hosting semantics. This is a first-party deployment, not a catalog entry -- D28 keeps the
+# shipped catalog free of platform identities, and this one is deliberately excluded from it.
+#
+# The point of authoring it this way is that hosting platfolio stops being an exception: the control plane is
+# deployed by the same code path a tenant uses (parse -> validate -> plan -> provider), so every rough edge in
+# the format is found here rather than by a tenant. #172 is the first time that has been attempted for real.
+name: platfolio-control-plane
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: apps/control-plane/Dockerfile
+    expose: ["8080"]
+    environment:
+      NODE_ENV: production
+      # No Compose-style `${VAR}` anywhere in this file, and that is a finding rather than a style choice: the
+      # renderer turns `environment:` entries into plan literals (build-plan maps every value straight through),
+      # so `${PLATFOLIO_DB_URL}` here would have been *written to the provider as the nine-character string*
+      # and the control plane would fail at boot with a message about a malformed DSN. Values that vary per
+      # deployment arrive one of three ways -- a provider-resolved `reference` below, a declared `secret` name,
+      # or a literal this script overrides with what it measured. Anything else is a placeholder that looks
+      # configured.
+      PLATFOLIO_IDENTITY_AUDIENCE: platfolio-api
+      PLATFOLIO_RELEASE_TAG: ''
+      # Issuer and JWKS are set by scripts/platform-deploy.ts from the host the provider actually granted,
+      # because asserting them before DNS lands would bake in a URL that serves nothing (E27). They are listed
+      # here so the inventory and the plan agree about which names this service needs.
+      PLATFOLIO_IDENTITY_ISSUER: &production-issuer https://auth.platfolio.dev/realms/platfolio
+      PLATFOLIO_IDENTITY_JWKS_URI: https://auth.platfolio.dev/realms/platfolio/protocol/openid-connect/certs
+      # Where platfolio's own UI is served from, said ONCE (D52). Two consumers read this one name: the API's
+      # CORS policy (`apps/control-plane/src/cors.ts`, which refuses to boot on a malformed entry), and
+      # `pnpm run identity:seed`, which turns the same origins into the public `platfolio-web` client's exact
+      # redirect URIs (`<origin>/callback`) and `webOrigins`. There used to be a second variable for the second
+      # consumer -- `PLATFOLIO_UI_ORIGIN` -- and that pair was one fact in two spellings: a UI could be admitted
+      # cross-origin while the realm refused to redirect to it, or the reverse, and no gate in this repository
+      # could see the disagreement because each file was internally consistent.
+      # `platfolio.dev` is the UI host; `api.platfolio.dev` below and `auth.platfolio.dev` on `identity` are the
+      # API and identity hosts (#199 verified and certificate-issued those two). The site and CORS share
+      # the origin through the same YAML anchor, which the Keycloak seeder also reads from the API config.
+      PLATFOLIO_ALLOWED_ORIGINS: &production-site-origin https://platfolio.dev
+      # Its own schema, not `public`: the identity provider shares this database instance (see `identity`), and
+      # two applications writing migrations into one schema is a collision waiting for its first upgrade.
+      PLATFOLIO_DB_SCHEMA: platfolio
+      # Migrations run at boot here and this is the one place that decision is written down: a single replica
+      # starts before traffic, so there is no race to lose. Replicas would use PLATFOLIO_DB_MIGRATE=false.
+      PLATFOLIO_DB_MIGRATE: 'true'
+      PLATFOLIO_RECONCILE_INTERVAL_MS: '60000'
+      # Email (D46). `none` until a relay is configured deliberately: the null transport refuses, reports
+      # honestly and leaves the routes mounted, which is safer than a half-configured sender that appears to work.
+      PLATFOLIO_EMAIL_DRIVER: none
+      PLATFOLIO_EMAIL_FROM: platfolio@platfolio.dev
+      PLATFOLIO_SMTP_STARTTLS: require
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/status').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+    x-platfolio:
+      # The wiring the provider resolves into a connection string: the operator never types it and the value
+      # never passes through platfolio's hands (D4). Note where it lives -- under x-platfolio, not as a top-level
+      # Compose key. The renderer refuses an unknown service field rather than dropping it, which is how I found
+      # I had put it in the wrong place: a silent drop here would have shipped a service with no database.
+      references:
+        - { variable: PLATFOLIO_DB_URL, database: main }
+      # Declared by NAME, never by value (D4). The validator refused the literal I first wrote -- a credential
+      # appearing in an env assignment is exactly what this platform must not store or read -- so the hosting
+      # layer supplies it at run time and platfolio only knows it exists.
+      # No SMTP secret is declared while PLATFOLIO_EMAIL_DRIVER is `none`. Declaring a credential the running
+      # config never reads is not caution, it is noise: the provider correctly refuses a plan whose declared
+      # secret has no value, so a phantom name would block the very deploy this file is meant to describe.
+      # Add the entry back the moment a relay is configured -- with `driver: smtp`, the provider will require
+      # the name to exist, and that is the point of declaring it rather than inlining a value (D4).
+      secrets:
+        # Names, never values (D4). The GitHub App's id, installation and signing key are what the two
+        # repository operations need (#172's middle); they live as variables in the tenant's own Railway
+        # project, which is the same custody shape as KC_BOOTSTRAP_ADMIN_PASSWORD below -- `shared-variable`,
+        # environment-scoped, attached to the service that reads it. Declaring them here also means
+        # `platform-deploy --apply` FAILS until they exist -- the composition says out loud what the
+        # service requires instead of discovering the gap at the first API call.
+        - { name: PLATFOLIO_GITHUB_APP_ID, source: shared-variable }
+        - { name: PLATFOLIO_GITHUB_INSTALLATION_ID, source: shared-variable }
+        - { name: PLATFOLIO_GITHUB_PRIVATE_KEY, source: shared-variable }
+      # `public: true` is what makes a service reachable and its domains actionable; it was here and my D50
+      # secrets edit swallowed it along with the line it replaced, which dropped api.platfolio.dev out of the
+      # plan silently -- two services, one database, and only one hostname. The renderer did not complain,
+      # because nothing is malformed about a private service that names a domain: it is simply not hosted.
+      public: true
+      # The user's direction is that platfolio lives at platfolio.dev. Declared here, and #172 measures whether
+      # it actually resolves rather than asserting it: E27 measured that a host whose zone we cannot edit sticks
+      # at `applying` forever with no certificate -- which looks like progress and is not. platfolio.dev's zone
+      # is 101domain-managed, so this needs one CNAME per subdomain from whoever holds that registrar login.
+      domains: [api.platfolio.dev]
+      # Developed here, so it runs in both environments (D51: mode development implies staging).
+      environments: [production, staging]
+      # Staging is the same deployment against its OWN realm (D56). The issuer host is deliberately shared --
+      # one Keycloak, one database, one certificate, no second copy of a service that does not need a
+      # development instance -- but the realm is not shared, so a staging token can never be accepted by
+      # production or the reverse. Three names change here and they change together: the realm appears inside
+      # both the issuer and the JWKS path, and staging's UI is served from its own host, so its browser origin
+      # is not production's either. A value map is the honest place to say so.
+      environmentValues:
+        staging:
+          PLATFOLIO_IDENTITY_ISSUER: &staging-issuer https://auth.platfolio.dev/realms/platfolio-staging
+          PLATFOLIO_IDENTITY_JWKS_URI: https://auth.platfolio.dev/realms/platfolio-staging/protocol/openid-connect/certs
+          # The staging UI host is `preview.platfolio.dev`. Do not read that as the `preview` environment below
+          # (which is pull-request previews, and disabled): it is the hostname the maintainer chose for the
+          # staging page. What matters to this file is that the two environments answer different origins,
+          # because the same string decides both which page may call this API and where its code may land.
+          PLATFOLIO_ALLOWED_ORIGINS: &staging-site-origin https://preview.platfolio.dev
+
+  site:
+    image: ghcr.io/fractalsynapse/platfolio-site
+    expose: [&site-port '4321']
+    environment:
+      PLATFOLIO_SITE_ORIGIN: *production-site-origin
+      PLATFOLIO_URL: &production-api-url https://api.platfolio.dev
+      PLATFOLIO_IDENTITY_ISSUER: *production-issuer
+      # Railway sends its health probe to PORT.
+      PORT: *site-port
+    build:
+      context: .
+      dockerfile: apps/site/Dockerfile
+      args:
+        PLATFOLIO_SITE_ORIGIN: *production-site-origin
+        PLATFOLIO_URL: *production-api-url
+        PLATFOLIO_IDENTITY_ISSUER: *production-issuer
+    healthcheck:
+      test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:4321/status').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+    deploy:
+      resources:
+        limits: { cpus: '1', memory: 256M }
+    x-platfolio:
+      public: true
+      domains: [platfolio.dev]
+      environmentDomains:
+        staging: [preview.platfolio.dev]
+      environmentValues:
+        staging:
+          PLATFOLIO_SITE_ORIGIN: *staging-site-origin
+          PLATFOLIO_URL: https://staging-api.platfolio.dev
+          PLATFOLIO_IDENTITY_ISSUER: *staging-issuer
+
+  identity:
+    # Upstream Keycloak, pinned by digest (D29/D30 law 3: a tag is a thing that moves). `ownership: external`
+    # is what the format calls a service we host but do not develop -- the same posture a tenant has toward
+    # their dependencies, which is the point of dogfooding.
+    image: keycloak/keycloak:26.8.2@sha256:c126f032d43b941ed7c5ccca7d6571596d8eab84d748afd7c86989e48ef07b8f
+    # Full path, not `start`: Railway's start command replaces the image command rather than being appended to
+    # an entrypoint, so a bare `start` is "command not found" -- an instant exit with zero log lines, which is
+    # how this failure looked like a mysterious deployment error for a whole debugging pass. #198's own lesson:
+    # the message a platform gives is part of the platform.
+    # Both halves, stated. `command` alone would be correct for Docker (the image's ENTRYPOINT is kc.sh) and
+    # wrong for Railway, whose start command replaces the entrypoint and runs in a shell -- which is exactly how
+    # the service once exited instantly with zero log lines. Declaring `entrypoint` here makes ONE description
+    # mean the same process on both runtimes (D50), and the renderer composes them into the provider's form.
+    entrypoint: ['/opt/keycloak/bin/kc.sh']
+    command: ['start']
+    expose: ["8080"]
+    environment:
+      KC_DB: postgres
+      # No KC_DB_SCHEMA. Keycloak's Liquibase refuses to create a schema it is told to use -- it failed with
+      # `ERROR: schema "keycloak" does not exist` -- and the manifest format has no way to ask the provider to
+      # create one, which is a real gap now recorded (a tenant's JVM app hitting the same wall would have no
+      # answer either). So identity shares `public`, while the control plane keeps its own schema through
+      # PLATFOLIO_DB_SCHEMA, which *is* created because our own migrator does it. The two cannot collide:
+      # Keycloak's tables and platfolio's migration ledger are different sets in different schemas.
+      # The port is an ENVIRONMENT setting in Keycloak 26, not a start flag. My first version passed
+      # `--http-port=8080` and the container printed its own usage text and exited -- which the provider
+      # reported honestly as a failed deployment rather than as success with a dead service.
+      KC_HTTP_PORT: '8080'
+      KC_HOSTNAME_STRICT: 'false'
+      KC_PROXY_HEADERS: xforwarded
+      KC_HTTP_ENABLED: 'true'
+      # Written by the deploy script from the host the provider granted. Keycloak stamps the `iss` claim from
+      # its own hostname setting, so if this and the control plane's issuer do not agree exactly, every token
+      # is refused -- which is the correct failure, and one worth being explicit about in the file that sets it.
+      KC_HOSTNAME: auth.platfolio.dev
+      KC_HEALTH_ENABLED: 'true'
+      # The bootstrap admin pair Keycloak 26.x actually reads, spelled the way the published `shared-identity`
+      # template spells it: the USERNAME is a composition literal here, and the PASSWORD is a declared secret
+      # obligation that appears nowhere in this file. What used to be declared was `KEYCLOAK_ADMIN` /
+      # `KEYCLOAK_ADMIN_PASSWORD` -- the 25.x names, which 26.8 does not read at all -- so the composition was
+      # claiming custody obligations over variables whose only consumer was nothing.
+      #
+      # Scope this change honestly, because it is narrow and the tempting reading is wrong: 26.8 creates the
+      # bootstrap admin "only during the initial start of the Keycloak server when the master realm doesn't
+      # exist yet" (https://www.keycloak.org/server/bootstrap-admin-recovery). The master realm of
+      # `identity-production` already exists, so renaming these names neither creates, repairs nor recovers an
+      # admin there. This is DECLARATION CORRECTNESS for every deployment made from this description from now
+      # on -- a newly hosted identity service gets a working admin on its first boot -- and it is not, and must
+      # never be reported as, the fix to a credential problem on the running box. What #248 recorded as
+      # "production's admin answers 400 invalid_grant" measured out as our own scripts defaulting
+      # `KC_ADMIN_PASSWORD` to the loopback value and then authenticating with it against a live host.
+      #
+      # `platfolio-admin`, not the template's `admin`, because that is the account this realm actually holds:
+      # measured 2026-11-15 against `/admin/realms/master/users`, the one master-realm user is `platfolio-admin`
+      # (`is_temporary_admin=true`, created 2026-11-12T08:30:25Z). The NAME is aligned with the template; the
+      # VALUE is a per-deployment fact, and copying the template's value here would describe a user that does
+      # not exist on this host.
+      KC_BOOTSTRAP_ADMIN_USERNAME: platfolio-admin
+    # Keycloak 26 builds its runtime configuration on first start when the config changed, and that build phase
+    # was OOM-killed at Railway's default memory ceiling (`kc.sh: line 170: 82 Killed 'java'`) before the
+    # server ever got to the schema error. 2 GB is what the JVM needs to survive its own start.
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2048M
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/realms/master').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 6
+    x-platfolio:
+      references:
+        # #198: Keycloak wants a JDBC URL, and handing it `postgresql://…` is what kept it from booting.
+        # The mechanism was never the limit -- `output` names WHICH variable on the database service to point
+        # at, and Railway Postgres exposes the components below (read live from `environment.config`, which
+        # returns names with values redacted). What was missing is that nothing checked the name existed.
+        # No KC_DB_URL at all: Keycloak assembles the JDBC string from host/port/database, which also keeps
+        # the password out of a URL that something other than Keycloak might log.
+        - { variable: KC_DB_URL_HOST, database: main, output: PGHOST }
+        - { variable: KC_DB_URL_PORT, database: main, output: PGPORT }
+        - { variable: KC_DB_URL_DATABASE, database: main, output: POSTGRES_DB }
+        - { variable: KC_DB_USERNAME, database: main, output: POSTGRES_USER }
+        - { variable: KC_DB_PASSWORD, database: main, output: POSTGRES_PASSWORD }
+      secrets:
+        # The bootstrap admin's credential, declared by NAME (D4) and by the name 26.8 reads. The username is
+        # not here: it is a composition literal above, because a username is not a credential and declaring it
+        # as one was the second half of the old pair's mislabelling. This matches the published
+        # `shared-identity` template, where `KC_BOOTSTRAP_ADMIN_USERNAME` sits in `environment:` and only
+        # `KC_BOOTSTRAP_ADMIN_PASSWORD` is an obligation on whoever deploys it.
+        #
+        # `source: shared-variable` keeps the custody shape this deployment already uses: the value lives in
+        # the tenant's own Railway project as an environment-scoped variable, delivered through
+        # `PUT …/secrets/{name}` (D53) or `platform-deploy --deliver-secrets`, and platfolio stores none of it.
+        # A plan that names a secret nobody delivered fails `secret-unavailable` -- which is the point: the
+        # composition says out loud what the service requires rather than discovering the gap at first boot.
+        - { name: KC_BOOTSTRAP_ADMIN_PASSWORD, source: shared-variable }
+      public: true
+      domains: [auth.platfolio.dev]
+      ownership: external
+      # Upstream Keycloak: nothing is developed in this service, so production only -- the same posture
+      # the shared-identity template takes. A staging Keycloak nobody changes is a second bill and no signal.
+      environments: [production]
+
+  # One provider-managed Postgres for the whole deployment. `singleUser` semantics apply: Railway creates the
+  # service and the connection string, and the two applications above each get their own schema.
+x-platfolio:
+  metadata:
+    name: platfolio-control-plane
+    version: 0.5.0
+    title: Platfolio Control Plane
+    summary: The control plane hosting itself, so the hosting path is tested on software we own.
+    # The same vocabulary the templates use (D51), because one set of rules now decides all four: platfolio
+    # is a web platform that is developed, so staging exists and production tracks the release branch.
+    kind: web
+    mode: development
+    repository: https://github.com/fractalsynapse/platfolio
+  capabilities: []
+  resources:
+    database: { name: main, kind: postgres }
+  environments:
+    # main is production, staging is staging. The line this replaces fed production from the staging
+    # branch, which was how the very first evidence run got an image quickly -- and then stayed, which is the
+    # kind of accident that makes the release model a rumour. CI publishes both tags (image.yml: ref_name).
+    production: { enabled: true, branch: main }
+    staging: { enabled: true, branch: staging }
+    preview: { enabled: false }
+  dns:
+    ownershipVerification: txt
+    apexPolicy: cname-flattening-only
+  lifecycle:
+    onSuspend: scale-to-zero
+    onEject: [compose, data-export]
+    onDelete: { graceDays: 30, backupAgeOutDays: 90 }
+  release:
+    registryImage: ghcr.io/fractalsynapse/platfolio-control-plane
+    dockerfile: apps/control-plane/Dockerfile
+    tagPattern: "{branch}"

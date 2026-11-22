@@ -1,4 +1,4 @@
-import { OPERATIONS, ProviderUnsupported, satisfiesRange, type ApplyResult, type CapabilityInfo, type DeleteResult, type InfraPlan, type InfraProvider, type Issue, type StateSnapshot } from './infra.ts';
+import { CONTRACT_VERSION, OPERATIONS, ProviderUnsupported, satisfiesRange, type ApplyResult, type CapabilityInfo, type DeleteResult, type InfraPlan, type InfraProvider, type Issue, type StateSnapshot } from './infra.ts';
 
 /**
  * The conformance suite: what makes "swappable provider" a claim that can be tested instead of
@@ -48,12 +48,14 @@ export function samplePlan(overrides: Partial<InfraPlan> = {}): InfraPlan {
     instanceId: 'inst-01',
     teamId: 'team-01',
     provider: 'sample',
-    contract: '1.0.0',
+    contract: CONTRACT_VERSION,
     planHash: 'a'.repeat(16),
-    manifestRef: { platform: 'example-web-app', version: '1.4.0' },
+    manifestRef: { template: 'example-web-app', version: '1.4.0' },
     environments: [
       { name: 'production', services: [service('api', 2)], domains: [{ host: 'api.example.com', service: 'api', port: 3000, verificationName: 'domain-verify' }], databases: [{ name: 'app-db', kind: 'postgres' }], buckets: [{ name: 'clones', region: 'iad' }] },
-      { name: 'staging', cloneFrom: 'production', services: [service('api', 1)], domains: [], databases: [{ name: 'app-db', kind: 'postgres' }], buckets: [] },
+      // Declared like production, not derived from it: staging's `api` and `app-db` are provisioned by the
+      // provider as staging's OWN resources, which is the property a consumer of this fixture can rely on (D57).
+      { name: 'staging', services: [service('api', 1)], domains: [], databases: [{ name: 'app-db', kind: 'postgres' }], buckets: [] },
     ],
     ...overrides,
   };
@@ -81,7 +83,9 @@ export interface ConformanceOptions {
   plan?: () => InfraPlan;
 }
 
-export async function runConformance(make: () => InfraProvider, requiredRange = '^1.0.0', options: ConformanceOptions = {}): Promise<ConformanceReport> {
+// D59: the default required range is derived from the contract version itself, so the suite cannot
+// pin a major the package no longer speaks.
+export async function runConformance(make: () => InfraProvider, requiredRange = `^${CONTRACT_VERSION}`, options: ConformanceOptions = {}): Promise<ConformanceReport> {
   const scope: ConformanceReport['scope'] = options.plan ? 'reduced' : 'full';
   if (options.plan) {
     const probe = options.plan();
@@ -191,6 +195,36 @@ export async function runConformance(make: () => InfraProvider, requiredRange = 
     return looksLikeValue
       ? { status: 'fail', detail: 'plan serialization contains a secret-valued field' }
       : { status: 'pass', detail: 'plan JSON holds secret names and sources only' };
+  });
+
+  await add('a delivered secret is readable by presence at both custody scopes (D53)', async () => {
+    const provider = make();
+    // The plan's OWN instance id: an earlier version passed a fresh one to planFor(), which a reduced fixture
+    // ignores, so delivery was aimed at an instance that had never been applied and the case failed for a
+    // reason that had nothing to do with the behaviour under test.
+    const plan = planFor();
+    await provider.applyPlan(plan);
+    if (typeof provider.putSecretValue !== 'function' || typeof provider.secretPresence !== 'function') {
+      return { status: 'not-implemented', detail: 'the driver exposes no secret delivery' };
+    }
+    const inst = plan.instanceId;
+    const outcomes: string[] = [];
+    for (const source of ['service', 'shared-variable'] as const) {
+      const name = `TOP_SECRET_${source === 'service' ? 'SVC' : 'SHARED'}`;
+      const written = await provider.putSecretValue({ instanceId: inst, environment: 'production', service: 'api', name, value: 'never-stored-by-platfolio', source });
+      if (!written.ok) return { status: 'fail', detail: `${source}: ${written.reason}` };
+      if (!written.verified) {
+        return { status: 'fail', detail: `${source}: write accepted but the declaring service cannot read the name -- presence at environment scope is not delivery` };
+      }
+      const seen = await provider.secretPresence({ instanceId: inst, environment: 'production', service: 'api', names: [name, 'NEVER_DELIVERED'] });
+      if (seen[name] !== 'set') return { status: 'fail', detail: `${source} delivery invisible through presence: ${JSON.stringify(seen)}` };
+      if (seen.NEVER_DELIVERED !== 'missing') return { status: 'fail', detail: `an undelivered name read as ${seen.NEVER_DELIVERED}` };
+      outcomes.push(source);
+    }
+    const empty = await provider.putSecretValue({ instanceId: inst, environment: 'production', service: 'api', name: 'EMPTY_CASE', value: '' });
+    return empty.ok === false && empty.code === 'invalid-value'
+      ? { status: 'pass', detail: `${outcomes.join(', ')} delivered; empty value refused rather than treated as deletion` }
+      : { status: 'fail', detail: JSON.stringify(empty) };
   });
 
   await add('deleteInstance removes everything and reports orphans honestly', async () => {

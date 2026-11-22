@@ -1,0 +1,69 @@
+---
+/**
+ * The landing page, and the reason the shell is Astro (D65).
+ *
+ * This file imports no component framework, declares no island and carries no `client:*` directive, so the build
+ * emits it as HTML plus one stylesheet and nothing that runs. That is the claim worth testing rather than
+ * asserting from configuration, and `apps/site/test/build-output.test.ts` reads `dist/index.html` for it: zero
+ * `<astro-island` markers, zero `<script` tags, one stylesheet. It is a *build* measurement, not a browser one —
+ * no browser was run in this change, and the distinction is the one 11 §9 keeps insisting on.
+ *
+ * Copy below states what is delivered. The control plane answers over HTTPS today; there is no tenant on either
+ * service, so a page that promised managed hosting *for you* would be describing planned behaviour as shipped,
+ * which AGENTS.md forbids in as many words.
+ */
+import Page from '../layouts/page.astro';
+---
+<Page title="platfolio — managed hosting on infrastructure you own">
+  <section class="hero">
+    <h1>Your infrastructure, run like a platform.</h1>
+    <p class="lede">
+      platfolio hosts standalone applications on compute you own, describes each one in a platform
+      manifest, and reads what the provider answered. It keeps no tenant secrets, and it will not read one.
+    </p>
+    <p class="actions">
+      <a class="primary" href="/dashboard">Open the dashboard</a>
+    </p>
+  </section>
+
+  {/* One column at the floor, three when this page's container (`ui-prose`, on <main> in the layout) has room.
+      The threshold, the tracks and both gaps are data in packages/ui/src/layout/content.ts — `ui-columns` is the
+      only thing this page says about them (#267 item 5, rule 2). */}
+  <section class="ui-columns">
+    <div class="point">
+      <h2>The provider stays yours</h2>
+      <p>
+        A platform declares its shape; platfolio turns an accepted attestation into stored state on the
+        infrastructure you point it at. One least-privilege grant in the managed tier, nothing at all in
+        self-custody — and the difference is disclosed rather than averaged away.
+      </p>
+    </div>
+    <div class="point">
+      <h2>Secrets pass through</h2>
+      <p>
+        A credential is delivered to your provider and kept nowhere. Presence is the only answer platfolio can
+        give about a secret — set, missing, or unverifiable — and an attempt to hold one fails the design.
+      </p>
+    </div>
+    <div class="point">
+      <h2>Every render shows its age</h2>
+      <p>
+        The dashboard reads the control plane on a poll and says so: &ldquo;updated 30 seconds ago (polled)&rdquo;.
+        A push channel is designed in the specification before it appears on a screen, and until then nothing here
+        is dressed up as something it is not.
+      </p>
+    </div>
+  </section>
+
+  <section class="status">
+    <h2>Where this stands</h2>
+    <p>
+      The control plane is deployed and answering on a public host, built by this repository. There is no tenant
+      on it yet, and this page is the first part of platfolio's own interface to reach a browser.
+    </p>
+    <p class="fineprint">
+      Everything on this page is stated by the source it was built from. The design decisions are in
+      <span class="mono">docs/design/</span>, and the six UI rules are in <span class="mono">docs/ui-architecture.md</span>.
+    </p>
+  </section>
+</Page>

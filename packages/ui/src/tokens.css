@@ -1,0 +1,78 @@
+/*
+ * GENERATED FILE -- DO NOT EDIT. The writer is `renderTokensCss()` in packages/ui/src/tokens.ts and it is the
+ * only one: this text is not worth editing by hand, because every line reproduces from the token module.
+ *
+ * Source: packages/ui/src/tokens.ts (the module you are reading; this file is its output)
+ * Input digest: sha256/34535a830d56203b
+ *
+ * Reproduce it with `pnpm run ui:css`. `pnpm run ui:css:check` fails when this file stops matching what the
+ * token module produces -- the same discipline `api:types:check` holds the API types to, for the same reason:
+ * a generated artifact nobody can prove still reproduces is a second description of the thing it claims to
+ * describe.
+ *
+ * D63: design tokens are CSS custom properties inside `packages/ui`. There is no `packages/tokens`.
+ */
+
+:root {
+  color-scheme: light;
+  --ui-space-0: 0rem;
+  --ui-space-1: 0.125rem;
+  --ui-space-2: 0.25rem;
+  --ui-space-3: 0.5rem;
+  --ui-space-4: 0.75rem;
+  --ui-space-5: 1rem;
+  --ui-space-6: 1.5rem;
+  --ui-space-7: 2rem;
+  --ui-space-8: 3rem;
+  --ui-space-9: 4rem;
+  --ui-font-caption: 0.8125rem;
+  --ui-leading-caption: 1.25rem;
+  --ui-weight-caption: 400;
+  --ui-font-label: 0.875rem;
+  --ui-leading-label: 1.25rem;
+  --ui-weight-label: 500;
+  --ui-font-body: 1rem;
+  --ui-leading-body: 1.5rem;
+  --ui-weight-body: 400;
+  --ui-font-title: 1.25rem;
+  --ui-leading-title: 1.75rem;
+  --ui-weight-title: 600;
+  --ui-font-headline: 1.5rem;
+  --ui-leading-headline: 2rem;
+  --ui-weight-headline: 600;
+  --ui-target-primary: 44px;
+  --ui-target-secondary: 24px;
+  --ui-gap-secondary: 8px;
+  --ui-container-min: 320px;
+  --ui-measure-content: 68ch;
+
+  --ui-color-bg: #ffffff;
+  --ui-color-surface: #f6f7f9;
+  --ui-color-text: #14161a;
+  --ui-color-textMuted: #5b6472;
+  --ui-color-border: #d4d8e0;
+  --ui-color-accent: #1c3faa;
+  --ui-color-onAccent: #ffffff;
+  --ui-color-ok: #15803d;
+  --ui-color-warn: #b45309;
+  --ui-color-danger: #b42318;
+  --ui-color-info: #0c6b6b;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+
+    --ui-color-bg: #101216;
+    --ui-color-surface: #181b21;
+    --ui-color-text: #f2f4f8;
+    --ui-color-textMuted: #a8b0be;
+    --ui-color-border: #2c313a;
+    --ui-color-accent: #7aa2ff;
+    --ui-color-onAccent: #0b1020;
+    --ui-color-ok: #6ee7a8;
+    --ui-color-warn: #fccf6d;
+    --ui-color-danger: #ff9b9b;
+    --ui-color-info: #5eead4;
+  }
+}

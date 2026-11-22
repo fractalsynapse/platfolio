@@ -1,8 +1,9 @@
 import { z } from 'zod';
+import type { SecretPresence } from './secret-writer.ts';
 
 /**
  * The `infra.provider` capability: everything platfolio needs from an infrastructure provider, and
- * nothing it should not have. This module is API-stable (see api/contracts.api.md); provider
+ * nothing it should not have. This module is API-stable (see packages/contracts/api.json); provider
  * implementations import these types and never the framework.
  *
  * Two rules are structural, not advisory:
@@ -14,15 +15,26 @@ import { z } from 'zod';
  */
 
 export const CONTRACT_NAME = 'infra.provider' as const;
-export const CONTRACT_VERSION = '1.0.0' as const;
+// D59: the version is DERIVED, never declared. `check-contracts.ts --update` computes it from the
+// public-surface diff recorded in packages/contracts/api.json and writes it into the generated file
+// below; `check-contracts.ts` without --update reproduces that file from the baseline or fails.
+// There is deliberately no version literal in this source tree to edit by hand.
+export { CONTRACT_VERSION } from './generated/contract-version.ts';
 
-/** Operations a provider must implement to claim contract 1.x. */
+/** Operations a provider must implement to claim this contract. (Which version they claim it AT is derived -- see CONTRACT_VERSION above, D59.) */
 export const OPERATIONS = [
   'describe',
   'validatePlan',
   'applyPlan',
   'readState',
   'deleteInstance',
+  // Secret delivery (D53) and its presence read. Both are advertised, so a driver that lacks one is
+  // discoverable from `describe()` instead of failing at the first attempt.
+  'putSecretValue',
+  'secretPresence',
+  // The refresh verb (D48). Named here because a provider that cannot restart a service must be discoverable
+  // the same way: the API answers 501 from `describe()`, not from a failed attempt.
+  'redeploy',
 ] as const;
 
 export type Operation = (typeof OPERATIONS)[number];
@@ -71,6 +83,20 @@ export const SecretRefSchema = z.object({
   source: z.enum(['preserve', 'shared-variable', 'resource', 'platform-internal', 'customer-held']),
 });
 
+/**
+ * Narrow a plan's declared secret `source` to the two scopes a provider can actually write (D53).
+ *
+ * Single-sourced here, beside the enum, because both the control-plane handler and the deploy script need the
+ * SAME answer and their agreement is a contract, not a coincidence: only `shared-variable` means "write at
+ * environment scope and attach the declaring service". Every other source describes a value the tenant placed
+ * somewhere already, or a reference the provider assembled, and when platfolio is asked to deliver one it
+ * belongs to the service that reads it. Duplicated, the two call sites drift the first time the enum grows --
+ * and the drift is invisible, because both versions still typecheck.
+ */
+export function secretWriteScope(source: string | undefined): 'service' | 'shared-variable' {
+  return source === 'shared-variable' ? 'shared-variable' : 'service';
+}
+
 export const ServicePlanSchema = z.object({
   name: NameSchema,
   image: z.string().min(1),
@@ -95,14 +121,48 @@ export const DomainPlanSchema = z.object({
   verificationName: NameSchema,
 });
 
+/**
+ * One environment of an instance, described completely: the provider provisions it from this declaration and
+ * from nothing else.
+ *
+ * This schema used to carry `cloneFrom`, which placed a second environment by duplicating a first one. That was
+ * wrong, and measured wrong on the live API: `environmentCreate` with a `sourceEnvironmentId` produced a staging
+ * whose `api` and `main` carried the SAME service ids as production's, and staging's api then failed its
+ * readiness check with `connect ETIMEDOUT` on the database URL. A duplicated environment receives the source's
+ * database *configuration*, because a Railway service is project-level and the duplicate only copies the pointer
+ * to it -- so a cloned database is not an isolated database, and no value of this field could make one. There is
+ * therefore no cloning field here at all: every environment declares its own resources and the provider creates
+ * them the way it creates production's (D57).
+ */
 export const EnvironmentPlanSchema = z.object({
   name: NameSchema,
-  cloneFrom: NameSchema.optional(),
   services: z.array(ServicePlanSchema).min(1),
   domains: z.array(DomainPlanSchema),
   databases: z.array(z.object({ name: NameSchema, kind: z.enum(['postgres', 'redis', 'mysql']) })),
   buckets: z.array(z.object({ name: NameSchema, region: NameSchema.optional() })),
-  volumes: z.array(z.object({ name: NameSchema, service: NameSchema, mountPath: z.string().startsWith('/'), sizeMB: z.number().int().positive().optional() })).optional(),
+  /**
+   * Volumes outlive the service attached to them -- measured on the live API: `serviceDelete` left both
+   * `postgres-volume` and `hibernate-a-volume` intact, and `volumeInstanceUpdate` re-attached a surviving
+   * volume to a different service (verified by read-back). That is the hibernate pattern a tenant pays less
+   * for, so `retention` states which side of the boundary platfolio respects: `instance` (default) is torn
+   * down with the instance; `survive` is kept, attached to nothing, and reported as a survivor.
+   *
+   * Deletion is **scheduled, not immediate**: a successful `volumeDelete` sets `isPendingDeletion` with a
+   * `deletedAt` roughly two days out while the volume stays listed. A caller that treats the mutation's
+   * `true` as completion is reporting a fact the provider has not yet performed.
+   */
+  volumes: z.array(z.object({
+    name: NameSchema,
+    service: NameSchema,
+    mountPath: z.string().startsWith('/'),
+    sizeMB: z.number().int().positive().optional(),
+    /**
+     * Optional rather than defaulted: `InfraPlan` is the schema's *output* type, so a `.default()` here
+     * would make every plan builder and fixture state retention explicitly. The provider treats absence as
+     * `instance` at the point of use, where the decision is actually made.
+     */
+    retention: z.enum(['instance', 'survive']).optional(),
+  })).optional(),
 });
 
 export const InfraPlanSchema = z.object({
@@ -112,7 +172,7 @@ export const InfraPlanSchema = z.object({
   contract: z.string().min(1),
   /** Hash of the rendered desired state; the idempotency key across retries. */
   planHash: z.string().regex(/^[a-f0-9]{16,64}$/),
-  manifestRef: z.object({ platform: NameSchema, version: NameSchema }),
+  manifestRef: z.object({ template: NameSchema, version: NameSchema }),
   environments: z.array(EnvironmentPlanSchema).min(1),
 });
 
@@ -151,7 +211,13 @@ export const ServiceStateSchema = z.object({
   environment: NameSchema,
   externalId: z.string().min(1),
   /** Provider deployment status, normalized. */
-  status: z.enum(['pending', 'building', 'deploying', 'live', 'failed', 'crashed', 'sleeping', 'awaiting-approval', 'removed']),
+  status: z.enum(['pending', 'building', 'deploying', 'live', 'stopped', 'failed', 'crashed', 'sleeping', 'awaiting-approval', 'removed']),
+  /**
+   * What the provider literally said, kept beside the normalized value. Needed for the case found on our own
+   * deployment: a Railway `SUCCESS` with nothing running behind it normalizes to `stopped`, and an operator
+   * reading only `stopped` cannot tell whether the platform finished, crashed, or was never deployed.
+   */
+  rawStatus: z.string().optional(),
   image: z.string().min(1),
   numReplicas: z.number().int().min(0),
 });
@@ -189,6 +255,20 @@ export const DeleteResultSchema = z.object({
   orphans: z.array(z.string().min(1)),
   /** Why a resource could not be removed. Orphans with no reason are unactionable (#80). */
   failures: z.array(z.object({ step: z.string().min(1), code: NameSchema, message: z.string().min(1) })).optional(),
+  /**
+   * #111: what left because the project did, rather than because we removed it. Kept distinct from both
+   * `removed` and `orphans` because the three claims differ: "I deleted this", "this was taken along", and
+   * "this is still reachable and nobody dealt with it". On Railway today a bucket and a template-created
+   * database both land here -- there is no bucket delete mutation at all, and a database with a volume that
+   * goes with its project was never individually deleted either.
+   */
+  releasedWithProject: z.array(z.string().min(1)).optional(),
+  /**
+   * Volumes deliberately left in place because the plan said `retention: 'survive'`. Listed separately from
+   * `removed` and `orphans` because the third meaning is different again: "we kept this on purpose". They are
+   * also not free -- an unattached volume bills -- so the answer has to be visible to whoever asks.
+   */
+  retained: z.array(z.string().min(1)).optional(),
 });
 
 export const CapabilityInfoSchema = z.object({
@@ -226,7 +306,99 @@ export interface InfraProvider {
   applyPlan(plan: InfraPlan): Promise<ApplyResult>;
   readState(instanceId: string): Promise<StateSnapshot>;
   deleteInstance(instanceId: string): Promise<DeleteResult>;
+  /**
+   * Deliver one secret value into the tenant's own provider environment (D53). The value is a pass-through:
+   * it is written and forgotten, never stored by platfolio, never echoed back, never logged. This is D34's
+   * `client_secret` rule ("relay once, keep nothing") promoted to the product's secret path, and it is what
+   * lets platfolio configure its OWN deployment through the same interface a tenant uses.
+   *
+   * Optional on the interface because a provider that cannot write configuration must say so through
+   * `describe().operations` rather than pretend; the API answers 501 when the verb is absent.
+   *
+   * `refresh` answers the maintainer's actual question -- "updating secret values should update the services as
+   * well" -- and its default is `suppress`, which is what every caller did before the question was asked. That
+   * default is deliberate and is the honest one: the platform cannot know whether the VALUE differed (D4 forbids
+   * reading it back), so it must not silently start restarting things on a write that changes nothing. With
+   * `auto`, the write is sent WITHOUT `skipDeploys`, and the provider's own value diff decides: measured arm B
+   * started a deployment for a changed value, arm D started nothing for an identical one. The platform does not
+   * detect the change -- the provider does, on the side that holds the value -- and reports what happened.
+   */
+  putSecretValue?(input: {
+    instanceId: string;
+    environment: string;
+    service: string;
+    name: string;
+    value: string;
+    source?: 'service' | 'shared-variable';
+    refresh?: 'suppress' | 'auto';
+  }): Promise<SecretWriteResult>;
+
+  /**
+   * Presence only -- never the value. The provider itself redacts secret values on read (measured for
+   * Railway: `{ value: null }` even moments after a write), which is why presence is the only honest read.
+   */
+  secretPresence?(input: { instanceId: string; environment: string; service: string; names: string[] }): Promise<Record<string, SecretPresence>>;
+  /**
+   * Redeploy one service, or every service in one environment, on an operator's decision (D48).
+   *
+   * This is NOT a re-run of `applyPlan`, and the distinction is the reason it exists. A plan whose content has
+   * not changed is a NOOP by design -- the planHash matches the marker, coverage is complete, and the provider
+   * correctly refuses to redeploy the world. Asking the apply path for a refresh would therefore either do
+   * nothing or, worse, be made to do something by perturbing the plan hash, which is faking a configuration
+   * change to get a restart.
+   *
+   * What the provider cannot answer is "did the value change?". Measured 2026-11-15
+   * (docs/research/railway-variable-value-redeploy-2026-11-15.md): Railway starts a new deployment for a
+   * variable VALUE change only when the write is not suppressed with `skipDeploys`, and an identical value does
+   * not start one at all -- the diffing happens on their side, against the value they hold and we may never
+   * read (D4). So `applyPlan` is already correct (it writes with `skipDeploys: true` and then deploys
+   * deliberately, budgeted); the paths that write configuration WITHOUT a plan -- secret delivery, and any
+   * variable an operator sets in the provider console -- are the ones that can leave a running container
+   * holding an old value. This operation is how those cases are closed: not by detecting the change, but by
+   * letting whoever knows about it ask for the restart.
+   */
+  redeploy?(input: { instanceId: string; environment: string; service?: string }): Promise<RedeployResult>;
 }
+
+export type SecretWriteResult =
+  | {
+      ok: true;
+      verified: boolean;
+      /**
+       * What the write did to the running service, when the caller asked for a refresh.
+       *
+       * `redeployed` is an OBSERVATION of a new deployment identity, never an inference from the write having
+       * succeeded. `unchanged` is the measured behaviour worth naming: Railway compares the value it already
+       * holds and starts nothing when the delivered value is identical, so re-delivering a credential is free
+       * (docs/research/railway-variable-value-redeploy-2026-11-15.md, arm D). `unknown` means the read-back did
+       * not answer -- an observation we could not make is reported as such rather than rounded to either
+       * outcome, because a false "unchanged" would let a stale container look up to date.
+       */
+      refresh?: 'redeployed' | 'unchanged' | 'unknown';
+    }
+  | { ok: false; code: string; reason: string };
+
+/**
+ * The redeploy answer. `services` are PHYSICAL names (D57) in the order the provider acted on them, so the
+ * result says which container was restarted rather than which logical service somebody named. `refused` and
+ * `budgetSkipped` are separate because they are separate facts: "there is nothing there by that name" and "I
+ * was not allowed to spend another deploy" must not collapse into one silent omission.
+ */
+export const RedeployResultSchema = z.object({
+  instanceId: z.string().min(1),
+  environment: z.string().min(1),
+  services: z.array(z.string().min(1)),
+  refused: z.array(z.object({ service: z.string().min(1), code: z.string().min(1), reason: z.string().min(1) }).strict()).default([]),
+  budgetSkipped: z.array(z.string().min(1)).default([]),
+  /** True when every named service was observed to have a fresh deployment after the calls. */
+  verified: z.boolean(),
+});
+export type RedeployResult = z.infer<typeof RedeployResultSchema>;
+
+// `SecretPresence` is imported, not re-declared: 'set' | 'missing' | 'unverifiable' already has one home in
+// secret-writer.ts, and a second definition of the same three states is how two modules start disagreeing
+// about what "we could not check" means.
+export type { SecretPresence };
 
 /**
  * Minimal semver range support for `"^1.0.0"`, `">=1.0.0 <2"`, `"1.x"` and `"*"`, enough for the
@@ -278,6 +450,22 @@ export function planIssues(plan: unknown): Issue[] {
   if (new Set(names).size !== names.length) issues.push({ path: ['environments'], code: 'duplicate-environment', message: 'environment names must be unique' });
   for (const env of data.environments) {
     const services = new Set(env.services.map((s) => s.name));
+    // Uniqueness of the DECLARED names, not of the resolved ones. The provider maps a logical name to a
+    // physical service name deterministically (`{name}-{environment}`), so two declarations that differ can
+    // never resolve to one service, and the only remaining way to ask for the same Railway service twice is
+    // to declare the same logical name twice. That is reachable here and nowhere upstream: `spec.services` in
+    // a manifest is a keyed map, so a rendered plan cannot carry it -- but `InfraPlan.services` is an ARRAY,
+    // and this schema is exactly what the API and `plan/from-repository` hand to a provider. A plan is a
+    // provider input in its own right, so the invariant is asserted at that boundary rather than inherited
+    // from a renderer that happens to obey it.
+    const serviceNames = env.services.map((s) => s.name);
+    for (const name of new Set(serviceNames.filter((n, i) => serviceNames.indexOf(n) !== i))) {
+      issues.push({ path: ['environments', env.name, 'services', name], code: 'duplicate-service', message: `service "${name}" is declared more than once in "${env.name}"` });
+    }
+    const databaseNames = env.databases.map((d) => d.name);
+    for (const name of new Set(databaseNames.filter((n, i) => databaseNames.indexOf(n) !== i))) {
+      issues.push({ path: ['environments', env.name, 'databases', name], code: 'duplicate-database', message: `database "${name}" is declared more than once in "${env.name}"` });
+    }
 
     const databases = new Set(env.databases.map((d) => d.name));
     for (const service of env.services) {
@@ -296,9 +484,6 @@ export function planIssues(plan: unknown): Issue[] {
       if (!services.has(d.service)) {
         issues.push({ path: ['environments', env.name, 'domains', d.host], code: 'unknown-service', message: `domain targets service "${d.service}" which is not in environment "${env.name}"` });
       }
-    }
-    if (env.cloneFrom && !data.environments.some((e) => e.name === env.cloneFrom)) {
-      issues.push({ path: ['environments', env.name, 'cloneFrom'], code: 'unknown-environment', message: `cloneFrom "${env.cloneFrom}" does not name an environment in this plan` });
     }
     for (const s of env.services) {
       for (const pair of s.env) {

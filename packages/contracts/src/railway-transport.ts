@@ -97,29 +97,6 @@ export interface RailwayCredentialSource {
   forEnvironment(projectId: string, environment: string): Promise<RailwayCredential>;
 }
 
-/** Test/offline source: pre-issued tokens, with minting recorded so a caller can prove it never re-mints. */
-export class StaticRailwayCredentials implements RailwayCredentialSource {
-  readonly minted: { projectId: string; environment: string }[] = [];
-  private readonly workspaceToken: string;
-  private readonly projectTokens: Record<string, string>;
-
-  constructor(args: { workspaceToken: string; projectTokens?: Record<string, string> }) {
-    this.workspaceToken = args.workspaceToken;
-    this.projectTokens = args.projectTokens ?? {};
-  }
-
-  async workspace(): Promise<RailwayCredential> {
-    return { kind: 'workspace', token: this.workspaceToken };
-  }
-
-  async forEnvironment(projectId: string, environment: string): Promise<RailwayCredential> {
-    const key = `${projectId}:${environment}`;
-    const token = this.projectTokens[key];
-    if (!token) throw new Error(`no project token available for environment "${environment}" of project "${projectId}"`);
-    this.minted.push({ projectId, environment });
-    return { kind: 'project', token };
-  }
-}
 
 /**
  * Mints environment-scoped project tokens through the API, using the workspace grant, and caches them for

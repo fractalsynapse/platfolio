@@ -13,7 +13,12 @@ export interface InstallFiles {
 }
 
 export const WORKFLOW_PATH = '.github/workflows/platfolio-managed.yml';
-export const IAC_PATH = '.railway/railway.ts';
+/** Where the action lives inside platfolio's repository; the install workflow references it by path. */
+export const ACTION_PATH = '.github/actions/platfolio-managed';
+// No IaC file ships in the install PR. The desired state lives with platfolio and is fetched per run, so a
+// constant naming `.railway/railway.ts` was a trap: the tenant-facing document referenced it while nothing
+// emitted it. If a future design writes plans into tenant repos, it will need to add the file AND the code
+// that produces it, not resurrect this path.
 
 /** Least privilege for the managed workflow. Anything broader is a regression, and a test says so. */
 export const WORKFLOW_PERMISSIONS: Record<string, string> = {
@@ -26,7 +31,9 @@ export const WORKFLOW_PERMISSIONS: Record<string, string> = {
 // GitHub expressions live in ordinary strings: a template literal would try to interpolate them.
 const EXPR = {
   dispatchOrRef: "platfolio-${{ inputs.dispatch_id || github.run_id }}",
-  action: "${{ inputs.action || 'deploy' }}",
+  // A pull request has no inputs, so the event decides: pushes apply, PRs check. Without this a PR targeting
+  // the release branch would deploy on open, which contradicts the release policy the project runs on.
+  action: "${{ inputs.action || (github.event_name == 'pull_request' && 'check' || 'apply') }}",
   environment: '${{ inputs.environment }}',
   instance: '${{ inputs.instance_id }}',
   dispatch: '${{ inputs.dispatch_id }}',
@@ -42,6 +49,13 @@ export interface InstallOptions {
   /** Commit SHA, not a tag: pinning by tag lets a later force-push change what runs. */
   actionSha: string;
   platfolioUrl: string;
+  /**
+   * Where the provider's projects live. Not a secret, and not derivable from one: the first real dispatch
+   * authenticated correctly and then asked Railway for projects(workspaceId: ""), which answers Not
+   * Authorized -- a credential with no coordinate is indistinguishable from a bad credential. It belongs in
+   * the workflow because it is part of this instance's provisioning, decided at connect.
+   */
+  workspaceId: string;
 }
 
 /**
@@ -58,6 +72,22 @@ export interface InstallOptions {
  */
 export function renderInstallPullRequest(m: Manifest, opts: InstallOptions): InstallFiles {
   const envs = m.spec.environments.staging.enabled ? ['production', 'staging'] : ['production'];
+  // An environment is not a branch. The manifest declares `production: { enabled, branch: main }`, and this
+  // renderer used to put the environment NAMES into `on.push.branches` -- so platfolio's own committed workflow
+  // listened for a branch called `production` that has never existed in the repository, and every "deploys on
+  // push" claim about it was fiction: it only ever ran when dispatched by hand. Bind each environment to its
+  // declared branch, falling back to the name only where the manifest is silent.
+  const envBindings = envs.map((name) => {
+    // Enumerated per environment rather than indexed generically: when a third environment is added to the
+    // schema, this is the line that fails to compile and forces the decision, instead of silently falling back
+    // to a branch named after the environment -- which is exactly the bug this binding replaced.
+    const declared: Record<string, string | undefined> = {
+      production: m.spec.environments.production.branch,
+      staging: m.spec.environments.staging.branch,
+    };
+    return { name, branch: declared[name] ?? name };
+  });
+  const pushBranches = [...new Set(envBindings.map((b) => b.branch))];
   const runner = m.metadata.architectures.includes('arm64') && m.metadata.architectures.length === 1 ? 'ubicloud-arm' : 'ubuntu-latest';
   const services = sorted(Object.keys(m.spec.services), (s) => s);
 
@@ -76,9 +106,18 @@ export function renderInstallPullRequest(m: Manifest, opts: InstallOptions): Ins
     '      plan_hash: { required: true, type: string }',
     '      action: { required: true, type: choice, options: [apply, check, drift, suspend, export] }',
     `      environment: { required: true, type: choice, options: [${envs.join(', ')}] }`,
+    // Pushes to a bound branch apply. A PULL REQUEST targeting one of those branches runs the read-only
+    // action instead: `check` fetches the plan, applies nothing, and still reports drift -- which is what makes
+    // "deploy on PR to staging" and "release only from a merged main" the same workflow rather than a policy
+    // that depends on nobody wiring the wrong trigger. GitHub gives a pull_request run no `inputs`, so the
+    // expression below is the only place that decision can live.
     '  push:',
     '    branches:',
-    ...envs.map((e) => `      - ${e}`),
+    ...pushBranches.map((b) => `      - ${b}`),
+    '  pull_request:',
+    '    branches:',
+    ...pushBranches.map((b) => `      - ${b}`),
+    '    types: [opened, synchronize, reopened]',
     '',
     'permissions:',
     ...Object.entries(WORKFLOW_PERMISSIONS).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `  ${k}: ${v}`),
@@ -88,17 +127,66 @@ export function renderInstallPullRequest(m: Manifest, opts: InstallOptions): Ins
     '  cancel-in-progress: false',
     '',
     'jobs:',
+    // The extension point. A starter that cannot be extended becomes a fork of a workflow nobody maintains,
+    // so the deploy is deliberately gated on a job the developer owns: add `run:` steps under `tests.steps` and
+    // they gate both the push deploy and the PR check, with no editing of anything platfolio wrote. It passes
+    // trivially until they add something -- which is the point of a starter, not an oversight.
+    '  tests:',
+    `    name: your checks (starter -- add steps here)`,
+    `    runs-on: ${runner}`,
+    '    timeout-minutes: 30',
+    '    steps:',
+    '      - uses: actions/checkout@v7',
+    '      # Add test steps below. Until you do, this job is a no-op gate in front of the managed deploy.',
+    '      - name: No project checks configured yet',
+    '        run: echo "platfolio installed this starter; add your own test steps in jobs.tests.steps"',
+    '',
     '  managed:',
     `    name: platfolio ${EXPR.action}`,
+    // A dispatch context is the only event that carries instance_id / dispatch_id / nonce / plan_hash.
+    // Without it the action refuses (and must: the nonce is what makes an attestation non-replayable), so
+    // running the job on a bare push or PR is a guaranteed 500ms failure with a message that reads like a
+    // misconfiguration. Skip with a visible reason instead. Push/PR-triggered deploys need the runner to
+    // request a dispatch from platfolio using its OIDC token -- see the issue linked in the file header --
+    // not a loosened guard here.
+    '    if: github.event_name == \'workflow_dispatch\' || inputs.instance_id != \'\'',
+    '    needs: tests',
     `    runs-on: ${runner}`,
     '    timeout-minutes: 30',
     '    environment:',
     `      name: ${EXPR.environment}`,
     '    steps:',
     '      - uses: actions/checkout@v7',
+
+    // A missing variable fails HERE, naming itself, rather than inside the action as a fetch to an empty
+    // URL. This is the step that makes the D47 choice usable by someone who has never read a design doc.
+    '      - name: Check the platfolio control-plane endpoint is configured',
+        '        env:',
+          '          PLATFOLIO_URL: ${{ vars.PLATFOLIO_URL }}',
+        '        run: |',
+          '          if [ -z "$PLATFOLIO_URL" ]; then',
+            '            echo "::error::repository variable PLATFOLIO_URL is unset -- set it to the platfolio control-plane origin given with your install request,"',
+            '            echo "::error::for example https://api.example.com. See README.md, managed by platfolio."',
+            '            exit 1',
+            '          fi',
+            '          echo "reporting to the platfolio control plane configured for this repository"',
+
     '',
     "      - name: Apply desired state with this repository's own credentials",
-    `        uses: ${opts.actionRepo}@${opts.actionSha}`,
+    '        id: apply',
+    // Path-qualified: the action ships inside platfolio's own repository, so a bare `owner/repo@sha` would
+    // look for an action.yml at the root that is not there.
+    `        uses: ${opts.actionRepo}/${ACTION_PATH}@${opts.actionSha}`,
+    // The provider credential comes from the repository environment's own secret. Without this block the
+    // action had no way to reach the provider at all -- plan, identity and trigger were all present, and the
+    // one thing needed to act was missing. Names in the manifest, never values: GitHub resolves the secret
+    // into the step process and platfolio never sees it.
+    '        env:',
+    '          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}',
+    '          PLATFOLIO_DISPATCH_TOKEN: ${{ secrets.PLATFOLIO_DISPATCH_TOKEN }}',
+    // Plain text, deliberately: the workspace id is configuration a tenant should see and be able to change
+    // without touching any credential.
+    `          RAILWAY_WORKSPACE_ID: ${opts.workspaceId}`,
     '        with:',
     `          action: ${EXPR.action}`,
     `          environment: ${EXPR.environment}`,
@@ -106,7 +194,10 @@ export function renderInstallPullRequest(m: Manifest, opts: InstallOptions): Ins
     `          dispatch_id: ${EXPR.dispatch}`,
     `          nonce: ${EXPR.nonce}`,
     `          plan_hash: ${EXPR.planHash}`,
-    `          platfolio_url: ${opts.platfolioUrl}`,
+    // D47: the control-plane origin is NOT written into the file every fork commits. It is a repository
+    // variable the owner sets once -- which is also what keeps a template usable by a stranger: a workflow
+    // that names someone else's deployment is a template nobody else can install.
+    '          platfolio_url: ${{ vars.PLATFOLIO_URL }}',
     '',
     '      - name: Report the outcome for platfolio to verify by read-back',
     '        if: always()',
@@ -118,21 +209,41 @@ export function renderInstallPullRequest(m: Manifest, opts: InstallOptions): Ins
 
   const secretLines = requiredSecrets(m).map((s) => `- \`${s.name}\` (service \`${s.service}\`; resolved by \`${s.source}\`)`);
   const doc = [
+    // Instruction, not declaration. The origin platfolio was reached at belongs in the install PR's body,
+    // which is ephemeral; putting it in a committed README is the same D47 mistake wearing prose.
+    '## Before the first run',
+    '',
+    'Set one repository variable: **`PLATFOLIO_URL`**, the platfolio control-plane origin you were given with',
+    'this install request (Settings → Secrets and variables → Actions → Variables). The workflow says that',
+    'name in its failure message if it is missing, and nothing committed here names a deployment.',
+    '',
     `# ${m.metadata.title} — managed by platfolio`,
     '',
-    `Platform \`${m.metadata.name}\` \`${m.metadata.version}\` (\`${m.metadata.archetype}\`).`,
+    // D51: kind and mode are the two facts that decide a platform's shape, and `hosted` is spelled out because
+    // it means the fork has no staging environment and no dev overlay -- something a reader would otherwise
+    // only discover from a missing file.
+    `Platform \`${m.metadata.name}\` \`${m.metadata.version}\` — **${m.metadata.kind}**, ${m.metadata.mode}${m.metadata.mode === 'hosted' ? ' (operated, not developed: production only)' : ''}${m.spec.provides ? `, offering the \`${m.spec.provides.name}\` capability to other platforms` : ''}.`,
     '',
     '## What runs here',
     '',
-    `- \`${WORKFLOW_PATH}\` applies \`${IAC_PATH}\` using **this repository's** credentials. platfolio`,
+    `- \`${WORKFLOW_PATH}\` applies the desired state platfolio holds, using **this repository's** credentials. platfolio`,
     '  dispatches it and verifies the result; it never writes to your infrastructure itself.',
+    '  The plan is fetched per run and checked against a hash before anything is applied, so this',
+    '  repository holds the trigger and the identity rather than a second copy of the desired state.',
     '- The provider credential is a per-environment project token stored as a GitHub environment',
     '  secret. platfolio stores no infrastructure credential of any kind.',
     '- Ordinary `git push` deploys still work, including when platfolio is offline.',
     '',
     '## Secrets you must set',
     '',
-    secretLines.length ? secretLines.join('\n') : '_None declared by this platform._',
+      // The provider token is listed because the workflow resolves it. Instructions that cover the
+      // platform's own secrets while omitting the one credential the apply step runs on are how an
+      // install looks complete and then fails on the first dispatch.
+      '- `RAILWAY_TOKEN` — workflow-level, resolved from your environment secret by the managed step',
+      '- `PLATFOLIO_DISPATCH_TOKEN` — how the runner proves it is talking to *its* control plane. The OIDC job',
+      '  token travels alongside it as identity evidence and is **not yet verified**, so today this secret is',
+      '  what authenticates; `/api/v1/attestations/capabilities` states the gap in those words.',
+      ...(secretLines.length ? secretLines : ['_No additional platform secrets declared._']),
     '',
     'No secret value crosses platfolio. Set these in your own provider project or as environment',
     'secrets here; platfolio learns they are filled only from a healthy deployment.',
@@ -145,8 +256,9 @@ export function renderInstallPullRequest(m: Manifest, opts: InstallOptions): Ins
     '',
     `1. Delete \`${WORKFLOW_PATH}\`.`,
     '2. Revoke the platfolio GitHub App installation.',
-    '3. Nothing else changes. The stack keeps deploying from your pushes and the desired-state file',
-    '   remains yours.',
+    '3. platfolio removes its own management records. **Your repository is never deleted** — keep it,',
+    '   archive it, or delete it yourself; platfolio does not have that capability and will not ask for it.',
+    '4. Nothing else changes. Ordinary pushes keep deploying, and every file here remains yours.',
     '',
   ].join('\n');
 

@@ -19,7 +19,7 @@ certificateStatus: CERTIFICATE_STATUS_TYPE_VALIDATING_OWNERSHIP
 verificationDnsHost: "_railway-verify.probe"
 verificationToken: "railway-verify=<64 hex>"
 dnsRecords: [ { fqdn: "probe.fractalsynapse.com", hostlabel: "probe", zone: "fractalsynapse.com",
-                recordType: DNS_RECORD_TYPE_CNAME, requiredValue: "1ggsepht.up.railway.app",
+                recordType: DNS_RECORD_TYPE_CNAME, requiredValue: "<generated-railway-host>",
                 currentValue: "", status: DNS_RECORD_STATUS_REQUIRES_UPDATE,
                 purpose: DNS_RECORD_PURPOSE_TRAFFIC_ROUTE } ]
 ```
@@ -58,7 +58,7 @@ Three consequences for the checker:
    record can appear later when certificate issuance needs it. A checklist rendered once from the attach
    response will go stale; it has to be re-read on every poll, which costs nothing.
 3. **The routing target is Railway's, not derived from the service hostname.** The required value was
-   `1ggsepht.up.railway.app`, while the service domain for that environment is a different host
+   `<generated-railway-host>`, while the service domain for that environment is a different host
    (`web-production-…up.railway.app`). Any implementation that synthesises the CNAME target from the
    service name — the obvious shortcut — produces a record that will never validate.
 
@@ -99,8 +99,8 @@ deployed**, so the routed host answers nothing — HTTP 000 — while the domain
 
 | When | Observed |
 | --- | --- |
-| attach, no DNS at all | `syncStatus: CREATING`, `verified: false`, `certificateStatus: VALIDATING_OWNERSHIP`, `dnsRecords[0] = CNAME required=1ggsepht.up.railway.app current="" REQUIRES_UPDATE TRAFFIC_ROUTE` |
-| after the CNAME was published | `syncStatus: **ACTIVE**`, record `currentValue: 1ggsepht.up.railway.app`, `status: **PROPAGATED**` — **but still `verified: false`, `VALIDATING_OWNERSHIP`** |
+| attach, no DNS at all | `syncStatus: CREATING`, `verified: false`, `certificateStatus: VALIDATING_OWNERSHIP`, `dnsRecords[0] = CNAME required=<generated-railway-host> current="" REQUIRES_UPDATE TRAFFIC_ROUTE` |
+| after the CNAME was published | `syncStatus: **ACTIVE**`, record `currentValue: <generated-railway-host>`, `status: **PROPAGATED**` — **but still `verified: false`, `VALIDATING_OWNERSHIP`** |
 
 So the traffic route and the certificate are genuinely **two independent states**, which is what D25's
 two-axis design is for: a tenant can have a working host pointing at nothing while ownership is pending,
@@ -132,7 +132,7 @@ Railway's response, nine consecutive polls over ten minutes:
 
 ```json
 { "verified": false, "certificateStatus": "CERTIFICATE_STATUS_TYPE_VALIDATING_OWNERSHIP",
-  "records": [ { "recordType": "CNAME", "currentValue": "1ggsepht.up.railway.app",
+  "records": [ { "recordType": "CNAME", "currentValue": "<generated-railway-host>",
                  "status": "PROPAGATED", "purpose": "TRAFFIC_ROUTE" } ] }
 ```
 

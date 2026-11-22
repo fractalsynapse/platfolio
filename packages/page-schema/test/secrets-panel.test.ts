@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import { parse as parseManifest, type Manifest } from '@platfolio/manifest';
 import {
   COMPONENT_NAMES, COMPONENT_REGISTRY, PageSchema, SecretFieldSchema,
-  buildSecretsPanel, findValueBearingProps, projectToText, type Page,
+  buildSecretsPanel, findValueBearingProps, isValueBearingKey, projectToText, type Page,
 } from '../src/index.ts';
 
 const root = path.resolve(new URL('.', import.meta.url).pathname, '../../..');
@@ -14,7 +14,7 @@ function manifest(p: string): Manifest {
   assert.equal(r.issues.length, 0, JSON.stringify(r.issues));
   return r.manifest!;
 }
-const fullStack = manifest('templates/example-full-stack/manifest.yaml');
+const fullStack = manifest('packages/manifest/test/fixtures/full-stack-manifest.yaml');
 
 const BOTH_ENVS = { instanceId: 'inst-1', environments: ['production', 'staging'], satisfied: [] };
 const SEALED = { sealedVariables: true, custody: 'managed' as const };
@@ -143,4 +143,35 @@ test('unknown components are refused by the page schema', () => {
   const bad = { component: 'page', props: { id: 'p', title: 't', platform: 'web' }, children: [{ component: 'iframe', props: { src: 'https://evil' } }] };
   const parsed = PageSchema.safeParse(bad);
   assert.equal(parsed.success, false);
+});
+
+test('the predicate is one function, and it catches credential-shaped names (#255)', () => {
+  // Rule 4 of docs/ui-architecture.md says overlay drafts can never hold a secret value, and its enforcement was
+  // cited as "findValueBearingProps, real today". Measured, that citation was false in two ways: the name was
+  // TWO functions with one definition (page.ts matched a closed list of five key names; a private copy in
+  // secrets-panel.ts matched any key containing `value`), and NEITHER caught `token`, `apiKey`, `clientSecret`
+  // or `passphrase` -- the commonest secret field names in the language. So the mechanical guarantee rested on a
+  // convention that missed the thing it was said to test for.
+  //
+  // Pinned per key rather than per document, because the document walk was already covered and still missed
+  // these: a name list is the unit being asserted.
+  const credentialShaped = ['token', 'apiKey', 'api_key', 'clientSecret', 'client_secret', 'password',
+    'passphrase', 'secret', 'authorization', 'bearer', 'accessToken', 'session', 'cookie'];
+  for (const key of credentialShaped) {
+    assert.ok(isValueBearingKey(key), `"${key}" is credential-shaped and must be refused as a draftable path`);
+  }
+  // Both halves of the old duplicated pair, kept: the closed list, and the broader substring with its exceptions.
+  for (const key of ['value', 'currentValue', 'defaultValue', 'secretValue', 'plaintext', 'someValue']) {
+    assert.ok(isValueBearingKey(key), `"${key}" was caught before and must still be`);
+  }
+  for (const key of ['satisfied', 'labelValue', 'name', 'label', 'text', 'note', 'sealedVariables', 'rotationNotice', 'custody']) {
+    assert.ok(!isValueBearingKey(key), `"${key}" is not a payload; widening that rejects benign keys teaches people to bypass the gate`);
+  }
+  // The walk reaches nested props, which is where a draft would actually hide.
+  assert.deepEqual(findValueBearingProps({ children: [{ component: 'text', props: { token: { kind: 'string' } } }] }),
+    ['children[0].props.token']);
+  // And there is exactly one implementation left in the package: the duplicate is the defect, not the coverage.
+  const src = fs.readFileSync(path.join(import.meta.dirname, '../src/secrets-panel.ts'), 'utf8');
+  assert.ok(!/function findValueBearingProps/.test(src),
+    'secrets-panel.ts must import the predicate, not carry a second copy of it -- two spellings of one rule is the bug');
 });

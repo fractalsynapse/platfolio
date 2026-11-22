@@ -35,8 +35,9 @@ release pinning), it lives under `x-platfolio`.
 3. **One vocabulary for two renderings.** Field names mirror Railway IaC (`source`, `build`, `start`,
    `healthcheck`, `preDeployCommand`, `replicas`, `env`, `domains`, `volumeMounts`, `postgres()`)
    so the renderer is a mapping, not a translation, and compose stays structurally equivalent.
-4. **Archetypes carry defaults** so a real manifest is short, and so an entire class of platform
-   can be validated by one fixture.
+4. **`kind` and `mode` carry defaults and rules** (D51), so a real manifest stays short and an entire class of
+   platform can be validated by one fixture. There is no archetype field: the labels mixed an inbound-direction
+   rule, a sharing declaration, and service counts copied from our own examples -- counts are not architecture.
 5. **Versioned and self-describing** — the renderer refuses a manifest major it does not know.
 
 ## Schema (normative sketch)
@@ -49,7 +50,8 @@ metadata:
   version: 0.9.2                # semver of the PLATFORM RELEASE, not of the manifest
   title: ArcNexus
   summary: Multi-agent architecture studio
-  archetype: full-stack-web     # api-service | full-stack-web
+  kind: web                     # web | worker -- does anything accept connections? (D51)
+  mode: development             # development | hosted -- is staging real here, or is this operated?
   repository: https://github.com/acme/arcnexus
   architectures: [amd64, arm64] # build targets; self-hosted runners honour this
   changelog: CHANGELOG.md#L0-9-2
@@ -69,7 +71,7 @@ spec:
     requiredClaims: [sub, email, preferred_username]
   environments:
     production: { enabled: true,  branch: main }
-    staging:    { enabled: true,  branch: staging, cloneFrom: production }
+    staging:    { enabled: true,  branch: staging }
     preview:    { enabled: false }
   resources:
     database: { kind: postgres, name: arcnexus-db }       # Railway postgres() | compose service
@@ -127,18 +129,37 @@ spec:
     resourceCostHint: { minGB: 2.5, maxGB: 12 }   # internal margin visibility, not a price
 ```
 
-### Archetype defaults
+### Kind and mode defaults
 
-| Archetype | Injected defaults |
-| --- | --- |
-| `api-service` (TreeDX) | one service, no public static asset handling, required `healthcheck`, `domains` limited to api/host subdomains, no frontend redirect rules, mandatory `apiAuth` block (OIDC bearer or platform-native key) |
-| `full-stack-web` (ArcNexus) | two+ services, session/cookie origin rules derived from `domains`, CSRF-safe same-site defaults, CSP report endpoint, `/health` conventions, static asset service optional |
+| Declared | Defaults injected | Rules that follow |
+| --- | --- | --- |
+| `kind: web` | ingress, TLS termination, a health path on the reachable service | at least one service must name `domains` -- a web platform nobody can reach is a worker with a lie in its metadata |
+| `kind: worker` | no ingress, scale by concurrency | any service publishing a host is refused: inbound was never decided |
+| `mode: development` | staging environment on, `compose.dev.yaml` as the local layer | staging must be enabled -- a platform someone changes needs somewhere to put a change |
+| `mode: hosted` | production only, no dev overlay | staging or preview is refused -- an operated copy costs money and returns no signal |
 
-An archetype is a defaults module plus a validation rule set — not a separate format.
+Being a **team service is not a kind.** That is `spec.provides` (D34): the shared identity provider is
+`kind: web` in `mode: hosted` publishing an `identity` capability others bind to. Keeping it as an archetype is
+what let two unrelated facts -- shape and sharing -- hide in one field, and the defaults module plus rules that
+the old labels carried are now stated above, per declaration.
+
+### Kind, mode and volume retention
+
+A declared value only earns a rule if the rule is about architecture. The retired archetypes failed that test:
+`api-service` capped the service count at two and `full-stack-web` required at least two -- numbers that
+described TreeDX and ArcNexus, our own examples, and would have refused a tenant's legitimate third worker
+while accepting a badly-shaped two-service mess. What remains refuses a worker that publishes a host, an
+unreachable web platform, a developed platform with no staging, and an operated platform with staging on.
+
+`resources.volumes` entries accept `retention: instance | survive` — `survive` keeps the disk when the
+instance is torn down, so a later service can mount the same state. The **mount** is the identity used
+throughout, because Railway names volumes itself and ignores the declared label.
 
 ### Environment inventory (D33, implemented)
 
-Obligations live beside the manifest, not inside it: `templates/*/.platfolio/environment.yaml` declares
+Obligations live in the platform's own registry -- `environment.yaml` at the platform root (D58). The separate
+`.platfolio/environment.yaml` this section used to name was folded into it, because two documents declaring the
+same variables drift, and the derived registry had been reading the hand-authored one.
 `reference` / `secret` / `value` / `output` entries with defaults, applicability and descriptions.
 `applyInventory` folds them into the service model, so the plan builder and provider stay untouched, and it
 is idempotent because install can be re-run after a tenant edits the file. The refusal rules are the point:
@@ -155,7 +176,7 @@ supply. Mixing them would list wiring as something to type in.
 
 Validation reuses the plan rule rather than a second one: a reference to a database the manifest does not
 declare is rejected by the contract (`unknown-database`), and the provider refuses to build a plan whose
-wiring it could not resolve. `templates/example-web-app` declares one (`DATABASE_URL` from `app-db`) so the
+wiring it could not resolve. `packages/manifest/test/fixtures/web-app-manifest.yaml` declares one (`DATABASE_URL` from `app-db`) so the
 catalog exercises it.
 
 ### Domains: literal hosts are provisional (OD12)
@@ -168,6 +189,52 @@ reachable and the host *pattern* (`app`, `api`, wildcard and apex policy); the i
 per environment; the plan resolves the two into the concrete hosts the provider already consumes. Until OD12
 lands, treat literal hosts in manifests and templates as examples — never copy one into a platform definition
 intended for more than one tenant.
+
+### Per-environment hosts: `environmentDomains` (D68)
+
+A service may name the host it serves in a **non-production** environment, the same way it may name a
+**per-environment value** (D56's `environmentValues`): same service, same file, environment as a key. The field
+is `environmentDomains`, a map from an environment name to the full host list that environment serves:
+
+```yaml
+    site:
+      x-platfolio:
+        public: true
+        domains: [platfolio.dev]                     # the production host list -- one home (D50)
+        environments: [production, staging]
+        environmentDomains:
+          staging: [preview.platfolio.dev]           # staging's host, said once (D68)
+```
+
+`buildPlan` resolves every host through `effectiveDomains()` in `packages/manifest/src/environments.ts`: **a
+declared list wins over derivation; absent a declaration the host is derived exactly as before** -- production
+uses `domains` verbatim, every other environment passes each host through `stagingHost()` (D57). Because the plan
+builder and `validateManifest` share that one function, the two can never disagree about what a service's staging
+host is.
+
+Why a sibling field and not a second shape of `domains`. The alternative was to let `domains` be either the flat
+list it is today *or* a map keyed by environment. That is the same fact in two spellings, and it is unsafe here
+for a mechanical reason: `compose.ts` maps the field with `Array.isArray(svcX.domains) ? svcX.domains : []`, so a
+map written under `domains` would be read as "no domains" -- a service planning with zero hosts, silently, the
+exact shape that swallowed `public: true` once before. `validateManifest` therefore refuses a map-shaped `domains`
+by name; `environmentDomains` is the only spelling of a per-environment host.
+
+Precedence and refusal, stated rather than guessed. Declared hosts win over derivation. A declaration that merely
+restates what derivation would produce is **refused** as redundant -- it is a second copy of the rule it overrides
+and drifts the moment the prefix or the base host moves. `production` is refused as a key (its hosts already live
+in `domains`). An empty list, a value that is not a hostname, an environment the platform does not enable or the
+service is not deployed to, and a host a declaration binds that is already bound in another environment of the
+same service or by another service are all refused, each naming the service, the environment, both values and the
+fix. There is no "unknown" fallback: where the model cannot state a host safely, it refuses.
+
+**Limits reported, not papered over.** This is a model change only: platfolio's own `site` service still cannot
+deploy, blocked separately by D54 (a `build:` service with no reported artifact). And `dns.apexPolicy` is
+declarative -- neither `buildPlan` nor `validateManifest` inspects whether a bound host is an apex that cannot be
+a plain CNAME -- so a per-environment host is exactly as unchecked against the apex rules as a `domains` host
+already was; `12 § Apex and wildcards` remains the authority, and making apex a *validated* fact is a separate
+change to `packages/manifest`. See [D68](01-product-and-decisions.md) and
+[12 § Where a domain is defined](12-domains-and-dns.md).
+
 ## Secrets
 
 `value_source` is a closed enum, and it is the mechanism that keeps decision D4 true:
@@ -194,12 +261,55 @@ production-only external service never demands its secrets be filled in a stagin
 no place for them. Whether `railway config plan` honours per-environment resource membership is E21 —
 the shape type-checks here, which is a weaker claim than "it deploys correctly".
 
-Staging is **a duplicate of production, created after the services exist** — measured in E25: Railway has
-no "add service to this environment" call, `environmentCreate(sourceEnvironmentId: …)` copies the services
-present at that moment, and a service added later is absent from the existing duplicate. `cloneFrom`
-therefore carries ordering and completeness meaning, not just "start from this config": a platform that
-grows a service must recreate the environment, and the provider refuses to pretend otherwise
-(`instance-missing-in-environment`). See [the record](../research/railway-token-and-sealing-2026-11-08.md).
+Each environment is **provisioned from its own declaration** — nothing is created as a copy of another
+environment, and the manifest has no field that would ask for one. The measured reason is in the decision
+register (D57): `environmentCreate(sourceEnvironmentId: …)` gives the new environment the source's *service
+ids*, so staging inherited production's database configuration and its api timed out on a DSN it did not own.
+A cloned database is not an isolated database.
+
+Because Railway service names are unique per project (`serviceCreate` refuses a name the project holds) and no
+mutation places an existing service into a further environment (`serviceInstanceUpdate` on an unplaced instance
+returns `true` and changes nothing — E25, and the captured schema has no `serviceInstanceCreate`), the provider
+names each service **deterministically**:
+
+> **`{name}-{environment}`**, where `{name}` is the compose definition's service key — the same key that is the
+> resource name — and `{environment}` is that key's environment, lowercased. Every environment, always, with no
+> exceptions. `physicalServiceName(logical, environment)` in `packages/contracts/src/railway-provider.ts` is the
+> one implementation, and the dry run renders from it, so a preview and an apply cannot disagree.
+
+The rule consults nothing: not the project's current service list, not which environment a service already runs
+in, not the provider's project description. The compose service key **is** the base name — the specification adds
+no field for it and does not derive it from a description. `production` is therefore `api-production`,
+`identity-production` and `main-production`, exactly as staging is `api-staging` and `main-staging`, and both
+environments come from one plan in any order.
+
+Services found in a project under a name that does not fit the rule — platfolio's own `api`, `identity` and
+`main`, created before per-environment provisioning — are **moved into it, not replaced**. `serviceUpdate(id,
+input: {name})` renames the service in place (`ServiceUpdateInput` carries `name`; the name lives on the service,
+not on the instance), and the volume, its data, the environment instances, the attached domains and the private
+network all follow the service id. Deleting a Railway service destroys its environments and its database volume,
+so a naming question is never answered by a delete. Three limits, all reported rather than assumed:
+
+| Shape found in the project | What the provider does |
+| --- | --- |
+| row named exactly a logical name this plan declares, running in this environment and nowhere else | rename it into `{name}-{environment}`; note `legacy-service-renamed` / `legacy-database-renamed`, naming the old id and the new name |
+| row named exactly a logical name this plan declares, running in **another** environment | leave it, provision this environment's own row; note `legacy-row-belongs-to-another-environment` |
+| row named exactly a logical name this plan declares, running in **no** environment | leave it and say so (`legacy-row-left-unplaced`). Renaming would install the name with no instance behind it and block the only placer; deleting is destructive and belongs to the operator's destroy path (D36/D43), never to a successful apply |
+| row whose name this plan does not declare | **never touched.** A rename candidate exists only when the row's current name is a logical name of this plan, which is what makes a foreign or hand-made service untouchable without any ownership marker to parse |
+
+Ownership is inferred from the one-project-per-instance layout plus the plan's declared names, not proven by a
+per-row marker, so a hand-made service inside a tenant's own platfolio project that happens to share a logical
+name is the one case this provider could mistake for its own legacy row — and the worst outcome of that mistake
+is a rename an operator can undo. See [the record](../research/railway-token-and-sealing-2026-11-08.md).
+
+A reference expression is expanded by Railway **at write time**, so a rename is followed by a rewrite of every
+expression that spells the old name, in the same apply, after the rename. The running containers still hold the
+value expanded from the old name until they are deployed again, and the apply says which ones (`legacy-reference-redeploy-required`).
+
+A plan that declares the same logical name twice is refused before a provider sees it (`duplicate-service`,
+`duplicate-database` in `planIssues`): under a deterministic rule, two *different* names can never resolve to one
+service, so a duplicate declaration is the only remaining way to ask for the same service twice — and `InfraPlan`
+carries services as an array, which is what the API and `plan/from-repository` hand over.
 
 The default is **`tenant-side`**, not `relay-sealed` — that ordering was reversed by E18, and the panel
 renders accordingly.
@@ -213,9 +323,10 @@ renders accordingly.
 
 Sealing has hard consequences the renderer and controller must honour, all from the provider's own
 documented behaviour: a sealed value **cannot be un-sealed**, is **not copied** when an environment or
-service is duplicated, is not provided by the CLI, and is not shown in environment-sync diffs. So the
-`cloneFrom` staging bootstrap must **expect** to arrive without these values, and the checklist turns
-red for exactly that reason — which is correct behaviour, not a bug. Rotation becomes
+service is duplicated, is not provided by the CLI, and is not shown in environment-sync diffs. So a newly
+provisioned environment arrives **expecting to have no values at all** — since D57 nothing is copied in from
+another environment, which turns the same checklist red for the same reason and now for every variable the
+tenant has not delivered (D53) — which is correct behaviour, not a bug. Rotation becomes
 "set a new value, verify, then revoke the old credential" with no read-back, and the UI must say so.
 
 `team-service` is **proposed, not valid** — it is the subject of
@@ -299,6 +410,16 @@ conflict check. A manifest that cannot be rendered is not mergeable.
 
 - `metadata.version` is the platform release; `apiVersion` is the manifest schema. Both matter: a
   tenant pinned to `arcnexus@0.8` must not be force-rendered with `1.x` semantics.
+- The provider **plan** carries the infra contract version in its `contract` field, and that version is
+  derived, never declared (D59). `scripts/check-contracts.ts --update` computes it from the public-surface
+  diff of `packages/contracts/api.json` (removal or widening -> major, new declaration -> minor, pure
+  reordering -> nothing), records it in the baseline's `Version:` header, and regenerates
+  `packages/contracts/src/generated/contract-version.ts`, which is the only place the string exists and is
+  reproduced byte-for-byte from the baseline by the gate. `buildPlan` stamps that value; the plan renderers
+  and `platform-deploy --dry-run` print it. A stored plan keeps the version it was made with as history:
+  `InfraPlanSchema.contract` is an unconstrained string on purpose, so old plans remain parseable audit
+  records, and applying a plan whose version disagrees with a provider's is refused by the provider, not
+  by the schema.
 - `requires.platfolio` is enforced by the control plane before dispatch, with an actionable message
   ("this platform needs platfolio renderer ≥ 0.4; your instance is running 0.3.2").
 - Migrations run via `preDeployCommand`, forward-only, with `migration_window` advisory; the release
@@ -308,20 +429,31 @@ conflict check. A manifest that cannot be rendered is not mergeable.
 - Self-hosted support policy (see [08](08-distribution-and-licensing.md)): latest minor +1,
   security cherry-picks to the previous minor for ~6 months.
 
-## Adding a platform (D9)
+## Adding a platform (D9, D60)
 
-Adding TreeDX or any future platform is a **data PR** into `templates/<name>/<version>/` containing
-the manifest, archetype overrides, an example `.env.example` (names only), a fixture used by CI, and
-generated docs. No control-plane code change. If a new platform requires a new field, that is a
-schema change and gets its own `apiVersion` review.
+Adding TreeDX or any future platform is a **data change in that platform's own repository**, not a directory in
+platfolio: `compose.yaml` with its `x-platfolio` block, its own `environment.yaml` registry at the same root
+(the authoritative list of the variable NAMES it needs, not a `.env.example` -- D52, D58), and the source that
+reads them. It enters platfolio as tenant data through the install flow, and the instance carries `templateRef`
+`{repo, commitSha}` so the plan is built from a pinned commit (D29, D45).
+
+The three published templates (`fractalsynapse/platfolio-starter-web`, `-starter-worker`,
+`-shared-identity`) are the reference implementations of this specification, and platfolio reads them the way it
+reads any tenant repository -- through the source-control seam. `packages/manifest/test/templates.test.ts`
+therefore validates the specification against real artifacts on every run rather than against a bundled copy
+that could disagree with them. A new *template* (as opposed to a hosted platform) additionally needs one entry
+in `packages/manifest/src/template-catalog.ts`, which is where the name→repository mapping lives; anything that
+wants to reach for a local copy instead fails `pnpm run check`.
+
+A schema change is not a data change: it gets its own `apiVersion` review.
 
 ## Worked examples to write next
 
-1. `templates/example-web-app/manifest.yaml` — `api-service`, one service, Postgres, object storage of
+1. `packages/manifest/test/fixtures/web-app-manifest.yaml` — `api-service`, one service, Postgres, object storage of
    repository clones, API-key auth, no identity host. Verify: can it be deployed with zero secrets
    known to platfolio? Its AI-context generation workload needs a resource ceiling and a queue,
    otherwise one tenant saturates its own project (and its own bill — correct under D1).
-2. `templates/example-full-stack/manifest.yaml` — `full-stack-web`, Keycloak dependency already in the
+2. `packages/manifest/test/fixtures/full-stack-manifest.yaml` — `full-stack-web`, Keycloak dependency already in the
    platform, so both `hosted-realm` and `byo-oidc` modes must be exercised. Verify: realm import
    round-trip and that ejecting leaves a working, self-contained ArcNexus with its own IdP.
 3. `ops/platfolio/manifest.yaml` — platfolio hosting itself, which is how the renderer stays honest.

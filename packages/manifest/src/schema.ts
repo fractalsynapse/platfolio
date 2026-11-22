@@ -1,4 +1,5 @@
 import { CapabilitySchema, RequiredCapabilitySchema } from '@platfolio/contracts';
+import { DEFAULT_STAGING_PREFIX } from './environments.ts';
 import { z } from 'zod';
 
 /** Schema version this renderer understands. Bumped only by breaking manifest changes. */
@@ -28,6 +29,44 @@ const Service = z.object({
   secrets: z.array(z.object({ name: Name, source: z.enum(['preserve', 'shared-variable', 'customer-held']) }).strict()).default([]),
   /** Which environments this service exists in (D23). Defaults from `ownership`. */
   environments: z.array(z.enum(['production', 'staging'])).optional(),
+
+  /**
+   * Values that differ PER ENVIRONMENT (D56). Keys are environment names this service is placed in; the inner
+   * map replaces entries of `env` for that environment only.
+   *
+   * This exists because a platform with a staging environment needs staging CONFIGURATION, not just a staging
+   * copy. platfolio's own deployment runs its staging control plane against a separate Keycloak realm on the
+   * same issuer host; before this field, `mode: development` bought a second environment whose values were
+   * identical to production's -- a second copy of the truth rather than a second environment.
+   *
+   * D4 applies exactly as it does to `env`: secret material is declared by NAME in `secrets`, never written as
+   * a literal in either map.
+   */
+  environmentValues: z.record(z.string(), z.record(z.string(), z.string())).default({}),
+  /**
+   * Hosts that differ PER ENVIRONMENT (D68). Keys are environment names this service is placed in; the value is
+   * the full host list that environment serves, replacing derivation for that environment only.
+   *
+   * This is the sibling of `environmentValues`, and it is deliberately the same SHAPE -- environment as a key,
+   * the same service, the same file (D56). A staging environment whose hostnames are only ever what
+   * `stagingHost()` derives is a staging environment that cannot name a host the rule did not guess: D62 serves
+   * platfolio's own staging UI at `preview.platfolio.dev`, while D57's `{name}-{env}` family derives
+   * `staging-platfolio.dev`. A flat `domains` list has no way to say which of the two is staging's, so landing
+   * the site service as written would state one environment's host twice (see
+   * [docs/ui-architecture.md § Open gaps](../../../docs/ui-architecture.md), gap #6 blocker two).
+   *
+   * WHY A SIBLING AND NOT A POLYMORPHIC `domains` (the alternative considered and refused). Option (a) was to
+   * let `domains` be either the flat list it is today OR a map keyed by environment. That is the same fact in two
+   * spellings -- the exact failure this repository has spent the week removing -- and it is unsafe here for a
+   * mechanical reason: the compose adapter maps service fields with `Array.isArray(svcX.domains) ? svcX.domains
+   * : []`, so a map written under `domains` would be read as "no domains" and the service would plan with zero
+   * hosts, silently. `validateManifest` refuses a map-shaped `domains` by name for that reason. `environmentDomains`
+   * is the only spelling; production hosts stay `domains` verbatim (refused as a key here, because they already
+   * have a home), and every declared list must differ from what derivation would produce -- a declared host that
+   * merely restates `stagingHost()` is refused rather than permitted, so the declaration cannot become a second
+   * copy of the rule it overrides.
+   */
+  environmentDomains: z.record(z.string(), z.array(z.string().min(1))).default({}),
   /** `external` = an upstream image platfolio hosts but does not develop; production-only by default. */
   ownership: z.enum(['maintained', 'external']).default('maintained'),
   domains: z.array(z.string().min(1)).default([]),
@@ -46,7 +85,7 @@ const Resources = z.object({
   database: z.object({ name: Name, kind: z.enum(['postgres', 'mysql', 'mongo']) }).strict().optional(),
   cache: z.object({ name: Name, kind: z.enum(['redis']) }).strict().optional(),
   storage: z.object({ name: Name, region: z.string().min(2).optional() }).strict().optional(),
-  volumes: z.array(z.object({ name: Name, service: Name, mountPath: z.string().startsWith('/'), sizeGB: z.number().int().positive().optional() }).strict()).default([]),
+  volumes: z.array(z.object({ name: Name, service: Name, mountPath: z.string().startsWith('/'), sizeGB: z.number().int().positive().optional(), retention: z.enum(['instance', 'survive']).optional() }).strict()).default([]),
 }).strict();
 
 export const ManifestSchema = z.object({
@@ -57,7 +96,24 @@ export const ManifestSchema = z.object({
     version: Version,
     title: z.string().min(1),
     summary: z.string().min(1),
-    archetype: z.enum(['api-service', 'full-stack-web']),
+    /**
+     * The platform is one of two things (D51): a `web` service that accepts connections, or a `worker` that
+     * does not. Everything the old four-value `archetype` conflated splits out of this pair:
+     *
+     * - `mode` says whether the platform is developed (`development`: staging beside production, a local
+     *   overlay, commits flowing) or merely operated (`hosted`: production only -- an upstream container plus a
+     *   database pulled by an existing template, which is exactly what `shared-identity` is).
+     * - being a team service is NOT a kind. It is `spec.provides`, modelled since D34: a shared identity
+     *   provider is a web platform in hosted mode that offers a capability, not a fourth shape.
+     *
+     * `archetype` is gone as authored input. The old labels carried rules that were really counts -- "an
+     * api-service has at most 2 services", "full-stack-web needs at least 2" -- which described our own example
+     * manifests and would have refused a tenant's legitimate third worker. What survives is about direction
+     * (who accepts connections) and lifecycle (which environments exist), because those are architecture
+     * rather than taste.
+     */
+    kind: z.enum(['web', 'worker']),
+    mode: z.enum(['development', 'hosted']).default('development'),
     repository: z.string().url().optional(),
     license: z.string().min(1).default('Apache-2.0'),
     architectures: z.array(z.enum(['amd64', 'arm64'])).default(['amd64', 'arm64']),
@@ -104,7 +160,7 @@ export const ManifestSchema = z.object({
        * How a staging host is derived from a declared production host. Rendered explicitly rather than
        * left to provider magic: a service present in both environments cannot claim the same host twice.
        */
-      stagingPrefix: z.string().min(1).default('staging-'),
+      stagingPrefix: z.string().min(1).default(DEFAULT_STAGING_PREFIX),
     }).strict().optional(),
     lifecycle: z.object({
       onSuspend: z.enum(['scale-to-zero']).default('scale-to-zero'),

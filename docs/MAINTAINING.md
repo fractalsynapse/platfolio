@@ -7,6 +7,380 @@ The workflow below is the one this repository already uses. It is carried over d
 only substantive change from the starter's policy is scope: this is now an application project, and
 `docs/MAINTAINING.md` no longer describes an instruction package.
 
+## Onboarding a tenant now goes through the API (D48)
+
+The two operations that replaced the shell step:
+
+```
+POST /api/v1/instances/{id}/plan/from-repository   # platfolio reads compose.yaml at the pinned commit
+POST /api/v1/instances/{id}/dispatches/{dispatchId}/trigger   # GitHub runs the tenant's workflow
+```
+
+Both require `ctx.scm`, which requires three variables in the deployment's own provider project:
+`PLATFOLIO_GITHUB_APP_ID`, `PLATFOLIO_GITHUB_INSTALLATION_ID`, `PLATFOLIO_GITHUB_PRIVATE_KEY`. The composition
+declares them by name (D4), so `platform:apply` fails until they are set -- and an unset platfolio answers
+**503 source-control-not-configured** rather than inventing an empty plan.
+
+Failures worth knowing by their codes: `repository-not-installed` (403) means the App installation cannot see
+the repository -- #130, and the fix is the installation selection, not the path; `source-unreadable` (400) means
+the path or ref is wrong; `manifest-invalid` (400) quotes the renderer, usually #84's unpinned image;
+`workflow-not-found` (502 via the trigger) means the install PR was never merged, because GitHub enumerates
+workflows from the default branch only (#149).
+
+`open-install-pr.ts` still renders and opens the PR itself -- that remaining logic is #213 -- but it no longer
+reads a local directory: `--platform .` is gone, and the platform description is fetched from a repository at a
+ref through the source-control seam (`--template=<name>` for a catalog template, otherwise the repository named
+by `--repo`, at its base branch). The rendered pull request is unchanged; what changed is that the tool can no
+longer describe platfolio's own platform while aimed at somebody else's repository (D48, D60). The driver follows
+`PLATFOLIO_SCM_DRIVER`: `git` reads public repositories anonymously, `github-app` is what a private tenant
+repository needs.
+
+## Repository history: the snapshot orphan, and what was restored
+
+`origin/staging` used to begin at a root commit `d4a2dc8` ("Merge of PR #214") **with no parents**: the
+integration line had been recreated from a working-tree snapshot on 2026-11-13. That snapshot's tree is
+byte-identical to PR #214's head commit `7a9aa029`, which is how the source of the snapshot was identified.
+
+**It is now repaired** (`c529012`, `0e0f711`): both `7a9aa029` and `main`'s three integration merges are
+ancestors of staging, merged with `git merge -s ours` -- a strategy that records the other side as history and
+leaves the tree exactly as it was. Verified by comparing the tree object before and after each merge: identical,
+and `git diff --stat` against the previous tip is empty. Staging now reaches **346 commits** back to
+`50fe8c2 Initial commit` (2026-10-23), and `git merge-base --is-ancestor` answers YES for pre-snapshot work
+such as PR #171's `02df442`.
+
+One artifact remains, deliberately: `d4a2dc8` is still a second root, because a commit's parents cannot be
+changed without rewriting it. Removing that wart means rebuilding the ~20 snapshot commits so the orphan gains
+a parent and force-pushing `staging` -- which would give every commit from PR #215 onward a new SHA and break
+the association GitHub holds between each PR page and the commit that was actually merged. That trade is not
+mine to make silently, so the duplicate line stays and is documented here.
+
+**Why `git log` was never the right record anyway:** the narrative lives in `CHANGELOG.md` and the decision
+register. The orphan proved that -- a repository whose history could be replaced by a snapshot without anything
+breaking is a repository that was relying on its files, not its VCS, for institutional memory.
+
+**How to judge "is this branch merged", measured the hard way (four wrong answers in one session):**
+
+| Tool | What it said | Why it mislead |
+| --- | --- | --- |
+| `merge-base --is-ancestor` | "not contained" | true of every pre-snapshot branch while the orphan line existed |
+| `git cherry -q … \| grep -c '^+'` | `0 unapplied` | `-q` prints nothing; the grep counted an empty stream |
+| `git cherry -v` | 122–312 unapplied | measures against the orphan line, so the number is history length, not work |
+| `git apply --reverse --check` | "not provable" | correct but too strict: later edits to the same files defeat a byte-level reverse patch |
+
+The signals that actually work: the merged-PR record (`gh pr list --state merged --head <branch>`) and the
+tree. Branches were pruned only after each was shown contained by one of those, and all 145 refs / 340 commits
+were bundled first to `.archive/platfolio-all-refs-20261113.bundle` (gitignored: a bundle is backup, not
+source). Recover with `git bundle unbundle .archive/<file>.bundle`, or per-PR with
+`gh pr view <N> --json headRefOid` -- GitHub retains `refs/pull/<N>/head` for every merged PR.
+
+## Delivering our own credentials (`--deliver-secrets`)
+
+The first-party stack declares three shared-variable secrets on its `api` service -- the GitHub App identity.
+They arrive through the provider seam, the same implementation a tenant's delivery uses:
+
+```sh
+PLATFOLIO_GITHUB_APP_ID=... PLATFOLIO_GITHUB_INSTALLATION_ID=... PLATFOLIO_GITHUB_PRIVATE_KEY=... \
+  npx -y tsx scripts/platform-deploy.ts --deliver-secrets
+```
+
+Read it as a list, not a guess:
+
+- the names and their **location** come from the registered composition, so a credential the platform never
+  declared is refused rather than parked somewhere plausible;
+- values are read from the local environment, written once, and **never logged, stored or echoed** -- the output
+  is names, environment, service, source and the provider's presence read-back (D4);
+- anything not supplied locally is listed as left alone, because inventing a value would be worse than an
+  incomplete install;
+- `verified: false` in that output is real information: the write was accepted but the name was not readable
+  back for that service -- which for `source: shared-variable` usually means the attachment is missing, and
+  attachment is the second of the two calls.
+
+`--bootstrap-vars` still exists for the two Keycloak bootstrap names, but it is the older shape of this
+problem: it talks to the provider's GraphQL endpoint with a hand-written query, knew only two variable names,
+and could only reach `production`. When staging was created those three App credentials did not exist in it, and
+the plan check correctly reported `secret-unavailable` for both environments -- the honest failure that produced
+`--deliver-secrets`. Retiring the raw-GraphQL blocks is #213.
+
+## Two realms, one Keycloak (D56)
+
+platfolio's production and staging control planes share the hosted identity service -- one container, one
+database, one certificate, `auth.platfolio.dev` -- and are separated by **realm**:
+
+| Environment | Realm | UI origin | Seeded with |
+| --- | --- | --- | --- |
+| production | `platfolio` | `https://platfolio.dev` | `pnpm run identity:seed` (default) |
+| staging | `platfolio-staging` | `https://preview.platfolio.dev` | `pnpm run identity:seed --realm=platfolio-staging` |
+| development | `platfolio` (local container) | `http://localhost:5173` | `pnpm run identity:seed` against loopback |
+
+The issuer and JWKS URIs that express this are **per-environment values** in `compose.yaml`
+(`services.api.x-platfolio.environmentValues.staging` -- the key is a per-service `x-platfolio` extension; the
+renderer reports the same location as `spec.services.api.environmentValues.staging` because `x-platfolio` is
+where the hosting semantics enter the manifest), so the difference is declared in the platform description and
+lands in the plan hash -- not patched in by a deploy script, and not silently identical. The UI origin is a
+per-environment value in the same map, for the same reason.
+
+One word, three meanings, and it is an open item rather than a resolved one: `preview.platfolio.dev` is the
+**staging** UI host the maintainer chose, while `environments.preview` in the same file is **pull-request
+previews** (declared, `enabled: false`), and staging's API host is derived with the `staging-` prefix as
+`staging-api.platfolio.dev` -- which is the convention the UI hostname does not follow. Nothing here is wrong,
+but three senses of one word is a conflation waiting for its reader, and renaming a hostname is the maintainer's
+call, not a change an agent should make while correcting configuration. Until that decision is taken, read every
+`preview` in this repository as whichever of the two the sentence is about, and prefer naming the environment
+(`staging`) over the word when writing about either.
+
+One name carries it, `PLATFOLIO_ALLOWED_ORIGINS`, because "where the UI is served from" is one fact with two
+consumers: the control plane admits exactly that list as its CORS allow-list (unset means same-origin only, and a
+malformed entry is a boot failure rather than a warning), and `identity:seed` writes exactly that list into the
+public `platfolio-web` client as its `<origin>/callback` redirect URIs and `webOrigins`. There used to be a second
+variable for the second consumer, `PLATFOLIO_UI_ORIGIN`; it is gone, and the seed now resolves a hosted realm's
+origins out of `compose.yaml` by matching the realm against the issuer the description declares. So the procedure
+is: change the hostname in the composition, re-run the seed, and `pnpm run environment:registry` plus
+`packages/contracts/test/browser-auth.test.ts` tell you if anything else still believes the old one.
+
+`api.platfolio.dev` and `auth.platfolio.dev` are the API and identity hosts and are a different fact -- the UI is
+a **third** host, and as of this writing it is a host nothing here serves or has verified: no DNS record, no
+Railway domain, no certificate, and no UI service in `compose.yaml`. The configuration above is correct, not
+exercised. Whether the page becomes a fourth platform inside this plan (dogfooding it, the way `identity` is
+hosted) or a static host outside it is an open decision for the maintainer, not something this file may imply.
+
+Deliberately **not** duplicated: a second Keycloak for staging. The identity provider does not need a
+development instance (`mode: hosted` says so, D51), so staging borrows the production deployment and gets its
+own realm, its own clients, its own users and its own credentials. What a staging token asserts is scoped to
+`platfolio-staging`, and production refuses it on audience *and* issuer -- the reverse holds too, which is the
+isolation the shared host does not have to provide.
+
+The local development stack keeps its own Keycloak container, and that is not a contradiction: it is the offline
+test double (D49), not a deployed environment.
+
+The hosted Keycloak's master realm holds exactly one admin — the bootstrap account, still flagged
+`is_temporary_admin=true` — and the maintainer's answer of 2026-11-15 was to leave it in place for now. The
+procedure for changing that, the stopped-nodes recovery if access is ever lost, and the credential rules that
+apply while doing either are **not** restated here: they are the runbook in
+[05 § Rotating the temporary Keycloak admin](design/05-identity.md#rotating-the-temporary-keycloak-admin-runbook).
+One thing, one home (and the DNS/origin state both realms carry is recorded there too).
+
+## Releases and credentials are operations, not console work
+
+For a first-party release candidate, use the `release-candidate-<attempt>` artifact from a successful
+**Image** workflow run. It records the full source commit, run and attempt, and the registry digest of each
+image the run published. Hosted candidates contain both `api` and `site`. The commit tag accompanies the
+digest because Railway requires `image:tag@digest`.
+Check out that commit with a clean tracked tree, then run
+`pnpm run platform:plan --candidate=/path/to/release-candidate.json`. The planner reads the recorded image
+references directly and prints the resulting plan hash. Keep the candidate manifest and its images for as long
+as that candidate needs to be replayed. The legacy API-only overlay cannot supply a full hosted plan.
+
+For a tagged release, fetch the tag and pass `--release-tag=<semver>` to both the candidate apply and
+the hosted smoke. The planner checks that the tag points to the candidate's exact source commit before it
+adds the tag to the runtime configuration. The image digests stay the same. `GET /version` reports that
+tag as `version`, or `null` for an untagged candidate. The `commit` field identifies either build.
+
+The site builds from the public production configuration in `compose.yaml`. Caddy serves the static artifact
+behind Railway's HTTPS proxy. On startup, the container renders the environment's public endpoint overlay
+before serving any request. The staged site uses `preview.platfolio.dev`, the staging API, and the staging
+Keycloak realm, all from the same composition. Registry pull access and DNS must be in place before running a
+hosted smoke check.
+
+Render only staging with `pnpm run platform:plan --candidate=/path/to/release-candidate.json --environment=staging`.
+Add `--apply` to that command when the staging deployment is authorized. The resulting plan includes the
+staging domains and excludes production.
+
+With the candidate already deployed and a staging smoke account supplied through `KC_PKCE_USER` and
+`KC_USER_PASSWORD`, run `pnpm run platform:plan --candidate=/path/to/release-candidate.json --verify-candidate=staging`.
+Supply the Railway workspace and credential through `RAILWAY_WORKSPACE_ID` and `RAILWAY_TOKEN`. The check
+reads the provider's image references and live status, confirms the commit on both hosts, and completes a
+PKCE authorization-code exchange and authenticated API request. It exercises the sign-in protocol with HTTP
+requests. The shell's browser hydration and accessibility checks are separate.
+
+A platform's build reports its own artifact; nobody types a digest, and nobody types a credential:
+
+```
+POST /api/v1/instances/{id}/artifacts       { service, image, digest }   -> 201   (D54)
+PUT  /api/v1/instances/{id}/secrets/{NAME}  { service, environment, value } -> 204 (D53)
+GET  /api/v1/instances/{id}/secrets?environment=production&service=api    -> presence (D53)
+```
+
+Three things an operator should expect from these:
+
+- **A build with no artifact is a pipeline that has not run.** `platform:plan` / `plan/from-repository` refuses
+  with the service named and the operation to call. It is not a schema error and will not be reported as one.
+  Third-party images (`image:` without `build:`) still require a digest in the document -- nobody's pipeline
+  compiles them, so there is nothing to report.
+- **A secret read cannot return a secret.** `GET …/secrets` answers `set | missing | unverifiable`. The provider
+  redacts values on read (measured: `{ value: null }` even moments after a write), so presence is the strongest
+  available claim; `unverifiable` is returned rather than `missing` when the instance has not been applied,
+  because "absent" about a project we never touched is a guess.
+- **Platfolio's own credentials go through the same door.** `PLATFOLIO_GITHUB_APP_ID`,
+  `PLATFOLIO_GITHUB_INSTALLATION_ID` and `PLATFOLIO_GITHUB_PRIVATE_KEY` are declared *by name* in
+  `compose.yaml` and delivered via `PUT …/secrets/{name}` into our own Railway project -- the composition
+  refuses to apply while they are absent, which is the design working, not a blocker to route around.
+
+`environment.yaml` is the authoritative list of variable names and their custody class (D52); `pnpm run
+environment:registry` fails if code reads a variable the registry does not declare, or the registry declares
+one nothing reads.
+
+## The templates are repositories, and this repository reads them
+
+There is no bundled copy of a template in this tree, and there is no publisher. `templates/` was deleted
+(maintainer's ruling, 2026-11-14; D60) and the three published repositories are the source of truth:
+
+| Template | Repository | Shape |
+| --- | --- | --- |
+| `starter-web` | `fractalsynapse/platfolio-starter-web` | `kind: web`, `mode: development` -- public UI + JSON API, managed Postgres |
+| `starter-worker` | `fractalsynapse/platfolio-starter-worker` | `kind: worker`, `mode: development` -- no inbound host, retained volume |
+| `shared-identity` | `fractalsynapse/platfolio-shared-identity` | `kind: web`, `mode: hosted` -- stock Keycloak, `provides: identity` |
+
+Platfolio consumes them the way it consumes a tenant's platform: through the source-control seam (D22), at a
+ref, one file at a time. `packages/manifest/src/template-catalog.ts` holds the name→repository mapping and the
+file list per template; `packages/manifest/test/templates.test.ts` reads each repository with `GitScm` -- the
+same `git` driver `POST …/instances/{id}/plan/from-repository` uses -- parses and validates it, builds a plan
+from it, and checks its registry against it. That is the double win the ruling asked for: platfolio's own
+parsing is exercised, and the scaffolds people actually fork are exercised, on every run.
+
+**These repositories are public and open source, and reading them needs no credential -- that is a requirement,
+not a convenience.** The three were found to be *private* while this change was being made (anonymous fetch →
+`401` → `GitScm` reports `kind=forbidden`), which is why the ruling was carried out rather than documented:
+visibility was set to public, then re-verified anonymously, with a full-history secret scan first. If the
+acceptance test ever needs a token, that is a finding about the repositories, not a configuration option. And
+because a public repository is a forkable one, the prose inside it -- `README.md`, `environment.yaml` -- is the
+tenant-facing contract in the strongest sense: `APP_SESSION_KEY` and `KEYCLOAK_ADMIN_PASSWORD` were both shipped
+into public artifacts while nothing read them.
+
+### Commands that no longer exist, and why
+
+`pnpm run templates:publish` and `pnpm run templates:check` are gone, together with
+`scripts/publish-templates.ts`, `scripts/check-template-publication.ts` and
+`scripts/template-manifest.ts`. **The parity gate is deleted because its subject is gone, not because drift was
+accepted**: it existed only to compare a bundled copy against a published copy, and with one copy there is
+nothing to keep in step. Nothing in this repository now claims those repositories match anything here, because
+nothing here is the thing they are supposed to match. What replaced the check is stronger in the way that
+matters -- the old gate compared bytes; the acceptance test asks whether platfolio can actually *parse,
+validate and host* what a tenant forks, which is the question a fork cares about.
+
+Two properties of the deleted arrangement are worth keeping as rules rather than as history:
+
+- **A published template is never mirror-deleted or force-pushed by us.** A fork adds files (its own Dockerfile,
+  CI, README) and a publisher that deleted "anything not in the source" would eat a tenant's work. Nothing here
+  writes to those repositories any more, so the rule holds by construction -- and the retirement list that
+  encoded it (`RETIRED_PATHS`) went with the publisher, because a declared retirement is only meaningful
+  beside a publisher that could forget it.
+- **A check that cannot run must not look like a check that passed.** The old `check-project.ts` carried an
+  "offline half" of publication integrity precisely because `templates:check` needed credentials and network.
+  The new gates keep that discipline in the opposite direction: the networked acceptance test **fails with the
+  driver's reason when a repository cannot be read** -- it never skips -- and the offline gate now asserts what
+  it can still see (our own registry exists and declares rows; no `.platfolio/` path returns; no code or
+  configuration reaches for a bundled `templates/` path). Verified by falsification, not by hope: pointing the
+  catalog at a ref that does not exist, at a repository that does not exist, and naming a source file the
+  published repository does not have each turn the named tests red with a different reason, and removing the
+  template's own source from the scan set turns the orphan-obligation rule red.
+
+Changing a template means editing its repository (and, if it is a new template, adding one catalog entry).
+`docs/design/03` describes what a template's `compose.yaml` must declare; the published repositories are the
+reference implementations of it.
+
+## The environment registry: one file per platform, at its root
+
+`environment.yaml` is both the **central registry** (D52) and, for a platform, its **obligations** (D33): custody,
+environments, defaults, and the wiring a deploy resolves. There used to be a second file —
+`.platfolio/environment.yaml` — with its own schema describing the same variables. It is gone, because two
+documents describing one fact drift, and because the registry used to *scan* the inventory for names: excluding
+it and re-running lost nothing, which meant the "source" was a copy.
+
+| Field | Meaning |
+| --- | --- |
+| `name` | the variable. **One row per name** — a second definition is a second custody claim, and parse order decides which wins |
+| `kind` | `value` / `secret` are obligations an operator supplies or defaults; `reference` / `output` are wiring the platform resolves and **must never appear on a panel asking a tenant to type** (D33) |
+| `secret` | the custody claim, not a guess: a name shaped like a credential is not proof, and `PLATFOLIO_DB_URL` carries a password in its userinfo (D4) |
+| `environments` | `all` — the only legal spelling of the full set — or a subset of `development \| staging \| production` |
+| `service` | which service reads it |
+| `required` / `default` / `enum` / `rotate` | the obligation's shape. Wiring cannot be `required`, and a secret cannot carry a `default` |
+| `database` / `output` / `from` | wiring targets: `database: app-db, output: DATABASE_URL`, or `from: identity#jwks` (D34) |
+| `deployedTo` | where the value lives: `railway:shared-variable`, `railway:reference`, `ci:secret`, `local:compose-overlay`, `host:shell` … |
+| `note` | provenance, or the judgement behind the row |
+
+Each platform carries its own at its root: ours is this repository's `environment.yaml`, and each published
+template carries one in its own repository (`fractalsynapse/platfolio-starter-web/environment.yaml` and its two
+siblings, D60). A platform's registry is authoritative **for that platform** -- shared-identity's `KC_DB_URL` is
+not a variable this control plane reads, and forcing it into our registry would recreate the duplication this
+rule exists to prevent. That is not a motto but a scan-set boundary: `environment:registry` discovers names from
+this repository's configuration only, so a template's variable cannot leak in the way `QUEUE_URL` once did
+through a bundled overlay; and the templates' own registries are validated where they live, by
+`packages/manifest/test/templates.test.ts` reading them through the seam.
+
+`pnpm run environment:registry` (in `check`, so in `verify`) fails on:
+
+- a variable referenced in configuration and **not declared**, and a declaration **nothing references**;
+- a **duplicate name**, or the full environment set written any way but `all`;
+- an obligation that contradicts itself: `kind: secret` with `secret: false`, a secret with a `default`, a
+  `reference` with no `database`, wiring marked `required`, a `kind` outside the four;
+- a platform registry that yields **no rows at all** — the vacuity guard. Three separate times this session a
+  check passed because it was parsing nothing (`git cherry -q` printing nothing; a malformed appended inventory
+  line producing zero entries; this function reading an old envelope name). A check that can pass by checking
+  nothing is worse than none, because it advertises coverage;
+- a secret with a **literal value** in a production-bearing file. A development overlay may hold a stand-in, and
+  the test is structural — URL userinfo must be dev-shaped — because a whitelist of "obviously fake" strings is
+  how a leak gets blessed.
+
+Judgements live in the `HUMAN` table inside the script, not in the generated file: hand-edit the output and the
+next `--emit` silently loses it. That is also where the 16 obligations moved with their notes, which is why they
+survive regeneration.
+
+Scope is deliberate. Prose, fixtures and spikes are excluded — an early pass applied a YAML-key regex to
+TypeScript and filled the registry with the provider's deployment-status vocabulary (`PENDING`, `NEEDS_APPROVAL`).
+And **no registry file is ever a discovery source**: a registry that feeds the derivation that produces it is a
+loop, not a check.
+
+## The environment registry (D52)
+
+`environment.yaml` at the repository root is the authoritative list of every variable platfolio reads or
+deploys:
+
+```yaml
+  - name: PLATFOLIO_GITHUB_PRIVATE_KEY
+    secret: true                          # a custody claim, not a guess
+    environments: [staging, production]   # development | staging | production, or all
+    deployedTo: railway:shared-variable   # where the value actually lives
+    note: "referenced by compose.yaml:69, apps/control-plane/src/index.ts:79"
+```
+
+`pnpm run environment:registry` (inside `pnpm run check`, so inside `verify`) fails on:
+
+- a variable referenced in configuration and **not declared** -- including the ones that look harmless but carry
+  credentials, which is why `DATABASE_URL` and `PLATFOLIO_DB_URL` are marked secret;
+- a declaration **nothing references** any more, because a registry that accretes memorials stops being trusted;
+- a variable **defined twice**, and the full environment set written any way except `environments: all` --
+  `appliesTo` is retired, and so are `ci`, `test` and `local` as environment names. Those three were never
+  environments: a laptop and a runner are both the development environment, and where a value lives is
+  `deployedTo`'s claim (`ci:secret`, `local:compose-overlay`, `host:shell`). The old file spelled one meaning
+  four ways, which is how a registry stops being searchable;
+- a secret with a **literal value** in a production-bearing file (D4: commit the name, let the provider hold the
+  value). A development overlay may hold a stand-in, and the rule is structural rather than a whitelist of
+  friendly strings: any URL userinfo must be dev-shaped, because a whitelist is how a leak gets blessed;
+- a secret whose `deployedTo` names no location that could hold it.
+
+Regenerating the skeleton (`tsx scripts/check-environment-registry.ts --emit`) is safe only because the
+judgement calls live in that script's `HUMAN` table, not in the file: hand-edit the output and the next
+`--emit` silently loses it.
+
+Scope is deliberate. Prose, fixtures and spikes are excluded -- an early pass scanned TypeScript for YAML keys
+and filled the registry with the provider's deployment-status vocabulary (`PENDING`, `NEEDS_APPROVAL`). A
+registry that invents variables nobody can set is worse than none, because people stop reading it.
+
+## Setting the control-plane endpoint (D47)
+
+Two places ask where the control plane lives, and neither has a default any more:
+
+- **`.github/workflows/platfolio-managed.yml`** reads `vars.PLATFOLIO_URL`. Set it per repository under
+  Settings → Secrets and variables → Actions → Variables, value like `https://api.example.com`. A guard step
+  fails the run naming that variable when it is unset, because an empty URL failing inside the action is a worse
+  first error than a missing-configuration message.
+- **`scripts/open-install-pr.ts`** takes `--url=` or `PLATFOLIO_URL`. No default: a committed one points every
+  install PR at whoever wrote it.
+
+`pnpm run check` rejects a generated Railway hostname anywhere in tracked files (`checkCommittedEndpoints`), so
+the endpoint cannot return as source. Synthetic sentinels and the provider's `.up.railway.app` suffix logic are
+allowed on purpose: the rule is about naming a deployment, not about the platform's vocabulary.
+
 ## Change workflow
 
 - Track changes in an issue with **observable acceptance**. Read-only analysis or a documentation
@@ -46,7 +420,7 @@ only substantive change from the starter's policy is scope: this is now an appli
 ## Branching and gating
 
 Every tier also runs `graphql:check`: each GraphQL document in the provider and the live-runner script
-is validated against a committed introspection snapshot (`api/railway-schema.json`, refreshable with
+is validated against a committed introspection snapshot (`packages/contracts/railway-graphql-schema.json`, refreshable with
 `scripts/refresh-railway-schema.ts`). This exists because Railway's API answers *unknown fields* with a
 validation error at runtime and *unknown payloads* with `status: applied` — so both classes of mistake are
 invisible until a tenant's apply fails or silently succeeds. The check is negative-tested against the four
@@ -83,7 +457,9 @@ unavailable or not applicable. Do not infer acceptance from a check that does no
 | Anything under `vendor/` | `npx -y tsx scripts/vendor-cordis.ts verify` must pass, and `check` must be reported. Local edits exist only as `vendor/patches/*.patch` |
 | Capability seams / `packages/contracts` (once created) | The seam's **conformance suite** against every implementation plus the test double; contracts-diff gate classifies the version bump; no framework import outside `packages/kernel` |
 | Manifest schema or renderers | Schema validation, secret-name lint, domain-conflict check, `railway config plan` against a scratch project, compose bring-up smoke test ([platform-manifest skill](../.agents/skills/platform-manifest/SKILL.md)) |
+| UI: components, layouts, page documents, signals, drafts, freshness | The six rules in [docs/ui-architecture.md](ui-architecture.md) via the [ui-architecture skill](../.agents/skills/ui-architecture/SKILL.md); `spec:check`, `api:check`, `api:types:check` and the page-schema suite green; then the gates in [11 §9](design/11-ui-components-and-page-model.md#9-the-conformance-checklist) that cover code actually in the tree. A gate whose package does not exist is reported *not run*, never passed |
 | Control-plane, provisioning, identity, billing or execution-plane behavior | [tenant-safety-check skill](../.agents/skills/tenant-safety-check/SKILL.md) run and reported; cross-tenant authorization tests; zero-secret path audit including logs and error payloads |
+| UI components, layouts, page documents, signals, drafts or freshness | The six rules in [ui-architecture.md](ui-architecture.md) via the [ui-architecture skill](../.agents/skills/ui-architecture/SKILL.md); `spec:check`, `api:check`, `api:types:check` and the page-schema suite green; then [11 §9's gates](design/11-ui-components-and-page-model.md#9-the-conformance-checklist) that cover code actually in the tree — a gate whose package does not exist is reported *not run*, never passed |
 | Database schema | Forward-only migration test from the previous revision, plus the documented rollback story |
 | Milestone 0 experiments | A record under `spikes/` with configuration, observed results, limits, and how to re-run it; a spike is not acceptance for a product capability |
 | Vendored framework upgrade | `plan --to <ref>` report reviewed (especially boundary files), then `apply`, `verify`, and the conformance suites |
@@ -92,12 +468,64 @@ unavailable or not applicable. Do not infer acceptance from a check that does no
 Environment notes for the current machine, not project requirements: Node is built without TypeScript
 support so `.ts` tooling runs via `tsx`; `npm` needs `npm_config_cache` pointed inside the workspace.
 
+The Node **version** is no longer one of those notes, and it is not spelled out in the workflows either:
+`.nvmrc` holds `22.22.1` — the runtime this suite was measured green on — every `actions/setup-node` step reads
+that file through `node-version-file`, and `scripts/check-project.ts` refuses a workflow that names a
+`node-version` of its own or a `.nvmrc` that carries anything but an exact `X.Y.Z`. Why that version and not the
+one Astro 7 asks for (`>=22.23.4`), and what accepting Astro 6.4.8 costs, is
+[01 § D66](design/01-product-and-decisions.md): the runtime is an environment, not a repository, and a change
+made in here cannot verify a Node it cannot run.
+
 ## Experimental work
 
 An authorized experiment answers a bounded question in isolated state — `spikes/` for code,
 `.research/` (gitignored) for retrieved evidence. Record configuration, versions and limits so the
 result is reproducible or falsifiable. Retaining experimental work as product requires the applicable
 acceptance and review above; a green spike does not establish delivery.
+
+## If `pnpm run <script>` fails before running anything
+
+A sandboxed or shared home can make pnpm's own version manager unwritable, and every wrapped command then
+dies with the same message regardless of which script you asked for:
+
+> `ERR_PNPM_STORE_DIR_OPEN_OPERATION_LOCK: lock the package-manager engine store … Read-only file system`
+
+That is not a failing gate. Each check is a plain `tsx` script and runs directly, which is what `verify`
+sequences:
+
+```
+npx -y tsx scripts/check-lockfile.ts          # lock:check
+npx -y tsx scripts/check-project.ts           # check
+npx -y tsx scripts/vendor-cordis.ts verify    # vendor:verify   (note: vendor-cordis, not check-vendor)
+npx -y tsx scripts/check-graphql-schema.ts    # graphql:check
+npx -y tsx scripts/check-api.ts               # api:check
+npx -y tsx scripts/gen-api-spec.ts --check    # spec:check   (write with --write; see spec:gen)
+npx -y tsx scripts/bundle-action.ts --check   # action:check
+npx -y tsc --noEmit -p tsconfig.json          # typecheck
+npx -y tsx --test --test-concurrency=1 packages/*/test/*.test.ts apps/*/test/*.test.ts
+npx -y tsx scripts/check-contracts.ts         # contracts:check
+```
+
+`--test-concurrency=1` belongs to the `test` script and to the line above, and it is not a performance dial. Two
+suites edit tracked source to prove the gates can bite, and a third suite that merely *imports* one of those files
+can be evaluated while the mutation is in flight -- which no waiting inside a test can prevent, because the import
+graph is built before the test body runs.
+[packages/ui/test/mutation-sandbox.ts](../packages/ui/test/mutation-sandbox.ts) serialises the mutators and heals a
+run that dies mid-mutation; [#263](https://github.com/fractalsynapse/platfolio/issues/263) is the change that would
+let the flag go.
+
+CI installs its own pnpm and is unaffected, so a locally unverifiable wrapper never excuses a merge: run the
+scripts directly, or don't merge. Record which you did.
+
+Two corrections to that, learned the hard way:
+
+- **pnpm can work here** when all of its writable state is inside the workspace, which is what a lockfile update
+  needs: `TMPDIR="$PWD/.tmp" npm_config_cache="$PWD/.cache/npm" npx -y pnpm@12.4.2 install --lockfile-only
+  --store-dir "$PWD/.cache/pnpm-store"`. The failures were the read-only default store *and* my own wrong flag —
+  `--lock-only` is not `--lockfile-only`, and pnpm's "did not run" is not a store problem.
+- **Dead code cannot come back**: `noUnusedLocals` and `noUnusedParameters` are on in the root `tsconfig.json`,
+  found after the sweep listed 29 dead declarations. An intentionally unused parameter is prefixed `_` — the
+  convention the compiler honours, rather than a comment claiming the value is deliberate.
 
 ## Release policy
 
@@ -109,6 +537,12 @@ Integration into `staging` does not close an implementation issue. When a releas
 - Prepare version and changelog updates on an issue branch with a `staging` PR. Only the maintainer
   approves and merges the release PR to `main`, and only they authorize publication. An agent may do
   that specific production merge only on express permission for that release.
+  - **Review gates are waived for the agent's own PRs while the first implementation is being built**
+    (D39). The agent merges to `staging` on green tests without waiting for a human and does not stop to
+    ask. This is process easing for a platform with no tenants, not an architecture change: the install PR
+    keeps its review shape because that is what a tenant will meet, and the two rules above still hold --
+    a Production run gates a tag, and a release to `main` needs the maintainer's permission for that
+    release. Revisit when the first real platform is hosted.
 - **Cut no tag on a commit that has not passed the Production workflow on `main`.** `production.yml`
   enforces this and also requires a root license file (D18: present on `staging`, reaches `main` with
   the next production integration).
@@ -122,6 +556,10 @@ Integration into `staging` does not close an implementation issue. When a releas
 
 A release that includes a new platform catalog entry must satisfy that platform's manifest CI gates;
   a release that changes a capability contract states the derived bump and why.
+- `check-contracts.ts --update` **classifies** before writing: removals or renames are refused unless passed
+  `--ack-breaking="<reason>"`, and the run prints the derived bump (`MAJOR` when anything was removed, `MINOR`
+  when only added). Before this, `--update` wrote whatever the diff contained and exited 0, so a breaking
+  removal and an additive line were indistinguishable in the log.
 - platfolio code and documents are **licensed under Apache-2.0** (D18). `LICENSE` at the root is that
   grant: never edit, move, or replace it as a side effect of tooling work, and treat any change to it
   as a maintainer decision. `vendor/cordis/LICENSE` (MIT, © 2021–present Shigma) is a third party's

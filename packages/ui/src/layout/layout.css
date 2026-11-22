@@ -1,0 +1,63 @@
+/*
+ * GENERATED FILE -- DO NOT EDIT. The writer is `renderLayoutCss()` in packages/ui/src/layout/primitives.ts.
+ *
+ * Source: packages/ui/src/layout/primitives.ts
+ * Input digest: sha256/dcbcce4d631820a8
+ *
+ * Reproduce with `pnpm run ui:css`; `pnpm run ui:css:check` fails when this stops matching the primitive
+ * table. Gate 9.3 audits this file too: it contains `@container` width queries and no `@media` width query,
+ * because a window breakpoint tells a component what device it is on and a container query tells it how much
+ * room it has.
+ */
+
+.ui-stack {
+  container-type: inline-size;
+  /* stack: Single ordered column: the default and the floor. One nested layout, and it is a stack. */
+}
+
+.ui-split {
+  container-type: inline-size;
+  /* split: Master + detail. Never two-up below 48rem: it degrades to a stack plus a pushed sheet. */
+}
+
+.ui-popout {
+  container-type: inline-size;
+  /* popout-sidebar: One context panel plus its stack. Read-mostly; floats over the edge mid-width, occupies a track wide. */
+}
+
+.ui-sheet {
+  container-type: inline-size;
+  /* overlay-sheet: The mobile stack entry: bottom sheet, dialog at mid widths, rail at wide. Same component, one contract, three homes. */
+}
+
+.ui-page {
+  container-type: inline-size;
+  /* full-page: Route-level document. The only primitive that survives a reload as itself. */
+}
+
+/* split adds simultaneity when its own container has room. Nothing appears here that is
+   not also reachable at the floor width -- rule 2, and gate 9.11 is the check on that claim. */
+@container (min-width: 48rem) {
+  .ui-split {
+    display: grid;
+    grid-template-columns: 24rem 1fr;
+  }
+}
+
+/* popout-sidebar adds simultaneity when its own container has room. Nothing appears here that is
+   not also reachable at the floor width -- rule 2, and gate 9.11 is the check on that claim. */
+@container (min-width: 64rem) {
+  .ui-popout {
+    display: grid;
+    grid-template-columns: 1fr 20rem;
+  }
+}
+
+/* overlay-sheet adds simultaneity when its own container has room. Nothing appears here that is
+   not also reachable at the floor width -- rule 2, and gate 9.11 is the check on that claim. */
+@container (min-width: 48rem) {
+  .ui-sheet {
+    justify-self: end;
+    inline-size: min(100%, 24rem);
+  }
+}

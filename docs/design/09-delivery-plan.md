@@ -116,7 +116,7 @@ E14 lands as part of M1 step 1, since "it started" is not evidence that a profil
 > "step 6" was the CI gate around generated IaC, and the deployment step is now closed too.
 > `RailwayInfraProvider.applyPlan` deployed platfolio's own pinned public image
 > (`ghcr.io/fractalsynapse/platfolio-status-api:staging` + digest) into the development workspace:
-> instance `live`, `https://status-production-54d3.up.railway.app` serving HTTPS with a Let's Encrypt
+> instance `live`, `https://<generated-railway-host>` serving HTTPS with a Let's Encrypt
 > certificate, `/version` reporting the deployed commit and the provider contract, and a second `applyPlan`
 > that changed nothing — idempotency demonstrated on a real registry-backed service rather than the
 > double. Certificate state came from reading `syncStatus` back, not from hostname inference. Sequence,
@@ -181,6 +181,19 @@ Depends on E1/E2/E5/E6.
 
 *Accept:* with platfolio's API stopped, `git push` still deploys; with platfolio running, a dispatch
 applies a plan and the attestation matches read-back state; a stale/forged attestation is rejected.
+
+## The connect loop has run once, end to end (2026-11-11)
+
+A `workflow_dispatch` against this repository started a GitHub-hosted job in environment `production`; the
+committed managed action fetched the plan from the live control plane, applied it through the real provider,
+and posted an attestation that was **accepted and stored** -- confirmed independently by `readState` on the
+provider. M2's flow in miniature, on platfolio's own tenant-shaped instance.
+
+Three limits, named rather than implied: it is not a tenant's repository; the runner's identity is **recorded
+and not verified** (#159); and the attestation's `release` fields read `0.0.0-dev` because a laptop chose the
+pins, not a release job (#146). What it establishes is that the parts fit -- dispatch inputs, hash comparison,
+credential boundary, single-use nonce, attestation round trip -- which is what the milestones assumed without
+evidence.
 
 ## Milestone 3 — control plane surface (2–3 weeks)
 
@@ -264,6 +277,23 @@ No billing decision blocks M1: OD1, OD3, OD4, OD5 and OI1–OI3 are accepted, an
 `/proprietary` boundary, and the trademark policy — plus **OD9**, the core-lineage choice from E9.
 
 
+## Teardown accounting closed (#111)
+
+`deleteInstance` now snapshots before removing anything and classifies each resource as `removed` by us,
+`releasedWithProject` (which on Railway includes every bucket, since no bucket delete mutation exists), or
+`orphans` — the last reserved for what is **still reachable** after `projectDelete`. Verified live: one
+service `removed`, one bucket `released`, `orphans: []` as a probed claim rather than an assumption. Refusals
+still land in `failures` with their reason, so #80's guarantee is intact and only the vocabulary moved.
+Evidence and the two mock bugs found along the way: [teardown-accounting-2026-11-10.md](../research/teardown-accounting-2026-11-10.md).
+
+## First tenant-shaped live run (2026-11-10)
+
+A reference platform manifest went `buildPlan` → `applyPlan` against Railway and came up: two services `live`, a managed database `live`, its volume attached, a bucket created, a generated domain with a certificate read back as issued — using platfolio's own published image in place of the templates' placeholder digests, so the run proves the hosting mechanism rather than a real platform boot. `verified` was **false**, for the one honest reason: the tenant had not supplied `APP_API_SIGNING_KEY`, reported with its environment and service (`secret-unavailable@environments.production.services.api.…`). Teardown left `orphans: [bucket:…]` and a refused `serviceDelete` on the database (#106 — no bucket delete mutation exists, so those are now reported as released with the project; #107 — ordering, now volumes-before-services and enforced by the double). A follow-up reporting gap became #111). Evidence: [research/tenant-run-2026-11-10.md](../research/tenant-run-2026-11-10.md).
+
+## M2 entry point
+
+The first tenant will be platfolio hosting platfolio: the repository root's `compose.yaml` (+ `compose.prod.yaml`, `.platfolio/`) is authored in the Compose format with its own inventory and a generated prod overlay, and round-trips through `parseCompose → applyInventory → buildPlan → validatePlan` with no issues (#113 offline half). The live half is the ordered runbook with its two browser-only steps marked: [14-first-connect-runbook.md](14-first-connect-runbook.md).
+
 ## Follow-on work accepted with D29–D31 (2026-11-09)
 
 Sequencing for the compose-first inversion. Step 7 is deliberately re-pointed: rather than writing
@@ -275,9 +305,9 @@ authored in the new one, so the format is tested by a system we actually operate
 | C1 | Compose input adapter | parse a Compose document into the existing intermediate model; subset acceptance plus named refusals; `x-platfolio` extension block |
 | C2 | Overlay generation | `compose.dev.yaml` and `compose.prod.yaml` produced, not hand-written; regenerate-and-compare as the drift gate |
 | C3 | Importer report | parse → merge → map → list every refusal and every behavioural difference before any plan is generated |
-| C4 | Step 7 as the experiment | `apps/status-api` authored in Compose, driven through provider to the same live state; compose-derived plan re-applied against the running instance must be a no-op |
-| C5 | Execution split | `workflow_dispatch` triggers, curated workflow updates as PRs, presence-only secret checks, structured workflow outputs, SHA-pinned actions |
+| C4 | Step 7 as the experiment | `apps/control-plane (was `apps/status-api`, deleted in favour of one API)` authored in Compose, driven through provider to the same live state; compose-derived plan re-applied against the running instance must be a no-op |
+| C5 | Execution split | **Trigger half done (#105).** `GithubWorkflowRunner`: `workflow_dispatch` with ref+inputs, run state normalised from status *and* conclusion, blob-hash drift on curated files (in-sync / changed / missing / unknown — a failed read is not a tenant edit), and **no log access at any layer**: no method, and a test asserting no request ever touches a logs or artifacts path |
 | C7 | Environment inventory (D33) | **Done (#100).** `packages/manifest/src/inventory.ts`: typed entries parsed, cross-checked against topology, folded into the manifest so `buildPlan` and the provider keep working untouched. `.platfolio/environment.yaml` ships on the generic reference template | `.platfolio/environment.yaml` with `reference`/`secret`/`value`/`output` kinds, defaults and applicability; replaces the authoring-layer `env`/`secrets` split; hard refusal on a credential-shaped `value` |
 | C8 | Secret write path (D32) | `PUT …/actions/secrets/NAME` from a request-borne value, presence via 204/404, and a UI offering rotate-and-rebind rather than replay |
-| C9 | Cross-instance binding (D34) | **Done (#101).** `packages/contracts/src/binding.ts`: requires-by-capability resolution, generation tracking for stale detection, secret outputs as state only, and a team rollup that answers "how many consumers still point at the old issuer". The two reference templates now declare a provider and a consumer of the same capability. Panel rendering is the remaining UI task | `provides`/`requires` by capability, binding records the supplier generation, credentials relayed once and re-issued on retry |
+| C9 | Cross-instance binding (D34) | **Done (#101).** `packages/contracts/src/binding.ts`: requires-by-capability resolution, generation tracking for stale detection, secret outputs as state only, and a team rollup that answers "how many consumers still point at the old issuer". The two reference templates now declare a provider and a consumer of the same capability. Panel rendering shipped with #104 (`buildBindingPanel`): counts per capability, per-consumer status, rebind and re-issue actions, and a structure that cannot carry a credential value | `provides`/`requires` by capability, binding records the supplier generation, credentials relayed once and re-issued on retry |
 | C6 | Runner option, if ever | in-tenant-account managed runner only (D31); nothing may depend on it |

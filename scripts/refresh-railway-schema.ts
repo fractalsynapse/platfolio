@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Refresh `api/railway-schema.json` from Railway's live introspection.
+ * Refresh `packages/contracts/railway-graphql-schema.json` from Railway's live introspection.
  *
  * Needs a workspace token in `.secrets/railway-workspace.token` (untracked; the credential-hygiene gate
  * refuses to track it). Introspection is public, but the token keeps the request inside the grant we
@@ -12,7 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
-const OUT = path.join(ROOT, 'api', 'railway-schema.json');
+const OUT = path.join(ROOT, 'packages', 'contracts', 'railway-graphql-schema.json');
 const TOKEN_FILE = path.join(ROOT, '.secrets', 'railway-workspace.token');
 
 if (!fs.existsSync(TOKEN_FILE)) {

@@ -1,0 +1,45 @@
+# D62's site service, expressed as a per-environment domain (D68).
+#
+# This is the stanza the real `compose.yaml` cannot yet carry: the site is a first-party `build:` service with
+# no published digest, so `platform:plan` refuses it for `no-artifact` (D54) -- a blocker OUT of scope here.
+# The fixture exists to prove the MODEL can express it once the digest lands: production serves the apex
+# `platfolio.dev`, staging serves `preview.platfolio.dev`, and saying both in one file no longer states one
+# environment's host twice. A pinned image stands in for the reported artifact so the file parses offline.
+#
+# Test input, not a catalog entry and not a project (D49): it lives under fixtures/ and names no real repository.
+name: platfolio-site-per-env
+services:
+  api:
+    image: ghcr.io/platfolio-fixtures/example-site-api:1.0.0@sha256:2c26b46b68ffc68ff99b453c1d30413411975222222222222222222222222222
+    expose: ["8080"]
+    x-platfolio:
+      public: true
+      domains: [api.platfolio.dev]
+      environments: [production, staging]
+  site:
+    image: ghcr.io/platfolio-fixtures/example-site-web:1.0.0@sha256:fcde3b7251fbb14751e63238b5c125a0d41d8cd98f00b204e9800998ecf8427e
+    expose: ["4321"]
+    x-platfolio:
+      public: true
+      # Production hosts live in `domains` -- that is their one home (D50).
+      domains: [platfolio.dev]
+      environments: [production, staging]
+      # Staging's host is said once, and it is NOT the name the rule would guess: stagingHost("platfolio.dev",
+      # "staging-") is `staging-platfolio.dev`, while D62 chose `preview.platfolio.dev`. environmentDomains wins.
+      environmentDomains:
+        staging: [preview.platfolio.dev]
+x-platfolio:
+  metadata:
+    name: platfolio-site-per-env
+    version: 1.0.0
+    title: Platfolio site per-environment fixture
+    summary: Proves a service can name its staging host instead of inheriting the derived one (D68).
+    kind: web
+    mode: development
+  environments:
+    production: { enabled: true, branch: main }
+    staging: { enabled: true, branch: staging }
+    preview: { enabled: false }
+  dns:
+    ownershipVerification: txt
+    apexPolicy: cname-flattening-only

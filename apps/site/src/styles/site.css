@@ -1,0 +1,131 @@
+/*
+ * The only stylesheet this app owns, and the shortest argument for it: every value below is either a token from
+ * `packages/ui/src/tokens.ts` (D63 — one place for colour, spacing, type and the line measure;
+ * `@platfolio/ui/tokens.css` is the generated sheet, and this file imports it rather than restating it) or a
+ * *structural* property of this shell's own furniture — `display`, `flex-direction`, `padding`, `border-bottom`.
+ *
+ * **What used to be here, and is not.** This file hand-rolled a `68ch` measure, `container-type: inline-size` on
+ * `main` and `@container (min-width: 48rem)` for the three-point row, because there was no content-layout
+ * primitive to import. `packages/ui/src/layout/content.ts` is that primitive now (#267 item 5): `ui-prose` is the
+ * measure plus the block rhythm, `ui-columns` is the group that is one column at the floor and three when its
+ * container has room, and the lengths they use are `--ui-measure-content` and `--ui-space-*`. The markup names the
+ * primitives; this stylesheet no longer owns a composition decision. That is the point — a breakpoint in an app is
+ * a second owner of one fact, and gate §D65 now refuses it by name.
+ *
+ * Gate §D65 reads this file and every `<style>` block in `apps/site/src/**.astro`, and refuses six shapes: a hex
+ * colour, an `rgb()`/`hsl()` call, a `px` length, a `font-family` whose value is not a `var(--ui-font-*)` token, a
+ * redeclared `--ui-*`, and a width `@media`/`@container` query or a hand-declared `container-type`. Each was
+ * falsified by planting it here and reading the named failure, so the rule is a gate and not a hope: `padding:
+ * 12px` in this app goes red and names the file, and so does planting the container query back — which it was,
+ * before the primitive existed, and the run that found nothing is recorded in the commit that added the rule.
+ *
+ * `rem` stays permitted where no token exists, and the reason a stricter gate is the wrong gate is argued in
+ * `layout/content.ts` rather than here: this package spells its own thresholds in rem, so refusing the unit in app
+ * CSS would refuse the architecture instead of the violation.
+ */
+@import '@platfolio/ui/tokens.css';
+@import '@platfolio/ui/content.css';
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--ui-color-bg);
+  color: var(--ui-color-text);
+  font-family: var(--ui-font-body);
+  line-height: var(--ui-leading-body);
+}
+
+.site-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--ui-space-4);
+  padding: var(--ui-space-4) var(--ui-space-6);
+  border-bottom: var(--ui-space-1) solid var(--ui-color-border);
+  flex-wrap: wrap;
+}
+
+.site-brand {
+  font-family: var(--ui-font-title);
+  color: var(--ui-color-on);
+  text-decoration: none;
+}
+
+.site-header nav {
+  display: flex;
+  gap: var(--ui-space-4);
+}
+
+/*
+ * The document column's only own property is its padding. The measure (`--ui-measure-content`), the block rhythm
+ * and the container the row below queries are `ui-prose`, declared in `packages/ui/src/layout/content.ts` and
+ * carried as a class on `<main>` in `src/layouts/page.astro` — which is why `page.astro` names a primitive and
+ * this file does not describe one.
+ */
+main {
+  padding: var(--ui-space-6);
+}
+
+.hero h1 {
+  font-family: var(--ui-font-headline);
+  line-height: var(--ui-leading-headline);
+  margin-block: 0;
+}
+
+.lede {
+  font-family: var(--ui-font-title);
+  line-height: var(--ui-leading-title);
+  margin-block: var(--ui-space-3) 0;
+}
+
+.actions,
+.fineprint {
+  font-family: var(--ui-font-caption);
+  line-height: var(--ui-leading-caption);
+}
+
+/*
+ * The three-point row used to be composed here: a `.three` class, a `container-type` on `main`, and a
+ * `@container (min-width: 48rem)` turning one column into three. All three are `ui-columns` now — the same
+ * threshold, the same tracks, the same gaps, as data in `CONTENT_TABLE` that gate §9.3 can read and an app
+ * stylesheet cannot quietly fork. See `packages/ui/src/layout/content.ts` for why the threshold lives there.
+ */
+.point h2 {
+  font-family: var(--ui-font-title);
+  line-height: var(--ui-leading-title);
+  margin-block: 0 var(--ui-space-2);
+}
+
+.status {
+  border-top: var(--ui-space-1) solid var(--ui-color-border);
+  padding-top: var(--ui-space-5);
+}
+
+.mono {
+  font-family: var(--ui-font-label);
+}
+
+a {
+  color: var(--ui-color-accent);
+}
+
+.site-footer {
+  padding: var(--ui-space-5) var(--ui-space-6);
+  border-top: var(--ui-space-1) solid var(--ui-color-border);
+  font-family: var(--ui-font-caption);
+  line-height: var(--ui-leading-caption);
+}
+
+/*
+ * The island's host. Everything inside this element is `packages/ui`'s doing — the five layout primitives, the
+ * registered components, the freshness label — and this app owns no rule that reaches past it.
+ */
+[data-platfolio-island] {
+  display: block;
+  min-height: var(--ui-space-8);
+}

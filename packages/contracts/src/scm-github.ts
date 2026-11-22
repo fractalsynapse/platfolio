@@ -1,4 +1,6 @@
+import { createSign, randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import { CONTRACT_VERSION } from './generated/contract-version.ts';
 
 /**
  * The source-control seam (D22). GitHub Apps and personal tokens differ in *custody*, not in the
@@ -21,12 +23,38 @@ export const AppPermissionsSchema = z.object({
   secrets: z.literal('write'),
   statuses: z.literal('write'),
   checks: z.literal('write'),
+  /**
+   * Held so platfolio can create the repository environments it manages secrets for, and so it can create
+   * tenant repositories in an organization. Measured: `PUT …/environments/{name}` answers 403 with
+   * `environments: write` alone, and requesting `administration` on a token that lacks it answers 422 -- so
+   * this grant is not optional for the capability, it is the only door. Accepted as D35 on the maintainer's
+   * decision that a control plane which cannot create a tenant's environments is not a control plane.
+   *
+   * Compensating controls, both already true of the write path: runtime tokens are minted per operation with
+   * the narrowest permission subset that works (measured: requesting contents/workflows/pull_requests yields
+   * exactly that) and are revoked at the end of the call; and OAuth/user consent remains outside platfolio.
+   *
+   * GitHub recommends the narrower `repository_creation` permission when creating repositories is all an app
+   * needs. Its manifest parameter name cannot be validated from outside a registration -- GitHub answers the
+   * identical 422 for an unknown permission and an ungranted one -- so it is NOT requested here, and the
+   * narrowing attempt is filed as a follow-up rather than risk breaking registration on an unproven key.
+   */
+  administration: z.literal('write'),
+  // No `repository_creation` permission is requested, because it does not exist: GitHub's published REST
+  // description has zero occurrences of the key (against 34 for `administration`). The docs describe a
+  // "Repository creation" permission behind a feature flag that never reached this schema, and an unknown
+ // manifest permission is what made GitHub reject the first registration outright (`single_file_permissions`).
+ // #130 stays open as a real limitation: platfolio can create an org repository and cannot see it afterwards,
+ // so tenant repositories arrive by installation selection (all repositories) or from the tenant. There is no
+ // permission-shaped workaround, and pretending otherwise cost a registration cycle.
 }).strict();
 
 /** What platfolio asks GitHub for. Kept one line per capability so a widening is a visible diff. */
 export const DEFAULT_APP_PERMISSIONS = {
   metadata: 'read', contents: 'write', pull_requests: 'write', workflows: 'write',
   actions: 'read', environments: 'write', secrets: 'write', statuses: 'write', checks: 'write',
+  // D35: environments and tenant repositories. See AppPermissionsSchema for why no narrower grant works.
+  administration: 'write',
 } as const satisfies z.infer<typeof AppPermissionsSchema>;
 
 export const RegistrationConfigSchema = z.object({
@@ -34,12 +62,68 @@ export const RegistrationConfigSchema = z.object({
   url: z.string().url(),
   /** Where GitHub hands the one-time code back. Must be reachable by the operator's browser. */
   callbackUrl: z.string().url(),
+  /**
+   * A webhook target that can actually receive deliveries -- a public host, or a smee.io channel while
+   * developing. Omitted means the app registers with no webhook at all, which is correct for v1.
+   */
+  webhookUrl: z.string().url().optional(),
+  /** Register under an organization rather than a personal account. */
+  org: z.string().min(1).optional(),
   setupUrl: z.string().url().optional(),
   description: z.string().min(1).default('Managed hosting control plane'),
   permissions: z.record(z.string(), z.string()).default({ ...DEFAULT_APP_PERMISSIONS }),
   /** v1 needs no inbound webhooks: connect reconciles by polling installations. */
   webhookActive: z.boolean().default(false),
 }).strict();
+
+/**
+ * GitHub's manifest keys, exactly as documented -- nothing else. Enforced by a strict schema because GitHub's
+ * rejection is one opaque line ("`single_file_permissions` is not a permitted key") naming only the **first**
+ * offender: three invented keys were shipped here before any could be observed, and `default_permissions` was
+ * a string where the docs define an object. An unknown key must fail locally, not in a browser screenshot.
+ *
+ * Source: https://docs.github.com/en/apps/sharing-github-apps/registering-a-github-app-from-a-manifest
+ */
+export const MANIFEST_KEYS = [
+  'name', 'url', 'hook_attributes', 'redirect_url', 'callback_urls', 'setup_url', 'description',
+  'public', 'default_events', 'default_permissions', 'request_oauth_on_install', 'setup_on_update',
+] as const;
+
+const PermissionAccess = z.enum(['read', 'write', 'admin']);
+
+export const AppManifestSchema = z.object({
+  name: z.string().min(1).optional(),
+  /** Required by GitHub: the app's homepage. */
+  url: z.string().url(),
+  /**
+   * Omit rather than point at a host that cannot answer. GitHub requires `url` *inside* this object, which
+   * is why an unused webhook is absent here instead of present and empty.
+   */
+  hook_attributes: z.object({ url: z.string().url(), active: z.boolean().default(true) }).strict().optional(),
+  redirect_url: z.string().url().optional(),
+  callback_urls: z.array(z.string().url()).max(10).optional(),
+  setup_url: z.string().url().optional(),
+  description: z.string().min(1).optional(),
+  public: z.boolean().optional(),
+  default_events: z.array(z.string().min(1)).optional(),
+  default_permissions: z.record(z.string(), PermissionAccess).optional(),
+  request_oauth_on_install: z.boolean().optional(),
+  setup_on_update: z.boolean().optional(),
+}).strict();
+export type AppManifest = z.infer<typeof AppManifestSchema>;
+
+/** The only exit for a manifest: validated against the documented key set before anything sees it. */
+export function buildAppManifest(candidate: Record<string, unknown>): AppManifest {
+  const parsed = AppManifestSchema.safeParse(candidate);
+  if (!parsed.success) {
+    const detail = parsed.error.issues.map((i) => `${i.path.map(String).join('.') || '(root)'}: ${i.message}`).join('; ');
+    throw new Error(`invalid GitHub App manifest -- ${detail}. Permitted keys: ${MANIFEST_KEYS.join(', ')}.`);
+  }
+  if (parsed.data.callback_urls && !parsed.data.redirect_url) {
+    throw new Error('invalid GitHub App manifest -- callback_urls without redirect_url leaves the one-time code nowhere to land');
+  }
+  return parsed.data;
+}
 
 export interface ScmDescriptor {
   kind: 'github-app' | 'github-pat';
@@ -64,38 +148,46 @@ export class GithubAppProvider implements ScmProvider {
   describe(): ScmDescriptor {
     return {
       kind: 'github-app',
-      contract: '1.0.0',
+      contract: CONTRACT_VERSION,
       // Only the credential-free operations are advertised until a real installation exists.
       operations: ['appManifest', 'registrationUrl', 'consumeRegistrationCallback', 'installUrl'],
     };
   }
 
-  appManifest(configInput: z.input<typeof RegistrationConfigSchema>): Record<string, unknown> {
+  appManifest(configInput: z.input<typeof RegistrationConfigSchema>): AppManifest {
     const c = RegistrationConfigSchema.parse(configInput);
-    return {
+    return buildAppManifest({
       name: c.name,
       url: c.url,
       description: c.description,
-      // GitHub's manifest shape: hook_attributes carries the webhook URL; v1 registers none it depends on.
-      hook_attributes: { url: c.callbackUrl },
+      // Webhooks are registered only when something can answer them. v1 polls installations, so the default
+      // is to omit the object entirely rather than accumulate failed deliveries in the tenant's UI.
+      ...(c.webhookUrl ? { hook_attributes: { url: c.webhookUrl, active: false } } : {}),
       redirect_url: c.callbackUrl,
       callback_urls: [c.callbackUrl],
       ...(c.setupUrl ? { setup_url: c.setupUrl } : {}),
       public: false,
-      default_permissions: 'read',
-      permissions: c.permissions,
-      events: [],
-      single_file_permissions: false,
-      request_verification: false,
-      // Recorded so a reviewer can see that nothing in v1 waits on an inbound delivery.
-      webhook_active: c.webhookActive,
-    };
+      // `default_permissions` is the documented object of permission-name to access level. This used to be
+      // `default_permissions: 'read'` with a separate `permissions` map, neither of which GitHub accepts --
+      // a shape invented before anything was checked against the schema.
+      default_permissions: c.permissions,
+      default_events: [],
+      request_oauth_on_install: false,
+    });
   }
 
+  /**
+   * The POST target for the manifest flow. GitHub's docs describe a link that **sends a POST** with the
+   * manifest as a form field; a GET with `?manifest=<base64>` is not the flow, and produced the "not a valid
+   * manifest" page we hit. `state` rides in the query, exactly as the documented form shows.
+   */
   registrationUrl(config: z.input<typeof RegistrationConfigSchema>, state: string): string {
     if (!/^[A-Za-z0-9._-]{16,}$/.test(state)) throw new Error('state must be an unguessable CSRF token');
-    const manifest = Buffer.from(JSON.stringify(this.appManifest(config)), 'utf8').toString('base64url');
-    return `https://github.com/settings/apps/new?manifest=${manifest}&socket=${encodeURIComponent(state)}`;
+    RegistrationConfigSchema.parse(config);
+    const org = z.string().min(1).optional().parse(config.org);
+    return org
+      ? `https://github.com/organizations/${org}/settings/apps/new?state=${encodeURIComponent(state)}`
+      : `https://github.com/settings/apps/new?state=${encodeURIComponent(state)}`;
   }
 
   consumeRegistrationCallback(query: Record<string, string>, expectedState: string): { code: string } {
@@ -120,9 +212,403 @@ export class GithubAppProvider implements ScmProvider {
 /** Self-hosters who will not install an App: same interface, personal credential, fewer operations. */
 export class GithubPatProvider implements ScmProvider {
   describe(): ScmDescriptor {
-    return { kind: 'github-pat', contract: '1.0.0', operations: ['installUrl'] };
+    return { kind: 'github-pat', contract: CONTRACT_VERSION, operations: ['installUrl'] };
   }
   installUrl(): string {
     throw new Error('a personal token has no app to install; use the App path for installation consent');
+  }
+}
+
+/**
+ * Local registration (issue #113, M2). GitHub's own tutorial uses `http://localhost:4567/...` as an app
+ * callback URL, so a localhost registration is supported and no tunnel is required for the flow platfolio
+ * actually needs -- installation authentication. Two facts drove the shape:
+ *
+ * - the manifest flow must be a **POST** to `github.com/settings/apps/new`; a GET link with `?manifest=`
+ *   (which is what the earlier helper produced) is not the documented flow, and
+ * - `hook_attributes.url` is documented as required *when the object is present*, so local mode can either
+ *   omit webhooks entirely or point them at a forwarding service like smee.io. platfolio polls installations
+ *   (D: no inbound webhook in v1), so an inactive or absent webhook is not a degraded setup.
+ */
+export interface LocalManifestOptions {
+  port: number;
+  hostname?: string;
+  /** A publicly reachable webhook target (for example a smee.io channel). Omit to register without one. */
+  webhookUrl?: string;
+  name?: string;
+  description?: string;
+  org?: string;
+}
+
+export function localDevManifest(options: LocalManifestOptions): AppManifest {
+  const origin = `http://${options.hostname ?? 'localhost'}:${String(options.port)}`;
+  // Same validated exit as the hosted path: a shape mistake should surface here, not as GitHub's page.
+  return buildAppManifest({
+    name: options.name ?? 'platfolio (local)',
+    url: origin,
+    description: options.description ?? 'Managed hosting control plane -- local development registration',
+    public: false,
+    callback_urls: [`${origin}/platfolio/callback`],
+    redirect_url: `${origin}/platfolio/callback`,
+    ...(options.webhookUrl ? { hook_attributes: { url: options.webhookUrl, active: false } } : {}),
+    default_permissions: { ...DEFAULT_APP_PERMISSIONS },
+    // No events: a polling app needs no deliveries, and an inactive webhook with subscribed events only
+    // produces redelivery noise in the tenant's UI.
+    default_events: [],
+    request_oauth_on_install: false,
+  });
+}
+
+/** Where GitHub wants the POST, and the state it must echo back. */
+export function localManifestTarget(org?: string): string {
+  return org ? `https://github.com/organizations/${org}/settings/apps/new` : 'https://github.com/settings/apps/new';
+}
+
+/**
+ * Exchange the one-time manifest code for the app's credentials. Documented as requiring no authentication
+ * -- reasonable, since the app does not exist until this call succeeds -- though GitHub does not state it
+ * in the imperative, so this is the one inference here and a 401 would be evidence against it rather than a
+ * mystery. The values are returned and written by the caller to a 0600 file; they are never logged.
+ */
+export interface ManifestExchangeResult {
+  appId: number;
+  slug: string;
+  clientId: string;
+  clientSecret: string;
+  /**
+   * Absent when the app registers with no webhook -- measured, because platfolio's local manifest omits
+   * `hook_attributes`. Requiring it here turned a successful registration into a failed run.
+   */
+  webhookSecret?: string;
+  privateKeyPem: string;
+}
+
+export async function exchangeManifestCode(code: string, fetchImpl: typeof globalThis.fetch = globalThis.fetch): Promise<ManifestExchangeResult> {
+  if (!/^[0-9a-f]{20,}$/i.test(code)) throw new Error('manifest code is not well-formed');
+  const response = await fetchImpl(`https://api.github.com/app-manifests/${encodeURIComponent(code)}/conversions`, {
+    method: 'POST',
+    headers: { accept: 'application/vnd.github+json', 'content-type': 'application/json', 'user-agent': 'platfolio' },
+    body: '{}',
+  });
+  if (!response.ok) throw new Error(`manifest exchange failed (${String(response.status)})`);
+  const body = await response.json() as Record<string, unknown>;
+  const missing = ['id', 'slug', 'client_id', 'client_secret', 'pem'].filter((k) => typeof body[k] !== 'string' && typeof body[k] !== 'number');
+  if (missing.length) {
+    // Key names only, never values. Without this a shape mismatch is unrecoverable, because the code has
+    // already been consumed by the call that failed -- the first version of this function turned a
+    // successful registration into a lost app by asserting a field GitHub does not send.
+    throw new Error(`manifest exchange response missing ${missing.join(', ')} (received keys: ${Object.keys(body).sort().join(', ') || 'none'})`);
+  }
+  return {
+    appId: Number(body.id),
+    slug: String(body.slug),
+    clientId: String(body.client_id),
+    clientSecret: String(body.client_secret),
+    ...(typeof body.webhook_secret === 'string' ? { webhookSecret: body.webhook_secret } : {}),
+    privateKeyPem: String(body.pem),
+  };
+}
+
+/**
+ * The RS256 JWT that authenticates the app itself (short-lived, `exp` <= 10 minutes per GitHub's docs).
+ * Only needed to read installations and mint installation tokens -- which is exactly the least-privilege
+ * boundary D25 claims, so the mechanism has to live in the contract layer where it can be tested.
+ */
+export function createAppJwt(input: { appId: number | string; privateKeyPem: string; now?: number; ttlSeconds?: number }): string {
+  const issuedAt = Math.floor((input.now ?? Date.now()) / 1000);
+  const ttl = input.ttlSeconds ?? 240;
+  if (ttl > 600) throw new Error('app JWTs must expire within 10 minutes');
+  const header = { alg: 'RS256', typ: 'JWT' };
+  const payload = { iat: issuedAt, exp: issuedAt + ttl, iss: String(input.appId), jti: randomUUID() };
+  const encode = (o: unknown) => Buffer.from(JSON.stringify(o), 'utf8').toString('base64url');
+  const signingInput = `${encode(header)}.${encode(payload)}`;
+  const signature = createSign('RSA-SHA256').update(signingInput).sign(input.privateKeyPem).toString('base64url');
+  return `${signingInput}.${signature}`;
+}
+
+/**
+ * Mint a short-lived installation access token (D25's least-privilege boundary, in code).
+ *
+ * Everything platfolio does *to a repository* -- the install pull request, workflow dispatch, secret writes --
+ * runs on this token, not on the app credential and not on anything long-lived. Two properties matter more
+ * than convenience:
+ *
+ * - **It can be scoped to the repositories the tenant chose.** GitHub clamps `repository_ids` to the
+ *   installation's selection, so asking for a repository the app cannot see yields an error rather than a
+ *   quieter, wider token.
+ * - **It should be revoked when the work finishes.** One hour is GitHub's cap and our default; the caller can
+ *   delete it immediately, which is why the expiry is returned instead of being assumed.
+ */
+export interface InstallationTokenRequest {
+  appId: number;
+  privateKeyPem: string;
+  installationId: number;
+  /** Restrict to these repository names. Omit to accept the installation's own selection. */
+  repositories?: string[];
+  /** Narrow the permissions to what one operation needs; GitHub clamps to the installation's grants. */
+  permissions?: Record<string, 'read' | 'write'>;
+  fetch?: typeof globalThis.fetch;
+}
+
+export interface InstallationToken {
+  token: string;
+  expiresAt: string;
+  repositorySelection: string;
+}
+
+export async function createInstallationAccessToken(request: InstallationTokenRequest): Promise<InstallationToken> {
+  const fetchImpl = request.fetch ?? globalThis.fetch;
+  const body: Record<string, unknown> = {};
+  if (request.repositories) body.repository_names = request.repositories;
+  if (request.permissions) body.permissions = request.permissions;
+  const response = await fetchImpl(`https://api.github.com/app/installations/${String(request.installationId)}/access_tokens`, {
+    method: 'POST',
+    headers: {
+      // The app JWT authorizes the *request* for a token; it is never used to call repository endpoints.
+      authorization: `Bearer ${createAppJwt({ appId: request.appId, privateKeyPem: request.privateKeyPem })}`,
+      accept: 'application/vnd.github+json',
+      'content-type': 'application/json',
+      'user-agent': 'platfolio',
+    },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const detail = (await response.text().catch(() => '')).slice(0, 200).replace(/\s+/g, ' ');
+    throw new Error(`installation token request failed (${String(response.status)})${detail ? `: ${detail}` : ''}`);
+  }
+  const data = await response.json() as { token?: string; expires_at?: string; repository_selection?: string };
+  if (!data.token || !data.expires_at) throw new Error('installation token response missing token or expires_at');
+  return { token: data.token, expiresAt: data.expires_at, repositorySelection: data.repository_selection ?? 'unknown' };
+}
+
+/** Delete an installation token early. Success is 204 with no body; anything else is reported. */
+export async function revokeInstallationAccessToken(input: { token: string; fetch?: typeof globalThis.fetch }): Promise<void> {
+  const fetchImpl = input.fetch ?? globalThis.fetch;
+  const response = await fetchImpl('https://api.github.com/installation/token', {
+    method: 'DELETE',
+    headers: {
+      authorization: `Bearer ${input.token}`,
+      accept: 'application/vnd.github+json',
+      'user-agent': 'platfolio',
+    },
+  });
+  if (response.status !== 204 && response.status !== 401 && response.status !== 404) {
+    throw new Error(`installation token revocation returned ${String(response.status)}`);
+  }
+}
+
+/**
+ * ## Reading a tenant's declared platform (the middle of #172)
+ *
+ * platfolio has always known what it intends to deploy -- `buildPlan` turns a Compose document into an
+ * `InfraPlan` in-process. What it could not do was obtain that document for a repository it does not own, so
+ * the step from "a tenant installed platfolio" to "platfolio dispatched something" lived in an operator's
+ * shell (`open-install-pr.ts --platform <local checkout>`), reading the maintainer's filesystem instead of the
+ * tenant's repository. That is the gap this closes: the control plane reads the file, from a ref, over an API.
+ *
+ * Evidence tiers, because three of these statuses were inferred from GitHub's docs rather than met:
+ * `not-found` and `forbidden` are measured (the contents endpoint answers 404 for a missing path AND for a
+ * repository the installation cannot see -- which is why the two are kept distinguishable only when a
+ * directory listing succeeds; see `repositoryVisible`). `too-large` is documented (GitHub omits `content` and
+ * sets `size` above 1 MiB) and not yet provoked. A 409 has been seen only for ref/SHA mismatches in other
+ * endpoints and is reported as `ref-not-found` on GitHub's own wording, not on ours.
+ */
+export interface RepositoryFileRequest {
+  appId: number;
+  privateKeyPem: string;
+  installationId: number;
+  /** `owner/name`, exactly as GitHub spells it. */
+  repo: string;
+  /** Branch, tag, or 40-character commit SHA. A tag is allowed but platfolio pins commits (D29). */
+  ref: string;
+  /** Path within the repository, e.g. `compose.yaml`. No leading slash. */
+  path: string;
+  fetch?: typeof globalThis.fetch;
+}
+
+export interface RepositoryFile {
+  path: string;
+  ref: string;
+  repo: string;
+  /** Blob SHA GitHub reports -- the identity of THIS content, useful for cache and for a pinned read-back. */
+  sha: string;
+  size: number;
+  content: string;
+}
+
+export type RepositoryReadFailure =
+  | { kind: 'not-found'; detail: string }
+  /** The installation exists but cannot see this repository: the #130 limit, surfaced instead of guessed. */
+  | { kind: 'forbidden'; detail: string }
+  | { kind: 'ref-not-found'; detail: string }
+  /** Present but unreadable as a single file -- a directory, a submodule, or GitHub's 1 MiB cutoff. */
+  | { kind: 'not-a-file'; detail: string }
+  | { kind: 'too-large'; detail: string };
+
+export class RepositoryReadError extends Error {
+  readonly failure: RepositoryReadFailure;
+  readonly status: number;
+  constructor(failure: RepositoryReadFailure, status: number) {
+    super(`${failure.kind}: ${failure.detail}`);
+    this.name = 'RepositoryReadError';
+    // Assigned rather than declared as constructor parameters: `erasableSyntaxOnly` rejects parameter
+    // properties, because these files run through Node's type stripping and nothing else would emit the
+    // assignments. The compiler caught it immediately, which is the point of having the flag on.
+    this.failure = failure;
+    this.status = status;
+  }
+}
+
+export async function readRepositoryFile(request: RepositoryFileRequest): Promise<RepositoryFile> {
+  const fetchImpl = request.fetch ?? globalThis.fetch;
+  if (!/^[^/]+\/[^/]+$/.test(request.repo)) throw new Error(`repo must be owner/name, got "${request.repo}"`);
+  if (!request.ref) throw new Error('a repository file read needs a ref; platfolio never reads a moving default');
+  const path = request.path.replace(/^\/+/, '');
+  const token = await createInstallationAccessToken({
+    appId: request.appId,
+    privateKeyPem: request.privateKeyPem,
+    installationId: request.installationId,
+    // `contents: read` only. Minted per call and revoked in the finally below, which is the D24 discipline
+    // applied to platfolio's own credentials rather than only to the tenant's.
+    permissions: { contents: 'read' },
+    // Passed explicitly. Omitting it is what the conformance test caught: the *file* call honoured the
+    // injected transport while the token mint did not, so a unit test signed a fabricated appId and sent it to
+    // the real api.github.com. Any seam whose helpers can reach the network needs the transport threaded
+    // through every call, or its tests are partly live whether anyone intended that or not.
+    fetch: fetchImpl,
+  });
+  try {
+    const url = `https://api.github.com/repos/${request.repo}/contents/${path.split('/').map(encodeURIComponent).join('/')}?ref=${encodeURIComponent(request.ref)}`;
+    const response = await fetchImpl(url, {
+      headers: {
+        authorization: `Bearer ${token.token}`,
+        accept: 'application/vnd.github+json',
+        'user-agent': 'platfolio',
+      },
+    });
+    if (response.status === 404) {
+      // Best-effort, and labelled as such: GitHub's contents endpoint answers the identical 404 with
+      // `{"message":"Not Found"}` for a missing path AND for a ref that does not resolve, so this match can
+      // only fire on wording we have NOT observed. It is kept because some GitHub surfaces do spell it out
+      // (git/refs endpoints), and because a provider that does say so should be believed. When it does not,
+      // the fall-through below reports `not-found` with the ref named in the detail, which is the honest limit
+      // of what the transport offers. Nothing here claims a distinction GitHub refuses to make.
+      const probe = await response.clone().json().catch(() => ({}) as unknown) as { message?: string };
+      if (/reference name is not found|not a valid object name|Invalid git ref/i.test(probe.message ?? '')) {
+        throw new RepositoryReadError({ kind: 'ref-not-found', detail: `${request.repo}: ${String(probe.message)}` }, 404);
+      }
+      // GitHub cannot tell us which of the two remaining meanings it intends without a second call, and the
+      // second call is the honest fix rather than a guess: if the repository root lists, the file is missing;
+      // if not, we are looking at an installation that cannot see this repository.
+      const visible = await repositoryVisible(request.repo, fetchImpl, token.token);
+      throw new RepositoryReadError(visible
+        ? { kind: 'not-found', detail: `${request.repo}@${request.ref} has no file at "${path}"` }
+        : { kind: 'forbidden', detail: `the platfolio GitHub App installation cannot see ${request.repo}; add it to the installation's repository selection (#130)` }, 404);
+    }
+    if (response.status === 403) {
+      throw new RepositoryReadError({ kind: 'forbidden', detail: `${request.repo}: GitHub refused the read (rate limit or installation permission) -- ${truncate(await response.text())}` }, 403);
+    }
+    if (!response.ok) {
+      const text = truncate(await response.text());
+      const kind = /reference name is not found|invalid ref/i.test(text) ? 'ref-not-found' : 'not-a-file';
+      throw new RepositoryReadError({ kind, detail: `contents read failed (${String(response.status)}): ${text}` }, response.status);
+    }
+    const body = await response.json() as Record<string, unknown>;
+    if (Array.isArray(body) || body.type !== 'file') {
+      throw new RepositoryReadError({ kind: 'not-a-file', detail: `"${path}" is ${String(body.type ?? 'a collection')}, not a file` }, response.status);
+    }
+    const size = typeof body.size === 'number' ? body.size : 0;
+    if (typeof body.content !== 'string') {
+      // GitHub's truncation: `content` is omitted past 1 MiB. A manifest is nowhere near that, so refusing
+      // beats silently deploying half a document.
+      throw new RepositoryReadError({ kind: 'too-large', detail: `${path} is ${String(size)} bytes and GitHub returned no inline content (>1 MiB); fetch it as an archive instead` }, response.status);
+    }
+    return {
+      path,
+      ref: request.ref,
+      repo: request.repo,
+      sha: String(body.sha ?? ''),
+      size,
+      // GitHub's base64 arrives with embedded newlines, which Buffer tolerates and atob does not.
+      content: Buffer.from(body.content.replace(/\s+/g, ''), 'base64').toString('utf8'),
+    };
+  } finally {
+    // A failed revocation must not turn a successful read into an error -- the response is already paid for.
+    // It is not silent in the way that matters: the token is minted with the narrowest permissions that work
+    // and expires within the hour regardless, so the residual exposure is bounded by construction rather than by
+    // this call succeeding. What it must NOT be is a mystery: if GitHub changes this endpoint, the lifecycle
+    // test in scm-conformance.test.ts is where that shows up.
+    // Same reasoning as the read path above: bounded exposure, and the lifecycle test guards the endpoint.
+    await revokeInstallationAccessToken({ token: token.token, fetch: fetchImpl }).catch(() => undefined);
+  }
+}
+
+async function repositoryVisible(repo: string, fetchImpl: typeof globalThis.fetch, token: string): Promise<boolean> {
+  try {
+    const r = await fetchImpl(`https://api.github.com/repos/${repo}`, { headers: { authorization: `Bearer ${token}`, accept: 'application/vnd.github+json', 'user-agent': 'platfolio' } });
+    return r.ok;
+  } catch {
+    return false;
+  }
+}
+
+function truncate(text: string): string {
+  return text.replace(/\s+/g, ' ').slice(0, 180);
+}
+
+/**
+ * Ask GitHub to run the tenant's managed workflow.
+ *
+ * This is the half of the loop that was never a script's business: platfolio decides what should happen, the
+ * tenant's own repository executes it with the tenant's own credentials. Two properties matter and both were
+ * measured in the earlier tenant run (#149, E23): the workflow must exist on the repository's DEFAULT branch
+ * or GitHub will not find it at all -- a 404 that reads like "no such workflow" but means "not installed
+ * yet" -- and dispatch `inputs` are strings, so anything structured arrives serialized.
+ */
+export interface WorkflowDispatchRequest {
+  appId: number;
+  privateKeyPem: string;
+  installationId: number;
+  repo: string;
+  /** Workflow file name, e.g. `platfolio-managed.yml`. */
+  workflow: string;
+  /** Branch or tag to run on. GitHub rejects a ref that lacks the workflow. */
+  ref: string;
+  inputs: Record<string, string>;
+  fetch?: typeof globalThis.fetch;
+}
+
+export type WorkflowDispatchResult = { kind: 'requested'; status: number } | { kind: 'workflow-not-found'; detail: string } | { kind: 'forbidden'; detail: string };
+
+export async function dispatchWorkflowRun(request: WorkflowDispatchRequest): Promise<WorkflowDispatchResult> {
+  const fetchImpl = request.fetch ?? globalThis.fetch;
+  const token = await createInstallationAccessToken({
+    appId: request.appId,
+    privateKeyPem: request.privateKeyPem,
+    installationId: request.installationId,
+    // actions: write is not in the app's permission set (it asks for actions: read); GitHub clamps the token
+    // to what the installation grants, and dispatching a run needs `actions: write`. Requested here so the
+    // refusal, if it comes, names the gap instead of surfacing as a mysterious 403 later.
+    permissions: { actions: 'write', contents: 'read' },
+    fetch: fetchImpl,
+  });
+  try {
+    const response = await fetchImpl(
+      `https://api.github.com/repos/${request.repo}/actions/workflows/${encodeURIComponent(request.workflow)}/dispatches`,
+      {
+        method: 'POST',
+        headers: { authorization: `Bearer ${token.token}`, accept: 'application/vnd.github+json', 'content-type': 'application/json', 'user-agent': 'platfolio' },
+        body: JSON.stringify({ ref: request.ref, inputs: request.inputs }),
+      },
+    );
+    // GitHub answers 204 with no body on success. Anything else is information, not silence.
+    if (response.status === 204) return { kind: 'requested', status: response.status };
+    const detail = truncate(await response.text());
+    if (response.status === 404) {
+      return { kind: 'workflow-not-found', detail: `${request.repo} has no workflow "${request.workflow}" on ${request.ref}. GitHub enumerates workflows from the default branch only (#149) -- an install PR that has not been merged looks identical to a typo.` };
+    }
+    return { kind: 'forbidden', detail: `dispatch refused (${String(response.status)}): ${detail}` };
+  } finally {
+    await revokeInstallationAccessToken({ token: token.token, fetch: fetchImpl }).catch(() => undefined);
   }
 }

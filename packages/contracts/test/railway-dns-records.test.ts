@@ -10,7 +10,6 @@ function plan(): InfraPlan {
   for (const environment of p.environments) {
     environment.databases = [];
     environment.buckets = [];
-    environment.cloneFrom = undefined;
     for (const service of environment.services) {
       service.image = 'docker.io/library/nginx:alpine';
       service.digest = `sha256:${'c'.repeat(64)}`;
@@ -33,9 +32,9 @@ test('the required CNAME value is the provider\'s routing host, copied through u
   assert.ok(domain, 'the custom domain is reported');
   const traffic = (domain.records ?? []).find((r) => r.purpose === 'traffic');
   assert.ok(traffic, 'the traffic-routing record is surfaced to the tenant');
-  // The mock mirrors the measured response: the target is `1ggsepht.up.railway.app`, which is NOT
+  // The mock mirrors the measured response: the target is `verify-target.up.railway.app`, which is NOT
   // derivable from the service or environment name. Anything that synthesised it would fail here.
-  assert.equal(traffic.value, '1ggsepht.up.railway.app');
+  assert.equal(traffic.value, 'verify-target.up.railway.app');
   assert.equal(traffic.type, 'CNAME');
   assert.equal(traffic.fqdn, CUSTOM);
   assert.equal(traffic.host, 'probe', 'the short label a DNS console asks for');

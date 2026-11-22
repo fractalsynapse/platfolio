@@ -19,6 +19,22 @@ export interface ComposeIssue { path: string; code: string; message: string }
 
 export interface ParsedCompose { manifest?: Manifest; issues: ComposeIssue[] }
 
+/**
+ * How a first-party image gets its digest (D54).
+ *
+ * A service with `build:` is compiled by the platform's own pipeline, and for those the committed document
+ * need not carry the digest. A digest in source control is a fact about a registry that can go stale -- which
+ * is what #84 and two stale pins were about, and what forced every fork to inherit CI that writes files back
+ * into itself (#217). Instead the builder reports the artifact and this resolver hands it to the parse.
+ *
+ * A service without `build:` is third-party (Keycloak, nginx): nobody in the tenant's pipeline compiles it, so
+ * there is nothing to report and the document must pin the digest. That asymmetry is the whole rule, and why
+ * the resolver is keyed by service name and returns either a full `image@digest` or nothing.
+ */
+export interface ComposeOptions {
+  resolveArtifact?: (service: string) => string | undefined;
+}
+
 /** Compose service keys we map. Anything absent from both lists is reported as unknown, not ignored. */
 const SERVICE_ACCEPTED = ['image', 'build', 'command', 'entrypoint', 'working_dir', 'environment', 'expose', 'ports', 'healthcheck', 'volumes', 'depends_on', 'deploy', 'labels', 'networks', 'restart'];
 
@@ -120,7 +136,7 @@ function scanService(name: string, svc: Rec, issues: ComposeIssue[]): void {
 }
 
 /** Read a Compose document (or an ordered list of overlay documents, merged as Compose merges) into a manifest. */
-export function parseCompose(texts: string | string[]): ParsedCompose {
+export function parseCompose(texts: string | string[], options: ComposeOptions = {}): ParsedCompose {
   const issues: ComposeIssue[] = [];
   const list = Array.isArray(texts) ? texts : [texts];
   const docs: Rec[] = [];
@@ -160,11 +176,29 @@ export function parseCompose(texts: string | string[]): ParsedCompose {
   const meta = isRec(xp.metadata) ? xp.metadata as Rec : {};
 
   const outServices: Rec = {};
-  const volumes: Rec[] = Array.isArray(resources.volumes) ? resources.volumes as Rec[] : [];
+  // Declared separately from the mounts discovered below, and copied: this array was the *same object* as
+  // resources.volumes, so every mount pushed into it mutated the declaration. The dedupe then compared a
+  // list against itself and reported one volume where the author wrote two views of one disk.
+  const declaredVolumes: Rec[] = Array.isArray(resources.volumes) ? [...(resources.volumes as Rec[])] : [];
+  const mounts: Rec[] = [];
   for (const [name, raw] of Object.entries(services)) {
     const svc = raw as Rec;
     scanService(name, svc, issues);
     const svcX = isRec(svc['x-platfolio']) ? svc['x-platfolio'] as Rec : {};
+
+    // A map-shaped `domains` is refused by name, not dropped. The field is a list of hosts; the per-environment
+    // form is a DIFFERENT field (`environmentDomains`, D68) keyed by environment. Reading a map here would hit
+    // the `Array.isArray(...) ? ... : []` below and silently produce a service with no hosts -- one plan short,
+    // nothing malformed about it, exactly the "public: true got swallowed" shape this file has been fixed for
+    // before. Two spellings of one fact is the bug; the refusal names the field that owns the claim.
+    if ('domains' in svcX && !Array.isArray(svcX.domains)) {
+      issues.push({
+        path: `services.${name}.x-platfolio.domains`,
+        code: 'compose-domains-must-be-a-list',
+        message: `"${name}.x-platfolio.domains" is a map, but the production host list is a flat list. Per-environment hosts go in \`environmentDomains: { <environment>: [hosts] }\` (D68); \`domains\` itself may not be keyed by environment`,
+      });
+      continue;
+    }
 
     // A managed marker turns a service into a provider-provisioned resource: locally it is a container,
     // hosted it is the provider's managed equivalent. Same name, same interface, different guarantees.
@@ -177,14 +211,24 @@ export function parseCompose(texts: string | string[]): ParsedCompose {
       continue;
     }
 
-    const image = typeof svc.image === 'string' ? svc.image : undefined;
+    const isBuilt = svc.build !== undefined && svc.build !== null;
+    const committed = typeof svc.image === 'string' ? svc.image : undefined;
+    // A built service takes its artifact from the resolver when one exists. A committed digest is still
+    // honoured, because the CLI and the plan cache have no resolver; what changed is that the committed digest
+    // is no longer REQUIRED for a fork to be installable (D54).
+    const image = (isBuilt ? options.resolveArtifact?.(name) : undefined) ?? committed;
     if (!image) {
-      issues.push({ path: `services.${name}.image`, code: 'compose-image-unpinned', message: 'no image: the hosted model needs the prod overlay (compose.prod.yaml) to supply the release pipeline\'s pinned image' });
+      issues.push({ path: `services.${name}.image`, code: isBuilt ? 'no-artifact' : 'compose-image-unpinned',
+        message: isBuilt
+          // The actionable form of the rule: a build with no reported artifact is not a schema error, it is a
+          // pipeline that has not run yet. Say which, so the operator publishes rather than guesses.
+          ? `service "${name}" builds an image and none has been reported for it: publish one (POST /api/v1/instances/{instanceId}/artifacts) and the plan resolves. A digest is deliberately not committed to source control (D54)`
+          : 'no image: the hosted model needs either a reported artifact for a build, or a digest-pinned image for a third-party service' });
       continue;
     }
     const { image: repo, digest } = splitImage(image);
     if (!digest) {
-      issues.push({ path: `services.${name}.image`, code: 'compose-image-unpinned', message: `"${repo}" has no @sha256 digest; a tag is mutable and a plan that trusts one can be moved under a tenant (D16)` });
+      issues.push({ path: `services.${name}.image`, code: 'compose-image-unpinned', message: `"${repo}" has no @sha256 digest; a tag is mutable and a plan that trusts one can be moved under a tenant (D16)${isBuilt ? ' -- report the built artifact instead of pinning a tag by hand (D54)' : ''}` });
       continue;
     }
     const deploy = isRec(svc.deploy) ? svc.deploy as Rec : {};
@@ -197,7 +241,28 @@ export function parseCompose(texts: string | string[]): ParsedCompose {
       digest,
       port,
       ...(healthPathOf(svc.healthcheck) ? { healthPath: healthPathOf(svc.healthcheck) } : {}),
-      ...(typeof svc.command === 'string' ? { start: svc.command } : {}),
+      // A Compose `command` is canonically a LIST (`["start", "--x"]`), and a string is the other accepted
+      // form. Reading only the string form silently dropped every list-valued command, which is how the
+      // hosted Keycloak came up with no arguments at all and printed its own usage text -- the provider had a
+      // correct `startCommand` path waiting for a value that never arrived. Elements containing whitespace are
+      // quoted because Railway parses this string with a shell.
+      ...(() => {
+        const command = svc.command;
+        if (typeof command === 'string') return command.length > 0 ? { start: command } : {};
+        if (!Array.isArray(command) && !Array.isArray(svc.entrypoint) && typeof svc.entrypoint !== 'string') return {};
+        // Entrypoint and command are composed into ONE provider start command, and the reason is a semantics
+        // clash measured on 2026-11-13 by running the same description twice: Docker appends `command` to the
+        // image's ENTRYPOINT, while Railway's `startCommand` REPLACES both and is run as a shell. Writing the
+        // full path as the command worked on Railway and produced `Unknown option: '/opt/keycloak/bin/kc.sh'`
+        // locally; writing the bare argument worked locally and produced an instant exit with no logs there.
+        // Stating both parts is the only form that means the same thing in each runtime, which is what D50's
+        // "one specification" actually requires -- it is not about file locations, it is about the semantics
+        // surviving the move.
+        const parts = [...(Array.isArray(svc.entrypoint) ? svc.entrypoint : typeof svc.entrypoint === 'string' ? [svc.entrypoint] : []),
+          ...(Array.isArray(command) ? command : typeof command === 'string' ? [command] : [])].map(String);
+        if (parts.length === 0) return {};
+        return { start: parts.map((p) => (/\s/.test(p) ? `"${p.replace(/"/g, '\"')}"` : p)).join(' ') };
+      })(),
       ...(typeof svcX.preDeploy === 'string' ? { preDeploy: svcX.preDeploy } : {}),
       ...(typeof svcX.rootDirectory === 'string' ? { rootDirectory: svcX.rootDirectory } : {}),
       ...(asNum(deploy.replicas) ? { replicas: asNum(deploy.replicas) } : {}),
@@ -206,6 +271,11 @@ export function parseCompose(texts: string | string[]): ParsedCompose {
       secrets: Array.isArray(svcX.secrets) ? svcX.secrets : [],
       references: Array.isArray(svcX.references) ? svcX.references : [],
       ...(Array.isArray(svcX.environments) ? { environments: svcX.environments } : {}),
+      // Per-environment values (D56): environment name -> the entries of `environment` it replaces there.
+      ...(isRec(svcX.environmentValues) ? { environmentValues: svcX.environmentValues as Record<string, Record<string, string>> } : {}),
+      // Per-environment hosts (D68): environment name -> the full host list that environment serves, replacing
+      // the derivation for that environment only. The sibling of `environmentValues`, same shape.
+      ...(isRec(svcX.environmentDomains) ? { environmentDomains: svcX.environmentDomains as Record<string, string[]> } : {}),
       ...(typeof svcX.ownership === 'string' ? { ownership: svcX.ownership } : {}),
       domains: Array.isArray(svcX.domains) ? svcX.domains : [],
       dependsOn: Array.isArray(svc.depends_on) ? svc.depends_on.map(String) : Object.keys(isRec(svc.depends_on) ? svc.depends_on as Rec : {}),
@@ -214,7 +284,7 @@ export function parseCompose(texts: string | string[]): ParsedCompose {
     for (const vol of asArr(svc.volumes)) {
       const spec = typeof vol === 'string' ? vol : '';
       const [vname, mount] = spec.split(':');
-      if (vname && mount) volumes.push({ name: vname, service: name, mountPath: mount });
+      if (vname && mount) mounts.push({ name: vname, service: name, mountPath: mount });
     }
   }
 
@@ -224,15 +294,24 @@ export function parseCompose(texts: string | string[]): ParsedCompose {
     kind: 'Platform',
     metadata: {
       name: meta.name, version: meta.version, title: meta.title, summary: meta.summary,
-      archetype: meta.archetype ?? 'api-service',
+      kind: meta.kind,
+      // No inferred mode and no archetype fallback: pre-release software does not carry migration
+      // shims, and a mode that silently became 'hosted' because staging was off would have hidden an
+      // environment the author meant to have (D51).
+      mode: meta.mode ?? 'development',
       ...(typeof meta.repository === 'string' ? { repository: meta.repository } : {}),
       ...(typeof meta.license === 'string' ? { license: meta.license } : {}),
     },
     spec: {
       requires: { platfolio: typeof requires.platfolio === 'string' ? requires.platfolio : '>=0.1.0 <1', ...(typeof requires.migrationWindow === 'string' ? { migrationWindow: requires.migrationWindow } : {}) },
+      // D34 had to be authorable here or the capability model was unreachable in the format it was
+      // designed for: `provides` and `capabilities` were only reaching the manifest through hand-written
+      // YAML, which is precisely the path D29 retired.
+      ...(isRec(xp.provides) ? { provides: xp.provides } : {}),
+      ...(Array.isArray(xp.capabilities) ? { capabilities: xp.capabilities } : {}),
       identity,
       environments: isRec(xp.environments) ? xp.environments : { production: { enabled: true }, staging: { enabled: false } },
-      resources: { ...resources, volumes },
+      resources: { ...resources, volumes: mergeVolumes({ volumes: declaredVolumes }, mounts as { name: string; service: string; mountPath: string }[]) },
       services: outServices,
       dns: isRec(xp.dns) ? xp.dns : {},
       lifecycle: isRec(xp.lifecycle) ? xp.lifecycle : { onSuspend: 'scale-to-zero', onEject: [], onDelete: { graceDays: 30, backupAgeOutDays: 90 } },
@@ -281,4 +360,33 @@ export function renderProdOverlay(baseText: string, pins: Record<string, { image
     if (isRec(svc) && svc.build !== undefined) lines.push('    build: !reset null');
   }
   return `${lines.join('\n')}\n`;
+}
+
+/**
+ * An explicit `x-platfolio.resources.volumes` entry and a Compose mount describe the same disk, so they must
+ * become one plan entry. The earlier code concatenated both, and the duplicate built from the mount string
+ * carries no `retention` — so a volume declared to survive also appeared as a plain entry that teardown was
+ * free to delete, with whichever matched first deciding whether a tenant's state lived. That is a data-loss
+ * bug shaped like a merge, and the template test found it by declaring both, which is exactly what an author
+ * writing Compose would naturally do.
+ */
+export function mergeVolumes(
+  declared: { volumes?: Record<string, unknown>[] },
+  derived: { name: string; service: string; mountPath: string }[],
+): Record<string, unknown>[] {
+  const explicit = (declared.volumes ?? []).map((v) => ({ ...v }));
+  const byMount = new Map<string, number>();
+  explicit.forEach((v, index) => { if (typeof v.mountPath === 'string') byMount.set(v.mountPath, index); });
+  for (const mount of derived) {
+    const at = byMount.get(mount.mountPath);
+    if (at !== undefined) {
+      // The declaration wins every field it states; the mount only supplies what is absent.
+      const existing = explicit[at]!;
+      if (typeof existing.service !== 'string') existing.service = mount.service;
+      if (typeof existing.name !== 'string') existing.name = mount.name;
+      continue;
+    }
+    explicit.push({ ...mount });
+  }
+  return explicit;
 }

@@ -102,7 +102,7 @@ export class StrictCredentialBroker implements CredentialBroker {
   async grant(): Promise<GrantReceipt> {
     throw new Error('strict mode stores no provider credential; place the grant in the tenant CI (docs/design/04)');
   }
-  async call<T>(tenantId: string, operation: string): Promise<T> {
+  async call<T>(tenantId: string, _operation: string): Promise<T> {
     throw new Error(`strict mode holds no credential for tenant "${tenantId}"`);
   }
   async revoke(): Promise<void> { /* nothing to forget */ }

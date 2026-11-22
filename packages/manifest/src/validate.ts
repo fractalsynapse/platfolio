@@ -1,5 +1,6 @@
 import { ManifestSchema, RENDERER_VERSION, SUPPORTED_API_VERSIONS } from './schema.ts';
-import { enabledEnvironments, serviceEnvironments } from './environments.ts';
+import { DEFAULT_STAGING_PREFIX } from './environments.ts';
+import { enabledEnvironments, serviceEnvironments, stagingHost, effectiveDomains } from './environments.ts';
 import { satisfiesRange } from '@platfolio/contracts';
 import type { Manifest, ServiceSpec } from './schema.ts';
 
@@ -44,8 +45,6 @@ function servicesOf(m: Manifest): [string, ServiceSpec][] {
 /** Post-schema rules the manifest spec says the schema alone cannot express. */
 export function validateManifest(unknown: unknown): Issue[] {
   const issues: Issue[] = [];
-  const raw = typeof unknown === 'string' ? unknown : JSON.stringify(unknown);
-
   const parsed = ManifestSchema.safeParse(typeof unknown === 'string' ? {} : unknown);
   if (!parsed.success) {
     for (const i of parsed.error.issues) {
@@ -186,6 +185,85 @@ export function validateManifest(unknown: unknown): Issue[] {
     }
   }
 
+  // 3b. Per-environment domains (D68). The host a service serves in each environment, said once. Derivation
+  // (`stagingHost`) is the fallback; a declaration wins it. Everything refused here is a case the model cannot
+  // state safely without a second copy of one fact, so it is refused rather than defaulted -- the project's
+  // standing rule. The prefix is read exactly as `buildPlan` reads it and hosts are resolved through the same
+  // `effectiveDomains` the plan uses, so the validator and the plan cannot disagree about a hostname.
+  {
+    const prefix = m.spec.dns?.stagingPrefix ?? DEFAULT_STAGING_PREFIX;
+    // A host claimed by more than one (service, environment) is two definitions of one binding. Recording EVERY
+    // public service's effective hosts lets a declared staging host collide with another service's *derived*
+    // host, which the brief names explicitly. But the refusal fires only when a DECLARATION is involved: with no
+    // `environmentDomains` anywhere, this reproduces the old world where derivation already gives each public
+    // service a distinct host, so existing platforms and templates are unaffected -- the collision check cannot
+    // newly refuse a tree that never declared a per-environment host.
+    type Claim = { service: string; environment: string; declared: boolean };
+    const claims = new Map<string, Claim[]>();
+    const addClaim = (host: string, c: Claim): void => {
+      const at = claims.get(host) ?? [];
+      at.push(c);
+      claims.set(host, at);
+    };
+    for (const env of enabled) {
+      for (const [name, svc] of servicesOf(m)) {
+        if (!svc.public || !scope.get(name)?.includes(env)) continue;
+        const declaredHere = svc.environmentDomains?.[env] !== undefined;
+        for (const host of effectiveDomains(svc, env, prefix)) {
+          if (!HOST.test(host)) continue; // host-form is reported in the declaration loop below and the base loop above
+          addClaim(host, { service: name, environment: env, declared: declaredHere });
+        }
+      }
+    }
+    const reported = new Set<string>();
+    for (const [host, at] of claims) {
+      if (at.length < 2 || !at.some((c) => c.declared)) continue;
+      const oneService = at.every((c) => c.service === at[0]!.service);
+      const key = oneService ? `${at[0]!.service}\u0000${host}` : `${host}`;
+      if (reported.has(key)) continue;
+      reported.add(key);
+      const message = oneService
+        ? `service "${at[0]!.service}" binds "${host}" in ${at.map((c) => `"${c.environment}"`).join(' and ')} -- one host cannot answer two environments (D57); name a distinct host per environment, or let derivation do it`
+        : `host "${host}" is bound by ${at.length} services in environment "${at[0]!.environment}" (${[...new Set(at.map((c) => c.service))].map((s) => `"${s}"`).join(', ')}) -- a declared host colliding with another service's host is two definitions of one binding`;
+      // The path names the participant that actually DECLARED the host, so the fix points at the line to edit.
+      const offender = at.find((c) => c.declared) ?? at[0]!;
+      issues.push({
+        path: `spec.services.${offender.service}.environmentDomains.${offender.environment}["${host}"]`,
+        code: 'environment-domains-conflict',
+        message,
+      });
+    }
+    for (const [name, svc] of servicesOf(m)) {
+      const where = serviceEnvironments(svc, enabled);
+      for (const [envName, declared] of Object.entries(svc.environmentDomains ?? {})) {
+        const path = `spec.services.${name}.environmentDomains.${envName}`;
+        if (!enabled.some((e) => e === envName)) {
+          issues.push({ path, code: 'environment-domains-unknown-environment', message: `service "${name}" declares per-environment hosts for "${envName}", which the platform does not enable (enabled: ${enabled.join(', ') || 'none'}) -- name an enabled environment, or drop the declaration` });
+        } else if (envName === 'production') {
+          issues.push({ path, code: 'environment-domains-production-is-domains', message: `service "${name}" declares \`environmentDomains.production\`, but production hosts already live in \`domains\` -- one list, one home (D50). Put production hosts in \`domains\`; this field is for environments whose host the rule derives (${where.filter((e) => e !== 'production').join(', ') || 'none'})` });
+        } else if (!where.some((e) => e === envName)) {
+          issues.push({ path, code: 'environment-domains-unplaced-environment', message: `service "${name}" declares hosts for "${envName}" but is not deployed there (it is in: ${where.join(', ') || 'none'}) -- dead configuration that reads like a decision (D56's rule, applied to hosts)` });
+        }
+        if (!Array.isArray(declared)) continue;
+        if (declared.length === 0) {
+          issues.push({ path, code: 'environment-domains-empty', message: `service "${name}" declares an empty host list for "${envName}"; a public service with no host in an environment it runs is unreachable there -- drop the key to let derivation apply, or name the hosts` });
+          continue;
+        }
+        // The derived list the declaration would replace. A declaration identical to it is a second copy of the
+        // rule it overrides -- refused, because it drifts the moment the prefix or the base host moves (D57).
+        const derived = svc.domains.map((h) => stagingHost(h, prefix));
+        if (envName !== 'production' && declared.length === derived.length && declared.every((h, i) => h === derived[i])) {
+          issues.push({ path, code: 'environment-domains-redundant', message: `service "${name}" declares hosts for "${envName}" identical to what derivation already produces (${derived.join(', ') || 'none'}) -- delete the declaration; a stated copy of \`stagingHost()\` is a second source of truth that moves when the prefix moves (D57)` });
+        }
+        for (const host of declared) {
+          if (!HOST.test(host)) {
+            issues.push({ path, code: 'host-form', message: `service "${name}" declares "${host}" as a "${envName}" host, which is not a valid hostname (no scheme, port, or path)` });
+          }
+        }
+      }
+    }
+  }
+
   // 4. Environment rules.
   const services = Object.entries(m.spec.services);
   if (services.length === 0) issues.push({ path: 'spec.services', code: 'no-services', message: 'a manifest must declare at least one service' });
@@ -213,15 +291,62 @@ export function validateManifest(unknown: unknown): Issue[] {
     }
   }
 
-  // 6. Archetype rules (docs/design/03 § Archetype defaults).
-  const publicCount = services.filter(([, s]) => s.domains.length > 0).length;
-  if (m.metadata.archetype === 'api-service') {
-    if (services.length > 2) issues.push({ path: 'spec.services', code: 'archetype-api-service', message: `api-service expects an API plus at most one worker, got ${services.length}` });
-    if (services.some(([, s]) => /(:3000|_web|frontend)$/i.test(s.image))) issues.push({ path: 'spec.services', code: 'archetype-api-service', message: 'api-service should not ship a web frontend; use full-stack-web' });
+  // 5e. Per-environment values (D56). An override naming an environment the service is not placed in is dead
+  // configuration -- worse than absent, because it reads like a decision and is never executed. And a
+  // credential-shaped NAME is refused whatever its value: "it is only the staging value" is how a committed
+  // secret gets past a review (D4).
+  {
+    const enabledHere = enabledEnvironments(m);
+    for (const [name, svc] of servicesOf(m)) {
+      const placed: string[] = serviceEnvironments(svc, enabledHere);
+      for (const [envName, overrides] of Object.entries(svc.environmentValues ?? {})) {
+        if (!placed.includes(envName)) {
+          issues.push({
+            path: `spec.services.${name}.environmentValues.${envName}`,
+            code: 'environment-values-unplaced-environment',
+            message: `overrides environment "${envName}" but the service is not deployed there (it is in: ${placed.join(', ') || 'none'}) -- dead configuration that reads like a decision`,
+          });
+        }
+        for (const [key, value] of Object.entries(overrides)) {
+          if (value.length === 0) {
+            issues.push({ path: `spec.services.${name}.environmentValues.${envName}.${key}`, code: 'environment-value-empty', message: `overrides "${key}" with an empty string in "${envName}" -- delete the entry to drop an inherited value, or give it a real one; an empty literal is how a service boots with a config it cannot see` });
+          }
+          if (/(SECRET|TOKEN|_KEY$|PASSWORD|CREDENTIAL)/.test(key)) {
+            issues.push({ path: `spec.services.${name}.environmentValues.${envName}.${key}`, code: 'environment-value-is-secret-name', message: `"${key}" is credential-shaped and belongs in the service's secrets list by NAME, not in a per-environment value map (D4)` });
+          }
+        }
+      }
+    }
   }
-  if (m.metadata.archetype === 'full-stack-web') {
-    if (services.length < 2) issues.push({ path: 'spec.services', code: 'archetype-full-stack', message: 'full-stack-web needs at least a UI and an API service' });
-    if (publicCount === 0) issues.push({ path: 'spec.services', code: 'archetype-full-stack', message: 'full-stack-web needs at least one service with a domain (session/cookie origin rules derive from it)' });
+
+  // 6. Platform kind and mode (D51). Rules are about direction and lifecycle, never service counts. The ones
+  // being deleted here said "an api-service has at most 2 services", "full-stack-web needs at least 2",
+  // "a shared service should stay at 1-2": those described our own example manifests, not the platform, and
+  // would have refused a tenant's legitimate third worker while accepting a badly-shaped two-service mess.
+  const publicCount = services.filter(([, s]) => s.domains.length > 0).length;
+  if (m.metadata.kind === 'worker') {
+    // The distinction is inbound direction, and it is the whole reason the kind exists: a worker that publishes
+    // a host is either mislabelled or about to be reachable without anyone deciding it.
+    const exposed = services.filter(([, s]) => s.domains.length > 0).map(([name]) => name);
+    if (exposed.length > 0) issues.push({ path: 'spec.services', code: 'kind-worker-exposed', message: `a worker platform accepts no inbound connections, but ${exposed.join(', ')} ${exposed.length === 1 ? 'publishes' : 'publish'} a host. If this service serves traffic it is kind: web; if it does not, remove the domains` });
+  } else if (publicCount === 0) {
+    // A web platform that exposes nothing is a worker with a lie in its metadata: no hostname, no path anyone
+    // can probe, and a deployment that reports live while nothing can reach it.
+    issues.push({ path: 'spec.services', code: 'kind-web-unreachable', message: `kind: web requires at least one service with domains; none of ${services.map(([n]) => n).join(', ')} accepts connections. Declare kind: worker if that is intended` });
+  }
+  if (m.metadata.mode === 'development' && !m.spec.environments.staging.enabled) {
+    // The rule the shipped templates violated until D51: starter-web and starter-worker are starting points for
+    // CHANGE, and a fork whose only environment is production has nowhere to put a change before it reaches
+    // users. Enabling staging is one line; discovering that later costs the first deploy.
+    issues.push({ path: 'spec.environments.staging', code: 'mode-development-staging', message: 'mode: development means someone changes this platform, so staging must be enabled -- that is where a change goes before production' });
+  }
+  if (m.metadata.mode === 'hosted' && (m.spec.environments.staging.enabled || m.spec.environments.preview.enabled)) {
+    issues.push({ path: 'spec.environments', code: 'mode-hosted-extra-env', message: 'mode: hosted is operated, not developed: production only. A staging copy of something nobody is changing costs money and attention for no signal (docs/design/03)' });
+  }
+  if (m.spec.provides !== undefined && m.metadata.kind !== 'web') {
+    // Sharing is a declaration (`spec.provides`, D34), not a shape -- which is why `shared-service` stopped
+    // being a kind. But an offering has to be reachable to be consumed.
+    issues.push({ path: 'spec.provides', code: 'provides-requires-web', message: `a platform offering the capability "${m.spec.provides.name}" must be reachable by other platforms, so it is kind: web -- this one is kind: worker` });
   }
 
   // 7. Identity clients must name real services, and hosted realms need domains to derive redirects.

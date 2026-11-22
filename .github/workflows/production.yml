@@ -80,7 +80,7 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: '22'
+          node-version-file: '.nvmrc'
 
       - name: Enable pnpm (version pinned by packageManager)
         run: corepack enable
@@ -99,7 +99,7 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: '22'
+          node-version-file: '.nvmrc'
 
       - name: Install spike dependencies from its lockfile
         working-directory: spikes/e9-cordis-kernel

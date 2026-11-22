@@ -1,0 +1,551 @@
+# The central environment registry (D52).
+
+# Every variable this project reads or deploys: whether it carries a credential (a custody claim, not a
+# guess), which environments it applies to -- development | staging | production, or all -- and where its
+# value actually lives.
+
+# Enforced both ways by `pnpm run environment:registry`: an undeclared variable and a declaration nothing
+# references are both failures, as is a variable defined twice or the full set written any way but `all`.
+# Regenerate the skeleton with --emit; judgement calls belong in the HUMAN table inside that script, never
+# hand-edited here, or the next regeneration silently loses them.
+variables:
+  - name: CONTROL_PLANE_BASE
+    kind: value
+    secret: false
+    environments: [development]
+    deployedTo: host:shell
+    note: "which control plane a smoke script points at; never a deployment value"
+  - name: CR_PAT
+    kind: secret
+    secret: true
+    environments: all
+    deployedTo: ci:secret
+    note: "GitHub Packages push token used by the image workflow"
+  - name: DATABASE_URL
+    kind: secret
+    secret: true
+    environments: all
+    deployedTo: host:shell
+    note: "read by the tenant application (starter-web); platfolio resolves the production value from the database reference"
+  - name: KC_ADMIN_PASSWORD
+    kind: secret
+    secret: true
+    environments: [development]
+    deployedTo: host:shell
+    note: "referenced by scripts/seed-identity.ts, scripts/smoke-identity.ts"
+  - name: KC_ADMIN_USER
+    kind: value
+    secret: false
+    environments: [development]
+    deployedTo: host:shell
+    note: "referenced by scripts/seed-identity.ts"
+  - name: KC_BASE
+    kind: value
+    secret: false
+    environments: [development]
+    deployedTo: host:shell
+    note: "referenced by scripts/seed-dev-data.ts, scripts/seed-identity.ts, scripts/smoke-identity.ts, scripts/smoke-invitations.ts"
+  - name: KC_BOOTSTRAP_ADMIN_PASSWORD
+    kind: secret
+    secret: true
+    environments: all
+    service: identity
+    required: true
+    rotate: on-demand
+    deployedTo: railway:shared-variable
+    note: "the bootstrap admin password, declared by NAME in the composition and delivered through PUT …/secrets/{name} or platform-deploy --deliver-secrets; platfolio stores no value (D4). Read by 26.8 only when the master realm does not exist yet, so this obligates new deployments and recovers nothing on a running one (#248)"
+  - name: KC_BOOTSTRAP_ADMIN_USERNAME
+    kind: value
+    secret: false
+    environments: all
+    service: identity
+    deployedTo: railway:variable
+    note: "the bootstrap admin username Keycloak 26.x reads at FIRST start only, when the master realm does not exist yet; a username is not a credential, so it is a composition literal -- the same shape the published shared-identity template uses (D50)"
+  - name: KC_CLIENT_SECRET
+    kind: secret
+    secret: true
+    environments: [development]
+    deployedTo: host:shell
+    note: "referenced by scripts/seed-identity.ts, scripts/smoke-identity.ts"
+  - name: KC_DB
+    kind: value
+    secret: false
+    environments: all
+    deployedTo: railway:variable
+    note: "referenced by compose.dev.yaml, compose.yaml"
+  - name: KC_DB_PASSWORD
+    kind: secret
+    secret: true
+    environments: [development]
+    deployedTo: local:compose-overlay
+    note: "referenced by compose.dev.yaml"
+  - name: KC_DB_SCHEMA
+    kind: value
+    secret: false
+    environments: [development]
+    deployedTo: local:compose-overlay
+    note: "referenced by compose.dev.yaml"
+  - name: KC_DB_URL
+    kind: value
+    secret: false
+    environments: [development]
+    deployedTo: local:compose-overlay
+    note: "referenced by compose.dev.yaml"
+  - name: KC_DB_USERNAME
+    kind: value
+    secret: false
+    environments: [development]
+    deployedTo: local:compose-overlay
+    note: "referenced by compose.dev.yaml"
+  - name: KC_HEALTH_ENABLED
+    kind: value
+    secret: false
+    environments: all
+    deployedTo: railway:variable
+    note: "referenced by compose.dev.yaml, compose.yaml"
+  - name: KC_HOSTNAME
+    kind: value
+    secret: false
+    environments: all
+    deployedTo: railway:variable
+    note: "referenced by compose.dev.yaml, compose.yaml"
+  - name: KC_HOSTNAME_STRICT
+    kind: value
+    secret: false
+    environments: all
+    deployedTo: railway:variable
+    note: "referenced by compose.dev.yaml, compose.yaml"
+  - name: KC_HTTP_ENABLED
+    kind: value
+    secret: false
+    environments: [staging, production]
+    deployedTo: railway:variable
+    note: "referenced by compose.yaml"
+  - name: KC_HTTP_PORT
+    kind: value
+    secret: false
+    environments: all
+    deployedTo: railway:variable
+    note: "referenced by compose.dev.yaml, compose.yaml"
+  - name: KC_PEER_CLIENT_SECRET
+    kind: secret
+    secret: true
+    environments: [development]
+    deployedTo: host:shell
+    note: "the peer realm's client secret -- a credential, used only to mint the token that must be refused"
+  - name: KC_PEER_REALM
+    kind: value
+    secret: false
+    environments: [development]
+    deployedTo: host:shell
+    note: "which realm supplies the foreign token for the cross-issuer check; unset means the check fails rather than skipping"
+  - name: KC_PEER_USER
+    kind: value
+    secret: false
+    environments: [development]
+    deployedTo: host:shell
+    note: "the peer-realm test identity, defaults to adrian"
+  - name: KC_PEER_USER_PASSWORD
+    kind: secret
+    secret: true
+    environments: [development]
+    deployedTo: host:shell
+    note: "the peer realm's user password -- same: minted against the peer, never sent to this realm's verifier"
+  - name: KC_PKCE_USER
+    kind: value
+    secret: false
+    environments: [development]
+    deployedTo: host:shell
+    note: "referenced by scripts/smoke-browser-auth.ts"
+  - name: KC_PROXY_HEADERS
+    kind: value
+    secret: false
+    environments: all
+    deployedTo: railway:variable
+    note: "referenced by compose.dev.yaml, compose.yaml"
+  - name: KC_REALM
+    kind: value
+    secret: false
+    environments: [development]
+    deployedTo: host:shell
+    note: "which realm a smoke or seed script targets -- the hosted Keycloak runs one instance with a realm per environment (D56), so this selects the environment under test; never a deployment value"
+  - name: KC_USER_PASSWORD
+    kind: secret
+    secret: true
+    environments: [development]
+    deployedTo: host:shell
+    note: "referenced by scripts/seed-identity.ts, scripts/smoke-identity.ts"
+  - name: LIVE_DEPLOY_TIMEOUT_MS
+    kind: value
+    secret: false
+    environments: [development]
+    deployedTo: host:shell
+    note: "referenced by scripts/railway-live-conformance.ts"
+  - name: LIVE_IMAGE_DIGEST
+    kind: value
+    secret: false
+    environments: [development]
+    deployedTo: host:shell
+    note: "referenced by scripts/railway-live-conformance.ts"
+  - name: LIVE_POLL_MS
+    kind: value
+    secret: false
+    environments: [development]
+    deployedTo: host:shell
+    note: "referenced by scripts/railway-live-conformance.ts"
+  - name: LIVE_TOTAL_TIMEOUT_MS
+    kind: value
+    secret: false
+    environments: [development]
+    deployedTo: host:shell
+    note: "referenced by scripts/railway-live-conformance.ts"
+  - name: MAILPIT_BASE
+    kind: value
+    secret: false
+    environments: [development]
+    deployedTo: host:shell
+    note: "referenced by scripts/smoke-invitations.ts"
+  - name: MAILPIT_HOST
+    kind: value
+    secret: false
+    environments: [development]
+    deployedTo: host:shell
+    note: "referenced by scripts/email-smoke.ts"
+  - name: MAILPIT_SMTP_PORT
+    kind: value
+    secret: false
+    environments: [development]
+    deployedTo: host:shell
+    note: "referenced by scripts/email-smoke.ts"
+  - name: MAILPIT_URL
+    kind: value
+    secret: false
+    environments: [development]
+    deployedTo: host:shell
+    note: "referenced by scripts/email-smoke.ts"
+  - name: MP_MAX_MESSAGES
+    kind: value
+    secret: false
+    environments: [development]
+    deployedTo: local:compose-overlay
+    note: "referenced by compose.dev.yaml"
+  - name: MP_SMTP_AUTH_ACCEPT_ANY
+    kind: value
+    secret: false
+    environments: [development]
+    deployedTo: ci:env
+    note: "referenced by .github/workflows/integration.yml, compose.dev.yaml"
+  - name: MP_SMTP_AUTH_ALLOW_INSECURE
+    kind: value
+    secret: false
+    environments: [development]
+    deployedTo: ci:env
+    note: "referenced by .github/workflows/integration.yml, compose.dev.yaml"
+  - name: OIDC_CLIENT_SECRET
+    kind: secret
+    secret: true
+    environments: [staging, production]
+    deployedTo: host:shell
+    note: "template placeholder: a tenant app that keeps its own OIDC client secret"
+  - name: PLATFOLIO_ACTION_REPO
+    kind: value
+    secret: false
+    environments: [development]
+    deployedTo: host:shell
+    note: "referenced by scripts/open-install-pr.ts"
+  - name: PLATFOLIO_ACTION_SHA
+    kind: value
+    secret: false
+    environments: [development]
+    deployedTo: host:shell
+    note: "referenced by apps/managed-action/src/runner.ts"
+  - name: PLATFOLIO_ACTION_VERSION
+    kind: value
+    secret: false
+    environments: [development]
+    deployedTo: host:shell
+    note: "referenced by apps/managed-action/src/runner.ts"
+  - name: PLATFOLIO_ALLOWED_ORIGINS
+    kind: value
+    secret: false
+    environments: all
+    service: api
+    required: false
+    default: ""
+    deployedTo: railway:variable
+    note: "comma-separated browser origins the UI is served from (scheme://host[:port] each). One list, both consumers: the API admits it as its CORS allow-list, and identity:seed writes it as the browser client's redirect URIs and webOrigins. Unset or empty means same-origin only -- the documented, safe default, and never `*`. A malformed entry is a boot failure, not a warning; the per-environment values belong in environmentValues (D56), in the platform description rather than in a script"
+  - name: PLATFOLIO_API_ORIGIN
+    kind: value
+    secret: false
+    environments: [development]
+    deployedTo: host:shell
+    note: "referenced by scripts/seed-identity.ts"
+  - name: PLATFOLIO_AUDIENCE
+    kind: value
+    secret: false
+    environments: [development]
+    deployedTo: host:shell
+    note: "referenced by apps/managed-action/src/main.ts"
+  - name: PLATFOLIO_BUILD_TIME
+    kind: value
+    secret: false
+    environments: all
+    deployedTo: host:shell
+    note: "referenced by apps/control-plane/src/index.ts, compose.dev.yaml"
+  - name: PLATFOLIO_COMMIT
+    kind: value
+    secret: false
+    environments: all
+    deployedTo: host:shell
+    note: "referenced by apps/control-plane/src/index.ts, compose.dev.yaml"
+  - name: PLATFOLIO_DB_MIGRATE
+    kind: value
+    secret: false
+    environments: all
+    deployedTo: railway:variable
+    note: "runs migrations at boot for the single-replica first-party deployment"
+  - name: PLATFOLIO_DB_SCHEMA
+    kind: value
+    secret: false
+    environments: all
+    deployedTo: railway:variable
+    note: "referenced by compose.dev.yaml, compose.yaml, scripts/migrate-db.ts"
+  - name: PLATFOLIO_DB_URL
+    kind: secret
+    secret: true
+    environments: all
+    deployedTo: github:environment-secret
+    note: "the same credential as DATABASE_URL, delivered as a provider reference rather than a literal (OD13); the platform resolves it from the environment's own database, so no one types it"
+  - name: PLATFOLIO_DEPLOY_BUDGET
+    kind: value
+    secret: false
+    environments: [development]
+    deployedTo: host:shell
+    note: "referenced by apps/managed-action/src/main.ts, scripts/platform-deploy.ts"
+  - name: PLATFOLIO_DEPLOY_TIMEOUT_MS
+    kind: value
+    secret: false
+    environments: [development]
+    deployedTo: host:shell
+    note: "referenced by apps/managed-action/src/main.ts, scripts/platform-deploy.ts"
+  - name: PLATFOLIO_DISPATCH_TOKEN
+    kind: secret
+    secret: true
+    environments: all
+    deployedTo: github:environment-secret
+    note: "referenced by .github/workflows/platfolio-managed.yml, apps/managed-action/src/main.ts, packages/manifest/src/render-install.ts"
+  - name: PLATFOLIO_EMAIL_DRIVER
+    kind: value
+    secret: false
+    environments: all
+    deployedTo: railway:variable
+    note: "referenced by apps/control-plane/src/index.ts, compose.dev.yaml, compose.yaml"
+  - name: PLATFOLIO_EMAIL_FROM
+    kind: value
+    secret: false
+    environments: all
+    deployedTo: railway:variable
+    note: "referenced by apps/control-plane/src/index.ts, compose.dev.yaml, compose.yaml"
+  - name: PLATFOLIO_EXPIRES_AT
+    kind: value
+    secret: false
+    environments: [development]
+    deployedTo: host:shell
+    note: "referenced by apps/managed-action/src/runner.ts"
+  - name: PLATFOLIO_GITHUB_APP_ID
+    kind: value
+    secret: false
+    environments: [staging, production]
+    deployedTo: railway:variable
+    note: "referenced by apps/control-plane/src/index.ts, compose.yaml"
+  - name: PLATFOLIO_GITHUB_INSTALLATION_ID
+    kind: value
+    secret: false
+    environments: [staging, production]
+    deployedTo: railway:variable
+    note: "referenced by apps/control-plane/src/index.ts, compose.yaml"
+  - name: PLATFOLIO_GITHUB_PRIVATE_KEY
+    kind: secret
+    secret: true
+    environments: [staging, production]
+    deployedTo: railway:shared-variable
+    note: "referenced by apps/control-plane/src/index.ts, compose.yaml"
+  - name: PLATFOLIO_GIT_HOST
+    kind: value
+    secret: false
+    environments: all
+    deployedTo: host:shell
+    note: "referenced by apps/control-plane/src/index.ts, compose.dev.yaml"
+  - name: PLATFOLIO_GIT_TOKEN
+    kind: secret
+    secret: true
+    environments: [development]
+    deployedTo: host:shell
+    note: "the git driver's HTTPS token, operator-supplied; production uses the App installation"
+  - name: PLATFOLIO_GIT_TRANSPORT
+    kind: value
+    secret: false
+    environments: all
+    deployedTo: host:shell
+    note: "referenced by apps/control-plane/src/index.ts, compose.dev.yaml"
+  - name: PLATFOLIO_IDENTITY_AUDIENCE
+    kind: value
+    secret: false
+    environments: all
+    deployedTo: railway:variable
+    note: "referenced by apps/control-plane/src/index.ts, compose.dev.yaml, compose.yaml"
+  - name: PLATFOLIO_IDENTITY_ISSUER
+    kind: value
+    secret: false
+    environments: all
+    deployedTo: railway:variable
+    note: "who an access token must be addressed to; staging overrides it per environment (D56)"
+  - name: PLATFOLIO_IDENTITY_JWKS_URI
+    kind: value
+    secret: false
+    environments: all
+    deployedTo: railway:variable
+    note: "resolved from the hosted identity capability, not typed (D34)"
+  - name: PLATFOLIO_IDENTITY_REALM
+    kind: value
+    secret: false
+    environments: [development]
+    deployedTo: host:shell
+    note: "which realm identity:seed targets; production realm is `platfolio`, staging is `platfolio-staging` (D56)"
+  - name: PLATFOLIO_IMAGE_TAG
+    kind: value
+    secret: false
+    environments: [development]
+    deployedTo: host:shell
+    note: "referenced by scripts/render-platform-overlay.ts"
+  - name: PLATFOLIO_ISSUED_AT
+    kind: value
+    secret: false
+    environments: [development]
+    deployedTo: host:shell
+    note: "referenced by apps/managed-action/src/runner.ts"
+  - name: PLATFOLIO_MAILPIT_URL
+    kind: value
+    secret: false
+    environments: all
+    deployedTo: host:shell
+    note: "the local mailbox reader; absent in production (D46)"
+  - name: PLATFOLIO_RECONCILE_INTERVAL_MS
+    kind: value
+    secret: false
+    environments: all
+    deployedTo: railway:variable
+    note: "referenced by apps/control-plane/src/capabilities.ts, compose.dev.yaml, compose.yaml"
+  - name: PLATFOLIO_RELEASE_TAG
+    kind: value
+    secret: false
+    environments: all
+    service: api
+    required: false
+    deployedTo: railway:variable
+    note: "bare SemVer tag verified against the candidate commit by the self-host planner; empty for an untagged deployment"
+  - name: PLATFOLIO_SCM_DRIVER
+    kind: value
+    secret: false
+    environments: all
+    deployedTo: host:shell
+    note: "which driver is live: git | github-app | none (D51/D50)"
+  - name: PLATFOLIO_SITE_ORIGIN
+    kind: value
+    secret: false
+    environments: all
+    required: true
+    deployedTo: railway:variable
+    note: "the origin platfolio's own UI is served from, read by `apps/site` (D65). It is not `PLATFOLIO_ALLOWED_ORIGINS`: that is the list the API *admits*, this is the one address this document is published at, and the browser needs it because the realm's redirect URIs are `<origin>/callback` (`CALLBACK_PATH` in `scripts/browser-auth.ts`). A deploy that has not answered this question has no UI to point at, and `apps/site` refuses to build rather than invent one (D47)"
+  - name: PLATFOLIO_SMTP_HOST
+    kind: value
+    secret: false
+    environments: all
+    deployedTo: host:shell
+    note: "referenced by apps/control-plane/src/index.ts, compose.dev.yaml"
+  - name: PLATFOLIO_SMTP_PASSWORD
+    kind: secret
+    secret: true
+    environments: [staging, production]
+    deployedTo: host:shell
+    note: "referenced by apps/control-plane/src/index.ts"
+  - name: PLATFOLIO_SMTP_PORT
+    kind: value
+    secret: false
+    environments: all
+    deployedTo: host:shell
+    note: "referenced by apps/control-plane/src/index.ts, compose.dev.yaml"
+  - name: PLATFOLIO_SMTP_SECURE
+    kind: value
+    secret: false
+    environments: [staging, production]
+    deployedTo: host:shell
+    note: "referenced by apps/control-plane/src/index.ts"
+  - name: PLATFOLIO_SMTP_STARTTLS
+    kind: value
+    secret: false
+    environments: all
+    deployedTo: railway:variable
+    note: "referenced by apps/control-plane/src/index.ts, compose.dev.yaml, compose.yaml"
+  - name: PLATFOLIO_SMTP_USER
+    kind: value
+    secret: false
+    environments: [staging, production]
+    deployedTo: host:shell
+    note: "referenced by apps/control-plane/src/index.ts"
+  - name: PLATFOLIO_TEAM_ID
+    kind: value
+    secret: false
+    environments: [development]
+    deployedTo: host:shell
+    note: "referenced by apps/managed-action/src/runner.ts"
+  - name: PLATFOLIO_URL
+    kind: value
+    secret: false
+    environments: all
+    deployedTo: ci:env
+    note: "referenced by .github/actions/platfolio-managed/action.yml, .github/workflows/platfolio-managed.yml, apps/managed-action/src/main.ts, packages/manifest/src/render-install.ts"
+  - name: PLATFOLIO_WEB_CLIENT_ID
+    kind: value
+    secret: false
+    environments: all
+    required: false
+    default: "platfolio-web"
+    deployedTo: host:shell
+    note: "which public PKCE client `apps/site` authenticates as. Optional because the default is the policy constant `WEB_CLIENT_ID` in `packages/ui/src/web/browser-auth-policy.ts` -- the same value `identity:seed` writes into the realm -- and a deploy renames it only when its realm renamed the client. Not a secret: a browser client id is public by construction (D4), which is why `secret: false` is stated rather than guessed from the name"
+  - name: POSTGRES_DB
+    kind: value
+    secret: false
+    environments: all
+    deployedTo: ci:env
+    note: "referenced by .github/workflows/development.yml, .github/workflows/integration.yml, compose.dev.yaml"
+  - name: POSTGRES_PASSWORD
+    kind: value
+    secret: false
+    environments: all
+    deployedTo: github:environment-secret
+    note: "a container password on loopback/CI; no real service listens"
+  - name: RAILWAY_TOKEN
+    kind: secret
+    secret: true
+    environments: all
+    deployedTo: github:environment-secret
+    note: "the provider grant. Exactly one per managed instance (D24), held as a GitHub environment secret so platfolio never stores it"
+  - name: RAILWAY_WORKSPACE_ID
+    kind: value
+    secret: false
+    environments: [development]
+    deployedTo: ci:env
+    note: "referenced by .github/workflows/platfolio-managed.yml, apps/managed-action/src/main.ts, scripts/open-install-pr.ts, scripts/platform-deploy.ts"
+  - name: REDIS_URL
+    kind: value
+    secret: false
+    environments: [staging, production]
+    deployedTo: host:shell
+    note: "referenced by packages/manifest/src/render.ts"
+  - name: STRIPE_WEBHOOK_SECRET
+    kind: secret
+    secret: true
+    environments: [staging, production]
+    deployedTo: host:shell
+    note: "template placeholder: a tenant app verifying Stripe webhooks itself"

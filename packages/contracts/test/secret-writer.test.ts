@@ -71,7 +71,7 @@ test('a failed key lookup or a refused write is reported, not swallowed', async 
   const noKey = fake(() => ({ status: 404 }));
   await assert.rejects(() => writer(noKey.fetchImpl).write({ repo: 'o/r', name: 'S' }, 'v'), /no public key|public-key request failed/);
 
-  const refused = fake((url, method) => (method === 'PUT' ? { status: 403 } : { status: 200, json: { key_id: 'K', key: KEY } }));
+  const refused = fake((_url, method) => (method === 'PUT' ? { status: 403 } : { status: 200, json: { key_id: 'K', key: KEY } }));
   await assert.rejects(() => writer(refused.fetchImpl).write({ repo: 'o/r', name: 'S' }, 'v'), /was not written \(403\)/);
 });
 
