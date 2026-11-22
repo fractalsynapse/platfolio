@@ -4,7 +4,7 @@
  * hand, because every line reproduces from the specification.
  *
  * Source: apps/control-plane/openapi.yaml (OpenAPI 3.1.0, info.version 0.1.0)
- * Input digest: sha256/c2f93543536c01f9
+ * Input digest: sha256/b2140e880ea02f18
  *
  * Reproduce it with `pnpm run api:types`. `pnpm run api:types:check` fails when this file stops matching
  * what the committed spec produces, which is the only way a generated type deserves to be trusted.
@@ -326,6 +326,8 @@ export interface ApiParameters {
   };
   /** GET /readyz */
   getReady: Record<string, never>;
+  /** GET /status */
+  getStatus: Record<string, never>;
   /** GET /version */
   getVersion: Record<string, never>;
   /** GET /api/v1/whoami */
@@ -636,6 +638,12 @@ export interface ApiResponses {
   getReady: {
     '200': Ready;
     '503': Ready;
+  };
+  /** GET /status */
+  getStatus: {
+    '200': {
+      status: 'ok';
+    };
   };
   /** GET /version */
   getVersion: {
@@ -950,6 +958,8 @@ export const ENDPOINTS = {
   getLatestAttestation: { method: 'get', path: '/api/v1/instances/{instanceId}/latest-attestation' },
   /** GET /readyz */
   getReady: { method: 'get', path: '/readyz' },
+  /** GET /status */
+  getStatus: { method: 'get', path: '/status' },
   /** GET /version */
   getVersion: { method: 'get', path: '/version' },
   /** GET /api/v1/whoami */

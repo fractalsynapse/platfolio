@@ -114,6 +114,12 @@ test('/version reports the release tag or null while retaining the build identit
 test('Slice 1 behaviour survives the refactor to plugins', async () => {
   const app = await startApp();
   try {
+    const status = await fetch(app.base() + '/status');
+    assert.equal(status.status, 200);
+    assert.equal(status.headers.get('cache-control'), 'no-store');
+    const statusBody = await status.json();
+    assert.deepEqual(statusBody, { status: 'ok' });
+    againstSpec('getStatus', 200, statusBody);
     againstSpec('getHealth', 200, (await app.call('/healthz')).body);
     const ready = await app.call('/readyz');
     againstSpec('getReady', ready.status, ready.body);

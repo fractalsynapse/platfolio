@@ -4,6 +4,13 @@
 
 :4321 {
 	root * /app/apps/site/dist
+	handle /status {
+		header {
+			Content-Type application/json
+			Cache-Control no-store
+		}
+		respond `{"status":"ok"}` 200
+	}
 	header /config.js Cache-Control "no-store"
 	header /version.json Cache-Control "no-store"
 	file_server {

@@ -175,6 +175,13 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
     requires: ['identity', 'store'],
     routes: [
       {
+        method: 'GET', path: '/status', operationId: 'getStatus',
+        handle: async () => ({
+          ...send('getStatus', 200, { status: 'ok' }),
+          headers: { 'cache-control': 'no-store' },
+        }),
+      },
+      {
         method: 'GET', path: '/healthz', operationId: 'getHealth',
         handle: async (_request, _params, _context) => {
           const { createHash } = await import('node:crypto');

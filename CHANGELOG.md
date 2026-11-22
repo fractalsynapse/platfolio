@@ -5,6 +5,11 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+### Fixed — probe the site and API at `/status` (#274)
+
+Both services return a small, fixed liveness response at `/status`. The Compose health checks,
+Railway plans and hosted smoke now use that endpoint.
+
 ### Fixed — report the exact release tag in `/version` (#272)
 
 Untagged builds report `version: null`. A candidate deployment can supply a SemVer release tag that
