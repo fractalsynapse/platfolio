@@ -5,6 +5,32 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+## [0.5.0]
+
+Release baseline: `0.4.0..36442bc`. The hosted API and site at that baseline passed the live Railway
+smoke in staging and production, including build identity, database readiness, both `/status` probes,
+site routes and PKCE sign-in.
+
+- Platfolio now hosts its own OpenAPI-validated control plane and static site. The first dashboard lists
+  instances for the signed-in user's teams, and the API supports self-service teams and invitations.
+- Instances use `team/name` addresses, carry a template reference, and report state per environment.
+  Providers provision each environment independently. The platform description carries per-environment
+  configuration and domains, and the environment registry records secret and wiring obligations.
+- The API can plan from a repository, record released artifacts by digest, and deliver secrets to the
+  provider. Secret reads report presence. The GitHub App driver dispatches workflows, and the Git driver
+  supports reading repositories over HTTPS or SSH.
+- CI publishes the API and site images as one candidate manifest. The self-host planner reuses its
+  recorded digests across environments. An untagged deployment reports `version: null`. Tagged
+  deployments report the SemVer tag that the planner verifies against the candidate commit.
+
+The old `apps/status-api` service was retired. Integrations should use the control plane at
+`api.platfolio.dev`. Templates are sourced from their published repositories. The provider contract at
+this baseline is `5.1.0`.
+
+The tenant-template cutover and install PR verification are tracked in
+[#172](https://github.com/fractalsynapse/platfolio/issues/172). The destroy API records
+deprovisioning and checks for dependent instances. Provider teardown remains pending.
+
 ### Fixed — probe the site and API at `/status` (#274)
 
 Both services return a small, fixed liveness response at `/status`. The Compose health checks,
@@ -283,8 +309,6 @@ child processes rather than asserting in prose: `SIGKILL` mid-mutation, `SIGKILL
 holding the lock, `process.exit()` inside a section, a live holder driving a waiter to the named timeout, a recycled
 pid refused as a holder, two contenders whose timed sections never overlap, a nested section refused instead of
 hanging, and a recovery that refuses to clobber somebody else's bytes.
-
-## [Unreleased]
 
 ### Added — #258: the generated contract carries the routes, and the SDK reads them
 
