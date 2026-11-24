@@ -61,10 +61,17 @@ const server = createServer({ requestTimeout: 10000 }, (request, response) => {
         reply(200, await oauth.complete({ code: String(body.code), state: String(body.state), issuer: String(body.issuer), error: String(body.error) }));
         return;
       case 'start':
+      case 'redeploy':
       case 'remove':
         if (await bao.status() !== 'ready' || !(await bao.readGrant()).grant) { reply(503, replyError); return; }
         if (command.action === 'start') reply(200, await launch.start());
-        else if (body.data === 'keep' || (body.data === 'wipe' && !project)) reply(200, await launch.remove(body.data));
+        else if (command.action === 'redeploy') {
+          const current = await launch.read();
+          if (typeof body.projectId !== 'string' || typeof body.deploymentId !== 'string' ||
+              current.projectId !== body.projectId || current.deploymentId !== body.deploymentId ||
+              !['ready', 'running'].includes(current.state)) { reply(409, null); return; }
+          reply(200, await launch.redeploy());
+        } else if (body.data === 'keep' || (body.data === 'wipe' && !project)) reply(200, await launch.remove(body.data));
         else reply(400, null);
         return;
       default: reply(404, null);

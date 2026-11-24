@@ -821,6 +821,39 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
+  /api/v1/instances/{instanceId}/environments/{environment}/deployments:
+    parameters:
+      - { name: instanceId, in: path, required: true, schema: { type: string } }
+      - { name: environment, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: redeployHostedStarter
+      summary: Rebuild the verified pinned Starter Web release in its existing staging project
+      security: [{ bearerJwt: [] }]
+      responses:
+        '202':
+          description: The private worker accepted the requested deployment.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [state]
+                properties:
+                  state: { type: string, enum: [requested] }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: The app is stopped or another setup step is in progress.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '503':
+          description: The private worker, OpenBao, or Railway is unavailable.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
   /api/v1/instances/{instanceId}/environments/{environment}:
     parameters:
       - { name: instanceId, in: path, required: true, schema: { type: string, minLength: 1 } }

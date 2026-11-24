@@ -4,7 +4,7 @@
  * hand, because every line reproduces from the specification.
  *
  * Source: apps/control-plane/openapi.yaml (OpenAPI 3.1.0, info.version 0.1.0)
- * Input digest: sha256/5bb9e75d763e487e
+ * Input digest: sha256/b97f7bb51adced44
  *
  * Reproduce it with `pnpm run api:types`. `pnpm run api:types:check` fails when this file stops matching
  * what the committed spec produces, which is the only way a generated type deserves to be trusted.
@@ -480,6 +480,11 @@ export interface ApiParameters {
   /** POST /api/v1/marketplace/installations/{installationId}/enrollment */
   redeemMarketplaceEnrollment: {
     installationId: string;
+  };
+  /** POST /api/v1/instances/{instanceId}/environments/{environment}/deployments */
+  redeployHostedStarter: {
+    instanceId: string;
+    environment: string;
   };
   /** POST /api/v1/instances/{instanceId}/redeploy */
   redeployInstance: {
@@ -1169,6 +1174,17 @@ export interface ApiResponses {
     '400': Error;
     '404': Error;
   };
+  /** POST /api/v1/instances/{instanceId}/environments/{environment}/deployments */
+  redeployHostedStarter: {
+    '202': {
+      state: 'requested';
+    };
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '409': Error;
+    '503': Error;
+  };
   /** POST /api/v1/instances/{instanceId}/redeploy */
   redeployInstance: {
     '202': {
@@ -1540,6 +1556,8 @@ export const ENDPOINTS = {
   putSecret: { method: 'put', path: '/api/v1/instances/{instanceId}/secrets/{name}' },
   /** POST /api/v1/marketplace/installations/{installationId}/enrollment */
   redeemMarketplaceEnrollment: { method: 'post', path: '/api/v1/marketplace/installations/{installationId}/enrollment' },
+  /** POST /api/v1/instances/{instanceId}/environments/{environment}/deployments */
+  redeployHostedStarter: { method: 'post', path: '/api/v1/instances/{instanceId}/environments/{environment}/deployments' },
   /** POST /api/v1/instances/{instanceId}/redeploy */
   redeployInstance: { method: 'post', path: '/api/v1/instances/{instanceId}/redeploy' },
   /** POST /api/v1/instances/{instanceId}/plan/from-repository */

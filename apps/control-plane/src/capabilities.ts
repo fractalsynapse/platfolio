@@ -1349,6 +1349,25 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
     id: 'starter-launch',
     requires: ['identity', 'store'],
     routes: [
+      scoped('POST', '/api/v1/instances/{instanceId}/environments/{environment}/deployments', 'redeployHostedStarter', 'marketplace.manage', async ({ teamId, context }, _request, params) => {
+        const instanceId = params.instanceId ?? '';
+        if (!customer || customer.teamId !== teamId || params.environment !== 'staging') return notFound('hosted deployment', instanceId);
+        const hosting = await context.store.getHostedStarter(instanceId);
+        if (!hosting.ok) return notFound('hosted deployment', instanceId);
+        if (hosting.value.state !== 'live') {
+          return { status: 409, body: { error: 'conflict', message: 'Restore this app before requesting another deployment.' } };
+        }
+        const current = await customer.call('report');
+        if (!current.ok) return unavailable();
+        const observed = current.body as { state?: unknown; projectId?: unknown; deploymentId?: unknown } | null;
+        if (!observed || !['ready', 'running'].includes(String(observed.state)) || observed.projectId !== hosting.value.projectId ||
+            observed.deploymentId !== hosting.value.deploymentId) {
+          return { status: 409, body: { error: 'conflict', message: 'Finish the current setup or refresh the app before trying again.' } };
+        }
+        const requested = await customer.call('redeploy', { projectId: hosting.value.projectId, deploymentId: hosting.value.deploymentId });
+        if (!requested.ok) return unavailable();
+        return send('redeployHostedStarter', 202, { state: 'requested' });
+      }),
       scoped('GET', launchPath, 'getStarterLaunch', 'marketplace.manage', async ({ teamId, context }) => {
         if (deps.starterLaunch?.teamId === teamId) return send('getStarterLaunch', 200, await deps.starterLaunch.read());
         if (!customer || customer.teamId !== teamId) return notFound('launch', 'starter');

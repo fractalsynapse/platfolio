@@ -6,7 +6,7 @@ import { launchStarterApp } from './launch-starter-app.ts';
 
 const app = FREE_STARTER_RELEASE.template;
 
-export function customerLaunchRun(teamId: string, journalPath: string, grantForLaunch?: () => Promise<CustomerRailwayGrant>): StarterLaunch {
+export function customerLaunchRun(teamId: string, journalPath: string, grantForLaunch?: () => Promise<CustomerRailwayGrant>): StarterLaunch & { redeploy: () => StarterLaunchReport } {
   let report: StarterLaunchReport = existsSync(journalPath)
     ? JSON.parse(readFileSync(journalPath, 'utf8')) as StarterLaunchReport
     : { state: 'idle', events: [], template: app, revision: FREE_STARTER_RELEASE.revision, retainedVolumes: [] };
@@ -23,10 +23,11 @@ export function customerLaunchRun(teamId: string, journalPath: string, grantForL
     report.state = 'failed';
     event({ step: 'Resume setup', state: 'FAILED', detail: 'The runner restarted. Resume the previous operation.' });
   }
-  function start() {
-    if (['running', 'removing', 'ready'].includes(report.state)) return report;
+  function start(redeploy = false) {
+    if (redeploy ? report.state !== 'ready' : ['running', 'removing', 'ready'].includes(report.state)) return report;
     report.state = 'running';
-    event({ step: 'Launch approved', state: 'READY', detail: 'One staging project, one database and one public HTTPS link.' });
+    event(redeploy ? { step: 'Redeploy the pinned release', state: 'WORKING', detail: 'The project and its database stay in place.' }
+      : { step: 'Launch approved', state: 'READY', detail: 'One staging project, one database and one public HTTPS link.' });
     void (async () => {
       try {
         const grant = await grantForLaunch?.();
@@ -74,5 +75,5 @@ export function customerLaunchRun(teamId: string, journalPath: string, grantForL
     })();
     return report;
   }
-  return { teamId, read: () => report, start, remove };
+  return { teamId, read: () => report, start: () => start(), redeploy: () => start(true), remove };
 }

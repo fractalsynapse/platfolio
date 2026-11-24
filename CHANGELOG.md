@@ -5,6 +5,7 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+- Owners can rebuild the pinned Starter Web release from Deployments while retaining its Railway project and database (#288).
 - Added personal in-app notification rules for failed deployments, outages, and environment secret updates, scoped to current team memberships (#288).
 - Added private availability checks and an outage timeline for hosted Starter Web. Planned stops remain visible separately from outages (#288).
 - Show verified deployments and hosting activity in each team workspace, with links to deployment evidence and app management (#288).
