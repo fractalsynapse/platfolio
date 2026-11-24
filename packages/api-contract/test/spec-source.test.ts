@@ -26,6 +26,7 @@ test('a document that does not parse is reported, never crashed', () => {
     'description: Names suppressed because the provider\'s deploy ceiling was already spent.',
   );
   assert.notEqual(broken, specText, 'the mutation must apply, or this test proves nothing at all');
+  const expectedLine = broken.split('\n').findIndex((line) => line.includes('description: Names suppressed because the provider')) + 1;
 
   const result = parseSpecSource(broken, SPEC_REL);
   assert.equal(result.ok, false, 'a malformed document must not be reported as readable');
@@ -34,11 +35,11 @@ test('a document that does not parse is reported, never crashed', () => {
   const finding = result.problems[0] ?? '';
   assert.match(finding, /does not parse/);
   assert.match(finding, /openapi\.yaml/);
-  assert.match(finding, /line 16\d\d, column \d+/);
+  assert.match(finding, new RegExp(`line ${expectedLine}, column \\d+`));
   assert.match(finding, /the line reads:/);
   assert.match(finding, /quote the value/i);
   // And the position is stated once, not twice -- the small thing that decides whether a gate is read.
-  assert.equal((finding.match(/at line 16/g) ?? []).length, 1, `the position must not be duplicated: ${finding}`);
+  assert.equal(finding.split(`at line ${expectedLine},`).length - 1, 1, `the position must not be duplicated: ${finding}`);
 
   // The intact document still passes, so this is not a check that fires on everything.
   assert.equal(parseSpecSource(specText, SPEC_REL).ok, true, 'the shipped spec must parse');
