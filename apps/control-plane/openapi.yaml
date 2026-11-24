@@ -1963,6 +1963,131 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /api/v1/teams/{teamId}/starter-launch/setup:
+    parameters:
+      - { name: teamId, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getStarterLaunchSetup
+      summary: Read the customer worker and OpenBao readiness
+      security: [{ bearerJwt: [] }]
+      responses:
+        '200':
+          description: Current readiness and the worker public encryption key.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [openBao, railway, workerKey]
+                properties:
+                  openBao: { type: string, enum: [unreachable, uninitialized, sealed, setup-required, ready] }
+                  railway: { type: string, enum: [connect, connected] }
+                  workerKey: { type: string }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': &launch-unavailable
+          description: The installation worker or a provider prerequisite is unavailable.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+  /api/v1/teams/{teamId}/starter-launch/openbao:
+    parameters:
+      - { name: teamId, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: initializeStarterOpenBao
+      summary: Initialize OpenBao and encrypt the recovery file for the owner
+      security: [{ bearerJwt: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [publicKey]
+              properties:
+                publicKey: { type: string, maxLength: 1024 }
+      responses:
+        '200':
+          description: An encrypted recovery file. Only the owner can decrypt it.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [recovery]
+                properties:
+                  recovery: { type: string }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': *launch-unavailable
+  /api/v1/teams/{teamId}/starter-launch/openbao/unlock:
+    parameters:
+      - { name: teamId, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: unlockStarterOpenBao
+      summary: Unlock OpenBao with recovery material encrypted to the customer worker
+      security: [{ bearerJwt: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [recovery]
+              properties:
+                recovery: { type: string, maxLength: 640 }
+      responses:
+        '204': { description: The worker proved it can access its scoped secret path. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': *launch-unavailable
+  /api/v1/teams/{teamId}/starter-launch/railway:
+    parameters:
+      - { name: teamId, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: beginStarterRailwayAuthorization
+      summary: Start Railway authorization in the customer's installation
+      security: [{ bearerJwt: [] }]
+      responses:
+        '200':
+          description: The one-use Railway authorization URL.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [authorizationUrl]
+                properties:
+                  authorizationUrl: { type: string, format: uri }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': *launch-unavailable
+  /api/v1/railway/callback:
+    get:
+      operationId: completeStarterRailwayAuthorization
+      summary: Complete the one-use Railway authorization and return to Platfolio
+      description: The worker binds the provider response to the owner-initiated state and PKCE verifier.
+      security: []
+      parameters:
+        - { name: state, in: query, schema: { type: string } }
+        - { name: code, in: query, schema: { type: string } }
+        - { name: iss, in: query, schema: { type: string } }
+        - { name: error, in: query, schema: { type: string } }
+      responses:
+        '303':
+          description: Continue in the originating Platfolio installation.
+          headers:
+            location: { schema: { type: string, format: uri } }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   /api/v1/teams/{teamId}/starter-launch:
     parameters:
       - { name: teamId, in: path, required: true, schema: { type: string } }
@@ -2002,6 +2127,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '503': *launch-unavailable
     post:
       operationId: startStarterLaunch
       summary: Launch or resume the free starter using the connected customer runner
@@ -2011,6 +2137,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '503': *launch-unavailable
   /api/v1/teams/{teamId}/starter-launch/remove:
     parameters:
       - { name: teamId, in: path, required: true, schema: { type: string } }
@@ -2035,6 +2162,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '503': *launch-unavailable
 
 
 components:

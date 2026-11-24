@@ -1,12 +1,12 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import type { StarterLaunch, StarterLaunchEvent, StarterLaunchReport, StarterRemoval } from '../apps/control-plane/src/starter-launch.ts';
 import { FREE_STARTER_RELEASE } from '../packages/manifest/src/template-catalog.ts';
-import { customerRailway } from './customer-railway.ts';
+import { customerRailway, type CustomerRailwayGrant } from './customer-railway.ts';
 import { launchStarterApp } from './launch-starter-app.ts';
 
 const app = FREE_STARTER_RELEASE.template;
 
-export function customerLaunchRun(teamId: string, journalPath: string): StarterLaunch {
+export function customerLaunchRun(teamId: string, journalPath: string, grantForLaunch?: () => Promise<CustomerRailwayGrant>): StarterLaunch {
   let report: StarterLaunchReport = existsSync(journalPath)
     ? JSON.parse(readFileSync(journalPath, 'utf8')) as StarterLaunchReport
     : { state: 'idle', events: [], template: app, revision: FREE_STARTER_RELEASE.revision, retainedVolumes: [] };
@@ -29,12 +29,15 @@ export function customerLaunchRun(teamId: string, journalPath: string): StarterL
     event({ step: 'Launch approved', state: 'READY', detail: 'One staging project, one database and one public HTTPS link.' });
     void (async () => {
       try {
-        await customerRailway({ kind: 'installation', name: 'platfolio' });
-        event({ step: 'Find your Platfolio installation', state: 'READY' });
+        const grant = await grantForLaunch?.();
+        if (!grant?.projectId) {
+          await customerRailway({ kind: 'installation', name: 'platfolio' }, undefined, grant);
+          event({ step: 'Find your Platfolio installation', state: 'READY' });
+        }
         const installed = await launchStarterApp(app, report.projectId, (data) => {
           if (data.step === 'Railway project' && data.resourceId) report.projectId = data.resourceId;
           event(data);
-        });
+        }, grant);
         report = { ...report, state: 'ready', projectId: installed.project, deploymentId: installed.deployment, origin: installed.origin };
         event({ step: 'Open your app', state: 'READY' });
       } catch {
@@ -51,7 +54,7 @@ export function customerLaunchRun(teamId: string, journalPath: string): StarterL
     event({ step: data === 'keep' ? 'Remove and keep data' : 'Remove and wipe data', state: 'WORKING', resourceId: projectId });
     void (async () => {
       try {
-        const rail = await customerRailway({ kind: 'app', name: app, id: projectId });
+        const rail = await customerRailway({ kind: 'app', name: app, id: projectId }, undefined, await grantForLaunch?.());
         const removal = await rail.remove(data);
         delete report.origin;
         report.retainedVolumes = removal.retainedVolumes;

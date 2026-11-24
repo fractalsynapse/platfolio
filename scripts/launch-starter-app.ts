@@ -4,13 +4,13 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { dirname, join } from 'node:path';
 import { GitScm } from '../packages/contracts/src/git-scm.ts';
 import { FREE_STARTER_RELEASE, parseInventory, readTemplate, templateCatalogEntry } from '../packages/manifest/src/index.ts';
-import { customerRailway, type RailwayProgress } from './customer-railway.ts';
+import { customerRailway, type CustomerRailwayGrant, type RailwayProgress } from './customer-railway.ts';
 import { parse as parseYaml } from 'yaml';
 
 const listing = FREE_STARTER_RELEASE;
 const entry = templateCatalogEntry(listing.template);
 
-export async function launchStarterApp(app: string, project?: string, progress?: RailwayProgress) {
+export async function launchStarterApp(app: string, project?: string, progress?: RailwayProgress, grant?: CustomerRailwayGrant) {
   const scm = new GitScm();
   progress?.({ step: 'Read the pinned release', state: 'WORKING' });
   const source = await readTemplate((request) => scm.readRepositoryFile(request), entry, listing.revision);
@@ -24,7 +24,8 @@ export async function launchStarterApp(app: string, project?: string, progress?:
       database.service !== 'web' || database.database !== 'app-db' || database.output !== 'DATABASE_URL') {
     throw new Error('Pinned starter does not match the reviewed source-build and database placement');
   }
-  const rail = await customerRailway({ name: app, kind: 'app', ...(project ? { id: project } : {}), create: true }, progress);
+  const target = project ?? grant?.projectId;
+  const rail = await customerRailway({ name: app, kind: 'app', ...(target ? { id: target } : {}), create: !target }, progress, grant);
   progress?.({ step: 'Prepare the database', state: 'WORKING' });
   await rail.privatePostgres('app-db-staging');
   progress?.({ step: 'Prepare the database', state: 'READY' });

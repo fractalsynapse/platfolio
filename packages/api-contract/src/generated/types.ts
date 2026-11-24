@@ -4,7 +4,7 @@
  * hand, because every line reproduces from the specification.
  *
  * Source: apps/control-plane/openapi.yaml (OpenAPI 3.1.0, info.version 0.1.0)
- * Input digest: sha256/b41f89329f1143ec
+ * Input digest: sha256/fec1678af8da4812
  *
  * Reproduce it with `pnpm run api:types`. `pnpm run api:types:check` fails when this file stops matching
  * what the committed spec produces, which is the only way a generated type deserves to be trusted.
@@ -287,6 +287,10 @@ export interface ApiParameters {
   acceptInvitation: {
     invitationId: string;
   };
+  /** POST /api/v1/teams/{teamId}/starter-launch/railway */
+  beginStarterRailwayAuthorization: {
+    teamId: string;
+  };
   /** PUT /api/v1/instances/{instanceId}/bindings/{capability} */
   bindCapability: {
     instanceId: string;
@@ -300,6 +304,13 @@ export interface ApiParameters {
   claimFreeMarketplaceRelease: {
     teamId: string;
     installationId: string;
+  };
+  /** GET /api/v1/railway/callback */
+  completeStarterRailwayAuthorization: {
+    state?: string;
+    code?: string;
+    iss?: string;
+    error?: string;
   };
   /** PUT /api/v1/teams/{teamId}/marketplace/installations/{installationId} */
   connectMarketplaceInstallation: {
@@ -357,12 +368,20 @@ export interface ApiParameters {
   getStarterLaunch: {
     teamId: string;
   };
+  /** GET /api/v1/teams/{teamId}/starter-launch/setup */
+  getStarterLaunchSetup: {
+    teamId: string;
+  };
   /** GET /status */
   getStatus: Record<string, never>;
   /** GET /version */
   getVersion: Record<string, never>;
   /** GET /api/v1/whoami */
   getWhoami: Record<string, never>;
+  /** POST /api/v1/teams/{teamId}/starter-launch/openbao */
+  initializeStarterOpenBao: {
+    teamId: string;
+  };
   /** POST /api/v1/teams/{teamId}/marketplace/installations/{installationId}/enrollment */
   issueMarketplaceEnrollment: {
     teamId: string;
@@ -467,6 +486,10 @@ export interface ApiParameters {
     instanceId: string;
     capability: string;
   };
+  /** POST /api/v1/teams/{teamId}/starter-launch/openbao/unlock */
+  unlockStarterOpenBao: {
+    teamId: string;
+  };
   /** PUT /api/v1/me/profile */
   updateAccountProfile: Record<string, never>;
 }
@@ -513,6 +536,10 @@ export interface ApiRequestBodies {
   /** POST /api/v1/teams */
   createTeam: {
     name: Slug;
+  };
+  /** POST /api/v1/teams/{teamId}/starter-launch/openbao */
+  initializeStarterOpenBao: {
+    publicKey: string;
   };
   /** POST /api/v1/attestations */
   postAttestation: Attestation;
@@ -584,6 +611,10 @@ export interface ApiRequestBodies {
     /** Workflow file name. Default `platfolio-managed.yml`. */
     workflow?: string;
   };
+  /** POST /api/v1/teams/{teamId}/starter-launch/openbao/unlock */
+  unlockStarterOpenBao: {
+    recovery: string;
+  };
   /** PUT /api/v1/me/profile */
   updateAccountProfile: {
     username: string;
@@ -609,6 +640,16 @@ export interface ApiResponses {
     '401': Error;
     '404': Error;
     '409': Error;
+  };
+  /** POST /api/v1/teams/{teamId}/starter-launch/railway */
+  beginStarterRailwayAuthorization: {
+    '200': {
+      authorizationUrl: string;
+    };
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '503': Error;
   };
   /** PUT /api/v1/instances/{instanceId}/bindings/{capability} */
   bindCapability: {
@@ -643,6 +684,11 @@ export interface ApiResponses {
     '400': Error;
     '401': Error;
     '403': Error;
+    '404': Error;
+  };
+  /** GET /api/v1/railway/callback */
+  completeStarterRailwayAuthorization: {
+    '303': void;
     '404': Error;
   };
   /** PUT /api/v1/teams/{teamId}/marketplace/installations/{installationId} */
@@ -805,6 +851,19 @@ export interface ApiResponses {
     '401': Error;
     '403': Error;
     '404': Error;
+    '503': Error;
+  };
+  /** GET /api/v1/teams/{teamId}/starter-launch/setup */
+  getStarterLaunchSetup: {
+    '200': {
+      openBao: 'unreachable' | 'uninitialized' | 'sealed' | 'setup-required' | 'ready';
+      railway: 'connect' | 'connected';
+      workerKey: string;
+    };
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '503': Error;
   };
   /** GET /status */
   getStatus: {
@@ -821,6 +880,17 @@ export interface ApiResponses {
     '200': Whoami;
     '401': Error;
     '403': Error;
+  };
+  /** POST /api/v1/teams/{teamId}/starter-launch/openbao */
+  initializeStarterOpenBao: {
+    '200': {
+      recovery: string;
+    };
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '503': Error;
   };
   /** POST /api/v1/teams/{teamId}/marketplace/installations/{installationId}/enrollment */
   issueMarketplaceEnrollment: {
@@ -1039,6 +1109,7 @@ export interface ApiResponses {
     '401': Error;
     '403': Error;
     '404': Error;
+    '503': Error;
   };
   /** POST /api/v1/instances/{instanceId}/artifacts */
   reportArtifact: {
@@ -1100,6 +1171,7 @@ export interface ApiResponses {
     '401': Error;
     '403': Error;
     '404': Error;
+    '503': Error;
   };
   /** POST /api/v1/instances/{instanceId}/dispatches/{dispatchId}/trigger */
   triggerDispatch: {
@@ -1123,6 +1195,15 @@ export interface ApiResponses {
     '204': void;
     '401': Error;
     '404': Error;
+  };
+  /** POST /api/v1/teams/{teamId}/starter-launch/openbao/unlock */
+  unlockStarterOpenBao: {
+    '204': void;
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '503': Error;
   };
   /** PUT /api/v1/me/profile */
   updateAccountProfile: {
@@ -1189,12 +1270,16 @@ export interface Endpoint {
 export const ENDPOINTS = {
   /** POST /api/v1/me/invitations/{invitationId}/accept */
   acceptInvitation: { method: 'post', path: '/api/v1/me/invitations/{invitationId}/accept' },
+  /** POST /api/v1/teams/{teamId}/starter-launch/railway */
+  beginStarterRailwayAuthorization: { method: 'post', path: '/api/v1/teams/{teamId}/starter-launch/railway' },
   /** PUT /api/v1/instances/{instanceId}/bindings/{capability} */
   bindCapability: { method: 'put', path: '/api/v1/instances/{instanceId}/bindings/{capability}' },
   /** POST /api/v1/marketplace/installations/{installationId}/claim */
   claimEnrolledMarketplaceRelease: { method: 'post', path: '/api/v1/marketplace/installations/{installationId}/claim' },
   /** POST /api/v1/teams/{teamId}/marketplace/installations/{installationId}/claim */
   claimFreeMarketplaceRelease: { method: 'post', path: '/api/v1/teams/{teamId}/marketplace/installations/{installationId}/claim' },
+  /** GET /api/v1/railway/callback */
+  completeStarterRailwayAuthorization: { method: 'get', path: '/api/v1/railway/callback' },
   /** PUT /api/v1/teams/{teamId}/marketplace/installations/{installationId} */
   connectMarketplaceInstallation: { method: 'put', path: '/api/v1/teams/{teamId}/marketplace/installations/{installationId}' },
   /** POST /api/v1/instances/{instanceId}/dispatches */
@@ -1227,12 +1312,16 @@ export const ENDPOINTS = {
   getReady: { method: 'get', path: '/readyz' },
   /** GET /api/v1/teams/{teamId}/starter-launch */
   getStarterLaunch: { method: 'get', path: '/api/v1/teams/{teamId}/starter-launch' },
+  /** GET /api/v1/teams/{teamId}/starter-launch/setup */
+  getStarterLaunchSetup: { method: 'get', path: '/api/v1/teams/{teamId}/starter-launch/setup' },
   /** GET /status */
   getStatus: { method: 'get', path: '/status' },
   /** GET /version */
   getVersion: { method: 'get', path: '/version' },
   /** GET /api/v1/whoami */
   getWhoami: { method: 'get', path: '/api/v1/whoami' },
+  /** POST /api/v1/teams/{teamId}/starter-launch/openbao */
+  initializeStarterOpenBao: { method: 'post', path: '/api/v1/teams/{teamId}/starter-launch/openbao' },
   /** POST /api/v1/teams/{teamId}/marketplace/installations/{installationId}/enrollment */
   issueMarketplaceEnrollment: { method: 'post', path: '/api/v1/teams/{teamId}/marketplace/installations/{installationId}/enrollment' },
   /** GET /api/v1/audit */
@@ -1285,6 +1374,8 @@ export const ENDPOINTS = {
   triggerDispatch: { method: 'post', path: '/api/v1/instances/{instanceId}/dispatches/{dispatchId}/trigger' },
   /** DELETE /api/v1/instances/{instanceId}/bindings/{capability} */
   unbindCapability: { method: 'delete', path: '/api/v1/instances/{instanceId}/bindings/{capability}' },
+  /** POST /api/v1/teams/{teamId}/starter-launch/openbao/unlock */
+  unlockStarterOpenBao: { method: 'post', path: '/api/v1/teams/{teamId}/starter-launch/openbao/unlock' },
   /** PUT /api/v1/me/profile */
   updateAccountProfile: { method: 'put', path: '/api/v1/me/profile' },
 } as const satisfies Record<OperationId, Endpoint>;

@@ -442,6 +442,54 @@ variables:
     environments: all
     deployedTo: railway:variable
     note: "Enables hub-only free-template enrollment and claims. Enabled for the staging hub and the local hub proof."
+  - name: PLATFOLIO_LAUNCH_APP_PROJECT
+    kind: value
+    secret: false
+    environments: [staging]
+    deployedTo: railway:variable
+    note: "Exact existing app project for a project-only authorization."
+  - name: PLATFOLIO_LAUNCH_STATE_DIR
+    kind: value
+    secret: false
+    environments: [staging]
+    deployedTo: railway:variable
+    note: "Customer worker directory on its persistent volume."
+  - name: PLATFOLIO_LAUNCH_TEAM
+    kind: value
+    secret: false
+    environments: [staging]
+    deployedTo: railway:variable
+    note: "The local team allowed to manage the customer launcher."
+  - name: PLATFOLIO_LAUNCH_WORKER_KEY
+    kind: secret
+    secret: true
+    environments: [staging]
+    deployedTo: railway:variable
+    note: "Private API-to-worker authentication."
+  - name: PLATFOLIO_LAUNCH_WORKER_URL
+    kind: value
+    secret: false
+    environments: [staging]
+    deployedTo: railway:variable
+    note: "Private customer installation worker origin."
+  - name: PLATFOLIO_RAILWAY_OAUTH_CALLBACK
+    kind: value
+    secret: false
+    environments: [staging]
+    deployedTo: railway:variable
+    note: "Exact HTTPS callback registered for this customer installation."
+  - name: PLATFOLIO_RAILWAY_OAUTH_CLIENT
+    kind: value
+    secret: false
+    environments: [staging]
+    deployedTo: railway:variable
+    note: "Railway public OAuth client ID for this installation."
+  - name: PLATFOLIO_OPENBAO_WORKER_SECRET
+    kind: secret
+    secret: true
+    environments: [staging]
+    deployedTo: railway:variable
+    note: "Local AppRole secret with access to the Railway grant path only."
   - name: PLATFOLIO_OPENBAO_URL
     kind: value
     secret: false
