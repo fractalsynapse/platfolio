@@ -382,7 +382,8 @@ const audList = Array.isArray(atClaims.aud) ? (atClaims.aud as string[]) : [Stri
 // second, stricter contract the API does not enforce and the UI could never rely on.
 check('the audience set includes the control plane while azp stays the browser client', audList.includes(API_CLIENT) && atClaims.azp === WEB_CLIENT,
   `aud=${JSON.stringify(atClaims.aud)} azp=${String(atClaims.azp)} -- the API can tell a person's session from a machine's grant`);
-check('the scope claim is exactly the one role, not the whole realm', JSON.stringify(atClaims.scope) === JSON.stringify([REQUIRED_SCOPE]), `scope=${JSON.stringify(atClaims.scope)}`);
+const scopes = typeof atClaims.scope === 'string' ? atClaims.scope.split(' ').filter(Boolean) : atClaims.scope;
+check('the scope claim is exactly the one role, not the whole realm', JSON.stringify(scopes) === JSON.stringify([REQUIRED_SCOPE]), `scope=${JSON.stringify(atClaims.scope)}`);
 check('the ID token is addressed to the browser client, not to the API', idClaims.aud === WEB_CLIENT, `id_token aud=${String(idClaims.aud ?? '(absent)')}`);
 check('sub agrees between ID token and access token', typeof idClaims.sub === 'string' && idClaims.sub === atClaims.sub, `sub=${String(atClaims.sub)}`);
 check('a refresh token came back too', refresh0.length > 40, shape(refresh0));

@@ -4,7 +4,7 @@
  * hand, because every line reproduces from the specification.
  *
  * Source: apps/control-plane/openapi.yaml (OpenAPI 3.1.0, info.version 0.1.0)
- * Input digest: sha256/78ea29d134a033de
+ * Input digest: sha256/740334c57662ae14
  *
  * Reproduce it with `pnpm run api:types`. `pnpm run api:types:check` fails when this file stops matching
  * what the committed spec produces, which is the only way a generated type deserves to be trusted.
@@ -327,6 +327,8 @@ export interface ApiParameters {
     teamId: string;
     installationId: string;
   };
+  /** GET /api/v1/me/profile */
+  getAccountProfile: Record<string, never>;
   /** GET /api/v1/me */
   getCurrentPerson: Record<string, never>;
   /** GET /api/v1/instances/{instanceId}/dispatches/{dispatchId} */
@@ -460,6 +462,8 @@ export interface ApiParameters {
     instanceId: string;
     capability: string;
   };
+  /** PUT /api/v1/me/profile */
+  updateAccountProfile: Record<string, never>;
 }
 
 /**
@@ -574,6 +578,11 @@ export interface ApiRequestBodies {
     ref: string;
     /** Workflow file name. Default `platfolio-managed.yml`. */
     workflow?: string;
+  };
+  /** PUT /api/v1/me/profile */
+  updateAccountProfile: {
+    username: string;
+    displayName: string;
   };
 }
 
@@ -696,6 +705,18 @@ export interface ApiResponses {
     '401': Error;
     '403': Error;
     '404': Error;
+  };
+  /** GET /api/v1/me/profile */
+  getAccountProfile: {
+    '200': {
+      username: string;
+      displayName: string;
+      email: string;
+      emailVerified: boolean;
+    };
+    '401': Error;
+    '403': Error;
+    '503': Error;
   };
   /** GET /api/v1/me */
   getCurrentPerson: {
@@ -1075,6 +1096,19 @@ export interface ApiResponses {
     '401': Error;
     '404': Error;
   };
+  /** PUT /api/v1/me/profile */
+  updateAccountProfile: {
+    '200': {
+      username: string;
+      displayName: string;
+      email: string;
+      emailVerified: boolean;
+    };
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '503': Error;
+  };
 }
 
 /** Every operationId in the document -- the key type of the three maps above. */
@@ -1147,6 +1181,8 @@ export const ENDPOINTS = {
   destroyInstance: { method: 'delete', path: '/api/v1/instances/{instanceId}' },
   /** DELETE /api/v1/teams/{teamId}/marketplace/installations/{installationId} */
   disconnectMarketplaceInstallation: { method: 'delete', path: '/api/v1/teams/{teamId}/marketplace/installations/{installationId}' },
+  /** GET /api/v1/me/profile */
+  getAccountProfile: { method: 'get', path: '/api/v1/me/profile' },
   /** GET /api/v1/me */
   getCurrentPerson: { method: 'get', path: '/api/v1/me' },
   /** GET /api/v1/instances/{instanceId}/dispatches/{dispatchId} */
@@ -1219,6 +1255,8 @@ export const ENDPOINTS = {
   triggerDispatch: { method: 'post', path: '/api/v1/instances/{instanceId}/dispatches/{dispatchId}/trigger' },
   /** DELETE /api/v1/instances/{instanceId}/bindings/{capability} */
   unbindCapability: { method: 'delete', path: '/api/v1/instances/{instanceId}/bindings/{capability}' },
+  /** PUT /api/v1/me/profile */
+  updateAccountProfile: { method: 'put', path: '/api/v1/me/profile' },
 } as const satisfies Record<OperationId, Endpoint>;
 
 /**

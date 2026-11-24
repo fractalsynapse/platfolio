@@ -350,3 +350,10 @@ opens registration, requires email verification, and enables password recovery. 
 receives the existing Platfolio API role. It lets verified registrants enter the workspace. Platfolio
 assigns team membership independently. The staging and production realms can select the theme
 independently on the shared identity host.
+
+Use `--enable-account-profile` on a realm to make the Platfolio Account page editable.
+The setup maps Keycloak's user-scoped account permission to the Platfolio browser client,
+enables username edits, and adds a display-name field. Run this after any reseeding of the
+browser client. Platfolio reads and saves only the signed-in person's profile through the
+issuer's Account REST API. The Password tab starts Keycloak's themed password change and
+returns to Account. The Emails tab shows the verified sign-in address.

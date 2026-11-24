@@ -3,6 +3,9 @@ const slug = '[a-z0-9](?:[a-z0-9-]*[a-z0-9])?';
 export const workspacePaths = {
   home: '/dashboard',
   createTeam: '/dashboard/create-team',
+  account: '/dashboard/account',
+  accountEmails: '/dashboard/account/emails',
+  accountPassword: '/dashboard/account/password',
   invitations: '/dashboard/invitations',
   launch: '/dashboard/launch',
   team: (team: string) => `/dashboard/teams/${team}`,
@@ -16,6 +19,7 @@ export const workspacePaths = {
 
 export type WorkspaceRoute =
   | { kind: 'home' | 'create-team' | 'invitations' | 'launch' | 'unavailable' }
+  | { kind: 'account'; tab: 'profile' | 'emails' | 'password' }
   | { kind: 'team'; team: string }
   | { kind: 'team-invitations'; team: string }
   | { kind: 'templates'; team: string }
@@ -34,6 +38,9 @@ export function matchWorkspaceRoute(path: string): WorkspaceRoute {
   const pathname = path.replace(/\/$/, '');
   if (pathname === workspacePaths.home) return { kind: 'home' };
   if (pathname === workspacePaths.createTeam) return { kind: 'create-team' };
+  if (pathname === workspacePaths.account) return { kind: 'account', tab: 'profile' };
+  if (pathname === workspacePaths.accountEmails) return { kind: 'account', tab: 'emails' };
+  if (pathname === workspacePaths.accountPassword) return { kind: 'account', tab: 'password' };
   if (pathname === workspacePaths.invitations) return { kind: 'invitations' };
   if (pathname === workspacePaths.launch) return { kind: 'launch' };
   const [, invitedTeam] = teamInvitationsRoute.exec(pathname) ?? [];

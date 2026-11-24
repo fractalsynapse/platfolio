@@ -16,6 +16,7 @@ import { CreateTeam } from './create-team.tsx';
 import { MyInvitations } from './my-invitations.tsx';
 import { TeamInvitations } from './team-invitations.tsx';
 import { FreeTemplatePicker } from './free-template-picker.tsx';
+import { AccountWorkspace } from './account-workspace.tsx';
 
 const params = {};
 const empty = [] as const;
@@ -54,6 +55,7 @@ function WorkspaceContent() {
         {teams.some(({ role }) => role === 'owner') && <p><WorkspaceLink href={workspacePaths.launch}>Starter setup</WorkspaceLink></p>}
       </> : route.kind === 'create-team' ? <CreateTeam onCreated={(result) => { setCreated(result); reload(); }} />
         : route.kind === 'invitations' ? <MyInvitations invitations={invitations} onAccepted={reload} />
+        : route.kind === 'account' ? <AccountWorkspace tab={route.tab} />
         : route.kind === 'templates' ? team?.role === 'owner' ? <FreeTemplatePicker team={team.name} /> : <UnavailablePage />
         : route.kind === 'team-launch' ? team?.role === 'owner' ? <>
           <h1>Set up Starter Web</h1>
@@ -75,7 +77,8 @@ export const workspaceContent = defineComponent({
   id: 'workspace.content',
   props: z.object({}).strict(),
   reads: ['listTeams', 'listInstances', 'getStarterLaunch', 'startStarterLaunch', 'removeStarterLaunch',
-    'createTeam', 'listMyInvitations', 'acceptInvitation', 'listInvitations', 'createInvitation', 'revokeInvitation', 'listInstallableTemplates'],
+    'createTeam', 'listMyInvitations', 'acceptInvitation', 'listInvitations', 'createInvitation', 'revokeInvitation', 'listInstallableTemplates',
+    'getAccountProfile', 'updateAccountProfile'],
   slots: ['full-page'],
   render: WorkspaceContent,
 });
