@@ -205,6 +205,7 @@ export async function boot(config: BootConfig, fetchImpl: typeof fetch = fetch) 
     extensions: buildCapabilities({
       build: config.build,
       marketplaceEnabled: config.marketplaceEnabled ?? false,
+      accountIssuer: { issuer: config.issuer, request: fetchImpl },
       ...(config.cors?.allowedOrigins.length === 1 ? { invitationOrigin: config.cors.allowedOrigins[0]! } : {}),
       ...(config.starterLaunch ? { starterLaunch: config.starterLaunch } : {}),
     }),

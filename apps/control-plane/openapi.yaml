@@ -196,6 +196,59 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthenticated'
 
+  /api/v1/me/profile:
+    get:
+      operationId: getAccountProfile
+      summary: Read the signed-in operator's account profile
+      security: [{ bearerJwt: [] }]
+      responses:
+        '200': &account-profile
+          description: Profile fields read from the operator identity provider.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [username, displayName, email, emailVerified]
+                properties:
+                  username: { type: string }
+                  displayName: { type: string }
+                  email: { type: string }
+                  emailVerified: { type: boolean }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503':
+          description: The issuer's user-scoped account API is unavailable.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    put:
+      operationId: updateAccountProfile
+      summary: Change the signed-in operator's username and display name
+      description: The operation uses the caller's own account permission. Email ownership and password changes are separate identity operations.
+      security: [{ bearerJwt: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [username, displayName]
+              properties:
+                username: { type: string, minLength: 3, maxLength: 255 }
+                displayName: { type: string, minLength: 1, maxLength: 100 }
+      responses:
+        '200': *account-profile
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503':
+          description: The issuer's user-scoped account API is unavailable.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
   /api/v1/teams/{teamId}/invitations:
     parameters:
       - { name: teamId, in: path, required: true, schema: { type: string, minLength: 1 } }

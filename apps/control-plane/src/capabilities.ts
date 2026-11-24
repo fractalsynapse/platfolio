@@ -10,6 +10,7 @@ import type { ExtensionDescriptor, KernelContext, Request, Response_, RouteDefin
 import { ArtifactRecordSchema, secretWriteScope } from '@platfolio/contracts';
 import type { StarterLaunch } from './starter-launch.ts';
 import { badRequest, bearerToken, notFound, send, unauthorized } from './respond.ts';
+import { accountProfile, type AccountIssuer } from './account-profile.ts';
 
 /**
  * The control plane's capabilities, expressed as plugins (D40: everything is a plugin).
@@ -29,6 +30,7 @@ export interface CapabilityDeps {
   dispatchTtlMs?: number;
   marketplaceEnabled?: boolean;
   invitationOrigin?: string;
+  accountIssuer?: AccountIssuer;
   starterLaunch?: StarterLaunch;
 }
 
@@ -1295,7 +1297,8 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
     }],
   };
 
-  return [core, instances, dispatches, audit, teams, bindings, invitations, secrets, controller, marketplace, launcher, catalog];
+  return [core, instances, dispatches, audit, teams, bindings, invitations, secrets, controller, marketplace, launcher, catalog,
+    accountProfile(authorize, deps.accountIssuer)];
 }
 
 export type { VerifiedClaims };

@@ -1,12 +1,14 @@
 import { parseArgs } from 'node:util';
 import { API_CLIENT_ID, REQUIRED_SCOPE, WEB_CLIENT_ID } from './browser-auth.ts';
 import { isLoopback, LOOPBACK_CREDENTIAL, resolveCredential } from './identity-credentials.ts';
+import { OPERATOR_DISPLAY_NAME_ATTRIBUTE } from '../apps/control-plane/src/account-profile.ts';
 
 const { values } = parseArgs({ options: {
   base: { type: 'string', default: process.env.KC_BASE ?? 'http://localhost:8081' },
   realm: { type: 'string', default: process.env.PLATFOLIO_IDENTITY_REALM ?? 'platfolio' },
   'allow-remote': { type: 'boolean' },
   'enable-self-service': { type: 'boolean' },
+  'enable-account-profile': { type: 'boolean' },
   'local-mailpit': { type: 'boolean' },
 } });
 
@@ -51,11 +53,19 @@ interface RealmSettings {
   registrationAllowed?: boolean;
   resetPasswordAllowed?: boolean;
   verifyEmail?: boolean;
+  editUsernameAllowed?: boolean;
   smtpServer?: Record<string, string>;
   defaultRole?: { id: string };
 }
 interface Client { id: string; enabled: boolean }
 interface Role { id: string; name: string }
+interface Mapper {
+  id?: string;
+  name: string;
+  protocol: 'openid-connect';
+  protocolMapper: string;
+  config: Record<string, string>;
+}
 async function findClient(id: string): Promise<Client | undefined> {
   const [match] = await (await request(`${basePath}/clients?clientId=${id}`)).json() as Client[];
   return match;
@@ -68,9 +78,55 @@ async function client(id: string): Promise<Client> {
 }
 
 const current = await (await request(basePath)).json() as RealmSettings;
-await client(WEB_CLIENT_ID);
+const web = await client(WEB_CLIENT_ID);
 const consoleClient = await findClient('account-console');
 const patch: RealmSettings = { loginTheme: theme };
+if (values['enable-account-profile']) {
+  const account = await client('account');
+  const scopePath = `${basePath}/clients/${web.id}/scope-mappings/clients/${account.id}`;
+  const manage = await (await request(`${basePath}/clients/${account.id}/roles/manage-account`)).json() as Role;
+  const mapped = await (await request(scopePath)).json() as Role[];
+  if (!mapped.some(({ id }) => id === manage.id)) await request(scopePath, 'POST', [manage]);
+
+  const mapperPath = `${basePath}/clients/${web.id}/protocol-mappers/models`;
+  const existing = await (await request(mapperPath)).json() as Mapper[];
+  const platfolioScope = existing.find(({ name }) => name === 'platfolio-web-scopes');
+  if (!platfolioScope?.id) throw new Error('Seed the Platfolio web client before enabling its account profile');
+  // Keycloak parses JWT scopes as a string for its own account API. Platfolio accepts either representation
+  // while installations are migrated. This changes the representation of the same existing API role.
+  await request(`${mapperPath}/${platfolioScope.id}`, 'PUT', {
+    ...platfolioScope, config: { ...platfolioScope.config, multivalued: 'false' },
+  });
+
+  const common = { 'id.token.claim': 'false', 'access.token.claim': 'true', 'userinfo.token.claim': 'false' };
+  const desired: Mapper[] = [
+    { name: 'platfolio-account-audience', protocol: 'openid-connect', protocolMapper: 'oidc-audience-mapper',
+      config: { ...common, 'included.client.audience': 'account' } },
+    { name: 'platfolio-account-roles', protocol: 'openid-connect', protocolMapper: 'oidc-usermodel-client-role-mapper',
+      config: { ...common, 'usermodel.clientRoleMapping.clientId': 'account', 'claim.name': 'resource_access.account.roles',
+        'jsonType.label': 'String', multivalued: 'true' } },
+  ];
+  for (const mapper of desired) {
+    const saved = existing.find(({ name }) => name === mapper.name);
+    await request(saved?.id ? `${mapperPath}/${saved.id}` : mapperPath, saved?.id ? 'PUT' : 'POST',
+      saved?.id ? { ...mapper, id: saved.id } : mapper);
+  }
+
+  const profilePath = `${basePath}/users/profile`;
+  const profile = await (await request(profilePath)).json() as { attributes?: { name: string; permissions?: { edit?: string[]; view?: string[] } }[] };
+  if (!Array.isArray(profile.attributes)) throw new Error('The realm did not return its user profile configuration');
+  const displayName = profile.attributes.find(({ name }) => name === OPERATOR_DISPLAY_NAME_ATTRIBUTE);
+  if (!displayName) await request(profilePath, 'PUT', {
+    ...profile, attributes: [...profile.attributes, {
+      name: OPERATOR_DISPLAY_NAME_ATTRIBUTE, displayName: 'Display name', validations: { length: { max: 100 } },
+      permissions: { view: ['admin', 'user'], edit: ['admin', 'user'] }, multivalued: false,
+    }],
+  });
+  else if (!displayName.permissions?.edit?.includes('user') || !displayName.permissions?.view?.includes('user')) {
+    throw new Error('The installed display-name field needs user read and edit permission');
+  }
+  patch.editUsernameAllowed = true;
+}
 if (values['enable-self-service']) {
   if (values['local-mailpit']) patch.smtpServer = { host: 'mailpit', port: '1025', from: 'no-reply@platfolio.test' };
   const smtp = patch.smtpServer ?? current.smtpServer;
@@ -90,6 +146,7 @@ await request(basePath, 'PUT', patch);
 if (consoleClient?.enabled) await request(`${basePath}/clients/${consoleClient.id}`, 'PUT', { enabled: false });
 const readback = await (await request(basePath)).json() as RealmSettings;
 if (readback.loginTheme !== theme || (await findClient('account-console'))?.enabled ||
+    (values['enable-account-profile'] && !readback.editUsernameAllowed) ||
     (values['enable-self-service'] && (!readback.registrationAllowed || !readback.resetPasswordAllowed || !readback.verifyEmail))) {
   throw new Error('Keycloak did not read back the expected authentication settings');
 }

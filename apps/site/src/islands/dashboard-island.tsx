@@ -60,5 +60,6 @@ export default function DashboardIsland({ config, callback }: DashboardIslandPro
     globalThis.scrollTo(0, 0);
   };
   const signOut = () => globalThis.location.assign(shell.auth.signOut() ?? '/');
-  return shell.wrap(<Workspace pathname={pathname} navigate={navigate} signIn={begin} signOut={signOut} />);
+  const changePassword = async () => globalThis.location.assign(await shell.auth.begin(workspacePaths.accountPassword, 'UPDATE_PASSWORD'));
+  return shell.wrap(<Workspace pathname={pathname} navigate={navigate} signIn={begin} signOut={signOut} changePassword={changePassword} />);
 }

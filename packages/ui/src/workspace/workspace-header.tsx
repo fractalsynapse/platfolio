@@ -26,6 +26,7 @@ export function WorkspaceHeader({ teams, team, invitationCount, signOut }: Works
           : <span className="ui-workspace-item">No teams available</span>}
       </WorkspaceMenu>
       <WorkspaceMenu align="end" hover label="Account menu" trigger={<span className="ui-workspace-avatar" aria-hidden="true"><span className="ui-workspace-avatar-head" /><span className="ui-workspace-avatar-body" /></span>}>
+        <WorkspaceLink className="ui-workspace-item ui-hit-primary" href={workspacePaths.account}>Account</WorkspaceLink>
         <WorkspaceLink className="ui-workspace-item ui-hit-primary" href={workspacePaths.home}>Your teams</WorkspaceLink>
         <WorkspaceLink className="ui-workspace-item ui-hit-primary" href={workspacePaths.invitations}>
           Invitations{invitationCount ? ` (${invitationCount})` : ''}

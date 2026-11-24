@@ -227,7 +227,7 @@ export function createTokenBag(): TokenBag {
 export interface BrowserAuthSource {
   /** The `AuthSource` the SDK consumes. */
   readonly token: () => Promise<string>;
-  readonly begin: (returnPath?: string) => Promise<string>;
+  readonly begin: (returnPath?: string, action?: 'UPDATE_PASSWORD') => Promise<string>;
   readonly complete: (params: URLSearchParams, onSignedIn?: (returnPath: string) => void) => Promise<'signed-in' | 'no-handoff' | 'state-mismatch' | 'refused'>;
   readonly refresh: () => Promise<'refreshed' | 'no-refresh-token' | 'refused'>;
   readonly signedIn: () => boolean;
@@ -293,7 +293,7 @@ export function createBrowserAuthSource(
 
   return {
     config: { clientId, scope, callbackUrl },
-    begin: async (returnPath) => {
+    begin: async (returnPath, action) => {
       const verifier = createVerifierWith(deps.random);
       const pair = await pkceChallengeWith(deps.digest, verifier);
       const state = base64Url(deps.random(24));
@@ -310,6 +310,7 @@ export function createBrowserAuthSource(
       authorize.searchParams.set('state', state);
       authorize.searchParams.set('code_challenge_method', PKCE_METHOD);
       authorize.searchParams.set('code_challenge', pair.challenge);
+      if (action) authorize.searchParams.set('kc_action', action);
       return authorize.toString();
     },
     complete: async (params, onSignedIn) => {
