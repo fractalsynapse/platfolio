@@ -1750,7 +1750,7 @@ paths:
       summary: Claim the pinned free starter release for a linked installation
       security: [{ bearerJwt: [] }]
       responses:
-        '200':
+        '200': &marketplace-claim-response
           description: A receipt containing the immutable template source coordinates.
           content:
             application/json:
@@ -1770,6 +1770,67 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /api/v1/teams/{teamId}/marketplace/installations/{installationId}/enrollment:
+    parameters:
+      - { name: teamId, in: path, required: true, schema: { type: string } }
+      - { name: installationId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: issueMarketplaceEnrollment
+      summary: Authorize a private installation to enroll with the hub
+      description: The team owner receives an expiring code once. Issuing again replaces a pending code. An enrolled or disconnected ID cannot be issued another code.
+      security: [{ bearerJwt: [] }]
+      responses:
+        '201':
+          description: A code to present to the hub enrollment endpoint before it expires.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [enrollmentCode, expiresAt]
+                properties:
+                  enrollmentCode: { type: string, pattern: '^[A-Za-z0-9_-]{43}$' }
+                  expiresAt: { type: string, format: date-time }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/marketplace/installations/{installationId}/enrollment:
+    parameters:
+      - { name: installationId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: redeemMarketplaceEnrollment
+      summary: Redeem a one-use hub enrollment code
+      description: The installation generates and keeps its own random credential. It sends only its SHA-256 verifier when redeeming. An expired, replaced, redeemed, or disconnected code cannot authorize an installation.
+      security: [{ marketplaceCredential: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [registryDigest]
+              properties:
+                registryDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+      responses:
+        '204': { description: The installation is enrolled and may use its credential for registry requests. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/marketplace/installations/{installationId}/claim:
+    parameters:
+      - { name: installationId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: claimEnrolledMarketplaceRelease
+      summary: Claim the pinned free starter from the private installation
+      description: This credential authorizes registry claims for one installation. It cannot act as a team member or authorize deployment or provider operations.
+      security: [{ marketplaceCredential: [] }]
+      responses:
+        '200': *marketplace-claim-response
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
 
   /api/v1/teams/{teamId}/starter-launch:
     parameters:
@@ -1847,6 +1908,10 @@ paths:
 
 components:
   securitySchemes:
+    marketplaceCredential:
+      type: http
+      scheme: bearer
+      description: A short-lived enrollment code or a private installation's registry credential, depending on the operation.
     bearerJwt:
       type: http
       scheme: bearer

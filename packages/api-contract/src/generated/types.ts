@@ -4,7 +4,7 @@
  * hand, because every line reproduces from the specification.
  *
  * Source: apps/control-plane/openapi.yaml (OpenAPI 3.1.0, info.version 0.1.0)
- * Input digest: sha256/f96ed90e9dc8b4f6
+ * Input digest: sha256/8c705a8f6f7acbfa
  *
  * Reproduce it with `pnpm run api:types`. `pnpm run api:types:check` fails when this file stops matching
  * what the committed spec produces, which is the only way a generated type deserves to be trusted.
@@ -292,6 +292,10 @@ export interface ApiParameters {
     instanceId: string;
     capability: string;
   };
+  /** POST /api/v1/marketplace/installations/{installationId}/claim */
+  claimEnrolledMarketplaceRelease: {
+    installationId: string;
+  };
   /** POST /api/v1/teams/{teamId}/marketplace/installations/{installationId}/claim */
   claimFreeMarketplaceRelease: {
     teamId: string;
@@ -352,6 +356,11 @@ export interface ApiParameters {
   getVersion: Record<string, never>;
   /** GET /api/v1/whoami */
   getWhoami: Record<string, never>;
+  /** POST /api/v1/teams/{teamId}/marketplace/installations/{installationId}/enrollment */
+  issueMarketplaceEnrollment: {
+    teamId: string;
+    installationId: string;
+  };
   /** GET /api/v1/audit */
   listAudit: {
     limit?: number;
@@ -398,6 +407,10 @@ export interface ApiParameters {
   putSecret: {
     instanceId: string;
     name: string;
+  };
+  /** POST /api/v1/marketplace/installations/{installationId}/enrollment */
+  redeemMarketplaceEnrollment: {
+    installationId: string;
   };
   /** POST /api/v1/instances/{instanceId}/redeploy */
   redeployInstance: {
@@ -515,6 +528,10 @@ export interface ApiRequestBodies {
     /** What the write does to the RUNNING service. The default, `suppress`, writes the variable and leaves the container alone -- the behaviour every delivery had before this field existed, and still the default, because a platform that cannot read a value back (D4) must not silently restart things on a write that changed nothing. `auto` sends the write without Railway's `skipDeploys` suppression and lets the provider's own comparison decide. Measured 2026-11-15 in docs/research/: a changed value started a new deployment on its own; an identical value started nothing. So the restart is triggered by the party that holds the value, and platfolio never stores, reads, or hashes one -- which is the tradeoff this design accepts in exchange for keeping D4 intact. */
     refresh?: 'suppress' | 'auto';
   };
+  /** POST /api/v1/marketplace/installations/{installationId}/enrollment */
+  redeemMarketplaceEnrollment: {
+    registryDigest: string;
+  };
   /** POST /api/v1/instances/{instanceId}/redeploy */
   redeployInstance: {
     environment: 'production' | 'staging' | 'preview';
@@ -582,6 +599,19 @@ export interface ApiResponses {
     '200': BindingRecord;
     '400': Error;
     '401': Error;
+    '404': Error;
+  };
+  /** POST /api/v1/marketplace/installations/{installationId}/claim */
+  claimEnrolledMarketplaceRelease: {
+    '200': {
+      installationId: string;
+      template: 'starter-web';
+      repo: string;
+      version: string;
+      revision: string;
+      priceMinor: 0;
+    };
+    '400': Error;
     '404': Error;
   };
   /** POST /api/v1/teams/{teamId}/marketplace/installations/{installationId}/claim */
@@ -741,6 +771,17 @@ export interface ApiResponses {
     '401': Error;
     '403': Error;
   };
+  /** POST /api/v1/teams/{teamId}/marketplace/installations/{installationId}/enrollment */
+  issueMarketplaceEnrollment: {
+    '201': {
+      enrollmentCode: string;
+      expiresAt: string;
+    };
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+  };
   /** GET /api/v1/audit */
   listAudit: {
     '200': AuditEntry[];
@@ -846,6 +887,12 @@ export interface ApiResponses {
     '501': Error;
     '502': Error;
     '503': Error;
+  };
+  /** POST /api/v1/marketplace/installations/{installationId}/enrollment */
+  redeemMarketplaceEnrollment: {
+    '204': void;
+    '400': Error;
+    '404': Error;
   };
   /** POST /api/v1/instances/{instanceId}/redeploy */
   redeployInstance: {
@@ -1068,6 +1115,8 @@ export const ENDPOINTS = {
   acceptInvitation: { method: 'post', path: '/api/v1/me/invitations/{invitationId}/accept' },
   /** PUT /api/v1/instances/{instanceId}/bindings/{capability} */
   bindCapability: { method: 'put', path: '/api/v1/instances/{instanceId}/bindings/{capability}' },
+  /** POST /api/v1/marketplace/installations/{installationId}/claim */
+  claimEnrolledMarketplaceRelease: { method: 'post', path: '/api/v1/marketplace/installations/{installationId}/claim' },
   /** POST /api/v1/teams/{teamId}/marketplace/installations/{installationId}/claim */
   claimFreeMarketplaceRelease: { method: 'post', path: '/api/v1/teams/{teamId}/marketplace/installations/{installationId}/claim' },
   /** PUT /api/v1/teams/{teamId}/marketplace/installations/{installationId} */
@@ -1104,6 +1153,8 @@ export const ENDPOINTS = {
   getVersion: { method: 'get', path: '/version' },
   /** GET /api/v1/whoami */
   getWhoami: { method: 'get', path: '/api/v1/whoami' },
+  /** POST /api/v1/teams/{teamId}/marketplace/installations/{installationId}/enrollment */
+  issueMarketplaceEnrollment: { method: 'post', path: '/api/v1/teams/{teamId}/marketplace/installations/{installationId}/enrollment' },
   /** GET /api/v1/audit */
   listAudit: { method: 'get', path: '/api/v1/audit' },
   /** GET /api/v1/capabilities */
@@ -1130,6 +1181,8 @@ export const ENDPOINTS = {
   putPlan: { method: 'put', path: '/api/v1/instances/{instanceId}/plan' },
   /** PUT /api/v1/instances/{instanceId}/secrets/{name} */
   putSecret: { method: 'put', path: '/api/v1/instances/{instanceId}/secrets/{name}' },
+  /** POST /api/v1/marketplace/installations/{installationId}/enrollment */
+  redeemMarketplaceEnrollment: { method: 'post', path: '/api/v1/marketplace/installations/{installationId}/enrollment' },
   /** POST /api/v1/instances/{instanceId}/redeploy */
   redeployInstance: { method: 'post', path: '/api/v1/instances/{instanceId}/redeploy' },
   /** POST /api/v1/instances/{instanceId}/plan/from-repository */

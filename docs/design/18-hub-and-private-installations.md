@@ -205,6 +205,17 @@ OpenBao initialization and recovery flow. Optional Keycloak brokering follows th
 operator flow. It should demonstrate that a marketplace user has no private role until an
 owner assigns one. Paid claims build on the free install path.
 
+The one-use enrollment API is supported by the customer CLI. A hub owner uses
+`customer-marketplace.ts issue` to create a code in a private file. The private installation
+uses `enroll` with that file and an owner-configured OpenBao KV v2 mount named
+`platfolio-registry`. Grant the installation token read, create, and update only on
+`platfolio-registry/data/installation/<installation UUID>`. Use an HTTPS OpenBao endpoint
+or a loopback endpoint for local tests. The installation generates its registry credential
+inside the operator process and persists it in OpenBao before redeeming. The hub stores
+only SHA-256 verifiers. A private installation uses `claim-enrolled` to read the pinned
+release using its own credential. The hub owner's `disconnect` revokes that credential.
+The saved receipt remains usable while the hub is offline.
+
 ## Customer launcher and free claim pilot
 
 The operator runs the launcher in a customer-owned Railway workspace. The installation uses

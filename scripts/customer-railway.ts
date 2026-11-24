@@ -68,11 +68,19 @@ export async function customerRailway(target: CustomerProjectTarget, progress?: 
     if (services.some(({ serviceName }) => !allowed.has(serviceName))) throw new Error('The project contains services for a different platform');
     return services;
   }
-  async function ensureService(name: string, image?: string) {
+  async function ensureService(name: string, image?: string, options: { updateImage?: boolean } = {}) {
     if (!allowed.has(name)) throw new Error('Service is outside the approved platform project');
     const found = (await instances()).find((item) => item.serviceName === name);
     if (found) {
-      if (image && found.source?.image !== image) throw new Error(`Existing ${name} must use the launcher image pin`);
+      if (image && found.source?.image !== image) {
+        if (!options.updateImage || target.kind !== 'installation' || !/^private-(api|site|identity)-staging$/.test(name) ||
+            !found.source?.image || found.source.repo || !/@sha256:[a-f0-9]{64}$/.test(image)) {
+          throw new Error(`Existing ${name} must use the launcher image pin. Use an explicit candidate update for a private Platfolio installation.`);
+        }
+        await configure(found.serviceId, { source: { image } });
+        const updated = (await instances()).find(({ serviceId }) => serviceId === found.serviceId);
+        if (updated?.source?.image !== image) throw new Error(`Railway did not set the candidate image for ${name}`);
+      }
       return found.serviceId;
     }
     const { serviceCreate } = await call<{ serviceCreate: Entry }>('stage service create',
