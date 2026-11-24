@@ -4,7 +4,7 @@
  * hand, because every line reproduces from the specification.
  *
  * Source: apps/control-plane/openapi.yaml (OpenAPI 3.1.0, info.version 0.1.0)
- * Input digest: sha256/8548c17c571f0edb
+ * Input digest: sha256/0a2b100b4439dd9c
  *
  * Reproduce it with `pnpm run api:types`. `pnpm run api:types:check` fails when this file stops matching
  * what the committed spec produces, which is the only way a generated type deserves to be trusted.
@@ -428,6 +428,10 @@ export interface ApiParameters {
     environment: string;
     service: string;
   };
+  /** GET /api/v1/teams/{teamId}/members */
+  listTeamMembers: {
+    teamId: string;
+  };
   /** GET /api/v1/teams */
   listTeams: Record<string, never>;
   /** POST /api/v1/attestations */
@@ -460,6 +464,11 @@ export interface ApiParameters {
   /** POST /api/v1/teams/{teamId}/starter-launch/remove */
   removeStarterLaunch: {
     teamId: string;
+  };
+  /** DELETE /api/v1/teams/{teamId}/members/{personId} */
+  removeTeamMember: {
+    teamId: string;
+    personId: string;
   };
   /** POST /api/v1/instances/{instanceId}/artifacts */
   reportArtifact: {
@@ -501,6 +510,11 @@ export interface ApiParameters {
   };
   /** PUT /api/v1/me/profile */
   updateAccountProfile: Record<string, never>;
+  /** PATCH /api/v1/teams/{teamId}/members/{personId} */
+  updateTeamMemberRole: {
+    teamId: string;
+    personId: string;
+  };
 }
 
 /**
@@ -628,6 +642,10 @@ export interface ApiRequestBodies {
   updateAccountProfile: {
     username: string;
     displayName: string;
+  };
+  /** PATCH /api/v1/teams/{teamId}/members/{personId} */
+  updateTeamMemberRole: {
+    role: 'owner' | 'member';
   };
 }
 
@@ -985,6 +1003,19 @@ export interface ApiResponses {
     '404': Error;
     '501': Error;
   };
+  /** GET /api/v1/teams/{teamId}/members */
+  listTeamMembers: {
+    '200': Array<{
+      personId: string;
+      role: 'owner' | 'member';
+      addedAt: string;
+      self: boolean;
+      invitedAddress?: string;
+    }>;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+  };
   /** GET /api/v1/teams */
   listTeams: {
     '200': Array<{
@@ -1126,6 +1157,15 @@ export interface ApiResponses {
     '409': Error;
     '503': Error;
   };
+  /** DELETE /api/v1/teams/{teamId}/members/{personId} */
+  removeTeamMember: {
+    '204': void;
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '409': Error;
+  };
   /** POST /api/v1/instances/{instanceId}/artifacts */
   reportArtifact: {
     '201': {
@@ -1234,6 +1274,15 @@ export interface ApiResponses {
     '401': Error;
     '403': Error;
     '503': Error;
+  };
+  /** PATCH /api/v1/teams/{teamId}/members/{personId} */
+  updateTeamMemberRole: {
+    '204': void;
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '409': Error;
   };
 }
 
@@ -1359,6 +1408,8 @@ export const ENDPOINTS = {
   listMyInvitations: { method: 'get', path: '/api/v1/me/invitations' },
   /** GET /api/v1/instances/{instanceId}/secrets */
   listSecretPresence: { method: 'get', path: '/api/v1/instances/{instanceId}/secrets' },
+  /** GET /api/v1/teams/{teamId}/members */
+  listTeamMembers: { method: 'get', path: '/api/v1/teams/{teamId}/members' },
   /** GET /api/v1/teams */
   listTeams: { method: 'get', path: '/api/v1/teams' },
   /** POST /api/v1/attestations */
@@ -1377,6 +1428,8 @@ export const ENDPOINTS = {
   registerPlanFromRepository: { method: 'post', path: '/api/v1/instances/{instanceId}/plan/from-repository' },
   /** POST /api/v1/teams/{teamId}/starter-launch/remove */
   removeStarterLaunch: { method: 'post', path: '/api/v1/teams/{teamId}/starter-launch/remove' },
+  /** DELETE /api/v1/teams/{teamId}/members/{personId} */
+  removeTeamMember: { method: 'delete', path: '/api/v1/teams/{teamId}/members/{personId}' },
   /** POST /api/v1/instances/{instanceId}/artifacts */
   reportArtifact: { method: 'post', path: '/api/v1/instances/{instanceId}/artifacts' },
   /** DELETE /api/v1/instances/{instanceId}/capability/{capability}/shares/{toTeamId} */
@@ -1395,6 +1448,8 @@ export const ENDPOINTS = {
   unlockStarterOpenBao: { method: 'post', path: '/api/v1/teams/{teamId}/starter-launch/openbao/unlock' },
   /** PUT /api/v1/me/profile */
   updateAccountProfile: { method: 'put', path: '/api/v1/me/profile' },
+  /** PATCH /api/v1/teams/{teamId}/members/{personId} */
+  updateTeamMemberRole: { method: 'patch', path: '/api/v1/teams/{teamId}/members/{personId}' },
 } as const satisfies Record<OperationId, Endpoint>;
 
 /**

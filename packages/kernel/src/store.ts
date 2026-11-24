@@ -81,6 +81,7 @@ export class StoreService extends Service<z.infer<typeof StoreConfigSchema>> {
   putTeamMember(...args: Parameters<Store['putTeamMember']>) { return this.inner.putTeamMember(...args); }
   getTeamMember(...args: Parameters<Store['getTeamMember']>) { return this.inner.getTeamMember(...args); }
   listTeamMembers(...args: Parameters<Store['listTeamMembers']>) { return this.inner.listTeamMembers(...args); }
+  changeTeamMember(...args: Parameters<Store['changeTeamMember']>) { return this.inner.changeTeamMember(...args); }
   teamsForPerson(...args: Parameters<Store['teamsForPerson']>) { return this.inner.teamsForPerson(...args); }
   resolvePerson(...args: Parameters<Store['resolvePerson']>) { return this.inner.resolvePerson(...args); }
   getPerson(...args: Parameters<Store['getPerson']>) { return this.inner.getPerson(...args); }

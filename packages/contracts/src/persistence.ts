@@ -604,6 +604,8 @@ export interface Store {
   putTeamMember(member: Omit<TeamMember, 'addedAt'> & { addedAt?: string }): Promise<StoreResult<TeamMember>>;
   getTeamMember(teamId: string, personId: string): Promise<StoreResult<TeamMember>>;
   listTeamMembers(teamId: string): Promise<TeamMember[]>;
+  /** Recheck the acting owner atomically with the change. An owner changes only other memberships. */
+  changeTeamMember(teamId: string, actorId: string, personId: string, role: TeamRole | null): Promise<StoreResult<TeamMember>>;
   /**
    * The authorization question, asked once: which teams may this person act for? An empty array means
    * authenticated and belonging to nothing -- a valid state, not an error, and the reason this returns a list

@@ -10,9 +10,12 @@ export const workspacePaths = {
   invitations: '/dashboard/invitations',
   launch: '/dashboard/launch',
   team: (team: string) => `/dashboard/teams/${team}`,
+  teamMembers: (team: string) => `/dashboard/teams/${team}/members`,
+  teamConnections: (team: string) => `/dashboard/teams/${team}/connections`,
   teamInvitations: (team: string) => `/dashboard/teams/${team}/members/invitations`,
   templates: (team: string) => `/dashboard/teams/${team}/create-instance`,
   launchForTeam: (team: string) => `/dashboard/teams/${team}/create-instance/launch`,
+  instanceSetup: (team: string, instance: string) => `/dashboard/teams/${team}/instances/${instance}/setup`,
   instance: (team: string, instance: string) => `/dashboard/teams/${team}/instances/${instance}`,
   environment: (team: string, instance: string, environment: string, tab: EnvironmentTab = 'overview') =>
     `/dashboard/teams/${team}/instances/${instance}/environments/${environment}${tab === 'overview' ? '' : `/${tab}`}`,
@@ -22,16 +25,22 @@ export type WorkspaceRoute =
   | { kind: 'home' | 'create-team' | 'invitations' | 'launch' | 'unavailable' }
   | { kind: 'account'; tab: 'profile' | 'emails' | 'password' }
   | { kind: 'team'; team: string }
+  | { kind: 'team-members'; team: string }
   | { kind: 'team-invitations'; team: string }
+  | { kind: 'team-connections'; team: string }
   | { kind: 'templates'; team: string }
   | { kind: 'team-launch'; team: string }
   | { kind: 'instance'; team: string; instance: string }
+  | { kind: 'instance-setup'; team: string; instance: string }
   | { kind: 'environment'; team: string; instance: string; environment: string; tab: EnvironmentTab };
 
 const teamRoute = new RegExp(`^${workspacePaths.team(`(${slug})`)}$`);
+const teamMembersRoute = new RegExp(`^${workspacePaths.teamMembers(`(${slug})`)}$`);
+const teamConnectionsRoute = new RegExp(`^${workspacePaths.teamConnections(`(${slug})`)}$`);
 const teamInvitationsRoute = new RegExp(`^${workspacePaths.teamInvitations(`(${slug})`)}$`);
 const templatesRoute = new RegExp(`^${workspacePaths.templates(`(${slug})`)}$`);
 const teamLaunchRoute = new RegExp(`^${workspacePaths.launchForTeam(`(${slug})`)}$`);
+const appSetupRoute = new RegExp(`^${workspacePaths.instanceSetup(`(${slug})`, `(${slug})`)}$`);
 const appRoute = new RegExp(`^${workspacePaths.instance(`(${slug})`, `(${slug})`)}$`);
 const environmentRoute = new RegExp(`^${workspacePaths.environment(`(${slug})`, `(${slug})`, `(${slug})`)}(?:/(deployments|configuration|domains))?$`);
 
@@ -44,6 +53,10 @@ export function matchWorkspaceRoute(path: string): WorkspaceRoute {
   if (pathname === workspacePaths.accountPassword) return { kind: 'account', tab: 'password' };
   if (pathname === workspacePaths.invitations) return { kind: 'invitations' };
   if (pathname === workspacePaths.launch) return { kind: 'launch' };
+  const [, membersTeam] = teamMembersRoute.exec(pathname) ?? [];
+  if (membersTeam) return { kind: 'team-members', team: membersTeam };
+  const [, connectedTeam] = teamConnectionsRoute.exec(pathname) ?? [];
+  if (connectedTeam) return { kind: 'team-connections', team: connectedTeam };
   const [, invitedTeam] = teamInvitationsRoute.exec(pathname) ?? [];
   if (invitedTeam) return { kind: 'team-invitations', team: invitedTeam };
   const [, templateTeam] = templatesRoute.exec(pathname) ?? [];
@@ -55,6 +68,8 @@ export function matchWorkspaceRoute(path: string): WorkspaceRoute {
     kind: 'environment', team, instance, environment,
     tab: subpage === 'deployments' || subpage === 'configuration' || subpage === 'domains' ? subpage : 'overview',
   };
+  const [, setupTeam, setupApp] = appSetupRoute.exec(pathname) ?? [];
+  if (setupTeam && setupApp) return { kind: 'instance-setup', team: setupTeam, instance: setupApp };
   const [, appTeam, app] = appRoute.exec(pathname) ?? [];
   if (appTeam && app) return { kind: 'instance', team: appTeam, instance: app };
   const [, teamName] = teamRoute.exec(pathname) ?? [];

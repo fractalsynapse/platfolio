@@ -3,7 +3,7 @@ import { Pool } from 'pg';
 import {
   HostedStarterSchema, rollupState, type HostedStarter, type NewHostedStarter,
   ArtifactRecordSchema, AttestationRecordSchema, AuditEntrySchema, BindingRecordSchema, CapabilityOfferSchema, CapabilityShareSchema, DispatchRecordSchema, IdentitySchema, PersonSchema, TeamMemberSchema, InstanceEnvironmentStateSchema, InstanceSchema, InvitationSchema, ProviderConnectionSchema, RepoConnectionSchema, TeamSchema, newId,
-  type ArtifactRecord, type AttestationRecord, type AuditEntry, type BindingRecord, type CapabilityOffer, type NewBinding, type NewCapabilityOffer, type NewCapabilityShare, type DispatchRecord, type Instance, type InstanceEnvironmentState, type Invitation, type NewInvitation, type ProviderConnection, type RepoConnection, type Store, type StoreError, type NewInstance, type StoreResult, type Team, type Person, type TeamMember,
+  type ArtifactRecord, type AttestationRecord, type AuditEntry, type BindingRecord, type CapabilityOffer, type NewBinding, type NewCapabilityOffer, type NewCapabilityShare, type DispatchRecord, type Instance, type InstanceEnvironmentState, type Invitation, type NewInvitation, type ProviderConnection, type RepoConnection, type Store, type StoreError, type NewInstance, type StoreResult, type Team, type Person, type TeamMember, type TeamRole,
 } from './persistence.ts';
 import { reasonOf } from './persistence.ts';
 import { normaliseEmail, normaliseName } from './persistence.ts';
@@ -729,9 +729,9 @@ export class PostgresStore implements Store {
       const invitation = this.asInvitation(updated);
       if (!invitation.ok) { await client.query('ROLLBACK'); return invitation; }
       const memberRows = (await client.query(
-        `INSERT INTO ${this.q('team_members')} (team_id, person_id, role, added_at)
+        `INSERT INTO ${this.q('team_members')} AS membership (team_id, person_id, role, added_at)
          VALUES ($1,$2,$3,now())
-         ON CONFLICT (team_id, person_id) DO UPDATE SET role = EXCLUDED.role
+         ON CONFLICT (team_id, person_id) DO UPDATE SET role = membership.role
          RETURNING *`, [updated.team_id, personId, updated.role])).rows as Row[];
       const member = memberRows[0];
       if (!member) { await client.query('ROLLBACK'); return err({ code: 'conflict', reason: 'membership write returned nothing' }); }
@@ -853,6 +853,33 @@ export class PostgresStore implements Store {
       const admitted = admit(TeamMemberSchema, { teamId: r.team_id, personId: r.person_id, role: r.role, addedAt: iso(r.added_at) }, 'team member row');
       return admitted.accepted ? ok(admitted.value) : err({ code: 'conflict', reason: admitted.reason });
     }));
+  }
+
+
+  async changeTeamMember(teamId: string, actorId: string, personId: string, role: TeamRole | null): Promise<StoreResult<TeamMember>> {
+    const client = await this.pool.connect();
+    let committed = false;
+    try {
+      await client.query('BEGIN');
+      await client.query(`SELECT id FROM ${this.q('teams')} WHERE id = $1 FOR UPDATE`, [teamId]);
+      const owner = await client.query(
+        `SELECT 1 FROM ${this.q('team_members')} WHERE team_id = $1 AND person_id = $2 AND role = 'owner'`, [teamId, actorId],
+      );
+      if (!owner.rowCount) return err({ code: 'not-found', what: 'ownership', id: teamId });
+      if (actorId === personId) return err({ code: 'conflict', reason: 'Another owner must change your membership' });
+      const result = role === null
+        ? await client.query(`DELETE FROM ${this.q('team_members')} WHERE team_id = $1 AND person_id = $2 RETURNING *`, [teamId, personId])
+        : await client.query(`UPDATE ${this.q('team_members')} SET role = $3 WHERE team_id = $1 AND person_id = $2 RETURNING *`, [teamId, personId, role]);
+      const row = result.rows[0];
+      if (!row) return err({ code: 'not-found', what: 'team membership', id: personId });
+      const member = TeamMemberSchema.parse({ teamId, personId, role: row.role, addedAt: iso(row.added_at) });
+      await client.query('COMMIT');
+      committed = true;
+      return ok(member);
+    } finally {
+      try { if (!committed) await client.query('ROLLBACK'); }
+      finally { client.release(); }
+    }
   }
 
   async teamsForPerson(personId: string) {

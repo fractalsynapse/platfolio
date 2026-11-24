@@ -1063,10 +1063,41 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
   // Teams (#195, D44). These are not team-scoped routes -- there is no team to scope to yet. Creation is
   // guarded by authentication plus the verified person, and the caller becomes the owner in the same
   // operation, because a team nobody owns cannot invite, share, or destroy anything and has no way out of that.
+  async function changeMember(scope: Scope, personId: string, role: 'owner' | 'member' | null): Promise<Response_> {
+    const changed = await scope.context.store.changeTeamMember(scope.teamId, scope.personId, personId, role);
+    if (!changed.ok) return {
+      status: changed.code === 'conflict' ? 409 : 404,
+      body: { error: changed.code, message: reasonOf(changed) },
+    };
+    await scope.context.store.appendAudit({
+      actorKind: 'user', actorRef: scope.personId, action: role === null ? 'team.member.remove' : 'team.member.role',
+      target: scope.teamId, detail: { personId, ...(role === null ? {} : { role }) },
+    });
+    return { status: 204, body: undefined };
+  }
+
   const teams: ExtensionDescriptor = {
     id: 'teams',
     requires: ['store', 'identity'],
     routes: [
+      scoped('GET', '/api/v1/teams/{teamId}/members', 'listTeamMembers', 'team.member.manage', async ({ context, teamId, personId }) => {
+        const [members, invitations] = await Promise.all([
+          context.store.listTeamMembers(teamId), context.store.listInvitations(teamId),
+        ]);
+        return send('listTeamMembers', 200, members.map((member) => {
+          const invite = invitations.find((record) => record.state === 'accepted' && record.acceptedBy === member.personId);
+          return { personId: member.personId, role: member.role, addedAt: member.addedAt,
+            self: member.personId === personId, ...(invite ? { invitedAddress: invite.email } : {}) };
+        }));
+      }),
+      scoped('PATCH', '/api/v1/teams/{teamId}/members/{personId}', 'updateTeamMemberRole', 'team.member.manage', async (scope, request, params) => {
+        const body = bodyOf<{ role?: unknown }>(request);
+        const role = body.ok ? body.value?.role : undefined;
+        if (role !== 'member' && role !== 'owner') return badRequest('Choose a team role');
+        return changeMember(scope, params.personId ?? '', role);
+      }),
+      scoped('DELETE', '/api/v1/teams/{teamId}/members/{personId}', 'removeTeamMember', 'team.member.manage',
+        (scope, _request, params) => changeMember(scope, params.personId ?? '', null)),
       {
         method: 'GET', path: '/api/v1/teams', operationId: 'listTeams',
         handle: async (request, _params, context) => {

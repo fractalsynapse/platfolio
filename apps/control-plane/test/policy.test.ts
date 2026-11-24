@@ -56,7 +56,7 @@ test('every scoped route declares an action, and every action is exercised somew
   // `instance.destroy` was exempted while the route did not exist (#178 asserted the DECISION early on
   // purpose). It is routed now (#196), so the exemption is gone -- leaving it in would let a future route
   // silently skip being covered, which is the failure this assertion exists to catch.
-  const notRouted = uncoveredActions(covered).filter((a) => !['team.member.manage'].includes(a));
+  const notRouted = uncoveredActions(covered);
   assert.deepEqual(notRouted, [], `actions in the table with no route yet: ${JSON.stringify(notRouted)}`);
 });
 

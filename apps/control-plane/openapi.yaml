@@ -453,6 +453,68 @@ paths:
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
+  /api/v1/teams/{teamId}/members:
+    parameters:
+      - { name: teamId, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: listTeamMembers
+      summary: List memberships for the team's owner
+      security: [{ bearerJwt: [] }]
+      responses:
+        '200':
+          description: Team memberships, with an optional label from this team's accepted invitations.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: false
+                  required: [personId, role, addedAt, self]
+                  properties:
+                    personId: { type: string, minLength: 1 }
+                    role: { type: string, enum: [owner, member] }
+                    addedAt: { type: string, format: date-time }
+                    self: { type: boolean }
+                    invitedAddress: { type: string, minLength: 3, maxLength: 320 }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/teams/{teamId}/members/{personId}:
+    parameters:
+      - { name: teamId, in: path, required: true, schema: { type: string } }
+      - { name: personId, in: path, required: true, schema: { type: string } }
+    patch:
+      operationId: updateTeamMemberRole
+      summary: Change another member's role
+      security: [{ bearerJwt: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [role]
+              properties:
+                role: { type: string, enum: [owner, member] }
+      responses: &membership-change-responses
+        '204': { description: The membership change was applied. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: The owner tried to change their own membership.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    delete:
+      operationId: removeTeamMember
+      summary: Remove another member from this team
+      security: [{ bearerJwt: [] }]
+      responses: *membership-change-responses
+
   /api/v1/teams:
     get:
       operationId: listTeams
