@@ -318,7 +318,7 @@ paths:
         - bearerJwt: []
       responses:
         '200':
-          description: Pending invitations for this verified address, across every team.
+          description: Pending, unexpired invitations for this verified address, with the team name for display before joining.
           content:
             application/json:
               schema: { type: array, items: { $ref: '#/components/schemas/Invitation' } }
@@ -1919,6 +1919,7 @@ components:
       properties:
         id: { type: string, minLength: 1 }
         teamId: { type: string, minLength: 1 }
+        teamName: { type: string, minLength: 1 }
         email: { type: string, description: 'Normalised (trimmed and case-folded) on write.', minLength: 3, maxLength: 320 }
         role: { type: string, enum: [owner, member] }
         state: { type: string, enum: [pending, accepted, revoked, expired], default: pending }

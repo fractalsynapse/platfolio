@@ -5,6 +5,8 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+- Create teams and manage or accept invitations from the workspace. Team owners can distinguish active invitations from history and see whether email was sent (#288).
+
 - Added a Platfolio theme for Keycloak authentication and included the themed identity image in release candidates.
 
 - Added the React team workspace with direct app and environment links, a shared team selector and navigation, and return to the original workspace page after Keycloak sign-in.

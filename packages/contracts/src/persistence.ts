@@ -371,6 +371,8 @@ export function rollupState(rows: readonly InstanceEnvironmentState[], productio
 export const InvitationSchema = z.object({
   id: z.string().min(1),
   teamId: z.string().min(1),
+  /** Included when an invitee looks up an invitation before they can read the team. */
+  teamName: z.string().min(1).optional(),
   /** The address as the inviter typed it, matched only against an IdP assertion later. Lower-cased on write. */
   email: z.string().min(3).max(320),
   role: TeamRoleSchema,
