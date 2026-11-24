@@ -7,10 +7,11 @@ import { WorkspaceMenu } from './workspace-menu.tsx';
 interface WorkspaceHeaderProps {
   readonly teams: readonly TeamWithRole[];
   readonly team?: string | undefined;
+  readonly invitationCount?: number | undefined;
   readonly signOut: () => void;
 }
 
-export function WorkspaceHeader({ teams, team, signOut }: WorkspaceHeaderProps): React.ReactElement {
+export function WorkspaceHeader({ teams, team, invitationCount, signOut }: WorkspaceHeaderProps): React.ReactElement {
   return <header className="ui-workspace-header">
     <WorkspaceMenu label="Platfolio navigation" trigger={<><span className="ui-workspace-mark" aria-hidden="true">P</span> Platfolio</>}>
       <a className="ui-workspace-item ui-hit-primary" href="/">Home</a>
@@ -26,6 +27,9 @@ export function WorkspaceHeader({ teams, team, signOut }: WorkspaceHeaderProps):
       </WorkspaceMenu>
       <WorkspaceMenu align="end" hover label="Account menu" trigger={<span className="ui-workspace-avatar" aria-hidden="true"><span className="ui-workspace-avatar-head" /><span className="ui-workspace-avatar-body" /></span>}>
         <WorkspaceLink className="ui-workspace-item ui-hit-primary" href={workspacePaths.home}>Your teams</WorkspaceLink>
+        <WorkspaceLink className="ui-workspace-item ui-hit-primary" href={workspacePaths.invitations}>
+          Invitations{invitationCount ? ` (${invitationCount})` : ''}
+        </WorkspaceLink>
         <button className="ui-workspace-item ui-hit-primary" type="button" onClick={signOut}>Log out</button>
       </WorkspaceMenu>
     </nav>

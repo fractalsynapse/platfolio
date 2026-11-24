@@ -28,6 +28,7 @@ export interface CapabilityDeps {
   now?: () => Date;
   dispatchTtlMs?: number;
   marketplaceEnabled?: boolean;
+  invitationOrigin?: string;
   starterLaunch?: StarterLaunch;
 }
 
@@ -935,7 +936,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
           delivery = { sent: false, reason };
           await scope.context.store.setInvitationEmailResult(invitation.id, { error: reason });
         } else {
-          const link = 'the address your inviter gave you, then open the team page';
+          const link = deps.invitationOrigin ? new URL('/dashboard/invitations', deps.invitationOrigin).href : 'the Platfolio address your inviter gave you, then open Invitations';
           const result = await scope.context.email.send({
             to: [invitation.email],
             subject: `You have been invited to a platfolio team`,
@@ -980,8 +981,14 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
             // match you" are different answers, and only one of them is actionable.
             return { status: 409, body: { error: 'conflict', message: 'your identity does not assert a verified email address, so there is nothing here to match an invitation against' } };
           }
-          const mine = await context.store.findInvitationsForEmail(email);
-          return send('listMyInvitations', 200, mine.filter((i) => i.state === 'pending'));
+          const now = nowOf(deps).getTime();
+          const mine = (await context.store.findInvitationsForEmail(email))
+            .filter(({ state, expiresAt }) => state === 'pending' && Date.parse(expiresAt) > now);
+          const named = await Promise.all(mine.map(async (invitation) => {
+            const team = await context.store.getTeam(invitation.teamId);
+            return team.ok ? { ...invitation, teamName: team.value.name } : invitation;
+          }));
+          return send('listMyInvitations', 200, named);
         },
       },
       {

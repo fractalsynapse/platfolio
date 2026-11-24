@@ -29,6 +29,21 @@ export interface ComponentRule {
 /** The classes a component may attach, each with the reason it exists. One list; the CSS is emitted from it. */
 export const COMPONENT_RULES = [
   {
+    selector: '.ui-workspace-form',
+    declarations: ['display: grid;', 'gap: var(--ui-space-3);', 'max-inline-size: 28rem;', 'margin-block: var(--ui-space-4);'],
+    why: 'Keep labels and fields together and limit the line length on wider screens.',
+  },
+  {
+    selector: '.ui-workspace-form input',
+    declarations: ['inline-size: 100%;', 'min-inline-size: 0;', 'min-block-size: var(--ui-target-primary);', 'padding: var(--ui-space-2) var(--ui-space-3);', 'border: 1px solid var(--ui-color-border);', 'border-radius: var(--ui-space-3);', 'background: var(--ui-color-bg);', 'color: var(--ui-color-text);', 'font: inherit;'],
+    why: 'Use the same field surface as authentication and preserve the primary input target.',
+  },
+  {
+    selector: '.ui-workspace-form input:focus-visible',
+    declarations: ['outline: 2px solid var(--ui-color-accent);', 'outline-offset: 2px;'],
+    why: 'Make keyboard focus visible on workspace fields.',
+  },
+  {
     selector: '.ui-hit-primary',
     declarations: [
       'box-sizing: border-box;',

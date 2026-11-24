@@ -202,7 +202,12 @@ export async function boot(config: BootConfig, fetchImpl: typeof fetch = fetch) 
     // that exists only in the operator's head. An empty list is passed through rather than dropped, so "no list"
     // has one spelling all the way down to the transport.
     server: { host: config.host, port: config.port, cors: { allowedOrigins: [...config.cors?.allowedOrigins ?? []] } },
-    extensions: buildCapabilities({ build: config.build, marketplaceEnabled: config.marketplaceEnabled ?? false, ...(config.starterLaunch ? { starterLaunch: config.starterLaunch } : {}) }),
+    extensions: buildCapabilities({
+      build: config.build,
+      marketplaceEnabled: config.marketplaceEnabled ?? false,
+      ...(config.cors?.allowedOrigins.length === 1 ? { invitationOrigin: config.cors.allowedOrigins[0]! } : {}),
+      ...(config.starterLaunch ? { starterLaunch: config.starterLaunch } : {}),
+    }),
     requiredServices: ['identity', 'server', 'store', 'extensions'],
   });
   ctx.identity.attachKeySource(new EndpointKeySource(identity, fetchImpl, config.jwksUri));

@@ -90,7 +90,9 @@ test('the invited person claims it with their own verified address, and that is 
     const mine = await app.call('/api/v1/me/invitations', {}, hire);
     app.against('listMyInvitations', 200, mine.body);
     assert.equal((mine.body as Array<{ id: string }>).length, 1, 'the invitation should be discoverable by the person it addresses');
-    assert.equal((mine.body as Array<{ id: string }>)[0]?.id, invitationId);
+    const received = (mine.body as Array<{ id: string; teamName?: string }>)[0];
+    assert.equal(received?.id, invitationId);
+    assert.equal(received?.teamName, team.name, 'the invitee can identify the team before becoming a member');
 
     const accepted = await app.call(`/api/v1/me/invitations/${invitationId}/accept`, post, hire);
     assert.equal(accepted.status, 200, accepted.text);

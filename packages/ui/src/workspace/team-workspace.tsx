@@ -7,10 +7,11 @@ import { Breadcrumbs, type Breadcrumb } from './breadcrumbs.tsx';
 import { EnvironmentList } from './environment-list.tsx';
 import { EnvironmentOverview } from './environment-overview.tsx';
 import { workspacePaths, type WorkspaceRoute } from './routes.ts';
+import { WorkspaceLink } from './workspace-link.tsx';
 import { UnavailablePage } from './unavailable-page.tsx';
 
 const params = {};
-type TeamRoute = Extract<WorkspaceRoute, { team: string }>;
+type TeamRoute = Extract<WorkspaceRoute, { kind: 'team' | 'instance' | 'environment' }>;
 
 export function TeamWorkspace({ team, route }: { readonly team: TeamWithRole; readonly route: TeamRoute }): React.ReactElement {
   const { state, reload } = useOperation('listInstances', { params });
@@ -26,6 +27,7 @@ export function TeamWorkspace({ team, route }: { readonly team: TeamWithRole; re
   const age = ageLabel(state.freshness, now).text;
   if (route.kind === 'team') return <>
     <h1>Team workspace</h1>
+    {team.role === 'owner' && <p><WorkspaceLink href={workspacePaths.teamInvitations(team.name)}>Manage invitations</WorkspaceLink></p>}
     <section aria-labelledby="workspace-apps"><div className="ui-workspace-heading">
       <h2 id="workspace-apps">Apps</h2><small className="ui-workspace-meta">{age}</small>
     </div><AppList team={team.name} apps={apps} /></section>
