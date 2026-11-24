@@ -49,7 +49,7 @@ const server = createServer({ requestTimeout: 10000 }, (request, response) => {
       case 'setup': {
         const openBao = await bao.status();
         const railway = openBao === 'ready' && (await bao.readGrant()).grant ? 'connected' : 'connect';
-        reply(200, { openBao, railway, workerKey: bao.publicKey });
+        reply(200, { openBao, railway, workerKey: bao.publicKey, canWipeData: !project });
         return;
       }
       case 'initialize': reply(200, { recovery: await bao.initialize(String(body.publicKey)) }); return;

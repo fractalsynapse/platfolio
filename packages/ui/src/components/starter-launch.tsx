@@ -23,6 +23,7 @@ function LaunchPanel({ teamId, teamName }: z.infer<typeof props>) {
   const setup = useOperation('getStarterLaunchSetup', { params, key: `starter-setup-${teamId}` });
   const local = setup.state.status === 'failed' && setup.state.error.status === 404;
   const ready = local || setup.state.status === 'loaded' && setup.state.data.openBao === 'ready' && setup.state.data.railway === 'connected';
+  const canWipeData = local || setup.state.status === 'loaded' && setup.state.data.canWipeData === true;
   const start = useCommand('startStarterLaunch');
   const remove = useCommand('removeStarterLaunch');
   const [confirmation, setConfirmation] = React.useState('');
@@ -83,9 +84,10 @@ function LaunchPanel({ teamId, teamName }: z.infer<typeof props>) {
         <summary>Remove app</summary>
         <p>Choose what happens to the app’s storage.</p>
         <button type="button" className="ui-hit-primary" onClick={() => select('keep')}>Remove and keep data</button>{' '}
-        <button type="button" className="ui-hit-primary" onClick={() => select('wipe')}>Remove and wipe data</button>
+        {canWipeData ? <button type="button" className="ui-hit-primary" onClick={() => select('wipe')}>Remove and wipe data</button>
+          : <p>Permanent removal is available with a workspace connection.</p>}
         {selected === 'keep' && <p>Stops the app and database. Railway keeps the storage and can still charge for it. <button type="button" className="ui-hit-primary" disabled={pending} onClick={() => void act('keep')}>Confirm removal</button></p>}
-        {selected === 'wipe' && <div>
+        {canWipeData && selected === 'wipe' && <div>
           <p>Removes the project and schedules deletion of its storage. Type <strong>starter-web</strong> to confirm.</p>
           <label>App name <input value={confirmation} onChange={(event) => setConfirmation(event.target.value)} /></label>{' '}
           <button type="button" className="ui-hit-primary" disabled={pending || confirmation !== 'starter-web'} onClick={() => void act('wipe')}>Wipe app data</button>
