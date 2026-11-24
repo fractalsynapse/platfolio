@@ -49,7 +49,7 @@ export const COMPONENT_RULES = [
   },
   {
     selector: '.ui-age',
-    declarations: ['color: var(--ui-color-textMuted);'],
+    declarations: ['color: var(--ui-color-textMuted);', 'font-size: var(--ui-font-caption);'],
     why: 'Rule 5: the age label is load-bearing, not caption decoration, and `textMuted` on `surface` is a listed contrast pair rather than a grey someone picked.',
   },
   {
@@ -64,7 +64,7 @@ export const COMPONENT_RULES = [
   },
   {
     selector: '.ui-state',
-    declarations: ['color: var(--ui-color-text);'],
+    declarations: ['display: inline-flex;', 'align-items: baseline;', 'flex-wrap: wrap;', 'gap: var(--ui-space-2);', 'color: var(--ui-color-text);'],
     why: 'The state word is text on purpose. Tone arrives as a word first and a colour second, which is the difference between a state and a dot.',
   },
   {

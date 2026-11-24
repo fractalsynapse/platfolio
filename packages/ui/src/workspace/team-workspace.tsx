@@ -39,7 +39,7 @@ export function TeamWorkspace({ team, route }: { readonly team: TeamWithRole; re
     <h1>{app.name}</h1>
     <p className="ui-workspace-meta">{app.template}{app.templateRef && <> · <code>{app.templateRef.commitSha.slice(0, 12)}</code></>}</p>
     <section aria-labelledby="app-environments"><div className="ui-workspace-heading">
-      <h2 id="app-environments">Environments</h2><small className="ui-workspace-meta">{age}</small>
+      <h2 id="app-environments">Environments</h2>{app.environments.length === 0 && <small className="ui-workspace-meta">{age}</small>}
     </div><EnvironmentList team={team.name} app={app} freshness={state.freshness} now={now} /></section>
   </>;
 

@@ -3,7 +3,7 @@
  * packages/ui/src/components/style.ts and it is the only one.
  *
  * Source: packages/ui/src/components/style.ts
- * Input digest: sha256/b787e60a89b20c6b
+ * Input digest: sha256/77908b63263776e7
  *
  * Reproduce with `pnpm run ui:css`; `pnpm run ui:css:check` fails when this stops matching the module. The
  * numbers in here are not literals: they reference the custom properties in ../tokens.css, which is what makes
@@ -30,6 +30,7 @@
 /* Rule 5: the age label is load-bearing, not caption decoration, and `textMuted` on `surface` is a listed contrast pair rather than a grey someone picked. */
 .ui-age {
   color: var(--ui-color-textMuted);
+  font-size: var(--ui-font-caption);
 }
 
 /* An observation older than the interval that keeps it current changes colour *and* keeps its words: 11 §8 says an error is never colour alone, and neither is a doubt. */
@@ -46,6 +47,10 @@
 
 /* The state word is text on purpose. Tone arrives as a word first and a colour second, which is the difference between a state and a dot. */
 .ui-state {
+  display: inline-flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--ui-space-2);
   color: var(--ui-color-text);
 }
 
