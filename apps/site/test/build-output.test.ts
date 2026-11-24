@@ -91,6 +91,9 @@ test('the dashboard hydrates exactly one island, and the callback exactly one', 
     const html = readPage(route);
     const islands = html.match(/<astro-island[\s>]/g) ?? [];
     assert.equal(islands.length, 1, `${route} carries ${String(islands.length)} island elements; D65 allows one, because a second hydration means two registries and two token stores`);
+    const config = html.indexOf('<script src="/config.js">');
+    assert.ok(config >= 0 && config < html.indexOf('</head>') && config < html.indexOf('<astro-island '),
+      `${route} must load its runtime configuration before it hydrates the island`);
   }
   const landing = (readPage('/').match(/<astro-island[\s>]/g) ?? []).length;
   assert.equal(landing, 0, 'the landing page must not hydrate');

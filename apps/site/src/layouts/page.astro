@@ -39,6 +39,7 @@ const origin = Astro.site ?? new URL(Astro.request.url).origin;
     <title>{title}</title>
     <meta name="description" content={description} />
     <link rel="canonical" href={new URL(Astro.url.pathname, origin)} />
+    {scriptSrc !== undefined ? <script is:inline src={scriptSrc}></script> : null}
   </head>
   <body>
     {workspace ? <slot /> : <>
@@ -62,6 +63,5 @@ const origin = Astro.site ?? new URL(Astro.request.url).origin;
       </p>
     </footer>
     </>}
-    {scriptSrc !== undefined ? <script is:inline src={scriptSrc}></script> : null}
   </body>
 </html>
