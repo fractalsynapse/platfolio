@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { createIdentityFixture, defaultIdentityConfig, signToken } from '@platfolio/contracts';
 import { createKernel, disposeKernel } from '@platfolio/kernel';
@@ -16,6 +17,8 @@ test('customer launch is owner scoped and passes only the intended fields to a p
   const workerKey = 'test-fixture-worker-key-for-owner-access';
   let teamId = '';
   let last: { action: string; body?: unknown } | undefined;
+  const ids = { projectId: randomUUID(), deploymentId: randomUUID() };
+  let workerReport: object | false = false;
   const config = {
     get teamId() { return teamId; },
     siteOrigin, workerKey, workerUrl: worker,
@@ -25,6 +28,8 @@ test('customer launch is owner scoped and passes only the intended fields to a p
     assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer ' + workerKey);
     assert.equal(init?.redirect, 'error');
     last = JSON.parse(String(init?.body)) as typeof last;
+    if (last?.action === 'report') return Response.json(workerReport);
+    if (last?.action === 'redeploy') return Response.json({ state: 'running' });
     return Response.json(last?.action === 'setup' ? { openBao: 'sealed', railway: 'connect', workerKey: 'public' } : false);
   };
   const kernel = await createKernel({
@@ -54,6 +59,24 @@ test('customer launch is owner scoped and passes only the intended fields to a p
     assert.equal(response.status, 303);
     assert.equal(response.headers.get('location'), siteOrigin + '/dashboard/launch?railway=retry');
     assert.equal(response.headers.get('referrer-policy'), 'no-referrer');
+
+    const managed = await kernel.store.recordHostedStarter({
+      ...ids, teamId, name: 'starter-web', template: 'starter-web', state: 'live',
+      templateRef: { repo: 'platfolio-fixtures/starter-web', commitSha: 'b'.repeat(40) },
+      origin: 'https://starter.up.railway.app', observedAt: '2026-11-24T00:00:00.000Z',
+    });
+    assert.ok(managed.ok);
+    const operation = (environment: string) => api + '/instances/' + managed.value.id + '/environments/' + environment + '/deployments';
+    const deploy = (environment: string, actor = 'owner') => fetch(operation(environment), { method: 'POST', headers: headers(actor) });
+    assert.equal((await deploy('staging', 'other')).status, 404);
+    assert.equal((await deploy('production')).status, 404);
+    workerReport = { ...ids, state: 'removing' };
+    assert.equal((await deploy('staging')).status, 409);
+    workerReport = { ...ids, state: 'ready' };
+    const deployed = await deploy('staging');
+    assert.equal(deployed.status, 202);
+    assert.deepEqual(await deployed.json(), { state: 'requested' });
+    assert.deepEqual(last, { action: 'redeploy', body: ids });
   } finally { await disposeKernel(kernel); }
 });
 

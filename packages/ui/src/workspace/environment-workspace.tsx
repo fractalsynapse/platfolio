@@ -6,6 +6,7 @@ import { useOperation } from '../sdk/use-operation.ts';
 import { EnvironmentOverview } from './environment-overview.tsx';
 import { EnvironmentDeployments } from './environment-deployments.tsx';
 import { EnvironmentDomains } from './environment-domains.tsx';
+import { StarterRedeploy } from './starter-redeploy.tsx';
 import { ServiceSecretPresence } from './service-secret-presence.tsx';
 import { workspacePaths, type WorkspaceRoute } from './routes.ts';
 import { WorkspaceLink } from './workspace-link.tsx';
@@ -50,11 +51,16 @@ export function EnvironmentWorkspace({ instanceId, canManage, environment, route
         {state.data.hosting.state !== 'paused' && state.data.hosting.state !== 'removed' && <p><a href={state.data.hosting.origin}>Open app</a></p>}
         {canManage && <p><WorkspaceLink href={workspacePaths.instanceSetup(route.team, route.instance)}>Open app setup</WorkspaceLink></p>}
       </section>}
-      {route.tab === 'deployments' && <EnvironmentDeployments deployments={state.data.deployments} />}
+      {route.tab === 'deployments' && <>
+        {canManage && state.data.hosting && state.data.hosting.state !== 'paused' && state.data.hosting.state !== 'removed' &&
+          <StarterRedeploy key={state.data.hosting.deploymentId} params={params} progressPath={workspacePaths.instanceSetup(route.team, route.instance)} />}
+        <EnvironmentDeployments deployments={state.data.deployments} />
+      </>}
       {route.tab === 'domains' && <EnvironmentDomains domains={state.data.domains} planned={state.data.planned} hosting={state.data.hosting} />}
       {route.tab === 'configuration' && <section aria-label="Environment configuration">
         <h2>Configuration</h2>
-        {!state.data.planned && <p>Register a deployment plan to check this environment’s settings.</p>}
+        {!state.data.planned && (state.data.hosting ? <p>Starter Web uses a database connection generated in Railway.</p>
+          : <p>Register a deployment plan to check this environment’s settings.</p>)}
         {state.data.planned && state.data.services.every(({ secrets }) => secrets.length === 0) && <p>No app secrets are declared for this environment.</p>}
         {state.data.services.filter(({ secrets }) => secrets.length > 0).map(({ name, secrets }) =>
           <ServiceSecretPresence key={name} scope={{ ...params, service: name }} names={secrets} />)}
