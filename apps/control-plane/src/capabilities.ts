@@ -742,7 +742,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
             const status = recorded.code === 'conflict' && reasonOf(recorded).includes('already attested') ? 409 : 400;
             return { status, body: { error: recorded.code, message: reasonOf(recorded) } };
           }
-          await context.store.appendAudit({ actorKind: 'runner', actorRef: recorded.value.dispatchId, action: 'attestation.record', target: recorded.value.instanceId, detail: { result: recorded.value.result, resources: recorded.value.resources.length } });
+          await context.store.appendAudit({ actorKind: 'runner', actorRef: recorded.value.dispatchId, action: 'attestation.record', target: recorded.value.instanceId, detail: { result: recorded.value.result, environment: recorded.value.environment, resources: recorded.value.resources.length } });
           return send('postAttestation', 202, { accepted: true, dispatchId: recorded.value.dispatchId, result: recorded.value.result });
         },
       },
@@ -756,23 +756,27 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
   const audit: ExtensionDescriptor = {
     id: 'audit',
     requires: ['store', 'identity'],
-    routes: [{
+    routes: [
+      scoped('GET', '/api/v1/teams/{teamId}/activity', 'listTeamActivity', 'audit.read', async ({ context, teamId }) => {
+        const apps = await context.store.listInstances(teamId);
+        const targets = [teamId, ...apps.flatMap(({ id }) => [id, `instance/${id}`])];
+        // Invitation and member administration records stay in the owner view.
+        const activity = await context.store.recentAuditForTargets(targets, 100);
+        return send('listTeamActivity', 200, activity.filter(({ action }) => !action.startsWith('team.member.')));
+      }),
+      {
       method: 'GET', path: '/api/v1/audit', operationId: 'listAudit',
       handle: async (request, _params, context) => {
         const auth = await authorize(context, request);
         if (auth.ok === false) return auth.response;
         const limit = Number(request.query.get('limit') ?? 50);
-        if (!Number.isFinite(limit) || limit < 1 || limit > 200) return badRequest('limit must be between 1 and 200');
+        if (!Number.isInteger(limit) || limit < 1 || limit > 200) return badRequest('limit must be between 1 and 200');
         const resolved = await context.store.resolvePerson({ issuer: auth.claims.issuer, subject: auth.claims.subject });
           if (resolved.ok === false) return { status: 503, body: { error: 'principal-unresolved', message: reasonOf(resolved) } };
           const teams = await context.store.teamsForPerson(resolved.value.person.id);
-        const owned = new Set((await Promise.all(teams.map((teamId) => context.store.listInstances(teamId)))).flat().map((i) => i.id));
-        const rows = await context.store.recentAudit(200);
-        // Audit rows are addressed by instance id, or by the instance itself for dispatches. Anything not
-        // owned by one of the caller's teams is simply not in the answer -- including rows that mention
-        // resources that do not exist, which would otherwise be a way to probe for them.
-        const visible = rows.filter((row) => owned.has(row.target) || owned.has(row.target.replace(/^instance\//, '')));
-        return send('listAudit', 200, visible.slice(0, limit));
+        const apps = (await Promise.all(teams.map((teamId) => context.store.listInstances(teamId)))).flat();
+        const targets = apps.flatMap(({ id }) => [id, `instance/${id}`]);
+        return send('listAudit', 200, await context.store.recentAuditForTargets(targets, limit));
       },
     }],
   };

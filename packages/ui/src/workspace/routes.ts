@@ -10,6 +10,7 @@ export const workspacePaths = {
   invitations: '/dashboard/invitations',
   launch: '/dashboard/launch',
   team: (team: string) => `/dashboard/teams/${team}`,
+  teamActivity: (team: string) => `/dashboard/teams/${team}/activity`,
   teamMembers: (team: string) => `/dashboard/teams/${team}/members`,
   teamConnections: (team: string) => `/dashboard/teams/${team}/connections`,
   teamInvitations: (team: string) => `/dashboard/teams/${team}/members/invitations`,
@@ -25,6 +26,7 @@ export type WorkspaceRoute =
   | { kind: 'home' | 'create-team' | 'invitations' | 'launch' | 'unavailable' }
   | { kind: 'account'; tab: 'profile' | 'emails' | 'password' }
   | { kind: 'team'; team: string }
+  | { kind: 'team-activity'; team: string }
   | { kind: 'team-members'; team: string }
   | { kind: 'team-invitations'; team: string }
   | { kind: 'team-connections'; team: string }
@@ -35,6 +37,7 @@ export type WorkspaceRoute =
   | { kind: 'environment'; team: string; instance: string; environment: string; tab: EnvironmentTab };
 
 const teamRoute = new RegExp(`^${workspacePaths.team(`(${slug})`)}$`);
+const teamActivityRoute = new RegExp(`^${workspacePaths.teamActivity(`(${slug})`)}$`);
 const teamMembersRoute = new RegExp(`^${workspacePaths.teamMembers(`(${slug})`)}$`);
 const teamConnectionsRoute = new RegExp(`^${workspacePaths.teamConnections(`(${slug})`)}$`);
 const teamInvitationsRoute = new RegExp(`^${workspacePaths.teamInvitations(`(${slug})`)}$`);
@@ -53,6 +56,8 @@ export function matchWorkspaceRoute(path: string): WorkspaceRoute {
   if (pathname === workspacePaths.accountPassword) return { kind: 'account', tab: 'password' };
   if (pathname === workspacePaths.invitations) return { kind: 'invitations' };
   if (pathname === workspacePaths.launch) return { kind: 'launch' };
+  const [, activityTeam] = teamActivityRoute.exec(pathname) ?? [];
+  if (activityTeam) return { kind: 'team-activity', team: activityTeam };
   const [, membersTeam] = teamMembersRoute.exec(pathname) ?? [];
   if (membersTeam) return { kind: 'team-members', team: membersTeam };
   const [, connectedTeam] = teamConnectionsRoute.exec(pathname) ?? [];

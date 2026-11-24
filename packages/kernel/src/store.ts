@@ -128,6 +128,7 @@ export class StoreService extends Service<z.infer<typeof StoreConfigSchema>> {
   listEnvironmentAttestations(...args: Parameters<Store['listEnvironmentAttestations']>) { return this.inner.listEnvironmentAttestations(...args); }
   appendAudit(entry: Parameters<Store['appendAudit']>[0]) { return this.inner.appendAudit(entry); }
   recentAudit(limit?: number) { return this.inner.recentAudit(limit); }
+  recentAuditForTargets(...args: Parameters<Store['recentAuditForTargets']>) { return this.inner.recentAuditForTargets(...args); }
   close() { return this.inner.close(); }
 
   /** Errors are values, but a store that cannot be reached is a condition worth logging where it happens. */

@@ -5,6 +5,7 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+- Show verified deployments and hosting activity in each team workspace, with links to deployment evidence and app management (#288).
 - Added team tabs for the owner roster and private installation connections and added management links to hosted Starter Web. Owners can update teammate roles or remove members (#288).
 - Verified Starter Web launches appear in the team workspace. The staging environment records the Railway project, deployment, and verified storage lifecycle state (#288).
 - Added private browser launch setup for Starter Web with owner-encrypted OpenBao recovery, Railway OAuth, and a persistent customer worker (#288).

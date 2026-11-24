@@ -202,6 +202,8 @@ export class MemoryStore implements Store {
     this.instances.set(instance.value.id, instance.value);
     this.hostedStarters.set(instance.value.id, observation.value);
     this.envStates.set(`${id}\u0000staging`, staging);
+    await this.appendAudit({ actorKind: 'controller', actorRef: 'private-launch-worker', action: input.state === 'live' ? 'hosting.verified' : `hosting.${input.state}`,
+      target: id, at: input.observedAt, detail: { environment: 'staging', deploymentId: observation.value.deploymentId } });
     return ok(copy(instance.value));
   }
 
@@ -647,6 +649,10 @@ export class MemoryStore implements Store {
   }
   async recentAudit(limit = 50) {
     return this.auditLog.slice(-limit).reverse().map(copy);
+  }
+  async recentAuditForTargets(targets: readonly string[], limit: number) {
+    const scoped = new Set(targets);
+    return limit > 0 ? this.auditLog.filter(({ target }) => scoped.has(target)).slice(-limit).reverse().map(copy) : [];
   }
 
   async close(): Promise<void> {

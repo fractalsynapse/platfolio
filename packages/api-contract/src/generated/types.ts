@@ -4,7 +4,7 @@
  * hand, because every line reproduces from the specification.
  *
  * Source: apps/control-plane/openapi.yaml (OpenAPI 3.1.0, info.version 0.1.0)
- * Input digest: sha256/0a2b100b4439dd9c
+ * Input digest: sha256/aa50250168a8c70d
  *
  * Reproduce it with `pnpm run api:types`. `pnpm run api:types:check` fails when this file stops matching
  * what the committed spec produces, which is the only way a generated type deserves to be trusted.
@@ -427,6 +427,10 @@ export interface ApiParameters {
     instanceId: string;
     environment: string;
     service: string;
+  };
+  /** GET /api/v1/teams/{teamId}/activity */
+  listTeamActivity: {
+    teamId: string;
   };
   /** GET /api/v1/teams/{teamId}/members */
   listTeamMembers: {
@@ -1003,6 +1007,13 @@ export interface ApiResponses {
     '404': Error;
     '501': Error;
   };
+  /** GET /api/v1/teams/{teamId}/activity */
+  listTeamActivity: {
+    '200': AuditEntry[];
+    '401': Error;
+    '403': Error;
+    '404': Error;
+  };
   /** GET /api/v1/teams/{teamId}/members */
   listTeamMembers: {
     '200': Array<{
@@ -1408,6 +1419,8 @@ export const ENDPOINTS = {
   listMyInvitations: { method: 'get', path: '/api/v1/me/invitations' },
   /** GET /api/v1/instances/{instanceId}/secrets */
   listSecretPresence: { method: 'get', path: '/api/v1/instances/{instanceId}/secrets' },
+  /** GET /api/v1/teams/{teamId}/activity */
+  listTeamActivity: { method: 'get', path: '/api/v1/teams/{teamId}/activity' },
   /** GET /api/v1/teams/{teamId}/members */
   listTeamMembers: { method: 'get', path: '/api/v1/teams/{teamId}/members' },
   /** GET /api/v1/teams */

@@ -9,11 +9,12 @@ import { EnvironmentList } from './environment-list.tsx';
 import { EnvironmentWorkspace } from './environment-workspace.tsx';
 import { workspacePaths, type WorkspaceRoute } from './routes.ts';
 import { WorkspaceLink } from './workspace-link.tsx';
+import { TeamActivity } from './team-activity.tsx';
 import { TeamTabs } from './team-tabs.tsx';
 import { UnavailablePage } from './unavailable-page.tsx';
 
 const params = {};
-type TeamRoute = Extract<WorkspaceRoute, { kind: 'team' | 'instance' | 'instance-setup' | 'environment' }>;
+type TeamRoute = Extract<WorkspaceRoute, { kind: 'team' | 'team-activity' | 'instance' | 'instance-setup' | 'environment' }>;
 
 export function TeamWorkspace({ team, route }: { readonly team: TeamWithRole; readonly route: TeamRoute }): React.ReactElement {
   const { state, reload } = useOperation('listInstances', { params });
@@ -36,6 +37,12 @@ export function TeamWorkspace({ team, route }: { readonly team: TeamWithRole; re
     <section aria-labelledby="workspace-apps"><div className="ui-workspace-heading">
       <h2 id="workspace-apps">Apps</h2><small className="ui-workspace-meta">{age}</small>
     </div><AppList team={team.name} apps={apps} /></section>
+    <TeamActivity key={team.teamId} team={team} apps={apps} summary />
+  </>;
+  if (route.kind === 'team-activity') return <>
+    <h1>Activity</h1>
+    <TeamTabs team={team} current="activity" />
+    <TeamActivity key={team.teamId} team={team} apps={apps} />
   </>;
 
   const app = apps.find(({ name }) => name === route.instance);
