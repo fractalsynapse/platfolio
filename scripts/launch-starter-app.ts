@@ -3,9 +3,9 @@ import { tmpdir } from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
 import { dirname, join } from 'node:path';
 import { GitScm } from '../packages/contracts/src/git-scm.ts';
-import { FREE_STARTER_RELEASE, parseInventory, readTemplate, templateCatalogEntry } from '../packages/manifest/src/index.ts';
+import { FREE_STARTER_RELEASE, readTemplate, templateCatalogEntry } from '../packages/manifest/src/index.ts';
 import { customerRailway, type CustomerRailwayGrant, type RailwayProgress } from './customer-railway.ts';
-import { parse as parseYaml } from 'yaml';
+import { validateStarterSource } from '../packages/manifest/src/starter-release.ts';
 
 const listing = FREE_STARTER_RELEASE;
 const entry = templateCatalogEntry(listing.template);
@@ -14,16 +14,7 @@ export async function launchStarterApp(app: string, project?: string, progress?:
   const scm = new GitScm();
   progress?.({ step: 'Read the pinned release', state: 'WORKING' });
   const source = await readTemplate((request) => scm.readRepositoryFile(request), entry, listing.revision);
-  // This uses Railway's source builder. An image-based InfraPlan is only valid after an artifact is published.
-  const compose = parseYaml(source.compose) as { services?: Record<string, { build?: { dockerfile?: string } }>; 'x-platfolio'?: { metadata?: { name?: string; version?: string }; resources?: { database?: { kind?: string } } } };
-  const metadata = compose['x-platfolio']?.metadata;
-  const inventory = parseInventory(source.inventory ?? '');
-  const database = inventory.entries.find((variable) => variable.name === 'DATABASE_URL');
-  if (metadata?.name !== listing.template || metadata.version !== listing.version || compose.services?.web?.build?.dockerfile !== 'Dockerfile' ||
-      compose['x-platfolio']?.resources?.database?.kind !== 'postgres' || inventory.issues.length || database?.kind !== 'reference' ||
-      database.service !== 'web' || database.database !== 'app-db' || database.output !== 'DATABASE_URL') {
-    throw new Error('Pinned starter does not match the reviewed source-build and database placement');
-  }
+  validateStarterSource(source.compose, source.inventory);
   const target = project ?? grant?.projectId;
   const rail = await customerRailway({ name: app, kind: 'app', ...(target ? { id: target } : {}), create: !target }, progress, grant);
   progress?.({ step: 'Prepare the database', state: 'WORKING' });

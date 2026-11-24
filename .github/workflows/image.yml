@@ -143,6 +143,28 @@ jobs:
           docker stop cp-smoke
           kill $JWKS_PID 2>/dev/null || true
 
+      - name: Smoke test the private installation worker
+        run: |
+          set -e
+          cleanup() { docker rm -f launch-worker-smoke >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          docker run -d --name launch-worker-smoke --user 0 --tmpfs /launch-state \
+            -e PLATFOLIO_LAUNCH_STATE_DIR=/launch-state -e PLATFOLIO_LAUNCH_TEAM=ci-team \
+            -e PLATFOLIO_LAUNCH_WORKER_KEY="$(node -p 'require("node:crypto").randomBytes(32).toString("base64url")')" \
+            -e PLATFOLIO_OPENBAO_WORKER_SECRET="$(node -p 'require("node:crypto").randomBytes(32).toString("base64url")')" \
+            -e PLATFOLIO_OPENBAO_URL=http://127.0.0.1:8200 -e PLATFOLIO_RAILWAY_OAUTH_CLIENT=ci-client \
+            -e PLATFOLIO_RAILWAY_OAUTH_CALLBACK=http://127.0.0.1:8080/api/v1/railway/callback \
+            -e RAILWAY_WORKSPACE_ID=ci-workspace -e HOST=127.0.0.1 platfolio-control-plane:build \
+            sh -c "chown node:node /launch-state && exec su -s /bin/sh node -c 'node /app/scripts/customer-installation-worker.ts'"
+          for attempt in $(seq 1 15); do
+            if docker exec launch-worker-smoke node -e "fetch('http://127.0.0.1:8080/status').then(async r=>process.exit(r.ok && (await r.json()).status==='ok'?0:1)).catch(()=>process.exit(1))"; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs launch-worker-smoke
+          exit 1
+
       # Only pushes publish. A pull request gets a build and a smoke test, never a registry write.
       - name: Publish
         id: publish
