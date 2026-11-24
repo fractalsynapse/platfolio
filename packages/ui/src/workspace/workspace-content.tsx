@@ -91,7 +91,7 @@ export const workspaceContent = defineComponent({
     'createTeam', 'listMyInvitations', 'acceptInvitation', 'listInvitations', 'createInvitation', 'revokeInvitation', 'listInstallableTemplates',
     'getAccountProfile', 'updateAccountProfile', 'getInstanceEnvironment', 'listSecretPresence',
     'getStarterLaunchSetup', 'initializeStarterOpenBao', 'unlockStarterOpenBao', 'beginStarterRailwayAuthorization',
-    'listTeamMembers', 'updateTeamMemberRole', 'removeTeamMember', 'listTeamActivity'],
+    'listTeamMembers', 'updateTeamMemberRole', 'removeTeamMember', 'listTeamActivity', 'getHostedAppStatus'],
   slots: ['full-page'],
   render: WorkspaceContent,
 });

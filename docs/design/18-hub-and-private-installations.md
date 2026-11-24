@@ -375,3 +375,16 @@ one-use code with PKCE and stores the OAuth grant at one scoped OpenBao KV path.
 Railway may refresh the grant during later launches. The workspace page reads readiness
 and the deployment timeline through the owner-scoped API. The hub does not receive the
 grant, the bootstrap credential, the recovery shares, or the app configuration.
+
+### Private app availability
+
+The private installation checks the verified Starter Web staging address once per
+reconciliation interval. The address comes from the worker's successful deployment
+report. The check follows no redirects and tests the app's health endpoint. It reports
+service reachability and the most recent check time. Two consecutive failures confirm an
+outage. A subsequent passing check records the recovery. Removing an app with data kept
+is a planned stop. The same check can start again after restore.
+
+The private app status page uses the team activity timeline component. The control plane
+keeps the observations and outage transitions within the installation. Publishing status
+to the public site requires an explicit production environment and a separate owner action.

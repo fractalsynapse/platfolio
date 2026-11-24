@@ -4,7 +4,7 @@
  * hand, because every line reproduces from the specification.
  *
  * Source: apps/control-plane/openapi.yaml (OpenAPI 3.1.0, info.version 0.1.0)
- * Input digest: sha256/aa50250168a8c70d
+ * Input digest: sha256/d651862961419cfd
  *
  * Reproduce it with `pnpm run api:types`. `pnpm run api:types:check` fails when this file stops matching
  * what the committed spec produces, which is the only way a generated type deserves to be trusted.
@@ -358,6 +358,10 @@ export interface ApiParameters {
   };
   /** GET /healthz */
   getHealth: Record<string, never>;
+  /** GET /api/v1/instances/{instanceId}/status */
+  getHostedAppStatus: {
+    instanceId: string;
+  };
   /** GET /api/v1/instances/{instanceId} */
   getInstance: {
     instanceId: string;
@@ -820,6 +824,22 @@ export interface ApiResponses {
   /** GET /healthz */
   getHealth: {
     '200': Health;
+  };
+  /** GET /api/v1/instances/{instanceId}/status */
+  getHostedAppStatus: {
+    '200': {
+      environment: 'staging';
+      state: 'checking' | 'up' | 'down' | 'paused' | 'removed';
+      checkedAt?: string;
+      updates: Array<{
+        id: string;
+        at: string;
+        state: 'down' | 'up' | 'paused' | 'removed';
+      }>;
+    };
+    '401': Error;
+    '403': Error;
+    '404': Error;
   };
   /** GET /api/v1/instances/{instanceId} */
   getInstance: {
@@ -1379,6 +1399,8 @@ export const ENDPOINTS = {
   getDispatchPlan: { method: 'get', path: '/api/v1/instances/{instanceId}/dispatches/{dispatchId}' },
   /** GET /healthz */
   getHealth: { method: 'get', path: '/healthz' },
+  /** GET /api/v1/instances/{instanceId}/status */
+  getHostedAppStatus: { method: 'get', path: '/api/v1/instances/{instanceId}/status' },
   /** GET /api/v1/instances/{instanceId} */
   getInstance: { method: 'get', path: '/api/v1/instances/{instanceId}' },
   /** GET /api/v1/instances/{instanceId}/environments/{environment} */

@@ -10,6 +10,7 @@ import type { ExtensionDescriptor, KernelContext, Request, Response_, RouteDefin
 import { ArtifactRecordSchema, InfraPlanSchema, secretWriteScope } from '@platfolio/contracts';
 import type { customerLaunch } from './customer-launch.ts';
 import { hostedStarterLink, hostedStarterObservation } from './hosted-starter.ts';
+import { checkHostedApp, hostedAppStatus } from './hosted-availability.ts';
 import type { StarterLaunch } from './starter-launch.ts';
 import { badRequest, bearerToken, notFound, send, unauthorized } from './respond.ts';
 import { accountProfile, type AccountIssuer } from './account-profile.ts';
@@ -795,7 +796,12 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
         try {
           const launch = deps.customerLaunch?.teamId ? await deps.customerLaunch.call('report') : undefined;
           const observation = launch?.ok && deps.customerLaunch && hostedStarterObservation(deps.customerLaunch.teamId, launch.body);
-          if (observation) await context.store.recordHostedStarter(observation);
+          if (observation) {
+            const stored = await context.store.recordHostedStarter(observation);
+            if (stored.ok && observation.state === 'live') {
+              await checkHostedApp(context.store, stored.value.id, observation, () => nowOf(deps));
+            }
+          }
           const instances = await context.store.listInstances();
           for (const instance of instances) {
             const latest = await context.store.latestAttestation(instance.id);
@@ -1400,6 +1406,17 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
     ],
   };
 
+  const availability: ExtensionDescriptor = {
+    id: 'app-availability',
+    requires: ['store', 'identity'],
+    routes: [
+      scoped('GET', '/api/v1/instances/{instanceId}/status', 'getHostedAppStatus', 'instance.read', async ({ context }, _request, params) => {
+        const status = await hostedAppStatus(context.store, params.instanceId ?? '');
+        return status ? send('getHostedAppStatus', 200, status) : notFound('app checks', params.instanceId ?? '');
+      }),
+    ],
+  };
+
   const catalog: ExtensionDescriptor = {
     id: 'template-catalog',
     requires: ['identity'],
@@ -1414,7 +1431,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
     }],
   };
 
-  return [core, instances, dispatches, audit, teams, bindings, invitations, secrets, controller, marketplace, launcher, catalog,
+  return [core, instances, dispatches, audit, teams, bindings, invitations, secrets, controller, marketplace, launcher, catalog, availability,
     accountProfile(authorize, deps.accountIssuer)];
 }
 

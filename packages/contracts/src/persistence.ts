@@ -111,6 +111,14 @@ export type NewHostedStarter = Pick<HostedStarter, 'projectId' | 'observedAt'> &
   ({ state: 'live' } & Pick<HostedStarter, 'deploymentId' | 'origin'> | { state: 'paused' | 'removed' });
 
 
+export interface HostedAppCheck {
+  instanceId: string;
+  deploymentId: string;
+  state: 'checking' | 'up' | 'down';
+  failures: number;
+  checkedAt: string;
+}
+
 /** Repository facts. `actionRef` is the pinned commit -- the trust anchor is a SHA, never a tag (D30 law 3). */
 export const RepoConnectionSchema = z.object({
   instanceId: z.string().min(1),
@@ -507,6 +515,8 @@ export interface Store {
   /** Atomically register verified staging evidence. Never adopt a pre-existing instance or another team's project. */
   recordHostedStarter(input: NewHostedStarter): Promise<StoreResult<Instance>>;
   getHostedStarter(instanceId: string): Promise<StoreResult<HostedStarter>>;
+  recordHostedAppCheck(input: Pick<HostedAppCheck, 'instanceId' | 'deploymentId' | 'checkedAt'> & { passing: boolean }): Promise<void>;
+  getHostedAppCheck(instanceId: string): Promise<HostedAppCheck | undefined>;
   /** Oldest first, so a tenant's platforms keep the order they were created in. */
   listInstances(teamId?: string): Promise<Instance[]>;
   updateInstanceState(id: string, state: InstanceState, patch?: { desiredPlanHash?: string; lastAppliedPlanHash?: string }): Promise<StoreResult<Instance>>;

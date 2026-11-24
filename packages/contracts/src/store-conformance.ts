@@ -159,6 +159,36 @@ const expectErr = (result: { ok: boolean; value?: unknown } & Partial<StoreError
     return { status: 'pass', detail: 'one app, isolated scope, ordered retain and restore' };
   });
 
+  await add('hosted availability records confirmed outages and ignores stale deployments', async () => {
+    const { store, team } = await seed();
+    const deploymentId = randomUUID();
+    const app = mustOk(await store.recordHostedStarter({
+      teamId: team.id, name: 'starter-web', template: 'starter-web',
+      templateRef: { repo: 'platfolio-fixtures/starter-web', commitSha: 'e'.repeat(40) },
+      state: 'live', projectId: randomUUID(), deploymentId, origin: 'https://starter.up.railway.app',
+      observedAt: '2026-11-24T00:00:00.000Z',
+    }), 'registered app');
+    const check = (at: number, passing: boolean, deployment = deploymentId) => store.recordHostedAppCheck({
+      instanceId: app.id, deploymentId: deployment, passing,
+      checkedAt: new Date(Date.UTC(2026, 10, 24, 0, 0, at)).toISOString(),
+    });
+    await check(2, false);
+    if ((await store.getHostedAppCheck(app.id))?.state !== 'checking') throw new Error('A single miss became an outage');
+    await check(1, false);
+    await check(3, false, randomUUID());
+    if ((await store.getHostedAppCheck(app.id))?.state !== 'checking') throw new Error('A stale or unrelated check changed status');
+    await check(4, false);
+    if ((await store.getHostedAppCheck(app.id))?.state !== 'down') throw new Error('Repeated failures did not appear');
+    await check(5, false);
+    await check(6, true);
+    const updates = await store.recentAuditForTargets([app.id], 10);
+    const transitions = updates.map(({ action }) => action).filter((action) => action.startsWith('availability.'));
+    if ((await store.getHostedAppCheck(app.id))?.state !== 'up' || transitions.join(',') !== 'availability.up,availability.down') {
+      throw new Error('Recovery or outage history was duplicated or missing');
+    }
+    return { status: 'pass', detail: 'two misses confirm an outage, valid recovery appears once' };
+  });
+
   await add('describe: names the driver and its readiness', async () => {
     const store = await fresh();
     const info = store.describe();

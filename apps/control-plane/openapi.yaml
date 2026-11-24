@@ -1483,6 +1483,40 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
+  /api/v1/instances/{instanceId}/status:
+    parameters:
+      - { name: instanceId, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getHostedAppStatus
+      summary: Read the latest availability and outage updates for a hosted app
+      security: [{ bearerJwt: [] }]
+      responses:
+        '200':
+          description: Private availability checks and changes recorded for the app.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [environment, state, updates]
+                properties:
+                  environment: { type: string, enum: [staging] }
+                  state: { type: string, enum: [checking, up, down, paused, removed] }
+                  checkedAt: { type: string, format: date-time }
+                  updates:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [id, at, state]
+                      properties:
+                        id: { type: string }
+                        at: { type: string, format: date-time }
+                        state: { type: string, enum: [down, up, paused, removed] }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   /api/v1/teams/{teamId}/activity:
     parameters:
       - { name: teamId, in: path, required: true, schema: { type: string } }

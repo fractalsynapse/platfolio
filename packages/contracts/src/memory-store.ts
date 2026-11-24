@@ -1,12 +1,13 @@
 import { z } from 'zod';
 import type { Attestation } from './attestation.ts';
 import { AttestationRecordSchema, AuditEntrySchema, BindingRecordSchema, CapabilityOfferSchema, CapabilityShareSchema, IdentitySchema, PersonSchema, TeamMemberSchema, DispatchRecordSchema, InstanceEnvironmentStateSchema, InstanceSchema, InvitationSchema, ProviderConnectionSchema, RepoConnectionSchema, TeamSchema, newId,
-  HostedStarterSchema, rollupState, type HostedStarter, type NewHostedStarter,
+  HostedStarterSchema, rollupState, type HostedStarter, type NewHostedStarter, type HostedAppCheck,
   ArtifactRecordSchema,
   type ArtifactRecord, type AttestationRecord, type AuditEntry, type BindingRecord, type CapabilityOffer, type CapabilityShare, type NewBinding, type NewCapabilityOffer, type NewCapabilityShare, type DispatchRecord, type Instance, type InstanceEnvironmentState, type Invitation, type NewInvitation, type ProviderConnection, type RepoConnection, type Store, type StoreError, type NewInstance, type StoreResult, type Team, type TeamMember, type TeamRole, type Identity, type Person } from './persistence.ts';
 import { reasonOf } from './persistence.ts';
 import { normaliseEmail, normaliseName } from './persistence.ts';
 import { checkAttestationPolicy } from './dispatch-policy.ts';
+import { nextAppCheck } from './hosted-availability.ts';
 import { CONTRACT_VERSION } from './generated/contract-version.ts';
 
 /**
@@ -42,6 +43,7 @@ export class MemoryStore implements Store {
     registryDigest?: string;
   }>();
   private readonly teams = new Map<string, Team>();
+  private readonly hostedChecks = new Map<string, HostedAppCheck>();
   private readonly hostedStarters = new Map<string, HostedStarter>();
   private readonly instances = new Map<string, Instance>();
   private readonly repos = new Map<string, RepoConnection>();
@@ -210,6 +212,23 @@ export class MemoryStore implements Store {
   async getHostedStarter(instanceId: string): Promise<StoreResult<HostedStarter>> {
     const found = this.hostedStarters.get(instanceId);
     return found ? ok(copy(found)) : err({ code: 'not-found', what: 'hosted starter', id: instanceId });
+  }
+
+  async recordHostedAppCheck(input: Parameters<Store['recordHostedAppCheck']>[0]): Promise<void> {
+    const hosting = this.hostedStarters.get(input.instanceId);
+    if (this.closed || hosting?.state !== 'live' || hosting.deploymentId !== input.deploymentId) return;
+    const next = nextAppCheck(this.hostedChecks.get(input.instanceId), input);
+    if (!next) return;
+    this.hostedChecks.set(input.instanceId, next.check);
+    if (next.changed) await this.appendAudit({
+      actorKind: 'controller', actorRef: 'private-app-check', action: `availability.${next.changed}`,
+      target: input.instanceId, at: input.checkedAt, detail: { environment: 'staging' },
+    });
+  }
+
+  async getHostedAppCheck(instanceId: string): Promise<HostedAppCheck | undefined> {
+    const check = this.hostedChecks.get(instanceId);
+    return check && copy(check);
   }
 
   async getInstance(id: string) {
@@ -661,6 +680,7 @@ export class MemoryStore implements Store {
     this.plans.clear();
     this.envStates.clear();
     this.hostedStarters.clear();
+    this.hostedChecks.clear();
     this.invitations.clear();
     this.members.clear();
     this.persons.clear();
