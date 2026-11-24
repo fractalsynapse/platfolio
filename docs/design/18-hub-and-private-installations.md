@@ -47,6 +47,26 @@ can do there. A future remote support capability needs separate local approval, 
 an expiry, and revocation. A registry credential cannot replace running code or exercise a
 private operator role. Customer-controlled review and artifact pins govern updates.
 
+## The records that connect the two installations
+
+These are proposed responsibilities for the existing shared product. The OpenAPI design
+will settle the request and response shapes for the connected pilot.
+
+| Record | Owner and purpose |
+| --- | --- |
+| Launch request | The hub team selects a pinned release and receives a one-use enrollment code. The request can expire or be cancelled before redemption. |
+| Installation | The private deployment owns its installation ID, local state and access policy. The hub keeps the linked ID, hub team and marketplace access state. It learns the console URL only when the customer chooses to share it. |
+| Marketplace credential | An installation-scoped grant for registry actions, issued by the hub and stored in the private OpenBao. It can rotate or be revoked independently of human access and the provider grant. |
+| Account link | A verified `(issuer, subject)` associates an approved identity with an account. Each installation resolves its own roles. Unlinking the account does not remove local owners. |
+| Template release and claim | The publisher releases the public, pinned material. A hub account or team claims a particular version. The private installation verifies the release and records its own installation and deployment events. |
+
+Only the enrolling private installation and the hub need to exchange registry credentials.
+Deployment automation can run under a customer-owned execution identity after enrollment.
+Losing that identity prevents new provider operations until the customer replaces it. An
+independent local owner and recovery process restore access without a hub session. Revoking
+marketplace access affects further authorized registry calls. It leaves workload state and
+already acquired artifacts in the customer's hands.
+
 ## Identity and secret management
 
 - Bundle one Keycloak and one OpenBao per installation initially. The local operator realm
@@ -95,5 +115,96 @@ screens.
 
 ## Evidence
 
-The proof is tracked on the implementation branch. This section records measured outcomes as
-they are exercised. Scope and limits belong alongside the results.
+Measured on November 24, 2026.
+
+### Local paired runtime
+
+The two installations run with separate Compose projects, networks, Postgres volumes,
+Keycloak realm stores and OpenBao Raft volumes. Both reuse the same API and site images built
+from the checkout. The site's runtime config selects its own API and issuer. The two loopback
+hostnames also give each Keycloak its own browser cookie scope.
+
+| Installation | Site | Control plane | Keycloak | OpenBao |
+| --- | --- | --- | --- | --- |
+| Hub | `http://localhost:18173` | `http://localhost:18082` | `http://localhost:18081` | `http://localhost:18200` |
+| Private | `http://127.0.0.1:19173` | `http://127.0.0.1:19082` | `http://127.0.0.1:19081` | `http://127.0.0.1:19200` |
+
+Build once with the existing production-shaped Dockerfiles, then start and check both local
+installations. The site needs build-time addresses for its static shell and takes the actual
+installation addresses from its runtime config.
+
+```sh
+pnpm install --frozen-lockfile
+docker build -f apps/control-plane/Dockerfile -t platfolio-control-plane:hub-spoke-proof .
+docker build -f apps/site/Dockerfile -t platfolio-site:hub-spoke-proof \
+  --build-arg PLATFOLIO_SITE_ORIGIN=http://localhost:18173 \
+  --build-arg PLATFOLIO_URL=http://localhost:18082 \
+  --build-arg PLATFOLIO_IDENTITY_ISSUER=http://localhost:18081/realms/platfolio .
+pnpm exec tsx scripts/prove-hub-spoke.ts
+```
+
+The proof checks image identity, endpoint health and site configuration for both
+installations. The repository’s authorization-code and PKCE sign-in check passed all six
+assertions on each installation. Each issuer's token reaches its own API, the peer token gets HTTP 401, and
+local teams with the same slug have separate IDs and memberships. Each OpenBao allows its
+own scoped token and returns HTTP 403 for the peer token and for a path outside its policy.
+The two servers each seal on restart, unseal with their own recovery material, and return the
+value written before the restart. The private installation obtains a new local token and reads
+its teams while the hub site, API and Keycloak are stopped. The command restores the hub
+before exiting.
+
+This local proof uses loopback HTTP, the existing development Keycloak seed, and one
+OpenBao recovery share per instance. The proof script keeps the generated OpenBao root token
+and unseal material in private, Git-ignored files under `.tmp/hub-spoke/`. Keep those files
+with the local Raft volumes if you restart the proof. Keep an empty reserved recovery file for
+inspection if initialization is interrupted. An initialized server requires its original
+recovery material. A customer installation needs its own TLS, recovery and bootstrap policy.
+The local control plane has no OpenBao integration in this proof. A test client exercises
+OpenBao directly. Registry enrollment and optional shared sign-in are the connected pilot.
+
+### Railway staging
+
+The starter has a staging-only Railway project named `platfolio-starter-web`. It was deployed
+from the existing starter repository, revision `f2a095711f98696a98ed1711a87ed288ef034bf4`.
+The Railway probe is appended to the starter's staging image at build time and runs inside
+`web-staging` at startup. It logs a DNS result and a PostgreSQL protocol result with no
+addresses or credentials. The steady-state app uses the original starter source.
+
+| Check | Measured result |
+| --- | --- |
+| Same project and environment | `web-staging` resolved `app-db-staging.railway.internal` over IPv4 and IPv6. PostgreSQL answered the protocol probe on port 5432. The runtime's configured database reference used the same private hostname. |
+| Across projects | Both DNS queries for `api-staging.railway.internal` in `platfolio-selfhost` returned `ENOTFOUND` from the starter runtime. Railway reported the target endpoint active in a separate private network. This probes service discovery. Direct private-IP routing and isolation between environments in the same project remain unmeasured. |
+| Deployment and ingress | Railway marked both the instrumented run and the subsequent unmodified starter deployment successful. The starter's project has only `staging`. The PostgreSQL template initially created a public TCP proxy. It was removed and Railway returned zero proxies for the starter database. |
+
+The first probe reached PostgreSQL before Railway had resolved the application's database
+reference. Reapplying the reference after the database service existed made the reference
+resolve on the next deployment. The launcher should reuse the provider’s ordering, waiting
+for the database to be placed before wiring its reference, and verify the resulting runtime
+configuration. The starter reports whether a database URL was configured. The probe checks
+transport and the reference without using a database password. [Instrumented deployment](https://railway.com/project/d14c2c1a-0040-457d-b6e0-cc6381b76d68/service/61475175-f2c7-4be6-9825-da4662165d59?id=e038f55b-c400-4537-b537-ab49c3c51da9) · [Unmodified starter deployment](https://railway.com/project/d14c2c1a-0040-457d-b6e0-cc6381b76d68/service/61475175-f2c7-4be6-9825-da4662165d59?id=01bd35ea-1071-445e-bddf-8362dec90e9e)
+
+To rerun the networking check, copy `scripts/probe-railway-starter-network.ts` into a clean
+checkout of the pinned starter as `src/network-proof.mts`. Append this build-only override
+and deploy to the existing `web-staging` service. Read the two `PLATFOLIO_NETWORK_PROOF`
+lines from that deployment. Redeploy the unmodified revision when finished.
+
+```dockerfile
+CMD ["sh", "-c", "node src/network-proof.mts && exec node src/server.mjs"]
+```
+
+## Next delivery
+
+Build the customer-owned launcher around the existing manifest, plan and provider seams. The
+first Railway installer should deploy the private control plane, Keycloak, OpenBao and its
+local execution worker onto an explicitly reviewed network placement. Verify that the worker
+reaches OpenBao privately and that the customer can restore identity and unseal OpenBao
+without the hub. Use the existing starter app for the first deployment from the private
+installation. Workloads that need a shared service in another Railway project require a
+customer-approved connectivity design. A shared installation or workspace ID alone does not
+supply a network route.
+
+Add the enrollment, scoped registry credential and free-template claim in the next slice.
+Make redemption single use, rotate and revoke the credential, and prove local sign-in and
+operations through a disconnect. Optional Keycloak brokering follows the local operator
+flow and can be tested with a marketplace user who has no private role until an owner
+assigns one. Keep billing and paid listings behind the free claim-and-install proof.

@@ -60,6 +60,8 @@ const EXTERNAL = new Set([
   'GITHUB_STEP_SUMMARY', 'GITHUB_API_URL', 'GITHUB_SERVER_URL', 'ACTIONS_ID_TOKEN_REQUEST_URL',
   'ACTIONS_ID_TOKEN_REQUEST_TOKEN', 'GH_TOKEN', 'IMAGE_NAME', 'IMAGE_REPO_OWNER', 'EVENT_NAME',
   'EVENT_ACTION', 'REGISTRY',
+  // Injected by Railway. These names describe the running service's scope.
+  'RAILWAY_PROJECT_NAME', 'RAILWAY_ENVIRONMENT_NAME',
 ]);
 /** GitHub synthesises `INPUT_*` from an action's `with:` keys; the rest is the runner's own namespace. */
 const EXTERNAL_PREFIXES = ['INPUT_', 'GITHUB_', 'ACTIONS_'];
