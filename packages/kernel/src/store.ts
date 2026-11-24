@@ -131,6 +131,9 @@ export class StoreService extends Service<z.infer<typeof StoreConfigSchema>> {
   appendAudit(entry: Parameters<Store['appendAudit']>[0]) { return this.inner.appendAudit(entry); }
   recentAudit(limit?: number) { return this.inner.recentAudit(limit); }
   recentAuditForTargets(...args: Parameters<Store['recentAuditForTargets']>) { return this.inner.recentAuditForTargets(...args); }
+  saveNotificationRule(...args: Parameters<Store['saveNotificationRule']>) { return this.inner.saveNotificationRule(...args); }
+  listNotificationRules(...args: Parameters<Store['listNotificationRules']>) { return this.inner.listNotificationRules(...args); }
+  removeNotificationRule(...args: Parameters<Store['removeNotificationRule']>) { return this.inner.removeNotificationRule(...args); }
   close() { return this.inner.close(); }
 
   /** Errors are values, but a store that cannot be reached is a condition worth logging where it happens. */

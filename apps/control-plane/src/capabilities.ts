@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import {
-  AttestationSchema, checkBindingPolicy, CONTRACT_NAME, CONTRACT_VERSION, DispatchIntentSchema, InstanceSchema,
+  AttestationSchema, NotificationRuleSchema, checkBindingPolicy, CONTRACT_NAME, CONTRACT_VERSION, DispatchIntentSchema, InstanceSchema,
   reasonOf, decide, checkInvitationAcceptance, bindingImpact, normaliseName, rollupState, type BindingRecord, type CapabilityOffer, type PolicyAction, type VerifiedClaims,
 } from '@platfolio/contracts';
 import { RepositoryReadError } from '@platfolio/contracts';
@@ -11,6 +11,7 @@ import { ArtifactRecordSchema, InfraPlanSchema, secretWriteScope } from '@platfo
 import type { customerLaunch } from './customer-launch.ts';
 import { hostedStarterLink, hostedStarterObservation } from './hosted-starter.ts';
 import { checkHostedApp, hostedAppStatus } from './hosted-availability.ts';
+import { listNotificationMatches } from './notification-rules.ts';
 import type { StarterLaunch } from './starter-launch.ts';
 import { badRequest, bearerToken, notFound, send, unauthorized } from './respond.ts';
 import { accountProfile, type AccountIssuer } from './account-profile.ts';
@@ -1406,6 +1407,41 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
     ],
   };
 
+  const deliveryRuleSchema = NotificationRuleSchema.pick({ event: true, enabled: true, environment: true });
+  async function saveNotification(scope: Scope, request: Request, params: Record<string, string>, operation: 'createNotificationRule' | 'updateNotificationRule') {
+    const input = deliveryRuleSchema.safeParse(request.body);
+    if (request.bodyError || !input.success) return badRequest('Choose an app event and environment');
+    const result = await scope.context.store.saveNotificationRule(scope.personId, {
+      ...input.data, instanceId: params.instanceId ?? '', ...(params.ruleId ? { id: params.ruleId } : {}),
+    });
+    if (!result.ok) return { status: result.code === 'conflict' ? 409 : 404, body: { error: result.code, message: reasonOf(result) } };
+    return send(operation, operation === 'updateNotificationRule' ? 200 : 201, result.value);
+  }
+  const rulePath = '/api/v1/instances/{instanceId}/notification-rules';
+  const notifications: ExtensionDescriptor = {
+    id: 'notifications',
+    requires: ['store', 'identity'],
+    routes: [
+      {
+        method: 'GET', path: '/api/v1/me/notifications', operationId: 'listMyNotifications',
+        async handle(request, _params, context) {
+          const auth = await authorize(context, request);
+          if (!auth.ok) return auth.response;
+          const resolved = await context.store.resolvePerson({ issuer: auth.claims.issuer, subject: auth.claims.subject });
+          if (!resolved.ok) return { status: 503, body: { error: 'principal-unresolved', message: reasonOf(resolved) } };
+          return send('listMyNotifications', 200, await listNotificationMatches(context.store, resolved.value.person.id));
+        },
+      },
+      scoped('POST', rulePath, 'createNotificationRule', 'instance.read',
+        (scope, request, params) => saveNotification(scope, request, params, 'createNotificationRule')),
+      scoped('PUT', rulePath + '/{ruleId}', 'updateNotificationRule', 'instance.read',
+        (scope, request, params) => saveNotification(scope, request, params, 'updateNotificationRule')),
+      scoped('DELETE', rulePath + '/{ruleId}', 'deleteNotificationRule', 'instance.read', async ({ context, personId }, _request, params) =>
+        await context.store.removeNotificationRule(personId, params.instanceId ?? '', params.ruleId ?? '')
+          ? { status: 204, body: undefined } : notFound('notification rule', params.ruleId ?? '')),
+    ],
+  };
+
   const availability: ExtensionDescriptor = {
     id: 'app-availability',
     requires: ['store', 'identity'],
@@ -1431,7 +1467,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
     }],
   };
 
-  return [core, instances, dispatches, audit, teams, bindings, invitations, secrets, controller, marketplace, launcher, catalog, availability,
+  return [core, instances, dispatches, audit, teams, bindings, invitations, secrets, controller, marketplace, launcher, catalog, availability, notifications,
     accountProfile(authorize, deps.accountIssuer)];
 }
 

@@ -20,6 +20,7 @@ import { TeamRoster } from './team-roster.tsx';
 import { TeamConnections } from './team-connections.tsx';
 import { TeamInvitations } from './team-invitations.tsx';
 import { FreeTemplatePicker } from './free-template-picker.tsx';
+import { NotificationsWorkspace } from './notifications-workspace.tsx';
 import { AccountWorkspace } from './account-workspace.tsx';
 
 const params = {};
@@ -59,6 +60,7 @@ function WorkspaceContent() {
         {teams.some(({ role }) => role === 'owner') && <p><WorkspaceLink href={workspacePaths.launch}>Starter setup</WorkspaceLink></p>}
       </> : route.kind === 'create-team' ? <CreateTeam onCreated={(result) => { setCreated(result); reload(); }} />
         : route.kind === 'invitations' ? <MyInvitations invitations={invitations} onAccepted={reload} />
+        : route.kind === 'notifications' ? <NotificationsWorkspace teams={teams} />
         : route.kind === 'account' ? <AccountWorkspace tab={route.tab} />
         : route.kind === 'templates' ? team?.role === 'owner' ? <FreeTemplatePicker team={team.name} /> : <UnavailablePage />
         : route.kind === 'team-launch' ? team?.role === 'owner' ? <>
@@ -91,7 +93,8 @@ export const workspaceContent = defineComponent({
     'createTeam', 'listMyInvitations', 'acceptInvitation', 'listInvitations', 'createInvitation', 'revokeInvitation', 'listInstallableTemplates',
     'getAccountProfile', 'updateAccountProfile', 'getInstanceEnvironment', 'listSecretPresence',
     'getStarterLaunchSetup', 'initializeStarterOpenBao', 'unlockStarterOpenBao', 'beginStarterRailwayAuthorization',
-    'listTeamMembers', 'updateTeamMemberRole', 'removeTeamMember', 'listTeamActivity', 'getHostedAppStatus'],
+    'listTeamMembers', 'updateTeamMemberRole', 'removeTeamMember', 'listTeamActivity', 'getHostedAppStatus',
+    'listMyNotifications', 'createNotificationRule', 'updateNotificationRule', 'deleteNotificationRule'],
   slots: ['full-page'],
   render: WorkspaceContent,
 });

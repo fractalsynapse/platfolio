@@ -119,6 +119,17 @@ export interface HostedAppCheck {
   checkedAt: string;
 }
 
+export const NotificationRuleSchema = z.object({
+  id: z.string().min(1),
+  instanceId: z.string().min(1),
+  event: z.enum(['deployment-failed', 'app-outage', 'secret-updated']),
+  enabled: z.boolean(),
+  createdAt: z.iso.datetime(),
+  environment: z.string().min(1).max(60).optional(),
+}).strict();
+export type NotificationRule = z.infer<typeof NotificationRuleSchema>;
+export type NewNotificationRule = Omit<NotificationRule, 'id' | 'createdAt'> & { id?: string };
+
 /** Repository facts. `actionRef` is the pinned commit -- the trust anchor is a SHA, never a tag (D30 law 3). */
 export const RepoConnectionSchema = z.object({
   instanceId: z.string().min(1),
@@ -651,6 +662,9 @@ export interface Store {
   recentAudit(limit?: number): Promise<AuditEntry[]>;
   /** Filter by authorized targets before limiting the result. */
   recentAuditForTargets(targets: readonly string[], limit: number): Promise<AuditEntry[]>;
+  saveNotificationRule(personId: string, input: NewNotificationRule): Promise<StoreResult<NotificationRule>>;
+  listNotificationRules(personId: string): Promise<NotificationRule[]>;
+  removeNotificationRule(personId: string, instanceId: string, id: string): Promise<boolean>;
 
   close(): Promise<void>;
 }

@@ -388,3 +388,13 @@ is a planned stop. The same check can start again after restore.
 The private app status page uses the team activity timeline component. The control plane
 keeps the observations and outage transitions within the installation. Publishing status
 to the public site requires an explicit production environment and a separate owner action.
+
+
+### Private notifications
+
+A person can follow failed deployments, outages, and environment secret updates for
+apps that belong to their current teams. Each rule selects an environment or follows all
+environments of one app. Recent matching events appear in the private workspace.
+Notification results include the app, event, environment, and time. The event feed carries
+neither secret names nor values. Email destinations depend on D70's verified address
+management and recipient verification.

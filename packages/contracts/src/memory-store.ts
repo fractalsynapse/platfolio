@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { Attestation } from './attestation.ts';
 import { AttestationRecordSchema, AuditEntrySchema, BindingRecordSchema, CapabilityOfferSchema, CapabilityShareSchema, IdentitySchema, PersonSchema, TeamMemberSchema, DispatchRecordSchema, InstanceEnvironmentStateSchema, InstanceSchema, InvitationSchema, ProviderConnectionSchema, RepoConnectionSchema, TeamSchema, newId,
-  HostedStarterSchema, rollupState, type HostedStarter, type NewHostedStarter, type HostedAppCheck,
+  HostedStarterSchema, NotificationRuleSchema, rollupState, type NewNotificationRule, type NotificationRule, type HostedStarter, type NewHostedStarter, type HostedAppCheck,
   ArtifactRecordSchema,
   type ArtifactRecord, type AttestationRecord, type AuditEntry, type BindingRecord, type CapabilityOffer, type CapabilityShare, type NewBinding, type NewCapabilityOffer, type NewCapabilityShare, type DispatchRecord, type Instance, type InstanceEnvironmentState, type Invitation, type NewInvitation, type ProviderConnection, type RepoConnection, type Store, type StoreError, type NewInstance, type StoreResult, type Team, type TeamMember, type TeamRole, type Identity, type Person } from './persistence.ts';
 import { reasonOf } from './persistence.ts';
@@ -43,6 +43,7 @@ export class MemoryStore implements Store {
     registryDigest?: string;
   }>();
   private readonly teams = new Map<string, Team>();
+  private readonly notificationRules = new Map<string, { personId: string; rule: NotificationRule }>();
   private readonly hostedChecks = new Map<string, HostedAppCheck>();
   private readonly hostedStarters = new Map<string, HostedStarter>();
   private readonly instances = new Map<string, Instance>();
@@ -674,6 +675,40 @@ export class MemoryStore implements Store {
     return limit > 0 ? this.auditLog.filter(({ target }) => scoped.has(target)).slice(-limit).reverse().map(copy) : [];
   }
 
+  async saveNotificationRule(personId: string, input: NewNotificationRule): Promise<StoreResult<NotificationRule>> {
+    if (this.closed) return this.refuse('saveNotificationRule');
+    const app = this.instances.get(input.instanceId);
+    if (!app || !this.members.has(`${app.teamId}\u0000${personId}`)) return err({ code: 'not-found', what: 'app', id: input.instanceId });
+    if (input.environment && !this.envStates.has(`${app.id}\u0000${input.environment}`)) {
+      return err({ code: 'not-found', what: 'environment', id: input.environment });
+    }
+    const existing = input.id ? this.notificationRules.get(input.id) : undefined;
+    if (input.id && (existing?.personId !== personId || existing.rule.instanceId !== app.id)) {
+      return err({ code: 'not-found', what: 'notification rule', id: input.id });
+    }
+    const result = admit(NotificationRuleSchema, { ...input, id: input.id ?? newId('rule'), createdAt: existing?.rule.createdAt ?? this.clock() }, 'notification rule');
+    if (!result.accepted) return err({ code: 'conflict', reason: result.reason });
+    const { value } = result;
+    if ([...this.notificationRules.values()].some((item) => item.personId === personId && item.rule.id !== value.id &&
+        item.rule.instanceId === app.id && item.rule.event === value.event && item.rule.environment === value.environment)) {
+      return err({ code: 'conflict', reason: 'This event already has a rule for that environment' });
+    }
+    this.notificationRules.set(value.id, { personId, rule: value });
+    return ok(copy(value));
+  }
+
+  async listNotificationRules(personId: string): Promise<NotificationRule[]> {
+    const teams = new Set(await this.teamsForPerson(personId));
+    return [...this.notificationRules.values()]
+      .filter((row) => row.personId === personId && teams.has(this.instances.get(row.rule.instanceId)?.teamId ?? ''))
+      .map(({ rule }) => copy(rule));
+  }
+
+  async removeNotificationRule(personId: string, instanceId: string, id: string): Promise<boolean> {
+    const current = this.notificationRules.get(id);
+    return current?.personId === personId && current.rule.instanceId === instanceId && this.notificationRules.delete(id);
+  }
+
   async close(): Promise<void> {
     this.closed = true;
     this.teams.clear();
@@ -681,6 +716,7 @@ export class MemoryStore implements Store {
     this.envStates.clear();
     this.hostedStarters.clear();
     this.hostedChecks.clear();
+    this.notificationRules.clear();
     this.invitations.clear();
     this.members.clear();
     this.persons.clear();

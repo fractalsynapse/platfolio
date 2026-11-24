@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { Pool, type PoolClient } from 'pg';
 import {
-  HostedStarterSchema, rollupState, type HostedStarter, type NewHostedStarter, type HostedAppCheck,
+  HostedStarterSchema, NotificationRuleSchema, rollupState, type NewNotificationRule, type NotificationRule, type HostedStarter, type NewHostedStarter, type HostedAppCheck,
   ArtifactRecordSchema, AttestationRecordSchema, AuditEntrySchema, BindingRecordSchema, CapabilityOfferSchema, CapabilityShareSchema, DispatchRecordSchema, IdentitySchema, PersonSchema, TeamMemberSchema, InstanceEnvironmentStateSchema, InstanceSchema, InvitationSchema, ProviderConnectionSchema, RepoConnectionSchema, TeamSchema, newId,
   type ArtifactRecord, type AttestationRecord, type AuditEntry, type BindingRecord, type CapabilityOffer, type NewBinding, type NewCapabilityOffer, type NewCapabilityShare, type DispatchRecord, type Instance, type InstanceEnvironmentState, type Invitation, type NewInvitation, type ProviderConnection, type RepoConnection, type Store, type StoreError, type NewInstance, type StoreResult, type Team, type Person, type TeamMember, type TeamRole,
 } from './persistence.ts';
@@ -1153,6 +1153,61 @@ export class PostgresStore implements Store {
       const admitted = admit(AuditEntrySchema, { id: r.id, at: iso(r.at), actorKind: r.actor_kind, actorRef: r.actor_ref, action: r.action, target: r.target, detail: r.detail }, 'audit row');
       return admitted.accepted ? admitted.value : undefined;
     }).filter((x): x is AuditEntry => x !== undefined);
+  }
+
+  async saveNotificationRule(personId: string, input: NewNotificationRule): Promise<StoreResult<NotificationRule>> {
+    const candidate = admit(NotificationRuleSchema, {
+      ...input, id: input.id ?? newId('rule'), createdAt: new Date().toISOString(),
+    }, 'notification rule');
+    if (!candidate.accepted) return err({ code: 'conflict', reason: candidate.reason });
+    const { id, instanceId, event, enabled, environment } = candidate.value;
+    const allowed = `SELECT 1 FROM ${this.q('instances')} AS app
+      JOIN ${this.q('team_members')} AS member ON member.team_id = app.team_id AND member.person_id = $2
+      WHERE app.id = $3 AND ($4::text IS NULL OR EXISTS (
+        SELECT 1 FROM ${this.q('instance_environments')} WHERE instance_id = app.id AND environment = $4
+      ))`;
+    try {
+      const values = [id, personId, instanceId, environment ?? null, event, enabled];
+      const result = input.id
+        ? await this.pool.query(
+          `UPDATE ${this.q('notification_rules')} SET environment = $4, event = $5, enabled = $6
+           WHERE id = $1 AND person_id = $2 AND instance_id = $3 AND EXISTS (${allowed}) RETURNING *`, values,
+        )
+        : await this.pool.query(
+          `INSERT INTO ${this.q('notification_rules')} (id, person_id, instance_id, environment, event, enabled)
+           SELECT $1, $2, $3, $4, $5, $6 WHERE EXISTS (${allowed}) RETURNING *`, values,
+        );
+      const row = result.rows[0];
+      return row ? this.asNotificationRule(row) : err({ code: 'not-found', what: 'app, environment, or notification rule', id: input.id ?? instanceId });
+    } catch (error) {
+      if ((error as { code?: string }).code === '23505') return err({ code: 'conflict', reason: 'This event already has a rule for that environment' });
+      throw error;
+    }
+  }
+
+  async listNotificationRules(personId: string): Promise<NotificationRule[]> {
+    const result = await this.pool.query(
+      `SELECT rule.* FROM ${this.q('notification_rules')} AS rule
+       JOIN ${this.q('instances')} AS app ON app.id = rule.instance_id
+       JOIN ${this.q('team_members')} AS member ON member.team_id = app.team_id AND member.person_id = rule.person_id
+       WHERE rule.person_id = $1 ORDER BY rule.created_at, rule.id`, [personId],
+    );
+    return values(result.rows.map((row) => this.asNotificationRule(row)));
+  }
+
+  async removeNotificationRule(personId: string, instanceId: string, id: string): Promise<boolean> {
+    const result = await this.pool.query(
+      `DELETE FROM ${this.q('notification_rules')} WHERE id = $1 AND person_id = $2 AND instance_id = $3`, [id, personId, instanceId],
+    );
+    return result.rowCount === 1;
+  }
+
+  private asNotificationRule(row: Row): StoreResult<NotificationRule> {
+    const rule = admit(NotificationRuleSchema, {
+      id: row.id, instanceId: row.instance_id, event: row.event, enabled: row.enabled, createdAt: iso(row.created_at),
+      ...(row.environment === null ? {} : { environment: row.environment }),
+    }, 'notification rule row');
+    return rule.accepted ? ok(rule.value) : err({ code: 'conflict', reason: rule.reason });
   }
 
   async close(): Promise<void> {
