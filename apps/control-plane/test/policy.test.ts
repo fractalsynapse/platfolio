@@ -133,3 +133,23 @@ test('the customer launch confines removal to its owner and requires a separate 
     await disposeKernel(app.ctx);
   }
 });
+
+test('team activity filters scope before limiting and omits membership administration', async () => {
+  const app = await start();
+  try {
+    const { team, instance } = await app.seed('activity-team');
+    const peer = must(await app.ctx.store.createTeam({ name: 'peer-activity-team' }), 'peer team');
+    const peerApp = must(await app.ctx.store.createInstance({ teamId: peer.id, name: 'peer-app', template: 'starter-web' }), 'peer app');
+    const record = (target: string, action: string) => app.ctx.store.appendAudit({
+      actorKind: 'controller', actorRef: 'evidence', action, target, detail: {},
+    });
+    must(await record(instance.id, 'hosting.verified'), 'own deployment');
+    must(await record(team.id, 'team.member.role'), 'private member change');
+    for (let index = 0; index < 110; index++) must(await record(peerApp.id, 'hosting.verified'), 'peer deployment');
+    const visible = await app.call(`/api/v1/teams/${team.id}/activity`, {}, 'member-subject');
+    assert.equal(visible.status, 200);
+    assert.deepEqual(JSON.parse(visible.text).map((event: { target: string; action: string }) => [event.target, event.action]),
+      [[instance.id, 'hosting.verified']]);
+    assert.equal((await app.call(`/api/v1/teams/${peer.id}/activity`, {}, 'member-subject')).status, 404);
+  } finally { await disposeKernel(app.ctx); }
+});

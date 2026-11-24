@@ -1483,6 +1483,25 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
+  /api/v1/teams/{teamId}/activity:
+    parameters:
+      - { name: teamId, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: listTeamActivity
+      summary: Read recent operations for one team and its apps
+      security: [{ bearerJwt: [] }]
+      responses:
+        '200':
+          description: The most recent 100 recorded operations in this team.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/AuditEntry' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   /api/v1/audit:
     get:
       operationId: listAudit

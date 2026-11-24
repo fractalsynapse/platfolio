@@ -152,6 +152,10 @@ const expectErr = (result: { ok: boolean; value?: unknown } & Partial<StoreError
     if (restored.id !== first.id || restored.state !== 'live' || hosting.deploymentId === registration.deploymentId) {
       throw new Error('Restore lost the instance or its new deployment');
     }
+    const activity = await store.recentAuditForTargets([first.id], 3);
+    if (activity.map(({ action }) => action).join(',') !== 'hosting.verified,hosting.paused,hosting.verified') {
+      throw new Error('Verified transitions did not appear once each in the app audit');
+    }
     return { status: 'pass', detail: 'one app, isolated scope, ordered retain and restore' };
   });
 

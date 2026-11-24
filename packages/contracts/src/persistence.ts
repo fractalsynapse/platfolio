@@ -639,6 +639,8 @@ export interface Store {
    * what happens when two things are equally recent.
    */
   recentAudit(limit?: number): Promise<AuditEntry[]>;
+  /** Filter by authorized targets before limiting the result. */
+  recentAuditForTargets(targets: readonly string[], limit: number): Promise<AuditEntry[]>;
 
   close(): Promise<void>;
 }

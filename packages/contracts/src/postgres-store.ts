@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { Pool } from 'pg';
+import { Pool, type PoolClient } from 'pg';
 import {
   HostedStarterSchema, rollupState, type HostedStarter, type NewHostedStarter,
   ArtifactRecordSchema, AttestationRecordSchema, AuditEntrySchema, BindingRecordSchema, CapabilityOfferSchema, CapabilityShareSchema, DispatchRecordSchema, IdentitySchema, PersonSchema, TeamMemberSchema, InstanceEnvironmentStateSchema, InstanceSchema, InvitationSchema, ProviderConnectionSchema, RepoConnectionSchema, TeamSchema, newId,
@@ -298,6 +298,11 @@ export class PostgresStore implements Store {
          ON CONFLICT (instance_id, environment) DO UPDATE SET state = EXCLUDED.state, updated_at = EXCLUDED.updated_at`,
         [instanceId, input.state, input.observedAt],
       );
+      const audit = await this.appendAuditRecord(client, {
+        actorKind: 'controller', actorRef: 'private-launch-worker', action: input.state === 'live' ? 'hosting.verified' : `hosting.${input.state}`,
+        target: instanceId, at: input.observedAt, detail: { environment: 'staging', deploymentId: observation.value.deploymentId },
+      });
+      if (!audit.ok) return audit;
       await client.query('COMMIT');
       committed = true;
       return ok(instance.value);
@@ -1069,10 +1074,14 @@ export class PostgresStore implements Store {
   }
 
   async appendAudit(entry: Omit<AuditEntry, 'id' | 'at'> & { at?: string }) {
+    return this.appendAuditRecord(this.pool, entry);
+  }
+
+  private async appendAuditRecord(client: Pool | PoolClient, entry: Omit<AuditEntry, 'id' | 'at'> & { at?: string }) {
     const admitted = admit(AuditEntrySchema, { ...entry, id: newId('aud'), at: entry.at ?? new Date().toISOString() }, 'audit entry');
     if (!admitted.accepted) return err({ code: 'conflict', reason: admitted.reason });
     const e = admitted.value;
-    await this.pool.query(
+    await client.query(
       `INSERT INTO ${this.q('audit_log')} (id, at, actor_kind, actor_ref, action, target, detail) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb)`,
       [e.id, e.at, e.actorKind, e.actorRef, e.action, e.target, JSON.stringify(e.detail)]);
     return ok(e);
@@ -1080,7 +1089,18 @@ export class PostgresStore implements Store {
 
   /** Ordered by the insertion counter, not by `at`: three rows sharing one statement timestamp made `at DESC` a coin flip, which CI caught and my laptop did not. */
   async recentAudit(limit = 50) {
-    const rows = (await this.pool.query(`SELECT * FROM ${this.q('audit_log')} ORDER BY seq DESC LIMIT $1`, [limit])).rows as Row[];
+    return this.readAudit(limit);
+  }
+
+  async recentAuditForTargets(targets: readonly string[], limit: number) {
+    return this.readAudit(limit, targets);
+  }
+
+  private async readAudit(limit: number, targets?: readonly string[]) {
+    const rows = (await this.pool.query(
+      `SELECT * FROM ${this.q('audit_log')} WHERE ($2::text[] IS NULL OR target = ANY($2)) ORDER BY seq DESC LIMIT $1`,
+      [limit, targets ?? null],
+    )).rows as Row[];
     return rows.map((r) => {
       const admitted = admit(AuditEntrySchema, { id: r.id, at: iso(r.at), actorKind: r.actor_kind, actorRef: r.actor_ref, action: r.action, target: r.target, detail: r.detail }, 'audit row');
       return admitted.accepted ? admitted.value : undefined;
