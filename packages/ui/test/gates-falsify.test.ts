@@ -170,7 +170,7 @@ const MUTATIONS: readonly Mutation[] = [
   {
     gateId: 'D65',
     label: 'a cookie write in the shell',
-    file: 'apps/site/src/islands/callback-island.tsx',
+    file: 'apps/site/src/islands/dashboard-island.tsx',
     append: '\nexport const __rogueCookie = (): void => { document.cookie = "platfolio=1"; };\n',
     expect: /document\.cookie in the shell/,
   },
