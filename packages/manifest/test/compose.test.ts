@@ -146,7 +146,7 @@ test('platfolio can describe and plan its own deployment (step 7, #172)', () => 
   const base = fs.readFileSync(path.join(dir, 'compose.yaml'), 'utf8');
   const overlay = fs.readFileSync(path.join(dir, 'compose.prod.yaml'), 'utf8');
   const parsed = parseCompose([base, overlay], {
-    resolveArtifact: (service) => service === 'site' ? `ghcr.io/platfolio-fixtures/site:ci@sha256:${DIGEST_PIN}` : undefined,
+    resolveArtifact: (service) => ['site', 'identity'].includes(service) ? `ghcr.io/platfolio-fixtures/${service}:ci@sha256:${DIGEST_PIN}` : undefined,
   });
   // This used to assert the OPPOSITE -- "the tree cannot describe a deployable self-host" -- because the
   // overlay pinned a digest belonging to a deleted service and had no image of its own. #172 changed that:

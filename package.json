@@ -38,6 +38,7 @@
     "app:check": "tsx scripts/github-app-check.ts",
     "install:pr": "tsx scripts/open-install-pr.ts",
     "action:bundle": "tsx scripts/bundle-action.ts",
+    "identity:theme": "tsx scripts/configure-auth-theme.ts",
     "identity:seed": "tsx scripts/seed-identity.ts",
     "identity:smoke": "tsx scripts/smoke-identity.ts",
     "identity:pkce:smoke": "tsx scripts/smoke-browser-auth.ts",

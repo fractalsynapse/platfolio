@@ -163,7 +163,7 @@ One thing, one home (and the DNS/origin state both realms carry is recorded ther
 
 For a first-party release candidate, use the `release-candidate-<attempt>` artifact from a successful
 **Image** workflow run. It records the full source commit, run and attempt, and the registry digest of each
-image the run published. Hosted candidates contain both `api` and `site`. The commit tag accompanies the
+image the run published. Hosted candidates now contain `api`, `site`, and the themed `identity` image. The commit tag accompanies the
 digest because Railway requires `image:tag@digest`.
 Check out that commit with a clean tracked tree, then run
 `pnpm run platform:plan --candidate=/path/to/release-candidate.json`. The planner reads the recorded image

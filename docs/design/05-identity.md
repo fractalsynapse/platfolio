@@ -322,3 +322,31 @@ The realm-admin users in `platfolio`/`platfolio-staging` are tenant-plane record
 `identity:seed`; this runbook is about the master realm of our own hosted Keycloak only. And nothing here
 changes the answer of 2026-11-15: **the temporary admin is not touched until the maintainer opens this
 checklist deliberately, in daylight, with Path 1 completed in order.**
+
+## Platfolio authentication theme
+
+The `platfolio` login theme inherits Keycloak’s native authentication templates. The identity image
+copies the same generated tokens and component styles that the React workspace uses. The layer
+also styles form fields, validation, and password visibility controls. The release candidate records
+the identity image digest alongside the API and site digests. [Keycloak theme guide](https://www.keycloak.org/ui-customization/themes)
+
+Build and start the local identity image with the development Compose overlay. Seed the operator
+realm once, then apply the theme and direct development mail to Mailpit.
+
+```sh
+docker compose -f compose.yaml -f compose.dev.yaml up -d --build identity mailpit
+pnpm run identity:seed
+pnpm run identity:theme --enable-self-service --local-mailpit
+```
+
+For an existing hosted realm, deploy the candidate’s identity image first. Run `identity:theme`
+with its HTTPS origin, exact `--realm`, `--allow-remote`, and administrator credentials in the
+operator environment. The command selects the theme and disables any existing `account-console`
+client without reseeding users. The identity image disables the Account Console feature and retains the
+Account REST API for the Platfolio-owned account UI. [Keycloak features](https://www.keycloak.org/server/features)
+
+Verify the realm’s SMTP relay before using `--enable-self-service` on a hosted realm. That flag
+opens registration, requires email verification, and enables password recovery. The realm’s default role
+receives the existing Platfolio API role. It lets verified registrants enter the workspace. Platfolio
+assigns team membership independently. The staging and production realms can select the theme
+independently on the shared identity host.

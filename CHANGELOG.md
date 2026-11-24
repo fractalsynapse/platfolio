@@ -5,6 +5,8 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+- Added a Platfolio theme for Keycloak authentication and included the themed identity image in release candidates.
+
 - Added the React team workspace with direct app and environment links, a shared team selector and navigation, and return to the original workspace page after Keycloak sign-in.
 
 - Added a browser launch pilot for the pinned Starter Web release with progress and a downloadable troubleshooting report.
