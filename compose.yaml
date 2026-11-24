@@ -143,10 +143,10 @@ services:
           PLATFOLIO_IDENTITY_ISSUER: *staging-issuer
 
   identity:
-    # Upstream Keycloak, pinned by digest (D29/D30 law 3: a tag is a thing that moves). `ownership: external`
-    # is what the format calls a service we host but do not develop -- the same posture a tenant has toward
-    # their dependencies, which is the point of dogfooding.
-    image: keycloak/keycloak:26.8.2@sha256:c126f032d43b941ed7c5ccca7d6571596d8eab84d748afd7c86989e48ef07b8f
+    image: ghcr.io/fractalsynapse/platfolio-identity
+    build:
+      context: .
+      dockerfile: apps/identity/Dockerfile
     # Full path, not `start`: Railway's start command replaces the image command rather than being appended to
     # an entrypoint, so a bare `start` is "command not found" -- an instant exit with zero log lines, which is
     # how this failure looked like a mysterious deployment error for a whole debugging pass. #198's own lesson:
@@ -241,9 +241,7 @@ services:
         - { name: KC_BOOTSTRAP_ADMIN_PASSWORD, source: shared-variable }
       public: true
       domains: [auth.platfolio.dev]
-      ownership: external
-      # Upstream Keycloak: nothing is developed in this service, so production only -- the same posture
-      # the shared-identity template takes. A staging Keycloak nobody changes is a second bill and no signal.
+      # Shared identity host, with separate staging and production realms (D56).
       environments: [production]
 
   # One provider-managed Postgres for the whole deployment. `singleUser` semantics apply: Railway creates the

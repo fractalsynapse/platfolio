@@ -155,6 +155,21 @@ services:
       main:
         condition: service_healthy
 
+    # The Keycloak image has Bash and lacks the Node probe used by the hosted manifest.
+    healthcheck:
+      test:
+        - CMD
+        - bash
+        - -ec
+        - >-
+          exec 3<>/dev/tcp/127.0.0.1/8080;
+          printf 'GET /realms/master HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3;
+          read -r status <&3;
+          [[ "$$status" == 'HTTP/1.1 200 '* ]]
+      interval: 5s
+      timeout: 3s
+      start_period: 30s
+
   # Mailpit (D46): an SMTP sink AND a mailbox that tests can read. Everything platfolio sends in development
   # lands here, and `email:smoke` asserts on it through Mailpit's HTTP API -- "the invitation was sent to that
   # address with this link" becomes a checked fact rather than a log line somebody eyeballs. UI :8025.

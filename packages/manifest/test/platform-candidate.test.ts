@@ -17,6 +17,7 @@ const composition = readFileSync(new URL('../../../compose.yaml', import.meta.ur
 function candidate(digest: string, sourceCommit = commit) {
   return { schemaVersion: 1, sourceCommit, runId: '40', runAttempt: '1', images: {
     api: { image: `ghcr.io/platfolio-fixtures/api:sha-${sourceCommit}`, digest },
+    identity: { image: `ghcr.io/platfolio-fixtures/identity:sha-${sourceCommit}`, digest: digestB },
     site: { image: `ghcr.io/platfolio-fixtures/site:sha-${sourceCommit}`, digest: digestA },
   } };
 }
@@ -42,6 +43,8 @@ test('an older release candidate can be replayed after a later publish', () => {
     assert.equal(api?.digest, digestA);
     assert.equal(environment.services.find((service) => service.name === 'site')?.digest, digestA);
   }
+  const production = replay.environments.find(({ name }) => name === 'production');
+  assert.equal(production?.services.find(({ name }) => name === 'identity')?.digest, digestB);
 });
 
 test('domain bootstrap options change the hash of the plan they change', () => {
@@ -59,6 +62,7 @@ test('staging selection excludes production from the plan and its hash', () => {
   const record = candidate(digestA);
   const staging = planFor(record, { environment: 'staging' });
   assert.deepEqual(staging.environments.map(({ name }) => name), ['staging']);
+  assert.ok(staging.environments.every(({ services }) => services.every(({ name }) => name !== 'identity')));
   assert.notEqual(staging.planHash, planFor(record).planHash);
   assert.throws(() => planFor(record, { environment: 'preview' }), /not enabled/);
 });

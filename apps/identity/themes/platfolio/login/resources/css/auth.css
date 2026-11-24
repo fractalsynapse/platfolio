@@ -1,0 +1,139 @@
+/* Native Keycloak form structure rendered with the workspace's shared styles. */
+.platfolio-auth,
+.platfolio-auth *,
+.platfolio-auth *::before,
+.platfolio-auth *::after {
+  box-sizing: border-box;
+}
+
+.platfolio-auth {
+  margin: 0;
+  background: var(--ui-color-bg);
+  color: var(--ui-color-text);
+  line-height: var(--ui-leading-body);
+}
+
+.platfolio-auth a {
+  color: var(--ui-color-accent);
+  overflow-wrap: anywhere;
+}
+
+.platfolio-auth a:focus-visible,
+.platfolio-auth-input:focus-visible {
+  outline: 2px solid var(--ui-color-accent);
+  outline-offset: 2px;
+}
+
+.platfolio-auth-form,
+.platfolio-auth-field,
+.platfolio-auth #kc-form-login {
+  display: grid;
+  gap: var(--ui-space-3);
+}
+
+.platfolio-auth-form,
+.platfolio-auth #kc-form-login {
+  gap: var(--ui-space-5);
+}
+
+.platfolio-auth-label {
+  font-size: var(--ui-font-label);
+  font-weight: var(--ui-weight-title);
+}
+
+.platfolio-auth-input {
+  inline-size: 100%;
+  min-inline-size: 0;
+  min-block-size: var(--ui-target-primary);
+  padding: var(--ui-space-2) var(--ui-space-3);
+  border: 1px solid var(--ui-color-border);
+  border-radius: var(--ui-space-3);
+  background: var(--ui-color-bg);
+  color: var(--ui-color-text);
+  font: inherit;
+}
+
+.platfolio-auth-input[aria-invalid="true"] {
+  border-color: var(--ui-color-danger);
+}
+
+.platfolio-auth-password,
+.platfolio-auth-actions {
+  display: flex;
+  gap: var(--ui-space-3);
+  align-items: center;
+}
+
+.platfolio-auth-actions {
+  flex-wrap: wrap;
+}
+
+.platfolio-auth-password button {
+  flex: none;
+  justify-content: center;
+}
+
+.platfolio-auth-eye,
+.platfolio-auth-eye-off {
+  position: relative;
+  inline-size: 1.1em;
+  block-size: 0.72em;
+  border: 1px solid currentColor;
+  border-radius: 66% 34%;
+  transform: rotate(-18deg);
+}
+
+.platfolio-auth-eye::before,
+.platfolio-auth-eye-off::before {
+  position: absolute;
+  inset: 24% 34%;
+  border-radius: 50%;
+  background: currentColor;
+  content: '';
+}
+
+.platfolio-auth-eye-off::after {
+  position: absolute;
+  inset: 46% -14%;
+  background: currentColor;
+  transform: rotate(45deg);
+  content: '';
+}
+
+.platfolio-auth-full {
+  inline-size: 100%;
+}
+
+.platfolio-auth #kc-info,
+.platfolio-auth-options,
+.platfolio-auth-notice {
+  font-size: var(--ui-font-label);
+}
+
+.platfolio-auth #kc-info {
+  margin-block-start: var(--ui-space-5);
+}
+
+.platfolio-auth-options {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+}
+
+.platfolio-auth-notice {
+  margin-block-end: var(--ui-space-5);
+  padding: var(--ui-space-4);
+  border: 1px solid var(--ui-color-border);
+  border-radius: var(--ui-space-3);
+  background: var(--ui-color-bg);
+}
+
+.platfolio-auth-error,
+.platfolio-auth-notice.pf-m-danger {
+  color: var(--ui-color-danger);
+}
+
+.platfolio-auth [disabled] {
+  cursor: wait;
+  opacity: 0.72;
+}

@@ -29,20 +29,6 @@ services:
     ports: !override ['127.0.0.1:${PROOF_IDENTITY_PORT:?}:8080']
     environment:
       KC_HOSTNAME: http://${PROOF_HOST:?}:${PROOF_IDENTITY_PORT:?}
-    # The Keycloak image has Bash and lacks the Node probe used by the hosted manifest.
-    healthcheck:
-      test:
-        - CMD
-        - bash
-        - -ec
-        - >-
-          exec 3<>/dev/tcp/127.0.0.1/8080;
-          printf 'GET /realms/master HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3;
-          read -r status <&3;
-          [[ "$$status" == 'HTTP/1.1 200 '* ]]
-      interval: 5s
-      timeout: 3s
-      start_period: 30s
   openbao:
     image: quay.io/openbao/openbao:2.7.0@sha256:71156a1c6623a5fa3f5e61b0c6a8ead0faf0df29a778339188443551995d1315
     command: ['server']
