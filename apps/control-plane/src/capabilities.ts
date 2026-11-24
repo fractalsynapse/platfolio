@@ -7,7 +7,7 @@ import { RepositoryReadError } from '@platfolio/contracts';
 import { ScmNotConfiguredError } from '@platfolio/kernel';
 import { buildPlan, FREE_STARTER_RELEASE, parseCompose, templateCatalogEntry } from '@platfolio/manifest';
 import type { ExtensionDescriptor, KernelContext, Request, Response_, RouteDefinition } from '@platfolio/kernel';
-import { ArtifactRecordSchema, secretWriteScope } from '@platfolio/contracts';
+import { ArtifactRecordSchema, InfraPlanSchema, secretWriteScope } from '@platfolio/contracts';
 import type { StarterLaunch } from './starter-launch.ts';
 import { badRequest, bearerToken, notFound, send, unauthorized } from './respond.ts';
 import { accountProfile, type AccountIssuer } from './account-profile.ts';
@@ -428,6 +428,26 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
         // row went away mid-request, which is a 404 like any other missing record.
         if (found.ok === false) return notFound('instance', params.instanceId ?? '');
         return send('getInstance', 200, { ...found.value, environments: await scope.context.store.listInstanceEnvironments(found.value.id) });
+      }),
+      scoped('GET', '/api/v1/instances/{instanceId}/environments/{environment}', 'getInstanceEnvironment', 'instance.read', async (scope, _request, params) => {
+        const instanceId = params.instanceId ?? '';
+        const environment = params.environment ?? '';
+        const store = scope.context.store;
+        const [recorded, storedPlan] = await Promise.all([store.getInstanceEnvironment(instanceId, environment), store.getPlan(instanceId)]);
+        const parsed = storedPlan.ok ? InfraPlanSchema.safeParse(storedPlan.value.plan) : undefined;
+        const plan = parsed?.success ? parsed.data.environments.find(({ name }) => name === environment) : undefined;
+        if (!recorded.ok && !plan) return notFound('environment', environment);
+        const reports = await store.listEnvironmentAttestations(instanceId, environment, 25);
+        return send('getInstanceEnvironment', 200, {
+          planned: plan !== undefined,
+          services: plan?.services.map(({ name, secrets }) => ({ name, secrets: secrets.map((secret) => secret.name) })) ?? [],
+          domains: plan?.domains.map(({ host, service }) => ({ host, service })) ?? [],
+          deployments: reports.map(({ dispatchId, result, finishedAt, release, errorCode }) => ({
+            id: dispatchId, result, reportedAt: finishedAt,
+            ...(release ? { commit: release.commitSha } : {}),
+            ...(errorCode && /^[a-z][a-z0-9-]{0,79}$/.test(errorCode) ? { problem: errorCode } : {}),
+          })),
+        });
       }),
       scoped('PUT', '/api/v1/instances/{instanceId}/plan', 'putPlan', 'instance.plan.write', async (scope, request, params) => {
         const parsed = bodyOf<{ plan?: unknown }>(request);

@@ -940,7 +940,18 @@ export class PostgresStore implements Store {
   }
 
   async listAttestations(instanceId: string, limit = 50) {
-    const rows = (await this.pool.query(`SELECT * FROM ${this.q('attestations')} WHERE instance_id = $1 ORDER BY finished_at DESC, received_at DESC, dispatch_id DESC LIMIT $2`, [instanceId, limit])).rows as Row[];
+    return this.readAttestations(instanceId, limit);
+  }
+
+  async listEnvironmentAttestations(instanceId: string, environment: string, limit = 50) {
+    return this.readAttestations(instanceId, limit, environment);
+  }
+
+  private async readAttestations(instanceId: string, limit: number, environment?: string): Promise<AttestationRecord[]> {
+    const rows = (await this.pool.query(
+      `SELECT * FROM ${this.q('attestations')} WHERE instance_id = $1 AND ($3::text IS NULL OR environment = $3)
+       ORDER BY finished_at DESC, received_at DESC, dispatch_id DESC LIMIT $2`, [instanceId, limit, environment ?? null],
+    )).rows as Row[];
     return values(rows.map((r) => this.asAttestation(r)));
   }
 

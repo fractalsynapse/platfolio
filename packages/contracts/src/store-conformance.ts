@@ -553,9 +553,9 @@ const expectErr = (result: { ok: boolean; value?: unknown } & Partial<StoreError
     const a = await store.createInstance({ teamId: t.value.id, name: 'a', template: 'starter-web' });
     const b = await store.createInstance({ teamId: t.value.id, name: 'b', template: 'starter-web' });
     if (!a.ok || !b.ok) return { status: 'fail', detail: 'instances failed' };
-    const mk = async (instanceId: string, id: string, finished: string) => {
+    const mk = async (instanceId: string, id: string, finished: string, environment = 'production') => {
       const d = await store.createDispatch({
-        instanceId, nonce, planHash, action: 'apply', environment: 'production',
+        instanceId, nonce, planHash, action: 'apply', environment,
         // Expires far in the future: the case is about ordering, and a January 2026 dispatch would be
         // correctly refused as expired -- which is the mistake this fixture originally made.
         issuedAt: finished, expiresAt: '2999-01-01T00:00:00.000Z', plan: {}, id,
@@ -570,6 +570,11 @@ const expectErr = (result: { ok: boolean; value?: unknown } & Partial<StoreError
     const latest = await store.latestAttestation(a.value.id);
     if (!latest.ok) return { status: 'fail', detail: JSON.stringify(latest) };
     if (latest.value.dispatchId !== 'disp-new') return { status: 'fail', detail: `expected disp-new (latest by finishedAt), got ${latest.value.dispatchId}` };
+    await mk(a.value.id, 'disp-staging', '2026-09-01T00:00:00.000Z', 'staging');
+    const production = await store.listEnvironmentAttestations(a.value.id, 'production', 1);
+    if (production.length !== 1 || production[0]?.dispatchId !== 'disp-new') {
+      return { status: 'fail', detail: 'environment selection must occur before sorting and limiting' };
+    }
     const wrong = await store.latestAttestation('inst-nobody');
     return wrong.ok ? { status: 'fail', detail: 'an unknown instance returned an attestation -- cross-instance leak' } : { status: 'pass', detail: 'ordered by finishedAt, isolated by instance' };
   });

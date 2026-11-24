@@ -5,7 +5,7 @@ import { useOperation } from '../sdk/use-operation.ts';
 import { AppList } from './app-list.tsx';
 import { Breadcrumbs, type Breadcrumb } from './breadcrumbs.tsx';
 import { EnvironmentList } from './environment-list.tsx';
-import { EnvironmentOverview } from './environment-overview.tsx';
+import { EnvironmentWorkspace } from './environment-workspace.tsx';
 import { workspacePaths, type WorkspaceRoute } from './routes.ts';
 import { WorkspaceLink } from './workspace-link.tsx';
 import { UnavailablePage } from './unavailable-page.tsx';
@@ -53,6 +53,7 @@ export function TeamWorkspace({ team, route }: { readonly team: TeamWithRole; re
   return <>
     <Breadcrumbs items={[parent, { label: app.name, href: workspacePaths.instance(team.name, app.name) }, { label: environment.environment }]} />
     <h1>{environment.environment}</h1>
-    <EnvironmentOverview environment={environment} freshness={state.freshness} now={now} />
+    <EnvironmentWorkspace key={`${app.id}-${environment.environment}`} instanceId={app.id}
+      environment={environment} route={route} freshness={state.freshness} now={now} />
   </>;
 }

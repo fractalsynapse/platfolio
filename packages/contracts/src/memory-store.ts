@@ -569,6 +569,11 @@ export class MemoryStore implements Store {
   async listAttestations(instanceId: string, limit = 50) {
     return [...this.attestations.values()].filter((a) => a.instanceId === instanceId).slice(-limit).reverse().map(copy);
   }
+  async listEnvironmentAttestations(instanceId: string, environment: string, limit = 50) {
+    const mine = [...this.attestations.values()].filter((report) => report.instanceId === instanceId && report.environment === environment);
+    return mine.sort((a, b) => Date.parse(b.finishedAt) - Date.parse(a.finishedAt) ||
+      Date.parse(b.receivedAt) - Date.parse(a.receivedAt) || b.dispatchId.localeCompare(a.dispatchId)).slice(0, limit).map(copy);
+  }
 
   async appendAudit(entry: Omit<AuditEntry, 'id' | 'at'> & { at?: string }) {
     if (this.closed) return this.refuse('appendAudit');

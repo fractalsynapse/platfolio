@@ -4,7 +4,7 @@
  * hand, because every line reproduces from the specification.
  *
  * Source: apps/control-plane/openapi.yaml (OpenAPI 3.1.0, info.version 0.1.0)
- * Input digest: sha256/740334c57662ae14
+ * Input digest: sha256/b41f89329f1143ec
  *
  * Reproduce it with `pnpm run api:types`. `pnpm run api:types:check` fails when this file stops matching
  * what the committed spec produces, which is the only way a generated type deserves to be trusted.
@@ -341,6 +341,11 @@ export interface ApiParameters {
   /** GET /api/v1/instances/{instanceId} */
   getInstance: {
     instanceId: string;
+  };
+  /** GET /api/v1/instances/{instanceId}/environments/{environment} */
+  getInstanceEnvironment: {
+    instanceId: string;
+    environment: string;
   };
   /** GET /api/v1/instances/{instanceId}/latest-attestation */
   getLatestAttestation: {
@@ -742,6 +747,29 @@ export interface ApiResponses {
   /** GET /api/v1/instances/{instanceId} */
   getInstance: {
     '200': InstanceResponse;
+    '401': Error;
+    '404': Error;
+  };
+  /** GET /api/v1/instances/{instanceId}/environments/{environment} */
+  getInstanceEnvironment: {
+    '200': {
+      planned: boolean;
+      services: Array<{
+        name: string;
+        secrets: string[];
+      }>;
+      domains: Array<{
+        host: string;
+        service: string;
+      }>;
+      deployments: Array<{
+        id: string;
+        result: 'ok' | 'partial' | 'failed' | 'noop';
+        reportedAt: string;
+        commit?: string;
+        problem?: string;
+      }>;
+    };
     '401': Error;
     '404': Error;
   };
@@ -1191,6 +1219,8 @@ export const ENDPOINTS = {
   getHealth: { method: 'get', path: '/healthz' },
   /** GET /api/v1/instances/{instanceId} */
   getInstance: { method: 'get', path: '/api/v1/instances/{instanceId}' },
+  /** GET /api/v1/instances/{instanceId}/environments/{environment} */
+  getInstanceEnvironment: { method: 'get', path: '/api/v1/instances/{instanceId}/environments/{environment}' },
   /** GET /api/v1/instances/{instanceId}/latest-attestation */
   getLatestAttestation: { method: 'get', path: '/api/v1/instances/{instanceId}/latest-attestation' },
   /** GET /readyz */

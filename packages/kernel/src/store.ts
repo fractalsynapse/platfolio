@@ -122,6 +122,7 @@ export class StoreService extends Service<z.infer<typeof StoreConfigSchema>> {
   getAttestation(dispatchId: string) { return this.inner.getAttestation(dispatchId); }
   latestAttestation(instanceId: string) { return this.inner.latestAttestation(instanceId); }
   listAttestations(instanceId: string, limit?: number) { return this.inner.listAttestations(instanceId, limit); }
+  listEnvironmentAttestations(...args: Parameters<Store['listEnvironmentAttestations']>) { return this.inner.listEnvironmentAttestations(...args); }
   appendAudit(entry: Parameters<Store['appendAudit']>[0]) { return this.inner.appendAudit(entry); }
   recentAudit(limit?: number) { return this.inner.recentAudit(limit); }
   close() { return this.inner.close(); }

@@ -1,4 +1,5 @@
 const slug = '[a-z0-9](?:[a-z0-9-]*[a-z0-9])?';
+export type EnvironmentTab = 'overview' | 'deployments' | 'configuration' | 'domains';
 
 export const workspacePaths = {
   home: '/dashboard',
@@ -13,8 +14,8 @@ export const workspacePaths = {
   templates: (team: string) => `/dashboard/teams/${team}/create-instance`,
   launchForTeam: (team: string) => `/dashboard/teams/${team}/create-instance/launch`,
   instance: (team: string, instance: string) => `/dashboard/teams/${team}/instances/${instance}`,
-  environment: (team: string, instance: string, environment: string) =>
-    `/dashboard/teams/${team}/instances/${instance}/environments/${environment}`,
+  environment: (team: string, instance: string, environment: string, tab: EnvironmentTab = 'overview') =>
+    `/dashboard/teams/${team}/instances/${instance}/environments/${environment}${tab === 'overview' ? '' : `/${tab}`}`,
 } as const;
 
 export type WorkspaceRoute =
@@ -25,14 +26,14 @@ export type WorkspaceRoute =
   | { kind: 'templates'; team: string }
   | { kind: 'team-launch'; team: string }
   | { kind: 'instance'; team: string; instance: string }
-  | { kind: 'environment'; team: string; instance: string; environment: string };
+  | { kind: 'environment'; team: string; instance: string; environment: string; tab: EnvironmentTab };
 
 const teamRoute = new RegExp(`^${workspacePaths.team(`(${slug})`)}$`);
 const teamInvitationsRoute = new RegExp(`^${workspacePaths.teamInvitations(`(${slug})`)}$`);
 const templatesRoute = new RegExp(`^${workspacePaths.templates(`(${slug})`)}$`);
 const teamLaunchRoute = new RegExp(`^${workspacePaths.launchForTeam(`(${slug})`)}$`);
 const appRoute = new RegExp(`^${workspacePaths.instance(`(${slug})`, `(${slug})`)}$`);
-const environmentRoute = new RegExp(`^${workspacePaths.environment(`(${slug})`, `(${slug})`, `(${slug})`)}$`);
+const environmentRoute = new RegExp(`^${workspacePaths.environment(`(${slug})`, `(${slug})`, `(${slug})`)}(?:/(deployments|configuration|domains))?$`);
 
 export function matchWorkspaceRoute(path: string): WorkspaceRoute {
   const pathname = path.replace(/\/$/, '');
@@ -49,8 +50,11 @@ export function matchWorkspaceRoute(path: string): WorkspaceRoute {
   if (templateTeam) return { kind: 'templates', team: templateTeam };
   const [, launchTeam] = teamLaunchRoute.exec(pathname) ?? [];
   if (launchTeam) return { kind: 'team-launch', team: launchTeam };
-  const [, team, instance, environment] = environmentRoute.exec(pathname) ?? [];
-  if (team && instance && environment) return { kind: 'environment', team, instance, environment };
+  const [, team, instance, environment, subpage] = environmentRoute.exec(pathname) ?? [];
+  if (team && instance && environment) return {
+    kind: 'environment', team, instance, environment,
+    tab: subpage === 'deployments' || subpage === 'configuration' || subpage === 'domains' ? subpage : 'overview',
+  };
   const [, appTeam, app] = appRoute.exec(pathname) ?? [];
   if (appTeam && app) return { kind: 'instance', team: appTeam, instance: app };
   const [, teamName] = teamRoute.exec(pathname) ?? [];
