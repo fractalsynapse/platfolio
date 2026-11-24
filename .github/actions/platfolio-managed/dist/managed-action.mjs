@@ -25068,7 +25068,7 @@ function date4(params) {
 }
 
 // packages/contracts/src/generated/contract-version.ts
-var CONTRACT_VERSION = "5.2.0";
+var CONTRACT_VERSION = "5.3.0";
 
 // packages/contracts/src/infra.ts
 var OPERATIONS = [
@@ -27515,6 +27515,8 @@ var InstanceEnvironmentStateSchema = external_exports.object({
 var InvitationSchema = external_exports.object({
   id: external_exports.string().min(1),
   teamId: external_exports.string().min(1),
+  /** Included when an invitee looks up an invitation before they can read the team. */
+  teamName: external_exports.string().min(1).optional(),
   /** The address as the inviter typed it, matched only against an IdP assertion later. Lower-cased on write. */
   email: external_exports.string().min(3).max(320),
   role: TeamRoleSchema,
