@@ -4,6 +4,7 @@ import { ageLabel, useClock } from './freshness.ts';
 import { defineComponent } from '../contract.ts';
 import { useCommand, useOperation } from '../sdk/use-operation.ts';
 import { isLoaded } from '../sdk/transport.ts';
+import { StarterLaunchSetup } from './starter-launch-setup.tsx';
 import type { SuccessOf } from '@platfolio/api-contract/generated/types';
 
 type Launch = SuccessOf<'getStarterLaunch'>;
@@ -17,6 +18,9 @@ const props = z.object({ teamId: z.string().min(1) }).strict();
 function LaunchPanel({ teamId }: z.infer<typeof props>) {
   const params = React.useMemo(() => ({ teamId }), [teamId]);
   const launch = useOperation('getStarterLaunch', { params, key: `starter-${teamId}` });
+  const setup = useOperation('getStarterLaunchSetup', { params, key: `starter-setup-${teamId}` });
+  const local = setup.state.status === 'failed' && setup.state.error.status === 404;
+  const ready = local || setup.state.status === 'loaded' && setup.state.data.openBao === 'ready' && setup.state.data.railway === 'connected';
   const start = useCommand('startStarterLaunch');
   const remove = useCommand('removeStarterLaunch');
   const [confirmation, setConfirmation] = React.useState('');
@@ -45,15 +49,19 @@ function LaunchPanel({ teamId }: z.infer<typeof props>) {
     {launch.state.status === 'pending' && <p role="status">Checking your launch setup…</p>}
     {launch.state.status === 'failed' && <p role="status">{launch.state.error.status === 404
       ? 'This team needs a connected Railway launcher.' : `Could not check launch setup. Try again. (${launch.state.error.code})`}</p>}
+    {setup.state.status === 'loaded' && <>
+      <StarterLaunchSetup teamId={teamId} setup={setup.state.data} refresh={setup.reload} />
+      <small>{ageLabel(setup.state.freshness, now().toISOString()).text}</small>
+    </>}
     {report && <>
       <p role="status" aria-label="Launch status"><strong>{headings[report.state]}</strong></p>
       {launch.state.status === 'loaded' && <small>{ageLabel(launch.state.freshness, now().toISOString()).text}</small>}
-      {['idle', 'failed', 'kept', 'wiped'].includes(report.state) && <>
+      {ready && ['idle', 'failed', 'kept', 'wiped'].includes(report.state) && <>
         <p>Use your connected Railway workspace. This creates a dedicated staging project and database. Anyone with the generated app link can open it. Railway charges apply to the resources you use.</p>
         <button className="ui-hit-primary" type="button" disabled={pending} onClick={() => void act('start')}>{report.state === 'kept' ? 'Restore app' : report.state === 'failed' ? 'Resume setup' : 'Launch starter'}</button>
       </>}
       {report.state === 'ready' && report.origin && <p><a href={report.origin}>Open app</a></p>}
-      <p>App secrets are unavailable while the connection to OpenBao is being set up.</p>
+      <p>Starter Web uses a generated database connection.</p>
       {report.events.length > 0 && <details open>
         <summary>Setup progress</summary>
         <ol aria-label="Setup progress">
@@ -64,7 +72,7 @@ function LaunchPanel({ teamId }: z.infer<typeof props>) {
         </ol>
         <a download="platfolio-launch-report.json" href={`data:application/json;charset=utf-8,${encodeURIComponent(JSON.stringify(report, null, 2))}`}>Download troubleshooting report</a>
       </details>}
-      {report.projectId && ['ready', 'kept', 'failed'].includes(report.state) && <details>
+      {ready && report.projectId && ['ready', 'kept', 'failed'].includes(report.state) && <details>
         <summary>Remove app</summary>
         <p>Choose what happens to the app’s storage.</p>
         <button type="button" className="ui-hit-primary" onClick={() => select('keep')}>Remove and keep data</button>{' '}
@@ -82,6 +90,6 @@ function LaunchPanel({ teamId }: z.infer<typeof props>) {
 }
 
 export const starterLaunch = defineComponent({
-  id: 'launch.starter', props, reads: ['getStarterLaunch', 'startStarterLaunch', 'removeStarterLaunch'],
+  id: 'launch.starter', props, reads: ['getStarterLaunch', 'startStarterLaunch', 'removeStarterLaunch', 'getStarterLaunchSetup', 'initializeStarterOpenBao', 'unlockStarterOpenBao', 'beginStarterRailwayAuthorization'],
   slots: ['full-page'], render: (value: z.infer<typeof props>) => <LaunchPanel {...value} />,
 });

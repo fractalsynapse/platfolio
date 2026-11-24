@@ -4,6 +4,7 @@ import { ROUTE_MANIFEST } from './routes.ts';
 import { buildCapabilities } from './capabilities.ts';
 import { describeAllowedOriginsConfig, parseAllowedOrigins, type CorsBootConfig } from './cors.ts';
 import type { StarterLaunch } from './starter-launch.ts';
+import { customerLaunch, customerLaunchConfig, type CustomerLaunchConfig } from './customer-launch.ts';
 import { isReleaseTag } from './release-tag.ts';
 
 export { ROUTE_MANIFEST };
@@ -14,6 +15,7 @@ export interface BootConfig {
   audience: string;
   marketplaceEnabled?: boolean;
   starterLaunch?: StarterLaunch;
+  customerLaunch?: CustomerLaunchConfig;
   jwksUri?: string;
   host: string;
   port: number;
@@ -45,6 +47,7 @@ export function configFromEnv(env: NodeJS.ProcessEnv): BootConfig {
   // variables by scanning configuration for that shape, and a name that only ever appears as a constant is a
   // name the registry cannot see. The constant and this spelling are kept identical by the test that uses both.
   const allowedOrigins = parseAllowedOrigins(env.PLATFOLIO_ALLOWED_ORIGINS);
+  const launcher = customerLaunchConfig(env, allowedOrigins);
   const releaseTag = env.PLATFOLIO_RELEASE_TAG || null;
   if (releaseTag !== null && !isReleaseTag(releaseTag)) {
     throw new Error('control-plane cannot start: PLATFOLIO_RELEASE_TAG must be a bare SemVer tag');
@@ -53,6 +56,7 @@ export function configFromEnv(env: NodeJS.ProcessEnv): BootConfig {
     issuer: env.PLATFOLIO_IDENTITY_ISSUER as string,
     audience: env.PLATFOLIO_IDENTITY_AUDIENCE as string,
     marketplaceEnabled: env.PLATFOLIO_MARKETPLACE_ENABLED === 'true',
+    ...(launcher ? { customerLaunch: launcher } : {}),
     ...(env.PLATFOLIO_IDENTITY_JWKS_URI ? { jwksUri: env.PLATFOLIO_IDENTITY_JWKS_URI } : {}),
     host: env.HOST ?? '0.0.0.0',
     port: Number(env.PORT ?? 8080),
@@ -208,6 +212,7 @@ export async function boot(config: BootConfig, fetchImpl: typeof fetch = fetch) 
       accountIssuer: { issuer: config.issuer, request: fetchImpl },
       ...(config.cors?.allowedOrigins.length === 1 ? { invitationOrigin: config.cors.allowedOrigins[0]! } : {}),
       ...(config.starterLaunch ? { starterLaunch: config.starterLaunch } : {}),
+      ...(config.customerLaunch ? { customerLaunch: customerLaunch(config.customerLaunch, fetchImpl) } : {}),
     }),
     requiredServices: ['identity', 'server', 'store', 'extensions'],
   });

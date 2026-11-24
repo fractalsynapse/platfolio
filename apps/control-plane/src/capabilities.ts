@@ -8,6 +8,7 @@ import { ScmNotConfiguredError } from '@platfolio/kernel';
 import { buildPlan, FREE_STARTER_RELEASE, parseCompose, templateCatalogEntry } from '@platfolio/manifest';
 import type { ExtensionDescriptor, KernelContext, Request, Response_, RouteDefinition } from '@platfolio/kernel';
 import { ArtifactRecordSchema, InfraPlanSchema, secretWriteScope } from '@platfolio/contracts';
+import type { customerLaunch } from './customer-launch.ts';
 import type { StarterLaunch } from './starter-launch.ts';
 import { badRequest, bearerToken, notFound, send, unauthorized } from './respond.ts';
 import { accountProfile, type AccountIssuer } from './account-profile.ts';
@@ -32,6 +33,7 @@ export interface CapabilityDeps {
   invitationOrigin?: string;
   accountIssuer?: AccountIssuer;
   starterLaunch?: StarterLaunch;
+  customerLaunch?: ReturnType<typeof customerLaunch>;
 }
 
 const nowOf = (deps: CapabilityDeps): Date => (deps.now?.() ?? new Date());
@@ -1122,7 +1124,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
     requires: ['store', 'identity', 'infra'],
     routes: [
       scoped('PUT', '/api/v1/instances/{instanceId}/secrets/{name}', 'putSecret', 'instance.secret.write', async (scope, request, params) => {
-        if (deps.starterLaunch) return { status: 503, body: { error: 'secret-store-unavailable', message: 'Wait for your customer OpenBao connection before sending app secrets.' } };
+        if (deps.starterLaunch || deps.customerLaunch) return { status: 503, body: { error: 'secret-store-unavailable', message: 'Wait for your customer OpenBao connection before sending app secrets.' } };
         // Write-through: the value is handed to the provider and kept nowhere. There is no assignment to a
         // local variable that survives this function, no audit field that could carry it, and the success
         // response is 204 with no body -- an echo would be the leak.
@@ -1283,23 +1285,63 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
     ],
   };
 
+  const customer = deps.customerLaunch;
+  const unavailable = () => ({ status: 503, body: { error: 'launcher-setup-unavailable', message: 'Check the customer worker, OpenBao and Railway connection, then try again.' } });
+  const relay = async (teamId: string, operation: string, action: Parameters<NonNullable<typeof customer>['call']>[0], body?: object) => {
+    if (!customer || customer.teamId !== teamId) return notFound('launch', 'starter');
+    const output = await customer.call(action, body);
+    if (!output.ok) return unavailable();
+    return action === 'unlock' ? { status: 204, body: null } : send(operation, 200, output.body);
+  };
+  const launchPath = '/api/v1/teams/{teamId}/starter-launch';
   const launcher: ExtensionDescriptor = {
     id: 'starter-launch',
     requires: ['identity', 'store'],
     routes: [
-      scoped('GET', '/api/v1/teams/{teamId}/starter-launch', 'getStarterLaunch', 'marketplace.manage', async ({ teamId }) =>
+      scoped('GET', launchPath, 'getStarterLaunch', 'marketplace.manage', async ({ teamId }) =>
         deps.starterLaunch?.teamId === teamId
-          ? send('getStarterLaunch', 200, deps.starterLaunch.read()) : notFound('launch', 'starter')),
-      scoped('POST', '/api/v1/teams/{teamId}/starter-launch', 'startStarterLaunch', 'marketplace.manage', async ({ teamId }) =>
+          ? send('getStarterLaunch', 200, await deps.starterLaunch.read()) : relay(teamId, 'getStarterLaunch', 'report')),
+      scoped('POST', launchPath, 'startStarterLaunch', 'marketplace.manage', async ({ teamId }) =>
         deps.starterLaunch?.teamId === teamId
-          ? send('startStarterLaunch', 200, deps.starterLaunch.start()) : notFound('launch', 'starter')),
-      scoped('POST', '/api/v1/teams/{teamId}/starter-launch/remove', 'removeStarterLaunch', 'marketplace.manage', async ({ teamId }, request) => {
-        if (deps.starterLaunch?.teamId !== teamId) return notFound('launch', 'starter');
+          ? send('startStarterLaunch', 200, await deps.starterLaunch.start()) : relay(teamId, 'startStarterLaunch', 'start')),
+      scoped('POST', launchPath + '/remove', 'removeStarterLaunch', 'marketplace.manage', async ({ teamId }, request) => {
+        if (deps.starterLaunch?.teamId !== teamId && customer?.teamId !== teamId) return notFound('launch', 'starter');
         const body = bodyOf<{ data: 'keep' | 'wipe'; confirmation?: string }>(request);
         if (!body.ok || !body.value || !['keep', 'wipe'].includes(body.value.data)) return badRequest('Select keep data or wipe data');
         if (body.value.data === 'wipe' && body.value.confirmation !== 'starter-web') return badRequest('Type starter-web to confirm deletion of its data');
-        return send('removeStarterLaunch', 200, deps.starterLaunch.remove(body.value.data));
+        return deps.starterLaunch?.teamId === teamId
+          ? send('removeStarterLaunch', 200, await deps.starterLaunch.remove(body.value.data))
+          : relay(teamId, 'removeStarterLaunch', 'remove', { data: body.value.data });
       }),
+      scoped('GET', launchPath + '/setup', 'getStarterLaunchSetup', 'marketplace.manage',
+        async ({ teamId }) => relay(teamId, 'getStarterLaunchSetup', 'setup')),
+      scoped('POST', launchPath + '/openbao', 'initializeStarterOpenBao', 'marketplace.manage', async ({ teamId }, request) => {
+        const body = bodyOf<{ publicKey?: unknown }>(request);
+        const key = body.ok ? body.value?.publicKey : undefined;
+        if (typeof key !== 'string' || !/^[a-zA-Z0-9+/=]{500,1024}$/.test(key)) return badRequest('Choose an owner recovery key file');
+        return relay(teamId, 'initializeStarterOpenBao', 'initialize', { publicKey: key });
+      }),
+      scoped('POST', launchPath + '/openbao/unlock', 'unlockStarterOpenBao', 'marketplace.manage', async ({ teamId }, request) => {
+        const body = bodyOf<{ recovery?: unknown }>(request);
+        const recovery = body.ok ? body.value?.recovery : undefined;
+        if (typeof recovery !== 'string' || !/^[a-zA-Z0-9+/=]{500,640}$/.test(recovery)) return badRequest('Choose the OpenBao recovery file');
+        return relay(teamId, 'unlockStarterOpenBao', 'unlock', { recovery });
+      }),
+      scoped('POST', launchPath + '/railway', 'beginStarterRailwayAuthorization', 'marketplace.manage',
+        async ({ teamId }) => relay(teamId, 'beginStarterRailwayAuthorization', 'authorize')),
+      {
+        method: 'GET', path: '/api/v1/railway/callback', operationId: 'completeStarterRailwayAuthorization',
+        async handle(request) {
+          if (!customer) return notFound('launch', 'starter');
+          const values = ['code', 'state', 'iss', 'error'].map((key) => request.query.get(key) ?? '');
+          if (values.some((value) => value.length > 1024) || !/^[a-zA-Z0-9_-]{43}$/.test(values[1]!)) return notFound('launch', 'starter');
+          const [code, state, issuer, error] = values;
+          const result = await customer.call('callback', { code, state, issuer, error });
+          const location = new URL(customer.returnTo);
+          location.searchParams.set('railway', result.ok && result.body === true ? 'connected' : 'retry');
+          return { status: 303, body: null, headers: { location: location.href, 'referrer-policy': 'no-referrer' } };
+        },
+      },
     ],
   };
 

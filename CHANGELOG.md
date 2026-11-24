@@ -5,6 +5,8 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+- Added private browser launch setup for Starter Web with owner-encrypted OpenBao recovery, Railway OAuth, and a persistent customer worker (#288).
+
 - Added environment tabs for deployment reports, configuration presence, and planned domains. The workspace only shows name and presence for app secrets (#288).
 - Added the Platfolio Account page for username and display-name edits, sign-in email status, and access to the themed password change flow (#288).
 - Added the pinned free Starter Web template picker and a launch route scoped to the active team (#288).

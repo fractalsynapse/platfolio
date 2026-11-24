@@ -12,20 +12,21 @@ const platformProjectName = 'platfolio';
 const platformServices = new Set([baoService, workerService, 'private-api-staging', 'private-site-staging', 'private-identity-staging', 'private-db-staging']);
 const appServices = new Set(['web-staging', 'app-db-staging']);
 export type CustomerProjectTarget = { name: string; kind: 'installation' | 'app'; id?: string; create?: boolean };
+export type CustomerRailwayGrant = { token: string; workspaceId: string; projectId?: string };
 export type RailwayProgress = (event: { step: string; state: string; resourceId?: string; detail?: string }) => void;
 type Entry = { id: string; name: string };
 type Edges<T> = { edges: { node: T }[] };
 type Stage = { id: string; name: string; description?: string | null; environments: Edges<Entry> };
 type Instance = { serviceId: string; serviceName: string; source: { image?: string; repo?: string } | null; startCommand?: string | null; latestDeployment: { id: string; status: string } | null; activeDeployments: { id: string; status: string }[]; domains: { customDomains: { id: string }[]; serviceDomains: { id: string; domain: string }[] } };
 
-export async function customerRailway(target: CustomerProjectTarget, progress?: RailwayProgress) {
+export async function customerRailway(target: CustomerProjectTarget, progress?: RailwayProgress, grant?: CustomerRailwayGrant) {
   if (!/^[a-z][a-z0-9-]{1,62}$/.test(target.name) || (target.name === platformProjectName) !== (target.kind === 'installation')) {
     throw new Error('Platfolio must run in the project named platfolio. Every app requires its own project name.');
   }
   const allowed = target.kind === 'installation' ? platformServices : appServices;
   const marker = `Platfolio project role ${target.kind}/${target.name}`;
-  const token = process.env.RAILWAY_TOKEN;
-  const workspaceId = process.env.RAILWAY_WORKSPACE_ID;
+  const token = grant?.token ?? process.env.RAILWAY_TOKEN;
+  const workspaceId = grant?.workspaceId ?? process.env.RAILWAY_WORKSPACE_ID;
   if (!token || !workspaceId) throw new Error('Provide the customer workspace ID and workspace token locally');
   const call = <T>(operation: string, query: string, variables: Record<string, unknown>) =>
     provider.graphql<T>({ operation, query, variables, credential: { kind: 'workspace', token } });
@@ -44,7 +45,11 @@ export async function customerRailway(target: CustomerProjectTarget, progress?: 
     } while (after);
     return result;
   }
-  const matches = (await workspaceProjects()).filter(({ name }) => name === target.name);
+  if (grant?.projectId && (target.kind !== 'app' || target.id !== grant.projectId)) throw new Error('The Railway grant is limited to the selected app project');
+  const selected = grant?.projectId ? (await call<{ project: Stage & { workspaceId: string } }>('selected app project',
+    `query($id:String!){project(id:$id){${projectFields} workspaceId}}`, { id: grant.projectId })).project : undefined;
+  if (selected && selected.workspaceId !== workspaceId) throw new Error('The selected project is in a different Railway workspace');
+  const matches = (selected ? [selected] : await workspaceProjects()).filter(({ name }) => name === target.name);
   if (matches.length > 1) throw new Error('More than one project has this name. Choose a unique app name.');
   let project = matches[0];
   if (target.id && project?.id !== target.id) throw new Error('Railway project ID does not match the approved name and workspace');
@@ -107,9 +112,8 @@ export async function customerRailway(target: CustomerProjectTarget, progress?: 
     }
   }
   async function upload(serviceId: string, source: string, message: string) {
-    const childEnv: NodeJS.ProcessEnv = { ...process.env };
-    childEnv['RAILWAY_API_TOKEN'] = token;
-    delete childEnv.RAILWAY_TOKEN;
+    const childEnv: NodeJS.ProcessEnv = { PATH: process.env.PATH, HOME: process.env.HOME };
+    childEnv.RAILWAY_API_TOKEN = token;
     const result = await promisify(execFile)('npm', ['exec', '--yes', '--package=@railway/cli@5.75.0', '--', 'railway', 'up', '.', '--path-as-root', '--detach',
       '--project', scope.projectId, '--environment', scope.environmentId, '--service', serviceId, '--message', message],
       { cwd: source, encoding: 'utf8', timeout: 120_000, env: childEnv }).catch(() => {
@@ -183,13 +187,18 @@ export async function customerRailway(target: CustomerProjectTarget, progress?: 
     }
     throw new Error('The worker did not verify a private OpenBao health response');
   }
+  async function ensureVolume(serviceId: string, mountPath: string) {
+    const volumes = await call<{ environment: { volumeInstances: Edges<{ serviceId: string; mountPath: string }> } }>('stage storage placement',
+      'query($environmentId:String!){environment(id:$environmentId){volumeInstances(first:100){edges{node{serviceId mountPath}}}}}', { environmentId: scope.environmentId });
+    const mounted = volumes.environment.volumeInstances.edges.some(({ node }) => node.serviceId === serviceId && node.mountPath === mountPath);
+    if (!mounted) await call('stage volume create', 'mutation($input:VolumeCreateInput!){volumeCreate(input:$input){id}}', { input: { ...scope, serviceId, mountPath } });
+    return mounted;
+  }
+
   async function deployOpenBao() {
     const serviceId = await ensureService(baoService, baoImage);
     await assertPrivate(serviceId);
-    const volumes = await call<{ environment: { volumeInstances: Edges<{ serviceId: string; mountPath: string }> } }>('stage storage placement',
-      'query($environmentId:String!){environment(id:$environmentId){volumeInstances(first:100){edges{node{serviceId mountPath}}}}}', { environmentId: scope.environmentId });
-    const mounted = volumes.environment.volumeInstances.edges.some(({ node }) => node.serviceId === serviceId && node.mountPath === dataPath);
-    if (!mounted) await call('stage volume create', 'mutation($input:VolumeCreateInput!){volumeCreate(input:$input){id}}', { input: { ...scope, serviceId, mountPath: dataPath } });
+    const mounted = await ensureVolume(serviceId, dataPath);
     const address = `${baoService}.railway.internal`;
     const startCommand = 'docker-entrypoint.sh server';
     const current = (await instances()).find((item) => item.serviceId === serviceId);
@@ -210,6 +219,7 @@ export async function customerRailway(target: CustomerProjectTarget, progress?: 
     const services = await instances();
     if (services.some((service) => service.source?.repo)) throw new Error('Disconnect automatic repository deployment before removing this app');
     if (data === 'wipe') {
+      if (grant?.projectId) throw new Error('A project-only connection cannot verify permanent project removal');
       const { projectDelete } = await call<{ projectDelete: boolean }>('schedule app project removal',
         'mutation($id:String!){projectDelete(id:$id)}', { id: scope.projectId });
       if (!projectDelete) throw new Error('Railway did not accept project deletion');
@@ -241,11 +251,38 @@ export async function customerRailway(target: CustomerProjectTarget, progress?: 
 
   await instances();
   progress?.({ step: 'Railway project', state: 'CONNECTED', resourceId: project.id });
-  return { project, scope, instances, ensureService, assertPrivate, setConfig, configure, upload, wait, deployImage, privatePostgres, publicOrigin, remove, async launch(workerSource: string) {
+  return { project, scope, instances, ensureService, assertPrivate, setConfig, configure, upload, wait, deployImage, privatePostgres, publicOrigin, remove,
+  async installLaunchWorker(image: string, config: { team: string; workerKey: string; openBaoSecret: string; client: string; callback: string; appProject?: string }) {
+    if (target.kind !== 'installation') throw new Error('The launch worker belongs in the Platfolio project');
+    const openbao = await deployOpenBao();
+    const service = await ensureService(workerService);
+    await assertPrivate(service);
+    const worker = (await instances()).find(({ serviceId }) => serviceId === service);
+    if (worker?.source?.repo || !/^[^@]+@sha256:[a-f0-9]{64}$/.test(image)) throw new Error('A launch worker requires a pinned candidate image');
+    const data = '/launch-state';
+    await ensureVolume(service, data);
+    const runtime = { PLATFOLIO_OPENBAO_URL: openbao, PLATFOLIO_OPENBAO_WORKER_SECRET: config.openBaoSecret,
+      PLATFOLIO_LAUNCH_STATE_DIR: data, PLATFOLIO_LAUNCH_WORKER_KEY: config.workerKey, PLATFOLIO_LAUNCH_TEAM: config.team,
+      PLATFOLIO_RAILWAY_OAUTH_CLIENT: config.client, PLATFOLIO_RAILWAY_OAUTH_CALLBACK: config.callback,
+      RAILWAY_WORKSPACE_ID: workspaceId, PLATFOLIO_LAUNCH_APP_PROJECT: config.appProject ?? '', RAILWAY_RUN_UID: '0', PORT: '8080', HOST: '::' };
+    for (const [name, value] of Object.entries(runtime)) {
+      await setConfig(service, name, value).catch(() => { throw new Error(`Railway did not apply worker setting ${name}`); });
+    }
+    await configure(service, { source: { image }, numReplicas: 1, healthcheckPath: '/status', healthcheckTimeout: 120,
+      startCommand: 'sh -c \"chown node:node /launch-state && exec su -s /bin/sh node -c \'node /app/scripts/customer-installation-worker.ts\'\"' });
+    const deployment = await deployImage(service);
+    await assertPrivate(service);
+    const verified = (await instances()).find(({ serviceId }) => serviceId === service);
+    if (verified?.source?.image !== image || verified.latestDeployment?.id !== deployment) throw new Error('Worker candidate did not match at read-back');
+    return { worker: service, deployment };
+  },
+  async launch(workerSource: string) {
     if (target.kind !== 'installation') throw new Error('OpenBao and its worker belong in the platfolio project');
     const openbaoUrl = await deployOpenBao();
     const worker = await ensureService(workerService);
     await assertPrivate(worker);
+    const existing = (await instances()).find(({ serviceId }) => serviceId === worker);
+    if (existing?.source?.image) throw new Error('Pass the owner launch configuration to preserve the hosted worker');
     await setConfig(worker, 'PLATFOLIO_OPENBAO_URL', openbaoUrl);
     const deployment = await upload(worker, workerSource, 'Platfolio customer installation worker');
     await wait(worker, deployment);
