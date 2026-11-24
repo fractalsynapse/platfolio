@@ -25068,7 +25068,7 @@ function date4(params) {
 }
 
 // packages/contracts/src/generated/contract-version.ts
-var CONTRACT_VERSION = "5.5.0";
+var CONTRACT_VERSION = "5.6.0";
 
 // packages/contracts/src/infra.ts
 var OPERATIONS = [
@@ -27384,6 +27384,14 @@ var InstanceSchema = external_exports.object({
   lastAppliedPlanHash: external_exports.string().optional(),
   createdAt: external_exports.string().min(1),
   updatedAt: external_exports.string().min(1)
+}).strict();
+var HostedStarterSchema = external_exports.object({
+  instanceId: external_exports.string().min(1),
+  projectId: external_exports.uuid(),
+  deploymentId: external_exports.uuid(),
+  state: external_exports.enum(["live", "paused", "removed"]),
+  origin: external_exports.url({ protocol: /^https$/ }).max(240),
+  observedAt: external_exports.iso.datetime()
 }).strict();
 var RepoConnectionSchema = external_exports.object({
   instanceId: external_exports.string().min(1),

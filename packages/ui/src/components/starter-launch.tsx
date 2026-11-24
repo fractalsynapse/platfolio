@@ -4,6 +4,8 @@ import { ageLabel, useClock } from './freshness.ts';
 import { defineComponent } from '../contract.ts';
 import { useCommand, useOperation } from '../sdk/use-operation.ts';
 import { isLoaded } from '../sdk/transport.ts';
+import { WorkspaceLink } from '../workspace/workspace-link.tsx';
+import { workspacePaths } from '../workspace/routes.ts';
 import { StarterLaunchSetup } from './starter-launch-setup.tsx';
 import type { SuccessOf } from '@platfolio/api-contract/generated/types';
 
@@ -13,9 +15,9 @@ const headings: Record<Launch['state'], string> = {
   failed: 'Setup needs attention', removing: 'Removing your app', kept: 'App removed. Data kept.', wiped: 'App removed. Data scheduled for deletion.',
 };
 const status = (value: string) => ({ WORKING: 'Working', READY: 'Complete', SUCCESS: 'Complete', FAILED: 'Needs attention' }[value] ?? value.toLowerCase());
-const props = z.object({ teamId: z.string().min(1) }).strict();
+const props = z.object({ teamId: z.string().min(1), teamName: z.string().min(1).optional() }).strict();
 
-function LaunchPanel({ teamId }: z.infer<typeof props>) {
+function LaunchPanel({ teamId, teamName }: z.infer<typeof props>) {
   const params = React.useMemo(() => ({ teamId }), [teamId]);
   const launch = useOperation('getStarterLaunch', { params, key: `starter-${teamId}` });
   const setup = useOperation('getStarterLaunchSetup', { params, key: `starter-setup-${teamId}` });
@@ -60,7 +62,12 @@ function LaunchPanel({ teamId }: z.infer<typeof props>) {
         <p>Use your connected Railway workspace. This creates a dedicated staging project and database. Anyone with the generated app link can open it. Railway charges apply to the resources you use.</p>
         <button className="ui-hit-primary" type="button" disabled={pending} onClick={() => void act('start')}>{report.state === 'kept' ? 'Restore app' : report.state === 'failed' ? 'Resume setup' : 'Launch starter'}</button>
       </>}
-      {report.state === 'ready' && report.origin && <p><a href={report.origin}>Open app</a></p>}
+      {report.state === 'ready' && <p className="ui-workspace-links">
+        {report.instanceName && teamName && <WorkspaceLink href={workspacePaths.instance(teamName, report.instanceName)}>Manage app</WorkspaceLink>}
+        {report.origin && <a href={report.origin}>Open app</a>}
+      </p>}
+      {report.registration === 'pending' && <p role="status">Adding this app to Team workspace…</p>}
+      {report.registration === 'conflict' && <p role="status">Another instance uses this name. Its settings have been preserved.</p>}
       <p>Starter Web uses a generated database connection.</p>
       {report.events.length > 0 && <details open>
         <summary>Setup progress</summary>

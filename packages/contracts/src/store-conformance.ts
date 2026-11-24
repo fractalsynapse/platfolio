@@ -101,6 +101,38 @@ const expectErr = (result: { ok: boolean; value?: unknown } & Partial<StoreError
       : { status: 'fail', detail: 'marketplace ownership or revocation differed' };
   });
 
+  await add('verified hosted starter updates are ordered, team-scoped and durable', async () => {
+    const { store, team, instance: unrelated } = await seed();
+    const peer = mustOk(await store.createTeam({ name: tName('starter-peer') }), 'peer team');
+    const registration = {
+      teamId: team.id, name: 'starter-web', template: 'starter-web',
+      templateRef: { repo: 'platfolio-fixtures/starter-web', commitSha: 'e'.repeat(40) },
+      state: 'live' as const, projectId: randomUUID(), deploymentId: randomUUID(),
+      origin: 'https://starter.up.railway.app', observedAt: '2026-11-24T00:00:00.000Z',
+    };
+    const [first, replay] = (await Promise.all([
+      store.recordHostedStarter(registration), store.recordHostedStarter(registration),
+    ])).map((result) => mustOk(result, 'register'));
+    if (!first || first.id !== replay?.id) throw new Error('The same deployment acquired multiple instances');
+    if ((await store.recordHostedStarter({ ...registration, teamId: peer.id })).ok ||
+        (await store.recordHostedStarter({ ...registration, name: unrelated.name })).ok ||
+        (await store.listInstances(peer.id)).length) throw new Error('Registration adopted a different app or team');
+    const idle = mustOk(await store.recordHostedStarter({ ...registration, state: 'paused', observedAt: '2026-11-24T00:00:01.000Z' }), 'keep');
+    await store.recordHostedStarter(registration);
+    const paused = mustOk(await store.getInstanceEnvironment(first.id, 'staging'), 'staging state');
+    if (idle.state !== 'paused' || paused.state !== 'paused' || (await store.getInstanceEnvironment(first.id, 'production')).ok) {
+      throw new Error('A stale report or extra environment changed the result');
+    }
+    const restored = mustOk(await store.recordHostedStarter({
+      ...registration, deploymentId: randomUUID(), observedAt: '2026-11-24T00:00:02.000Z',
+    }), 'restore');
+    const hosting = mustOk(await store.getHostedStarter(first.id), 'read hosting');
+    if (restored.id !== first.id || restored.state !== 'live' || hosting.deploymentId === registration.deploymentId) {
+      throw new Error('Restore lost the instance or its new deployment');
+    }
+    return { status: 'pass', detail: 'one app, isolated scope, ordered retain and restore' };
+  });
+
   await add('describe: names the driver and its readiness', async () => {
     const store = await fresh();
     const info = store.describe();

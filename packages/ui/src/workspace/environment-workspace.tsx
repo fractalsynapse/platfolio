@@ -41,6 +41,14 @@ export function EnvironmentWorkspace({ instanceId, environment, route, freshness
     </p>}
     {state.status === 'loaded' && <>
       <p className="ui-workspace-meta">{ageLabel(state.freshness, clock().toISOString()).text}</p>
+      {(route.tab === 'overview' || route.tab === 'deployments') && state.data.hosting && <section aria-label="Verified Railway deployment">
+        <h2>Verified Railway deployment</h2>
+        <p>Deployment <code>{state.data.hosting.deploymentId.slice(0, 12)}</code></p>
+        <p>Project <code>{state.data.hosting.projectId.slice(0, 12)}</code></p>
+        <p>Last confirmed {new Date(state.data.hosting.observedAt).toLocaleString()}</p>
+        {state.data.hosting.state !== 'paused' && state.data.hosting.state !== 'removed' && <p><a href={state.data.hosting.origin}>Open app</a></p>}
+        <p><WorkspaceLink href={workspacePaths.launchForTeam(route.team)}>Open app setup</WorkspaceLink></p>
+      </section>}
       {route.tab === 'deployments' && <EnvironmentDeployments deployments={state.data.deployments} />}
       {route.tab === 'domains' && <EnvironmentDomains domains={state.data.domains} planned={state.data.planned} />}
       {route.tab === 'configuration' && <section aria-label="Environment configuration">

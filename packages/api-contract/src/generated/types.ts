@@ -4,7 +4,7 @@
  * hand, because every line reproduces from the specification.
  *
  * Source: apps/control-plane/openapi.yaml (OpenAPI 3.1.0, info.version 0.1.0)
- * Input digest: sha256/fec1678af8da4812
+ * Input digest: sha256/8548c17c571f0edb
  *
  * Reproduce it with `pnpm run api:types`. `pnpm run api:types:check` fails when this file stops matching
  * what the committed spec produces, which is the only way a generated type deserves to be trusted.
@@ -153,6 +153,15 @@ export interface Health {
   status: 'ok';
   /** sha256(commit + version), truncated. Not a credential. */
   livenessToken: string;
+}
+
+export interface HostedStarter {
+  instanceId: string;
+  projectId: string;
+  deploymentId: string;
+  state: 'live' | 'paused' | 'removed';
+  origin: string;
+  observedAt: string;
 }
 
 export interface Instance {
@@ -800,6 +809,7 @@ export interface ApiResponses {
   getInstanceEnvironment: {
     '200': {
       planned: boolean;
+      hosting?: HostedStarter;
       services: Array<{
         name: string;
         secrets: string[];
@@ -836,6 +846,8 @@ export interface ApiResponses {
       state: 'idle' | 'running' | 'ready' | 'failed' | 'removing' | 'kept' | 'wiped';
       template: string;
       revision: string;
+      registration?: 'pending' | 'recorded' | 'conflict';
+      instanceName?: string;
       projectId?: string;
       deploymentId?: string;
       origin?: string;
@@ -1093,6 +1105,8 @@ export interface ApiResponses {
       state: 'idle' | 'running' | 'ready' | 'failed' | 'removing' | 'kept' | 'wiped';
       template: string;
       revision: string;
+      registration?: 'pending' | 'recorded' | 'conflict';
+      instanceName?: string;
       projectId?: string;
       deploymentId?: string;
       origin?: string;
@@ -1109,6 +1123,7 @@ export interface ApiResponses {
     '401': Error;
     '403': Error;
     '404': Error;
+    '409': Error;
     '503': Error;
   };
   /** POST /api/v1/instances/{instanceId}/artifacts */
@@ -1156,6 +1171,8 @@ export interface ApiResponses {
       state: 'idle' | 'running' | 'ready' | 'failed' | 'removing' | 'kept' | 'wiped';
       template: string;
       revision: string;
+      registration?: 'pending' | 'recorded' | 'conflict';
+      instanceName?: string;
       projectId?: string;
       deploymentId?: string;
       origin?: string;

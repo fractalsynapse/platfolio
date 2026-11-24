@@ -9,6 +9,7 @@ import { buildPlan, FREE_STARTER_RELEASE, parseCompose, templateCatalogEntry } f
 import type { ExtensionDescriptor, KernelContext, Request, Response_, RouteDefinition } from '@platfolio/kernel';
 import { ArtifactRecordSchema, InfraPlanSchema, secretWriteScope } from '@platfolio/contracts';
 import type { customerLaunch } from './customer-launch.ts';
+import { hostedStarterLink, hostedStarterObservation } from './hosted-starter.ts';
 import type { StarterLaunch } from './starter-launch.ts';
 import { badRequest, bearerToken, notFound, send, unauthorized } from './respond.ts';
 import { accountProfile, type AccountIssuer } from './account-profile.ts';
@@ -358,6 +359,9 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
         // Recorded, not claimed done: provider teardown is a dispatch the action executes and attests (#196).
         // Reporting completed destruction the control plane has not performed is a lie with consequences -- a
         // tenant reads it as licence to reclaim their own compute.
+        if ((await scope.context.store.getHostedStarter(params.instanceId ?? '')).ok) {
+          return { status: 409, body: { error: 'conflict', message: 'Choose a storage policy in the app’s setup before removing it.' } };
+        }
         const moved = await scope.context.store.updateInstanceState(params.instanceId ?? '', 'deprovisioning');
         if (moved.ok === false) return { status: moved.code === 'not-found' ? 404 : 400, body: { error: moved.code, message: reasonOf(moved) } };
         await scope.context.store.appendAudit({ actorKind: 'user', actorRef: scope.personId, action: 'instance.destroy', target: moved.value.id, detail: { from: scope.role, state: 'deprovisioning' } });
@@ -440,8 +444,10 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
         const plan = parsed?.success ? parsed.data.environments.find(({ name }) => name === environment) : undefined;
         if (!recorded.ok && !plan) return notFound('environment', environment);
         const reports = await store.listEnvironmentAttestations(instanceId, environment, 25);
+        const hosting = environment === 'staging' ? await store.getHostedStarter(instanceId) : undefined;
         return send('getInstanceEnvironment', 200, {
           planned: plan !== undefined,
+          ...(hosting?.ok ? { hosting: hosting.value } : {}),
           services: plan?.services.map(({ name, secrets }) => ({ name, secrets: secrets.map((secret) => secret.name) })) ?? [],
           domains: plan?.domains.map(({ host, service }) => ({ host, service })) ?? [],
           deployments: reports.map(({ dispatchId, result, finishedAt, release, errorCode }) => ({
@@ -783,6 +789,9 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
         if (running) return;
         running = true;
         try {
+          const launch = deps.customerLaunch?.teamId ? await deps.customerLaunch.call('report') : undefined;
+          const observation = launch?.ok && deps.customerLaunch && hostedStarterObservation(deps.customerLaunch.teamId, launch.body);
+          if (observation) await context.store.recordHostedStarter(observation);
           const instances = await context.store.listInstances();
           for (const instance of instances) {
             const latest = await context.store.latestAttestation(instance.id);
@@ -1298,17 +1307,28 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
     id: 'starter-launch',
     requires: ['identity', 'store'],
     routes: [
-      scoped('GET', launchPath, 'getStarterLaunch', 'marketplace.manage', async ({ teamId }) =>
-        deps.starterLaunch?.teamId === teamId
-          ? send('getStarterLaunch', 200, await deps.starterLaunch.read()) : relay(teamId, 'getStarterLaunch', 'report')),
+      scoped('GET', launchPath, 'getStarterLaunch', 'marketplace.manage', async ({ teamId, context }) => {
+        if (deps.starterLaunch?.teamId === teamId) return send('getStarterLaunch', 200, await deps.starterLaunch.read());
+        if (!customer || customer.teamId !== teamId) return notFound('launch', 'starter');
+        const report = await customer.call('report');
+        if (!report.ok) return unavailable();
+        const link = await hostedStarterLink(context.store, teamId, report.body);
+        return send('getStarterLaunch', 200, { ...(report.body as object), ...link });
+      }),
       scoped('POST', launchPath, 'startStarterLaunch', 'marketplace.manage', async ({ teamId }) =>
         deps.starterLaunch?.teamId === teamId
           ? send('startStarterLaunch', 200, await deps.starterLaunch.start()) : relay(teamId, 'startStarterLaunch', 'start')),
-      scoped('POST', launchPath + '/remove', 'removeStarterLaunch', 'marketplace.manage', async ({ teamId }, request) => {
+      scoped('POST', launchPath + '/remove', 'removeStarterLaunch', 'marketplace.manage', async ({ teamId, context }, request) => {
         if (deps.starterLaunch?.teamId !== teamId && customer?.teamId !== teamId) return notFound('launch', 'starter');
         const body = bodyOf<{ data: 'keep' | 'wipe'; confirmation?: string }>(request);
         if (!body.ok || !body.value || !['keep', 'wipe'].includes(body.value.data)) return badRequest('Select keep data or wipe data');
         if (body.value.data === 'wipe' && body.value.confirmation !== 'starter-web') return badRequest('Type starter-web to confirm deletion of its data');
+        const instance = (await context.store.listInstances(teamId)).find(({ name }) => name === FREE_STARTER_RELEASE.template);
+        const hosting = instance && await context.store.getHostedStarter(instance.id);
+        if (instance && hosting?.ok) {
+          const consumers = await context.store.listConsumers(instance.id);
+          if (consumers.length) return { status: 409, body: { error: 'conflict', message: `Removing this app would strand: ${bindingImpact(consumers).join('; ')}` } };
+        }
         return deps.starterLaunch?.teamId === teamId
           ? send('removeStarterLaunch', 200, await deps.starterLaunch.remove(body.value.data))
           : relay(teamId, 'removeStarterLaunch', 'remove', { data: body.value.data });
