@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { AttestationSchema, type Attestation } from './attestation.ts';
 import { RepoConnectionSchema, reasonOf, type DispatchRecord, type Store, type StoreError, type StoreResult } from './persistence.ts';
 import { checkBindingPolicy } from './binding-policy.ts';
@@ -81,6 +82,24 @@ const expectErr = (result: { ok: boolean; value?: unknown } & Partial<StoreError
     if (!instance.ok) throw new Error('seed instance create failed');
     return { store, team: team.value, instance: instance.value };
   };
+
+  await add('marketplace links preserve team scope and remain revoked on connect replay', async () => {
+    const store = await fresh();
+    const owner = mustOk(await store.createTeam({ name: tName('marketplace-owner') }), 'owner');
+    const peer = mustOk(await store.createTeam({ name: tName('marketplace-peer') }), 'peer');
+    const id = randomUUID();
+    const valid = await store.connectMarketplaceInstallation(owner.id, id) &&
+      await store.connectMarketplaceInstallation(owner.id, id) &&
+      await store.marketplaceInstallationConnected(owner.id, id) &&
+      !await store.connectMarketplaceInstallation(peer.id, id) &&
+      !await store.marketplaceInstallationConnected(peer.id, id) &&
+      !await store.disconnectMarketplaceInstallation(peer.id, id) &&
+      await store.disconnectMarketplaceInstallation(owner.id, id) &&
+      !await store.connectMarketplaceInstallation(owner.id, id) &&
+      !await store.marketplaceInstallationConnected(owner.id, id);
+    return valid ? { status: 'pass', detail: 'owner scoped, disconnected, replay refused' }
+      : { status: 'fail', detail: 'marketplace ownership or revocation differed' };
+  });
 
   await add('describe: names the driver and its readiness', async () => {
     const store = await fresh();

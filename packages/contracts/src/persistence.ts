@@ -472,6 +472,11 @@ export interface Store {
   describe(): { driver: string; contract: string; schemaReady: boolean };
   ping(): Promise<boolean>;
 
+  /** First ownership wins. A tombstoned link requires a new installation ID to connect again. */
+  connectMarketplaceInstallation(teamId: string, installationId: string): Promise<boolean>;
+  marketplaceInstallationConnected(teamId: string, installationId: string): Promise<boolean>;
+  disconnectMarketplaceInstallation(teamId: string, installationId: string): Promise<boolean>;
+
   createTeam(input: NewTeam): Promise<StoreResult<Team>>;
   getTeam(id: string): Promise<StoreResult<Team>>;
   /** Oldest first: teams are a small, stable listing, not a feed. */

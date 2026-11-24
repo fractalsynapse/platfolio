@@ -11,6 +11,7 @@ export { ALLOWED_ORIGINS_ENV, describeAllowedOriginsConfig, parseAllowedOrigins,
 export interface BootConfig {
   issuer: string;
   audience: string;
+  marketplaceEnabled?: boolean;
   jwksUri?: string;
   host: string;
   port: number;
@@ -49,6 +50,7 @@ export function configFromEnv(env: NodeJS.ProcessEnv): BootConfig {
   return {
     issuer: env.PLATFOLIO_IDENTITY_ISSUER as string,
     audience: env.PLATFOLIO_IDENTITY_AUDIENCE as string,
+    marketplaceEnabled: env.PLATFOLIO_MARKETPLACE_ENABLED === 'true',
     ...(env.PLATFOLIO_IDENTITY_JWKS_URI ? { jwksUri: env.PLATFOLIO_IDENTITY_JWKS_URI } : {}),
     host: env.HOST ?? '0.0.0.0',
     port: Number(env.PORT ?? 8080),
@@ -198,7 +200,7 @@ export async function boot(config: BootConfig, fetchImpl: typeof fetch = fetch) 
     // that exists only in the operator's head. An empty list is passed through rather than dropped, so "no list"
     // has one spelling all the way down to the transport.
     server: { host: config.host, port: config.port, cors: { allowedOrigins: [...config.cors?.allowedOrigins ?? []] } },
-    extensions: buildCapabilities({ build: config.build }),
+    extensions: buildCapabilities({ build: config.build, marketplaceEnabled: config.marketplaceEnabled ?? false }),
     requiredServices: ['identity', 'server', 'store', 'extensions'],
   });
   ctx.identity.attachKeySource(new EndpointKeySource(identity, fetchImpl, config.jwksUri));

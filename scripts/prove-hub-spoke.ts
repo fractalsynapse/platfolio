@@ -20,7 +20,7 @@ const [hub, spoke] = ['hub', 'spoke'].map((name, index) => {
     bao: `http://${host}:${port.bao}`,
     compose: (...args: string[]) => run('docker', ['compose', '-p', `platfolio-${name}-proof`,
       '-f', 'compose.yaml', '-f', 'compose.dev.yaml', '-f', 'compose.hub-spoke.yaml', ...args], {
-      PROOF_HOST: host, PROOF_SITE_PORT: String(port.site), PROOF_API_PORT: String(port.api),
+      PROOF_HOST: host, PROOF_MARKETPLACE_ENABLED: String(name === 'hub'), PROOF_SITE_PORT: String(port.site), PROOF_API_PORT: String(port.api),
       PROOF_IDENTITY_PORT: String(port.identity), PROOF_BAO_PORT: String(port.bao),
     }),
   };

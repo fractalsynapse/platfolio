@@ -192,19 +192,96 @@ lines from that deployment. Redeploy the unmodified revision when finished.
 CMD ["sh", "-c", "node src/network-proof.mts && exec node src/server.mjs"]
 ```
 
-## Next delivery
+## Delivery sequence
 
-Build the customer-owned launcher around the existing manifest, plan and provider seams. The
-first Railway installer should deploy the private control plane, Keycloak, OpenBao and its
-local execution worker onto an explicitly reviewed network placement. Verify that the worker
-reaches OpenBao privately and that the customer can restore identity and unseal OpenBao
-without the hub. Use the existing starter app for the first deployment from the private
-installation. Workloads that need a shared service in another Railway project require a
-customer-approved connectivity design. A shared installation or workspace ID alone does not
-supply a network route.
+The customer-owned launcher and the first free claim are exercised in the pilot below. The
+placement gives the worker and OpenBao one private Railway network and keeps the private
+issuer independent of the hub. Workloads that need a shared service in a different Railway
+project require customer-approved connectivity. A common installation or workspace ID
+alone does not supply a network route.
 
-Add the enrollment, scoped registry credential and free-template claim in the next slice.
-Make redemption single use, rotate and revoke the credential, and prove local sign-in and
-operations through a disconnect. Optional Keycloak brokering follows the local operator
-flow and can be tested with a marketplace user who has no private role until an owner
-assigns one. Keep billing and paid listings behind the free claim-and-install proof.
+The next slice is one-use hosted enrollment, scoped machine credentials, and an owner-run
+OpenBao initialization and recovery flow. Optional Keycloak brokering follows the local
+operator flow. It should demonstrate that a marketplace user has no private role until an
+owner assigns one. Paid claims build on the free install path.
+
+## Customer launcher and free claim pilot
+
+The operator runs the launcher in a customer-owned Railway workspace, targeting a project
+with a single staging environment. The customer supplies the workspace credential locally,
+a verified Platfolio CI candidate, and a strong Keycloak bootstrap password in a private
+file. The launcher locates the project in that workspace before applying anything. It
+renders the candidate using the existing Platfolio description, provisions a private
+Postgres for Platfolio and Keycloak, and assigns Railway HTTPS origins to the site, API,
+and issuer. It places OpenBao and the installation worker on the same private network.
+OpenBao uses a persistent volume. The worker verifies a private health response without
+receiving an OpenBao root or recovery credential.
+
+```sh
+pnpm exec tsx scripts/launch-customer-railway.ts --project "$project" --candidate "$candidate"
+pnpm exec tsx scripts/launch-customer-railway.ts --project "$project" --candidate "$candidate" \
+  --identity-bootstrap-file "$bootstrap_file" --apply
+```
+
+Set `RAILWAY_WORKSPACE_ID` and `RAILWAY_TOKEN` in the operator's environment. The launcher
+forwards the workspace token only to Railway and its CLI. The optional candidate-free mode
+runs the private networking portion against an existing customer staging project. For a
+new pilot, finish Keycloak onboarding on the issuer URL returned by the launcher. Review
+and retain OpenBao recovery materials under customer control before storing any secrets.
+Keep untrusted workloads out of a staging network with an uninitialized OpenBao.
+
+Marketplace operations are enabled only on the hub. In this pilot, a verified hub team
+owner links a customer-generated installation ID and claims the fixed free release. The
+hub persists the link and disconnects it permanently. The owner obtains a fresh access
+token for these operations. The launcher writes the claim receipt locally and hands Railway
+only the source files read through Git at the exact pinned revision. The install step uses
+a staging starter service and its private PostgreSQL, reusing them when present. Runtime
+build base images retain the template's own policy. The pilot pins the template source revision.
+
+```sh
+pnpm exec tsx scripts/customer-marketplace.ts connect --hub "$hub" --team "$team" \
+  --installation "$installation" --identity-file "$owner_token_file"
+pnpm exec tsx scripts/customer-marketplace.ts claim --hub "$hub" --team "$team" \
+  --installation "$installation" --identity-file "$owner_token_file" --receipt "$receipt"
+pnpm exec tsx scripts/customer-marketplace.ts install --installation "$installation" \
+  --receipt "$receipt" --project "$project"
+pnpm exec tsx scripts/customer-marketplace.ts disconnect --hub "$hub" --team "$team" \
+  --installation "$installation" --identity-file "$owner_token_file"
+```
+
+Connector requests carry the installation ID and hub team scope. The hub does not receive
+Railway grants, private DNS names, Keycloak administration credentials, OpenBao credentials,
+or information about the app's runtime. A disconnected ID cannot be linked again by replay.
+The installed application has no hub URL or credential in its runtime configuration. An
+acquired release remains in the customer's possession after disconnect.
+
+This owner-driven pilot precedes customer-facing launch workflow integration, machine
+credentials, OpenBao unseal and recovery orchestration, and registry support for other
+release types. The currently reviewed Railway starter deployment is a source build of one
+existing repository. The private control plane's support for managing that deployment will
+use its existing instance and deployment records.
+
+### Pilot results
+
+On November 24, 2026, the launcher placed the private site, API and Keycloak from CI candidate
+`36442bc15a0de5f2dcc6976fd3769dc875744c5d` in the existing `platfolio-starter-web` staging
+project. The private issuer, site and API answered over HTTPS. The six authorization-code and
+PKCE checks passed against the private issuer and API. Platfolio and Keycloak use their own
+private Postgres service, separate from the starter database.
+
+- Railway reported zero public service domains, custom domains or TCP proxies for OpenBao
+  and the installation worker. Within the project, the worker reached OpenBao and received
+  HTTP 501 with `initialized=false` and `sealed=true`. This measured private connectivity.
+  Owner initialization and secret access were outside this test. [Worker deployment](https://railway.com/project/d14c2c1a-0040-457d-b6e0-cc6381b76d68/service/ec9e000b-8b9a-4fd8-ada2-2c0f6a255741?id=f6f726c0-ce9e-4e85-819e-eaece004be25)
+- The local hub issued a free `starter-web` 0.1.0 claim pinned to
+  `f2a095711f98696a98ed1711a87ed288ef034bf4`. The installer read source blobs at that commit
+  and Railway marked the corresponding starter deployment successful. [Starter deployment](https://railway.com/project/d14c2c1a-0040-457d-b6e0-cc6381b76d68/service/61475175-f2c7-4be6-9825-da4662165d59?id=23901917-a3e2-4fad-a124-05d2498fe938)
+- On disconnect, the hub returned HTTP 204, followed by HTTP 404 for a new claim and a
+  replayed connect. With the hub API then stopped, the Railway worker received a healthy
+  starter response over the private network. Railway reported the same deployment ID
+  and a successful state. The retained receipt also produced a fresh successful deployment
+  while the hub API was offline. The hub was restored after both checks. [Offline redeployment](https://railway.com/project/d14c2c1a-0040-457d-b6e0-cc6381b76d68/service/61475175-f2c7-4be6-9825-da4662165d59?id=e88d9aad-8a2c-47d6-8ceb-b21ef9cf3c97)
+
+The local hub ran the new registry code. The private Railway installation used the previously
+published CI candidate, with marketplace operations disabled. Hub enrollment and the private
+installation's sign-in remained independent throughout the pilot.

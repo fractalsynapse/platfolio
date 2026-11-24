@@ -9,6 +9,12 @@
 # Regenerate the skeleton with --emit; judgement calls belong in the HUMAN table inside that script, never
 # hand-edited here, or the next regeneration silently loses them.
 variables:
+  - name: BAO_LOCAL_CONFIG
+    kind: value
+    secret: false
+    environments: [staging]
+    deployedTo: railway:variable
+    note: "OpenBao private listener and Raft storage settings. Contains no recovery material."
   - name: CONTROL_PLANE_BASE
     kind: value
     secret: false
@@ -430,6 +436,18 @@ variables:
     environments: all
     deployedTo: host:shell
     note: "the local mailbox reader; absent in production (D46)"
+  - name: PLATFOLIO_MARKETPLACE_ENABLED
+    kind: value
+    secret: false
+    environments: all
+    deployedTo: local:compose-overlay
+    note: "Enables hub-only free-template links and claims."
+  - name: PLATFOLIO_OPENBAO_URL
+    kind: value
+    secret: false
+    environments: [staging]
+    deployedTo: railway:variable
+    note: "Private OpenBao service origin, supplied to the customer installation worker."
   - name: PLATFOLIO_RECONCILE_INTERVAL_MS
     kind: value
     secret: false
@@ -493,6 +511,12 @@ variables:
     environments: [staging, production]
     deployedTo: host:shell
     note: "referenced by apps/control-plane/src/index.ts"
+  - name: PLATFOLIO_STARTER_HEALTH_URL
+    kind: value
+    secret: false
+    environments: [staging]
+    deployedTo: railway:variable
+    note: "Optional private starter runtime health URL for the pilot worker."
   - name: PLATFOLIO_TEAM_ID
     kind: value
     secret: false
@@ -525,6 +549,18 @@ variables:
     environments: all
     deployedTo: github:environment-secret
     note: "a container password on loopback/CI; no real service listens"
+  - name: RAILWAY_API_TOKEN
+    kind: secret
+    secret: true
+    environments: [development]
+    deployedTo: host:shell
+    note: "Workspace token forwarded in memory to the customer-side Railway CLI process."
+  - name: RAILWAY_RUN_UID
+    kind: value
+    secret: false
+    environments: [staging]
+    deployedTo: railway:variable
+    note: "Allows the OpenBao entrypoint to prepare its volume before dropping privileges."
   - name: RAILWAY_TOKEN
     kind: secret
     secret: true

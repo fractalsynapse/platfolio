@@ -59,6 +59,9 @@ export class StoreService extends Service<z.infer<typeof StoreConfigSchema>> {
 
   // Pass-through surface. Kept as methods rather than exposing the inner store so the capability can add
   // instrumentation (timing, audit) later without every call site changing.
+  connectMarketplaceInstallation(...args: Parameters<Store['connectMarketplaceInstallation']>) { return this.inner.connectMarketplaceInstallation(...args); }
+  marketplaceInstallationConnected(...args: Parameters<Store['marketplaceInstallationConnected']>) { return this.inner.marketplaceInstallationConnected(...args); }
+  disconnectMarketplaceInstallation(...args: Parameters<Store['disconnectMarketplaceInstallation']>) { return this.inner.disconnectMarketplaceInstallation(...args); }
   createTeam(input: { name: string }) { return this.inner.createTeam(input); }
   getTeam(id: string) { return this.inner.getTeam(id); }
   listTeams() { return this.inner.listTeams(); }

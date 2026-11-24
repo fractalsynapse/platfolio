@@ -4,7 +4,7 @@
  * hand, because every line reproduces from the specification.
  *
  * Source: apps/control-plane/openapi.yaml (OpenAPI 3.1.0, info.version 0.1.0)
- * Input digest: sha256/b2140e880ea02f18
+ * Input digest: sha256/08f694b1405efc02
  *
  * Reproduce it with `pnpm run api:types`. `pnpm run api:types:check` fails when this file stops matching
  * what the committed spec produces, which is the only way a generated type deserves to be trusted.
@@ -291,6 +291,16 @@ export interface ApiParameters {
     instanceId: string;
     capability: string;
   };
+  /** POST /api/v1/teams/{teamId}/marketplace/installations/{installationId}/claim */
+  claimFreeMarketplaceRelease: {
+    teamId: string;
+    installationId: string;
+  };
+  /** PUT /api/v1/teams/{teamId}/marketplace/installations/{installationId} */
+  connectMarketplaceInstallation: {
+    teamId: string;
+    installationId: string;
+  };
   /** POST /api/v1/instances/{instanceId}/dispatches */
   createDispatch: {
     instanceId: string;
@@ -306,6 +316,11 @@ export interface ApiParameters {
   /** DELETE /api/v1/instances/{instanceId} */
   destroyInstance: {
     instanceId: string;
+  };
+  /** DELETE /api/v1/teams/{teamId}/marketplace/installations/{installationId} */
+  disconnectMarketplaceInstallation: {
+    teamId: string;
+    installationId: string;
   };
   /** GET /api/v1/me */
   getCurrentPerson: Record<string, never>;
@@ -551,6 +566,29 @@ export interface ApiResponses {
     '401': Error;
     '404': Error;
   };
+  /** POST /api/v1/teams/{teamId}/marketplace/installations/{installationId}/claim */
+  claimFreeMarketplaceRelease: {
+    '200': {
+      installationId: string;
+      template: 'starter-web';
+      repo: string;
+      version: string;
+      revision: string;
+      priceMinor: 0;
+    };
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+  };
+  /** PUT /api/v1/teams/{teamId}/marketplace/installations/{installationId} */
+  connectMarketplaceInstallation: {
+    '204': void;
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+  };
   /** POST /api/v1/instances/{instanceId}/dispatches */
   createDispatch: {
     '201': {
@@ -600,6 +638,14 @@ export interface ApiResponses {
     '403': Error;
     '404': Error;
     '409': Error;
+  };
+  /** DELETE /api/v1/teams/{teamId}/marketplace/installations/{installationId} */
+  disconnectMarketplaceInstallation: {
+    '204': void;
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '404': Error;
   };
   /** GET /api/v1/me */
   getCurrentPerson: {
@@ -936,6 +982,10 @@ export const ENDPOINTS = {
   acceptInvitation: { method: 'post', path: '/api/v1/me/invitations/{invitationId}/accept' },
   /** PUT /api/v1/instances/{instanceId}/bindings/{capability} */
   bindCapability: { method: 'put', path: '/api/v1/instances/{instanceId}/bindings/{capability}' },
+  /** POST /api/v1/teams/{teamId}/marketplace/installations/{installationId}/claim */
+  claimFreeMarketplaceRelease: { method: 'post', path: '/api/v1/teams/{teamId}/marketplace/installations/{installationId}/claim' },
+  /** PUT /api/v1/teams/{teamId}/marketplace/installations/{installationId} */
+  connectMarketplaceInstallation: { method: 'put', path: '/api/v1/teams/{teamId}/marketplace/installations/{installationId}' },
   /** POST /api/v1/instances/{instanceId}/dispatches */
   createDispatch: { method: 'post', path: '/api/v1/instances/{instanceId}/dispatches' },
   /** POST /api/v1/instances */
@@ -946,6 +996,8 @@ export const ENDPOINTS = {
   createTeam: { method: 'post', path: '/api/v1/teams' },
   /** DELETE /api/v1/instances/{instanceId} */
   destroyInstance: { method: 'delete', path: '/api/v1/instances/{instanceId}' },
+  /** DELETE /api/v1/teams/{teamId}/marketplace/installations/{installationId} */
+  disconnectMarketplaceInstallation: { method: 'delete', path: '/api/v1/teams/{teamId}/marketplace/installations/{installationId}' },
   /** GET /api/v1/me */
   getCurrentPerson: { method: 'get', path: '/api/v1/me' },
   /** GET /api/v1/instances/{instanceId}/dispatches/{dispatchId} */

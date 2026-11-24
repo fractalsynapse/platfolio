@@ -1710,6 +1710,62 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
 
 
+  /api/v1/teams/{teamId}/marketplace/installations/{installationId}:
+    parameters:
+      - { name: teamId, in: path, required: true, schema: { type: string } }
+      - { name: installationId, in: path, required: true, schema: { type: string, format: uuid } }
+    put:
+      operationId: connectMarketplaceInstallation
+      summary: Link a customer installation to this team
+      description: A team owner approves a link. A disconnected installation ID cannot be reactivated.
+      security: [{ bearerJwt: [] }]
+      responses:
+        '204': { description: The installation is linked. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      operationId: disconnectMarketplaceInstallation
+      summary: Disconnect an installation from marketplace access
+      description: Existing deployments and acquired releases remain with the customer.
+      security: [{ bearerJwt: [] }]
+      responses:
+        '204': { description: The installation is disconnected. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/teams/{teamId}/marketplace/installations/{installationId}/claim:
+    parameters:
+      - { name: teamId, in: path, required: true, schema: { type: string } }
+      - { name: installationId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: claimFreeMarketplaceRelease
+      summary: Claim the pinned free starter release for a linked installation
+      security: [{ bearerJwt: [] }]
+      responses:
+        '200':
+          description: A receipt containing the immutable template source coordinates.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [installationId, template, repo, version, revision, priceMinor]
+                properties:
+                  installationId: { type: string, format: uuid }
+                  template: { type: string, enum: [starter-web] }
+                  repo: { type: string }
+                  version: { type: string }
+                  revision: { type: string, pattern: '^[a-f0-9]{40}$' }
+                  priceMinor: { type: integer, enum: [0] }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+
 components:
   securitySchemes:
     bearerJwt:

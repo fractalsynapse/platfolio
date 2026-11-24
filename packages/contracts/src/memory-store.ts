@@ -34,6 +34,7 @@ export interface MemoryStoreOptions {
 
 export class MemoryStore implements Store {
   readonly driver = 'memory';
+  private readonly marketplaceLinks = new Map<string, { teamId: string; disconnected: boolean }>();
   private readonly teams = new Map<string, Team>();
   private readonly instances = new Map<string, Instance>();
   private readonly repos = new Map<string, RepoConnection>();
@@ -72,6 +73,26 @@ export class MemoryStore implements Store {
     // A closed store says so. Reporting healthy after close() is how a pool pretends to work while every
     // query fails.
     return !this.closed;
+  }
+
+  async connectMarketplaceInstallation(teamId: string, installationId: string): Promise<boolean> {
+    if (this.closed || !this.teams.has(teamId)) return false;
+    const found = this.marketplaceLinks.get(installationId);
+    if (found) return found.teamId === teamId && !found.disconnected;
+    this.marketplaceLinks.set(installationId, { teamId, disconnected: false });
+    return true;
+  }
+
+  async marketplaceInstallationConnected(teamId: string, installationId: string): Promise<boolean> {
+    const found = this.marketplaceLinks.get(installationId);
+    return !this.closed && found?.teamId === teamId && !found.disconnected;
+  }
+
+  async disconnectMarketplaceInstallation(teamId: string, installationId: string): Promise<boolean> {
+    const found = this.marketplaceLinks.get(installationId);
+    if (this.closed || found?.teamId !== teamId) return false;
+    found.disconnected = true;
+    return true;
   }
 
   async createTeam(input: { name: string }) {

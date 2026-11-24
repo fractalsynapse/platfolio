@@ -14,6 +14,7 @@ services:
       PLATFOLIO_COMMIT: !reset null
       PLATFOLIO_BUILD_TIME: !reset null
       PLATFOLIO_GIT_TOKEN: !reset null
+      PLATFOLIO_MARKETPLACE_ENABLED: ${PROOF_MARKETPLACE_ENABLED:-false}
       PLATFOLIO_IDENTITY_ISSUER: http://${PROOF_HOST:?}:${PROOF_IDENTITY_PORT:?}/realms/platfolio
       PLATFOLIO_ALLOWED_ORIGINS: http://${PROOF_HOST:?}:${PROOF_SITE_PORT:?}
   site:
