@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { Pool } from 'pg';
 import {
+  HostedStarterSchema, rollupState, type HostedStarter, type NewHostedStarter,
   ArtifactRecordSchema, AttestationRecordSchema, AuditEntrySchema, BindingRecordSchema, CapabilityOfferSchema, CapabilityShareSchema, DispatchRecordSchema, IdentitySchema, PersonSchema, TeamMemberSchema, InstanceEnvironmentStateSchema, InstanceSchema, InvitationSchema, ProviderConnectionSchema, RepoConnectionSchema, TeamSchema, newId,
   type ArtifactRecord, type AttestationRecord, type AuditEntry, type BindingRecord, type CapabilityOffer, type NewBinding, type NewCapabilityOffer, type NewCapabilityShare, type DispatchRecord, type Instance, type InstanceEnvironmentState, type Invitation, type NewInvitation, type ProviderConnection, type RepoConnection, type Store, type StoreError, type NewInstance, type StoreResult, type Team, type Person, type TeamMember,
 } from './persistence.ts';
@@ -231,6 +232,91 @@ export class PostgresStore implements Store {
       throw error;
     }
     return ok(i);
+  }
+
+  async recordHostedStarter(input: NewHostedStarter): Promise<StoreResult<Instance>> {
+    const client = await this.pool.connect();
+    let committed = false;
+    try {
+      await client.query('BEGIN');
+      // All registrations for one team take the same lock. The project uniqueness constraint handles peer teams.
+      const team = await client.query(`SELECT id FROM ${this.q('teams')} WHERE id = $1 FOR UPDATE`, [input.teamId]);
+      if (!team.rowCount) return err({ code: 'not-found', what: 'team', id: input.teamId });
+      const existing = (await client.query(`SELECT * FROM ${this.q('instances')} WHERE team_id = $1 AND name = $2 FOR UPDATE`, [input.teamId, input.name])).rows[0] as Row | undefined;
+      const instanceId = existing ? String(existing.id) : newId('inst');
+      const current = existing
+        ? (await client.query(`SELECT * FROM ${this.q('hosted_starters')} WHERE instance_id = $1`, [instanceId])).rows[0] as Row | undefined
+        : undefined;
+      if (input.state !== 'live' && !current) return err({ code: 'not-found', what: 'hosted starter', id: input.name });
+      const replacement = input.state === 'live' && current?.state === 'removed';
+      if (existing && (!current || (!replacement && current.project_id !== input.projectId) || existing.template !== input.template ||
+          existing.template_commit !== input.templateRef.commitSha || existing.template_repo !== input.templateRef.repo)) {
+        return err({ code: 'conflict', reason: 'This name already belongs to a different instance' });
+      }
+      if (existing && current && Date.parse(iso(current.observed_at)) >= Date.parse(input.observedAt)) {
+        return this.asInstance(existing);
+      }
+
+      const now = new Date().toISOString();
+      const otherEnvironments = (await client.query(
+        `SELECT environment, state, updated_at FROM ${this.q('instance_environments')} WHERE instance_id = $1 AND environment <> 'staging'`,
+        [instanceId],
+      )).rows.map((row) => InstanceEnvironmentStateSchema.parse({
+        instanceId, environment: row.environment, state: row.state, updatedAt: iso(row.updated_at),
+      }));
+      const state = rollupState([...otherEnvironments, { instanceId, environment: 'staging', state: input.state, updatedAt: input.observedAt }]);
+      const instance = admit(InstanceSchema, {
+        id: instanceId, teamId: input.teamId, name: input.name, template: input.template, templateRef: input.templateRef,
+        state, provider: 'railway', createdAt: existing ? iso(existing.created_at) : now, updatedAt: now,
+      }, 'instance');
+      if (!instance.accepted) return err({ code: 'conflict', reason: instance.reason });
+      const observation = admit(HostedStarterSchema, {
+        instanceId, projectId: input.projectId, state: input.state, observedAt: input.observedAt,
+        deploymentId: input.state === 'live' ? input.deploymentId : current?.deployment_id,
+        origin: input.state === 'live' ? input.origin : current?.origin,
+      }, 'hosted starter');
+      if (!observation.accepted) return err({ code: 'conflict', reason: observation.reason });
+      if (existing) {
+        await client.query(`UPDATE ${this.q('instances')} SET state = $2, updated_at = $3 WHERE id = $1`, [instanceId, state, now]);
+      } else {
+        await client.query(
+          `INSERT INTO ${this.q('instances')} (id, team_id, name, template, template_repo, template_commit, state, provider, created_at, updated_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,'railway',$8,$8)`,
+          [instanceId, input.teamId, input.name, input.template, input.templateRef.repo, input.templateRef.commitSha, state, now],
+        );
+      }
+      await client.query(
+        `INSERT INTO ${this.q('hosted_starters')} (instance_id, project_id, deployment_id, origin, state, observed_at)
+         VALUES ($1,$2,$3,$4,$5,$6)
+         ON CONFLICT (instance_id) DO UPDATE SET project_id = EXCLUDED.project_id, deployment_id = EXCLUDED.deployment_id,
+           origin = EXCLUDED.origin, state = EXCLUDED.state, observed_at = EXCLUDED.observed_at`,
+        [instanceId, input.projectId, observation.value.deploymentId, observation.value.origin, input.state, input.observedAt],
+      );
+      await client.query(
+        `INSERT INTO ${this.q('instance_environments')} (instance_id, environment, state, updated_at)
+         VALUES ($1,'staging',$2,$3)
+         ON CONFLICT (instance_id, environment) DO UPDATE SET state = EXCLUDED.state, updated_at = EXCLUDED.updated_at`,
+        [instanceId, input.state, input.observedAt],
+      );
+      await client.query('COMMIT');
+      committed = true;
+      return ok(instance.value);
+    } catch (error) {
+      if ((error as { code?: string }).code === '23505') return err({ code: 'conflict', reason: 'An instance already manages this project or name' });
+      throw error;
+    } finally {
+      try { if (!committed) await client.query('ROLLBACK'); }
+      finally { client.release(); }
+    }
+  }
+
+  async getHostedStarter(instanceId: string): Promise<StoreResult<HostedStarter>> {
+    const row = (await this.pool.query(`SELECT * FROM ${this.q('hosted_starters')} WHERE instance_id = $1`, [instanceId])).rows[0] as Row | undefined;
+    if (!row) return err({ code: 'not-found', what: 'hosted starter', id: instanceId });
+    const parsed = admit(HostedStarterSchema, {
+      instanceId, projectId: row.project_id, deploymentId: row.deployment_id, origin: row.origin, state: row.state, observedAt: iso(row.observed_at),
+    }, 'hosted starter row');
+    return parsed.accepted ? ok(parsed.value) : err({ code: 'conflict', reason: parsed.reason });
   }
 
   async getInstance(id: string) {

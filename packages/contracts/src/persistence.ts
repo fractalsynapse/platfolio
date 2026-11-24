@@ -96,6 +96,21 @@ export const InstanceSchema = z.object({
 }).strict();
 export type Instance = z.infer<typeof InstanceSchema>;
 
+/** A verified source-build deployment. It has no workflow nonce or provider credential. */
+export const HostedStarterSchema = z.object({
+  instanceId: z.string().min(1),
+  projectId: z.uuid(),
+  deploymentId: z.uuid(),
+  state: z.enum(['live', 'paused', 'removed']),
+  origin: z.url({ protocol: /^https$/ }).max(240),
+  observedAt: z.iso.datetime(),
+}).strict();
+export type HostedStarter = z.infer<typeof HostedStarterSchema>;
+export type NewHostedStarter = Pick<HostedStarter, 'projectId' | 'observedAt'> &
+  Pick<Instance, 'teamId' | 'name' | 'template'> & { templateRef: NonNullable<Instance['templateRef']> } &
+  ({ state: 'live' } & Pick<HostedStarter, 'deploymentId' | 'origin'> | { state: 'paused' | 'removed' });
+
+
 /** Repository facts. `actionRef` is the pinned commit -- the trust anchor is a SHA, never a tag (D30 law 3). */
 export const RepoConnectionSchema = z.object({
   instanceId: z.string().min(1),
@@ -489,6 +504,9 @@ export interface Store {
 
   createInstance(input: NewInstance): Promise<StoreResult<Instance>>;
   getInstance(id: string): Promise<StoreResult<Instance>>;
+  /** Atomically register verified staging evidence. Never adopt a pre-existing instance or another team's project. */
+  recordHostedStarter(input: NewHostedStarter): Promise<StoreResult<Instance>>;
+  getHostedStarter(instanceId: string): Promise<StoreResult<HostedStarter>>;
   /** Oldest first, so a tenant's platforms keep the order they were created in. */
   listInstances(teamId?: string): Promise<Instance[]>;
   updateInstanceState(id: string, state: InstanceState, patch?: { desiredPlanHash?: string; lastAppliedPlanHash?: string }): Promise<StoreResult<Instance>>;

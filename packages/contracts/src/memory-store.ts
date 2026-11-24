@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { Attestation } from './attestation.ts';
 import { AttestationRecordSchema, AuditEntrySchema, BindingRecordSchema, CapabilityOfferSchema, CapabilityShareSchema, IdentitySchema, PersonSchema, TeamMemberSchema, DispatchRecordSchema, InstanceEnvironmentStateSchema, InstanceSchema, InvitationSchema, ProviderConnectionSchema, RepoConnectionSchema, TeamSchema, newId,
+  HostedStarterSchema, rollupState, type HostedStarter, type NewHostedStarter,
   ArtifactRecordSchema,
   type ArtifactRecord, type AttestationRecord, type AuditEntry, type BindingRecord, type CapabilityOffer, type CapabilityShare, type NewBinding, type NewCapabilityOffer, type NewCapabilityShare, type DispatchRecord, type Instance, type InstanceEnvironmentState, type Invitation, type NewInvitation, type ProviderConnection, type RepoConnection, type Store, type StoreError, type NewInstance, type StoreResult, type Team, type TeamMember, type Identity, type Person } from './persistence.ts';
 import { reasonOf } from './persistence.ts';
@@ -41,6 +42,7 @@ export class MemoryStore implements Store {
     registryDigest?: string;
   }>();
   private readonly teams = new Map<string, Team>();
+  private readonly hostedStarters = new Map<string, HostedStarter>();
   private readonly instances = new Map<string, Instance>();
   private readonly repos = new Map<string, RepoConnection>();
   private readonly providers = new Map<string, ProviderConnection>();
@@ -164,6 +166,50 @@ export class MemoryStore implements Store {
     this.instances.set(admitted.value.id, admitted.value);
     return ok(admitted.value);
   }
+  async recordHostedStarter(input: NewHostedStarter): Promise<StoreResult<Instance>> {
+    if (this.closed) return this.refuse('recordHostedStarter');
+    if (!this.teams.has(input.teamId)) return err({ code: 'not-found', what: 'team', id: input.teamId });
+    const existing = [...this.instances.values()].find(({ teamId, name }) => teamId === input.teamId && name === input.name);
+    const current = existing && this.hostedStarters.get(existing.id);
+    if (input.state !== 'live' && !current) return err({ code: 'not-found', what: 'hosted starter', id: input.name });
+    const replacement = input.state === 'live' && current?.state === 'removed';
+    if (existing && (!current || (!replacement && current.projectId !== input.projectId) || existing.template !== input.template ||
+        existing.templateRef?.commitSha !== input.templateRef.commitSha || existing.templateRef.repo !== input.templateRef.repo)) {
+      return err({ code: 'conflict', reason: 'This name already belongs to a different instance' });
+    }
+    if ([...this.hostedStarters.values()].some((item) => item.projectId === input.projectId && item.instanceId !== existing?.id)) {
+      return err({ code: 'conflict', reason: 'This project is already managed' });
+    }
+    if (existing && current && Date.parse(current.observedAt) >= Date.parse(input.observedAt)) {
+      return ok(copy(existing));
+    }
+
+    const id = existing?.id ?? newId('inst');
+    const staging = { instanceId: id, environment: 'staging', state: input.state, updatedAt: input.observedAt };
+    const environments = [...this.envStates.values()].filter((row) => row.instanceId === id && row.environment !== 'staging');
+    const instance = admit(InstanceSchema, {
+      ...existing, id, teamId: input.teamId, name: input.name, template: input.template, templateRef: input.templateRef,
+      state: rollupState([...environments, staging]), provider: 'railway', createdAt: existing?.createdAt ?? this.clock(), updatedAt: this.clock(),
+    }, 'instance');
+    if (!instance.accepted) return err({ code: 'conflict', reason: instance.reason });
+    const observation = admit(HostedStarterSchema, {
+      instanceId: id, projectId: input.projectId, state: input.state, observedAt: input.observedAt,
+      deploymentId: input.state === 'live' ? input.deploymentId : current?.deploymentId,
+      origin: input.state === 'live' ? input.origin : current?.origin,
+    }, 'hosted starter');
+    if (!observation.accepted) return err({ code: 'conflict', reason: observation.reason });
+
+    this.instances.set(instance.value.id, instance.value);
+    this.hostedStarters.set(instance.value.id, observation.value);
+    this.envStates.set(`${id}\u0000staging`, staging);
+    return ok(copy(instance.value));
+  }
+
+  async getHostedStarter(instanceId: string): Promise<StoreResult<HostedStarter>> {
+    const found = this.hostedStarters.get(instanceId);
+    return found ? ok(copy(found)) : err({ code: 'not-found', what: 'hosted starter', id: instanceId });
+  }
+
   async getInstance(id: string) {
     const found = this.instances.get(id);
     return found ? ok(copy(found)) : err({ code: 'not-found', what: 'instance', id });
@@ -592,6 +638,7 @@ export class MemoryStore implements Store {
     this.teams.clear();
     this.plans.clear();
     this.envStates.clear();
+    this.hostedStarters.clear();
     this.invitations.clear();
     this.members.clear();
     this.persons.clear();

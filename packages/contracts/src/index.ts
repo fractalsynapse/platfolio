@@ -151,3 +151,5 @@ export { MailpitEmailTransport, type MailpitOptions } from './mailpit-email.ts';
 export { NullEmailTransport } from './email.ts';
 export { MemoryEmailTransport, type MemoryEmailOptions } from './memory-email.ts';
 export { SmtpEmailTransport, type SmtpOptions } from './smtp-email.ts';
+
+export { HostedStarterSchema, type HostedStarter, type NewHostedStarter } from './persistence.ts';

@@ -11,14 +11,15 @@ export function StarterLaunchScreen({ selectedTeamId }: { readonly selectedTeamI
   const teams = useOperation('listTeams', { params });
   const [choice, setChoice] = React.useState('');
   const owners = isLoaded(teams.state) ? teams.state.data.filter(({ role }) => role === 'owner') : [];
-  const teamId = selectedTeamId
-    ? owners.find((item) => item.teamId === selectedTeamId)?.teamId
-    : owners.find((item) => item.teamId === choice)?.teamId ?? owners[0]?.teamId;
-  if (!teamId) return null;
+  const selected = selectedTeamId
+    ? owners.find((item) => item.teamId === selectedTeamId)
+    : owners.find((item) => item.teamId === choice) ?? owners[0];
+  if (!selected) return null;
+  const teamId = selected.teamId;
   return <>
     {!selectedTeamId && owners.length > 1 && <p><label>Launch for <select value={teamId} onChange={(event) => setChoice(event.target.value)}>
       {owners.map(({ teamId, name }) => <option key={teamId} value={teamId}>{name}</option>)}
     </select></label></p>}
-    <React.Fragment key={teamId}>{renderScreen(STARTER_LAUNCH_SCREEN, () => ({ teamId }))}</React.Fragment>
+    <React.Fragment key={teamId}>{renderScreen(STARTER_LAUNCH_SCREEN, () => ({ teamId, teamName: selected.name }))}</React.Fragment>
   </>;
 }
