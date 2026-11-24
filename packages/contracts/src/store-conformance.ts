@@ -189,6 +189,27 @@ const expectErr = (result: { ok: boolean; value?: unknown } & Partial<StoreError
     return { status: 'pass', detail: 'two misses confirm an outage, valid recovery appears once' };
   });
 
+  await add('notification rules are unique to the person, app, environment and event', async () => {
+    const { store, team, instance } = await seed();
+    const owner = mustOk(await store.resolvePerson({ issuer: 'https://rules.example.test', subject: randomUUID() }), 'owner').person;
+    const member = mustOk(await store.resolvePerson({ issuer: 'https://rules.example.test', subject: randomUUID() }), 'member').person;
+    mustOk(await store.putTeamMember({ teamId: team.id, personId: owner.id, role: 'owner' }), 'owner member');
+    mustOk(await store.putTeamMember({ teamId: team.id, personId: member.id, role: 'member' }), 'member');
+    const input = { instanceId: instance.id, event: 'app-outage' as const, enabled: true };
+    const rule = mustOk(await store.saveNotificationRule(member.id, input), 'save');
+    if ((await store.saveNotificationRule(member.id, input)).ok ||
+        (await store.saveNotificationRule(owner.id, { ...input, id: rule.id, enabled: false })).ok ||
+        (await store.saveNotificationRule(member.id, { ...input, environment: 'unknown' })).ok) throw new Error('Invalid rule accepted');
+    mustOk(await store.setInstanceEnvironment({ instanceId: instance.id, environment: 'staging', state: 'live' }), 'staging environment');
+    const exact = mustOk(await store.saveNotificationRule(member.id, { ...input, environment: 'staging' }), 'environment rule');
+    if (!await store.removeNotificationRule(member.id, instance.id, exact.id) || (await store.listNotificationRules(owner.id)).length) {
+      throw new Error('Rule deletion or isolation failed');
+    }
+    mustOk(await store.changeTeamMember(team.id, owner.id, member.id, null), 'revoke member');
+    if ((await store.listNotificationRules(member.id)).length) throw new Error('Rule survived revoked team access');
+    return { status: 'pass', detail: 'scoped uniqueness, rule ownership, and recheck after membership removal' };
+  });
+
   await add('describe: names the driver and its readiness', async () => {
     const store = await fresh();
     const info = store.describe();

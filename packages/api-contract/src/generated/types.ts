@@ -4,7 +4,7 @@
  * hand, because every line reproduces from the specification.
  *
  * Source: apps/control-plane/openapi.yaml (OpenAPI 3.1.0, info.version 0.1.0)
- * Input digest: sha256/d651862961419cfd
+ * Input digest: sha256/5bb9e75d763e487e
  *
  * Reproduce it with `pnpm run api:types`. `pnpm run api:types:check` fails when this file stops matching
  * what the committed spec produces, which is the only way a generated type deserves to be trusted.
@@ -235,6 +235,15 @@ export interface Invitation {
   emailError?: string;
 }
 
+export interface NotificationRule {
+  id: string;
+  instanceId: string;
+  event: 'deployment-failed' | 'app-outage' | 'secret-updated';
+  enabled: boolean;
+  createdAt: string;
+  environment?: string;
+}
+
 export interface ReadinessCheck {
   /** Dependency identifier, stable across builds (`database`, `identity`). */
   name: string;
@@ -336,8 +345,17 @@ export interface ApiParameters {
   createInvitation: {
     teamId: string;
   };
+  /** POST /api/v1/instances/{instanceId}/notification-rules */
+  createNotificationRule: {
+    instanceId: string;
+  };
   /** POST /api/v1/teams */
   createTeam: Record<string, never>;
+  /** DELETE /api/v1/instances/{instanceId}/notification-rules/{ruleId} */
+  deleteNotificationRule: {
+    instanceId: string;
+    ruleId: string;
+  };
   /** DELETE /api/v1/instances/{instanceId} */
   destroyInstance: {
     instanceId: string;
@@ -426,6 +444,8 @@ export interface ApiParameters {
   };
   /** GET /api/v1/me/invitations */
   listMyInvitations: Record<string, never>;
+  /** GET /api/v1/me/notifications */
+  listMyNotifications: Record<string, never>;
   /** GET /api/v1/instances/{instanceId}/secrets */
   listSecretPresence: {
     instanceId: string;
@@ -518,6 +538,11 @@ export interface ApiParameters {
   };
   /** PUT /api/v1/me/profile */
   updateAccountProfile: Record<string, never>;
+  /** PUT /api/v1/instances/{instanceId}/notification-rules/{ruleId} */
+  updateNotificationRule: {
+    instanceId: string;
+    ruleId: string;
+  };
   /** PATCH /api/v1/teams/{teamId}/members/{personId} */
   updateTeamMemberRole: {
     teamId: string;
@@ -563,6 +588,12 @@ export interface ApiRequestBodies {
     email: string;
     role?: 'owner' | 'member';
     ttlDays?: number;
+  };
+  /** POST /api/v1/instances/{instanceId}/notification-rules */
+  createNotificationRule: {
+    event: 'deployment-failed' | 'app-outage' | 'secret-updated';
+    enabled: boolean;
+    environment?: string;
   };
   /** POST /api/v1/teams */
   createTeam: {
@@ -650,6 +681,12 @@ export interface ApiRequestBodies {
   updateAccountProfile: {
     username: string;
     displayName: string;
+  };
+  /** PUT /api/v1/instances/{instanceId}/notification-rules/{ruleId} */
+  updateNotificationRule: {
+    event: 'deployment-failed' | 'app-outage' | 'secret-updated';
+    enabled: boolean;
+    environment?: string;
   };
   /** PATCH /api/v1/teams/{teamId}/members/{personId} */
   updateTeamMemberRole: {
@@ -765,12 +802,28 @@ export interface ApiResponses {
     '404': Error;
     '409': Error;
   };
+  /** POST /api/v1/instances/{instanceId}/notification-rules */
+  createNotificationRule: {
+    '201': NotificationRule;
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '409': Error;
+  };
   /** POST /api/v1/teams */
   createTeam: {
     '201': TeamWithRole;
     '400': Error;
     '401': Error;
     '409': Error;
+  };
+  /** DELETE /api/v1/instances/{instanceId}/notification-rules/{ruleId} */
+  deleteNotificationRule: {
+    '204': void;
+    '401': Error;
+    '403': Error;
+    '404': Error;
   };
   /** DELETE /api/v1/instances/{instanceId} */
   destroyInstance: {
@@ -1009,6 +1062,21 @@ export interface ApiResponses {
     '200': Invitation[];
     '401': Error;
     '409': Error;
+  };
+  /** GET /api/v1/me/notifications */
+  listMyNotifications: {
+    '200': {
+      rules: NotificationRule[];
+      updates: Array<{
+        id: string;
+        instanceId: string;
+        event: 'deployment-failed' | 'app-outage' | 'secret-updated';
+        at: string;
+        environment?: string;
+      }>;
+    };
+    '401': Error;
+    '403': Error;
   };
   /** GET /api/v1/instances/{instanceId}/secrets */
   listSecretPresence: {
@@ -1306,6 +1374,15 @@ export interface ApiResponses {
     '403': Error;
     '503': Error;
   };
+  /** PUT /api/v1/instances/{instanceId}/notification-rules/{ruleId} */
+  updateNotificationRule: {
+    '200': NotificationRule;
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '409': Error;
+  };
   /** PATCH /api/v1/teams/{teamId}/members/{personId} */
   updateTeamMemberRole: {
     '204': void;
@@ -1385,8 +1462,12 @@ export const ENDPOINTS = {
   createInstance: { method: 'post', path: '/api/v1/instances' },
   /** POST /api/v1/teams/{teamId}/invitations */
   createInvitation: { method: 'post', path: '/api/v1/teams/{teamId}/invitations' },
+  /** POST /api/v1/instances/{instanceId}/notification-rules */
+  createNotificationRule: { method: 'post', path: '/api/v1/instances/{instanceId}/notification-rules' },
   /** POST /api/v1/teams */
   createTeam: { method: 'post', path: '/api/v1/teams' },
+  /** DELETE /api/v1/instances/{instanceId}/notification-rules/{ruleId} */
+  deleteNotificationRule: { method: 'delete', path: '/api/v1/instances/{instanceId}/notification-rules/{ruleId}' },
   /** DELETE /api/v1/instances/{instanceId} */
   destroyInstance: { method: 'delete', path: '/api/v1/instances/{instanceId}' },
   /** DELETE /api/v1/teams/{teamId}/marketplace/installations/{installationId} */
@@ -1439,6 +1520,8 @@ export const ENDPOINTS = {
   listInvitations: { method: 'get', path: '/api/v1/teams/{teamId}/invitations' },
   /** GET /api/v1/me/invitations */
   listMyInvitations: { method: 'get', path: '/api/v1/me/invitations' },
+  /** GET /api/v1/me/notifications */
+  listMyNotifications: { method: 'get', path: '/api/v1/me/notifications' },
   /** GET /api/v1/instances/{instanceId}/secrets */
   listSecretPresence: { method: 'get', path: '/api/v1/instances/{instanceId}/secrets' },
   /** GET /api/v1/teams/{teamId}/activity */
@@ -1483,6 +1566,8 @@ export const ENDPOINTS = {
   unlockStarterOpenBao: { method: 'post', path: '/api/v1/teams/{teamId}/starter-launch/openbao/unlock' },
   /** PUT /api/v1/me/profile */
   updateAccountProfile: { method: 'put', path: '/api/v1/me/profile' },
+  /** PUT /api/v1/instances/{instanceId}/notification-rules/{ruleId} */
+  updateNotificationRule: { method: 'put', path: '/api/v1/instances/{instanceId}/notification-rules/{ruleId}' },
   /** PATCH /api/v1/teams/{teamId}/members/{personId} */
   updateTeamMemberRole: { method: 'patch', path: '/api/v1/teams/{teamId}/members/{personId}' },
 } as const satisfies Record<OperationId, Endpoint>;

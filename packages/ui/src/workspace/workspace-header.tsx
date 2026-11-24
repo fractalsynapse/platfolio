@@ -31,6 +31,7 @@ export function WorkspaceHeader({ teams, team, invitationCount, signOut }: Works
         <WorkspaceLink className="ui-workspace-item ui-hit-primary" href={workspacePaths.invitations}>
           Invitations{invitationCount ? ` (${invitationCount})` : ''}
         </WorkspaceLink>
+        <WorkspaceLink className="ui-workspace-item ui-hit-primary" href={workspacePaths.notifications}>Notifications</WorkspaceLink>
         <button className="ui-workspace-item ui-hit-primary" type="button" onClick={signOut}>Log out</button>
       </WorkspaceMenu>
     </nav>

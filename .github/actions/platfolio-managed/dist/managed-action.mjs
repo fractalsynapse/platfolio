@@ -25068,7 +25068,7 @@ function date4(params) {
 }
 
 // packages/contracts/src/generated/contract-version.ts
-var CONTRACT_VERSION = "5.9.0";
+var CONTRACT_VERSION = "5.10.0";
 
 // packages/contracts/src/infra.ts
 var OPERATIONS = [
@@ -27392,6 +27392,14 @@ var HostedStarterSchema = external_exports.object({
   state: external_exports.enum(["live", "paused", "removed"]),
   origin: external_exports.url({ protocol: /^https$/ }).max(240),
   observedAt: external_exports.iso.datetime()
+}).strict();
+var NotificationRuleSchema = external_exports.object({
+  id: external_exports.string().min(1),
+  instanceId: external_exports.string().min(1),
+  event: external_exports.enum(["deployment-failed", "app-outage", "secret-updated"]),
+  enabled: external_exports.boolean(),
+  createdAt: external_exports.iso.datetime(),
+  environment: external_exports.string().min(1).max(60).optional()
 }).strict();
 var RepoConnectionSchema = external_exports.object({
   instanceId: external_exports.string().min(1),

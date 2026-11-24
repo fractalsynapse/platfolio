@@ -5,6 +5,7 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+- Added personal in-app notification rules for failed deployments, outages, and environment secret updates, scoped to current team memberships (#288).
 - Added private availability checks and an outage timeline for hosted Starter Web. Planned stops remain visible separately from outages (#288).
 - Show verified deployments and hosting activity in each team workspace, with links to deployment evidence and app management (#288).
 - Added team tabs for the owner roster and private installation connections and added management links to hosted Starter Web. Owners can update teammate roles or remove members (#288).
