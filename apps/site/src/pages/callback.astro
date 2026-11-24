@@ -5,6 +5,6 @@ import { publicConfigOf, resolveSiteConfig } from '../lib/site-config.ts';
 
 const config = resolveSiteConfig(process.env);
 ---
-<Page title="Dashboard — platfolio" scriptSrc="/config.js">
+<Page title="Workspace — Platfolio" scriptSrc="/config.js" workspace>
   <DashboardIsland client:only="react" config={publicConfigOf(config)} callback />
 </Page>

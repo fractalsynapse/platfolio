@@ -1,3 +1,4 @@
+import { workspacePaths, workspaceReturnPath } from '../workspace/routes.ts';
 /**
  * The browser's side of the `platfolio-web` PKCE flow, as the SDK's `AuthSource` (D65; 11 §6; 07 §identity).
  *
@@ -226,8 +227,8 @@ export function createTokenBag(): TokenBag {
 export interface BrowserAuthSource {
   /** The `AuthSource` the SDK consumes. */
   readonly token: () => Promise<string>;
-  readonly begin: () => Promise<string>;
-  readonly complete: (params: URLSearchParams) => Promise<'signed-in' | 'no-handoff' | 'state-mismatch' | 'refused'>;
+  readonly begin: (returnPath?: string) => Promise<string>;
+  readonly complete: (params: URLSearchParams, onSignedIn?: (returnPath: string) => void) => Promise<'signed-in' | 'no-handoff' | 'state-mismatch' | 'refused'>;
   readonly refresh: () => Promise<'refreshed' | 'no-refresh-token' | 'refused'>;
   readonly signedIn: () => boolean;
   /** The URL a person should land on after the issuer ends the session; the bag is emptied first. */
@@ -292,13 +293,15 @@ export function createBrowserAuthSource(
 
   return {
     config: { clientId, scope, callbackUrl },
-    begin: async () => {
+    begin: async (returnPath) => {
       const verifier = createVerifierWith(deps.random);
       const pair = await pkceChallengeWith(deps.digest, verifier);
       const state = base64Url(deps.random(24));
       // The handoff is written, not kept: the navigation that follows discards this module's memory.
       deps.handoff.write(HANDOFF.verifier, pair.verifier);
-      deps.handoff.write(HANDOFF.state, state);
+      const destination = workspaceReturnPath(returnPath);
+      // The issuer receives only the nonce. The validated route stays in the tab's read-once state record.
+      deps.handoff.write(HANDOFF.state, destination ? `${state}:${destination}` : state);
       const authorize = new URL(endpoints.authorize);
       authorize.searchParams.set('client_id', clientId);
       authorize.searchParams.set('redirect_uri', callbackUrl);
@@ -309,7 +312,7 @@ export function createBrowserAuthSource(
       authorize.searchParams.set('code_challenge', pair.challenge);
       return authorize.toString();
     },
-    complete: async (params) => {
+    complete: async (params, onSignedIn) => {
       const state = params.get('state');
       const code = params.get('code');
       const storedState = deps.handoff.read(HANDOFF.state);
@@ -317,7 +320,8 @@ export function createBrowserAuthSource(
       const verifier = deps.handoff.read(HANDOFF.verifier);
       deps.handoff.drop(HANDOFF.verifier); // read-once: the verifier is spent the moment it is read
       if (verifier === undefined || storedState === undefined) return 'no-handoff';
-      if (state === null || state !== storedState) return 'state-mismatch';
+      const [nonce, returnPath] = storedState.split(':', 2);
+      if (state === null || state !== nonce) return 'state-mismatch';
       if (code === null || code === '') return 'refused';
       const pair = await pkceChallengeWith(deps.digest, verifier);
       const tokens = await post({
@@ -328,6 +332,7 @@ export function createBrowserAuthSource(
         code_verifier: pair.verifier,
       });
       bag.set(tokens, now());
+      onSignedIn?.(workspaceReturnPath(returnPath) ?? workspacePaths.home);
       return 'signed-in';
     },
     refresh: refreshSession,

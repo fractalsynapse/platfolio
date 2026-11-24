@@ -18,6 +18,7 @@ import '../styles/site.css';
 interface Props {
   title: string;
   description?: string;
+  workspace?: boolean;
   /** A page that mounts an island names the overlay here; a page that ships no JavaScript leaves it undefined. */
   scriptSrc?: string;
 }
@@ -26,6 +27,7 @@ const {
   title,
   description = 'Managed hosting of standalone platforms on infrastructure the tenant owns.',
   scriptSrc,
+  workspace = false,
 } = Astro.props;
 const origin = Astro.site ?? new URL(Astro.request.url).origin;
 ---
@@ -39,6 +41,7 @@ const origin = Astro.site ?? new URL(Astro.request.url).origin;
     <link rel="canonical" href={new URL(Astro.url.pathname, origin)} />
   </head>
   <body>
+    {workspace ? <slot /> : <>
     <header class="site-header">
       <a class="site-brand" href="/">platfolio</a>
       <nav aria-label="Primary">
@@ -58,6 +61,7 @@ const origin = Astro.site ?? new URL(Astro.request.url).origin;
         <a href="https://github.com/fractalsynapse/platfolio">fractalsynapse/platfolio</a>.
       </p>
     </footer>
+    </>}
     {scriptSrc !== undefined ? <script is:inline src={scriptSrc}></script> : null}
   </body>
 </html>

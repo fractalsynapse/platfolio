@@ -1,3 +1,4 @@
+import { WORKSPACE_SCREEN } from './workspace.ts';
 import { STARTER_LAUNCH_SCREEN } from './starter-launch.tsx';
 import { INSTANCE_LIST_SCREEN } from './instance-list.tsx';
 import type { ScreenDocument } from './screen.ts';
@@ -11,7 +12,7 @@ export * from './screen.ts';
  *
  * Each addition to the table is checked separately for §9.11 capability parity.
  */
-export const SCREENS = [INSTANCE_LIST_SCREEN, STARTER_LAUNCH_SCREEN] as const satisfies readonly ScreenDocument[];
+export const SCREENS = [INSTANCE_LIST_SCREEN, STARTER_LAUNCH_SCREEN, WORKSPACE_SCREEN] as const satisfies readonly ScreenDocument[];
 
 export { INSTANCE_LIST_SCREEN };
 export { InstanceListScreen } from './instance-list.tsx';
