@@ -8,6 +8,7 @@ import { ScmNotConfiguredError } from '@platfolio/kernel';
 import { buildPlan, FREE_STARTER_RELEASE, parseCompose, templateCatalogEntry } from '@platfolio/manifest';
 import type { ExtensionDescriptor, KernelContext, Request, Response_, RouteDefinition } from '@platfolio/kernel';
 import { ArtifactRecordSchema, secretWriteScope } from '@platfolio/contracts';
+import type { StarterLaunch } from './starter-launch.ts';
 import { badRequest, bearerToken, notFound, send, unauthorized } from './respond.ts';
 
 /**
@@ -27,6 +28,7 @@ export interface CapabilityDeps {
   now?: () => Date;
   dispatchTtlMs?: number;
   marketplaceEnabled?: boolean;
+  starterLaunch?: StarterLaunch;
 }
 
 const nowOf = (deps: CapabilityDeps): Date => (deps.now?.() ?? new Date());
@@ -1088,6 +1090,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
     requires: ['store', 'identity', 'infra'],
     routes: [
       scoped('PUT', '/api/v1/instances/{instanceId}/secrets/{name}', 'putSecret', 'instance.secret.write', async (scope, request, params) => {
+        if (deps.starterLaunch) return { status: 503, body: { error: 'secret-store-unavailable', message: 'Wait for your customer OpenBao connection before sending app secrets.' } };
         // Write-through: the value is handed to the provider and kept nowhere. There is no assignment to a
         // local variable that survives this function, no audit field that could carry it, and the success
         // response is 204 with no body -- an echo would be the leak.
@@ -1209,7 +1212,27 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
     ],
   };
 
-  return [core, instances, dispatches, audit, teams, bindings, invitations, secrets, controller, marketplace];
+  const launcher: ExtensionDescriptor = {
+    id: 'starter-launch',
+    requires: ['identity', 'store'],
+    routes: [
+      scoped('GET', '/api/v1/teams/{teamId}/starter-launch', 'getStarterLaunch', 'marketplace.manage', async ({ teamId }) =>
+        deps.starterLaunch?.teamId === teamId
+          ? send('getStarterLaunch', 200, deps.starterLaunch.read()) : notFound('launch', 'starter')),
+      scoped('POST', '/api/v1/teams/{teamId}/starter-launch', 'startStarterLaunch', 'marketplace.manage', async ({ teamId }) =>
+        deps.starterLaunch?.teamId === teamId
+          ? send('startStarterLaunch', 200, deps.starterLaunch.start()) : notFound('launch', 'starter')),
+      scoped('POST', '/api/v1/teams/{teamId}/starter-launch/remove', 'removeStarterLaunch', 'marketplace.manage', async ({ teamId }, request) => {
+        if (deps.starterLaunch?.teamId !== teamId) return notFound('launch', 'starter');
+        const body = bodyOf<{ data: 'keep' | 'wipe'; confirmation?: string }>(request);
+        if (!body.ok || !body.value || !['keep', 'wipe'].includes(body.value.data)) return badRequest('Select keep data or wipe data');
+        if (body.value.data === 'wipe' && body.value.confirmation !== 'starter-web') return badRequest('Type starter-web to confirm deletion of its data');
+        return send('removeStarterLaunch', 200, deps.starterLaunch.remove(body.value.data));
+      }),
+    ],
+  };
+
+  return [core, instances, dispatches, audit, teams, bindings, invitations, secrets, controller, marketplace, launcher];
 }
 
 export type { VerifiedClaims };

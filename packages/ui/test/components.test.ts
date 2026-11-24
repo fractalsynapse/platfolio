@@ -1,3 +1,4 @@
+import { SdkProvider, type SdkContextValue } from '../src/sdk/use-operation.ts';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
@@ -80,7 +81,13 @@ function propsFor(componentId: string): Record<string, unknown> {
  */
 function render(componentId: string, props: Record<string, unknown>, bus: SignalBus = contextualBus()): string {
   const contract = componentById(componentId);
-  return renderToStaticMarkup(React.createElement(SignalsProvider, { bus }, React.createElement(contract.render, props)));
+  const sdk: SdkContextValue = {
+    transport: { kind: 'poll', call: async () => ({ ok: false, error: { status: 503, code: 'fixture', message: 'No request during static rendering' } }) },
+    auth: { token: async () => { throw new Error('No token during static rendering'); } },
+    now: () => new Date(SAMPLE_NOW),
+  };
+  return renderToStaticMarkup(React.createElement(SdkProvider, { value: sdk },
+    React.createElement(SignalsProvider, { bus }, React.createElement(contract.render, props))));
 }
 
 /* ------------------------------------------------------------------ registration renders */

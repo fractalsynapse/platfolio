@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createKernel, disposeKernel } from '@platfolio/kernel';
+import type { StarterLaunch, StarterRemoval } from '../src/starter-launch.ts';
 import { buildCapabilities, OPERATION_ACTIONS } from '../src/capabilities.ts';
 import { createIdentityFixture, defaultIdentityConfig, POLICY, reasonOf, signToken, uncoveredActions, type StoreResult, type PolicyAction } from '@platfolio/contracts';
 
@@ -12,11 +13,11 @@ function must<T>(result: StoreResult<T>, label: string): T {
   throw new Error(`${label} refused: ${reasonOf(result)}`);
 }
 
-async function start() {
+async function start(starterLaunch?: StarterLaunch) {
   const ctx = await createKernel({
     provider: 'fake', custody: 'strict', identity: defaultIdentityConfig(fixture), identityKeys: [fixture.jwk],
     store: { driver: 'memory' }, server: { port: 0 },
-    extensions: buildCapabilities({ build: { version: '1', commit: 'a'.repeat(40), buildTime: '2026-11-11T00:00:00.000Z' } }),
+    extensions: buildCapabilities({ build: { version: '1', commit: 'a'.repeat(40), buildTime: '2026-11-11T00:00:00.000Z' }, ...(starterLaunch ? { starterLaunch } : {}) }),
     requiredServices: ['identity', 'server', 'store', 'extensions'],
   });
   const call = async (p: string, init: RequestInit = {}, subject = 'owner-subject') => {
@@ -100,4 +101,35 @@ test('the destructive verb is owner-only at the policy layer before the route ex
   assert.equal(POLICY['instance.destroy'], 'owner');
   assert.equal(POLICY['capability.share'], 'owner');
   assert.equal(POLICY['team.invite'], 'owner');
+});
+
+
+test('the customer launch confines removal to its owner and requires a separate wipe confirmation', async () => {
+  let teamId = '';
+  const selections: StarterRemoval[] = [];
+  const report = { state: 'idle', template: 'starter-web', revision: 'pinned', events: [], retainedVolumes: [] } as const;
+  const read = () => ({ ...report, events: [], retainedVolumes: [] });
+  const app = await start({ get teamId() { return teamId; }, read, start: read, remove(data) { selections.push(data); return read(); } });
+  try {
+    const { team, instance } = await app.seed('launch-role-lab');
+    teamId = team.id;
+    const path = `/api/v1/teams/${team.id}/starter-launch/remove`;
+    const wipe = { method: 'POST', body: JSON.stringify({ data: 'wipe', confirmation: 'starter-web' }) };
+    assert.equal((await app.call(path, wipe, 'outsider')).status, 404);
+    assert.equal((await app.call(path, wipe, 'member-subject')).status, 403);
+    assert.equal((await app.call(path, { method: 'POST', body: JSON.stringify({ data: 'wipe' }) })).status, 400);
+    assert.deepEqual(selections, []);
+    assert.equal((await app.call(path, { method: 'POST', body: JSON.stringify({ data: 'keep' }) })).status, 200);
+    assert.deepEqual(selections, ['keep']);
+    assert.equal((await app.call(path, wipe)).status, 200);
+    assert.deepEqual(selections, ['keep', 'wipe']);
+    const denied = await app.call(`/api/v1/instances/${instance.id}/secrets/APP_SECRET`, {
+      method: 'PUT', body: JSON.stringify({ service: 'web', environment: 'staging', value: 'must-never-pass' }),
+    });
+    assert.equal(denied.status, 503);
+    assert.equal(denied.body?.error, 'secret-store-unavailable');
+    assert.doesNotMatch(denied.text, /must-never-pass/);
+  } finally {
+    await disposeKernel(app.ctx);
+  }
 });

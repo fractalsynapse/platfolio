@@ -1,15 +1,11 @@
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { readFile, stat, writeFile } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
-import { GitScm } from '../packages/contracts/src/git-scm.ts';
-import { FREE_STARTER_RELEASE, parseInventory, readTemplate, templateCatalogEntry } from '../packages/manifest/src/index.ts';
-import { customerRailway } from './customer-railway.ts';
-import { parse as parseYaml } from 'yaml';
+import { FREE_STARTER_RELEASE, templateCatalogEntry } from '../packages/manifest/src/index.ts';
+import { launchStarterApp } from './launch-starter-app.ts';
 
 const { positionals: [action], values: args } = parseArgs({ allowPositionals: true, options: {
   hub: { type: 'string' }, team: { type: 'string' }, installation: { type: 'string' },
-  'identity-file': { type: 'string' }, receipt: { type: 'string' }, project: { type: 'string' },
+  'identity-file': { type: 'string' }, app: { type: 'string' }, receipt: { type: 'string' }, project: { type: 'string' },
 } });
 const installation = args.installation;
 if (!installation || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(installation)) {
@@ -52,39 +48,9 @@ if (action === 'connect' || action === 'disconnect') {
   await writeFile(args.receipt, JSON.stringify(receipt, null, 2) + '\n', { flag: 'wx', mode: 0o600 });
   console.log(`${listing.template} ${listing.version} claimed at ${listing.revision}`);
 } else if (action === 'install') {
-  if (!args.receipt || !args.project) throw new Error('Pass the acquired --receipt and customer Railway --project');
+  if (!args.receipt) throw new Error('Pass the acquired --receipt');
   verifyReceipt(JSON.parse(await readFile(args.receipt, 'utf8')));
-  const scm = new GitScm();
-  const source = await readTemplate((request) => scm.readRepositoryFile(request), entry, listing.revision);
-  // This uses Railway's source builder. An image-based InfraPlan is only valid after an artifact is published.
-  const compose = parseYaml(source.compose) as { services?: Record<string, { build?: { dockerfile?: string } }>; 'x-platfolio'?: { metadata?: { name?: string; version?: string }; resources?: { database?: { kind?: string } } } };
-  const metadata = compose['x-platfolio']?.metadata;
-  const inventory = parseInventory(source.inventory ?? '');
-  const database = inventory.entries.find((variable) => variable.name === 'DATABASE_URL');
-  if (metadata?.name !== listing.template || metadata.version !== listing.version || compose.services?.web?.build?.dockerfile !== 'Dockerfile' ||
-      compose['x-platfolio']?.resources?.database?.kind !== 'postgres' || inventory.issues.length || database?.kind !== 'reference' ||
-      database.service !== 'web' || database.database !== 'app-db' || database.output !== 'DATABASE_URL') {
-    throw new Error('Pinned starter does not match the reviewed source-build and database placement');
-  }
-  const rail = await customerRailway(args.project);
-  await rail.privatePostgres('app-db-staging');
-  const web = await rail.ensureService('web-staging');
-  await rail.setConfig(web, 'PORT', '8080');
-  await rail.setConfig(web, 'DATABASE_URL', '${{app-db-staging.DATABASE_URL}}');
-  await rail.configure(web, { numReplicas: 1, healthcheckPath: '/healthz', healthcheckTimeout: 120 });
-  const archive = await mkdtemp(join(tmpdir(), 'platfolio-starter-build-'));
-  try {
-    for (const [path, content] of Object.entries(source.sources)) {
-      const target = join(archive, path);
-      await mkdir(dirname(target), { recursive: true });
-      await writeFile(target, content);
-    }
-    const deployment = rail.upload(web, archive, `Marketplace ${listing.template} at ${listing.revision}`);
-    await rail.wait(web, deployment);
-    console.log(JSON.stringify({ project: rail.project.id, service: web, deployment, template: listing.template, revision: listing.revision, blobs: source.blobs }));
-  } finally {
-    await rm(archive, { recursive: true, force: true });
-  }
+  console.log(JSON.stringify(await launchStarterApp(args.app ?? listing.template, args.project)));
 } else {
   throw new Error('Use connect, claim, install, or disconnect');
 }

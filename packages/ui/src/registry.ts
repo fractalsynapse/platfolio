@@ -1,3 +1,4 @@
+import { starterLaunch } from './components/starter-launch.tsx';
 import { contractProblems, type AnyComponentContract } from './contract.ts';
 import { contextSwitcher, freshnessLabel, instanceDetail, instanceList, instanceRow, instanceState } from './components/instances.tsx';
 
@@ -48,6 +49,7 @@ const COMPONENTS = {
   'instance.list': instanceList,
   'instance.row': instanceRow,
   'instance.state': instanceState,
+  'launch.starter': starterLaunch,
 } as const satisfies Record<string, AnyComponentContract>;
 
 export type ComponentId = keyof typeof COMPONENTS;

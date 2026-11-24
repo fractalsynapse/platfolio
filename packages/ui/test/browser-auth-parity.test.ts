@@ -10,6 +10,7 @@ import {
   PKCE_METHOD,
   RECOMMENDED_STORE,
   REQUIRED_SCOPE,
+  LOGIN_SCOPES,
   TOKEN_STORAGE,
   WEB_CLIENT_ID,
   codeChallenge,
@@ -275,7 +276,7 @@ test('sign-in writes the handoff, asks for the enrolled parameters, and opens no
   assert.deepEqual(requests, [], 'begin() must not reach the token endpoint: a person is being sent to the issuer, not authenticated behind their back');
   assert.equal(`${authorize.origin}${authorize.pathname}`, `${ISSUER}/protocol/openid-connect/auth`, 'the authorize URL must be the realm path the operator scripts use');
   assert.equal(authorize.searchParams.get('client_id'), WEB_CLIENT_ID);
-  assert.equal(authorize.searchParams.get('scope'), REQUIRED_SCOPE);
+  assert.equal(authorize.searchParams.get('scope'), LOGIN_SCOPES);
   assert.equal(authorize.searchParams.get('response_type'), 'code');
   assert.equal(authorize.searchParams.get('code_challenge_method'), PKCE_METHOD);
   assert.equal(authorize.searchParams.get('redirect_uri'), `${ORIGIN}${CALLBACK_PATH}`, 'the realm admits <origin>/callback and nothing else (scripts/browser-auth.ts, seeded from PLATFOLIO_ALLOWED_ORIGINS)');

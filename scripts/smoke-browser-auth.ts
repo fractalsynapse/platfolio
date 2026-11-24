@@ -111,7 +111,7 @@
  * ============================================================================
  */
 import { parseArgs } from 'node:util';
-import { API_CLIENT_ID, LOOPBACK_UI_ORIGIN, PKCE_CHALLENGE_ATTRIBUTE, PKCE_METHOD, REQUIRED_SCOPE, WEB_CLIENT_ID, browserClientMappers, codeChallenge, createPkcePair, endSessionUrl, isPkceVerifier, refreshSkewSeconds } from './browser-auth.ts';
+import { API_CLIENT_ID, LOGIN_SCOPES, LOOPBACK_UI_ORIGIN, PKCE_CHALLENGE_ATTRIBUTE, PKCE_METHOD, REQUIRED_SCOPE, WEB_CLIENT_ID, browserClientMappers, codeChallenge, createPkcePair, endSessionUrl, isPkceVerifier, refreshSkewSeconds } from './browser-auth.ts';
 
 const { values: flags } = parseArgs({
   options: {
@@ -242,7 +242,7 @@ async function authorize(opts: {
   u.searchParams.set('client_id', WEB_CLIENT);
   u.searchParams.set('redirect_uri', opts.redirectOverride ?? redirectUri);
   u.searchParams.set('response_type', 'code');
-  u.searchParams.set('scope', opts.scope ?? 'openid profile email');
+  u.searchParams.set('scope', opts.scope ?? LOGIN_SCOPES);
   u.searchParams.set('state', state);
   u.searchParams.set('nonce', `n-${Math.random().toString(36).slice(2, 10)}`);
   const challenge = opts.challengeOverride ?? (opts.omitChallenge ? undefined : await challengeFor(verifier));
@@ -618,7 +618,7 @@ section('F. cross-realm: a browser token from another realm is refused here');
       pu.searchParams.set('client_id', WEB_CLIENT);
       pu.searchParams.set('redirect_uri', redirectUri);
       pu.searchParams.set('response_type', 'code');
-      pu.searchParams.set('scope', 'openid profile email');
+      pu.searchParams.set('scope', LOGIN_SCOPES);
       pu.searchParams.set('state', 'peer');
       pu.searchParams.set('code_challenge', await challengeFor(pv));
       pu.searchParams.set('code_challenge_method', 'S256');

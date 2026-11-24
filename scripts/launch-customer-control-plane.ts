@@ -8,7 +8,8 @@ import { readReleaseCandidate } from './platform-candidate.ts';
 export async function customerControlPlanePlan(candidateFile: string) {
   const candidate = readReleaseCandidate(candidateFile);
   const checkout = await readFile(resolve(import.meta.dirname, '../compose.yaml'), 'utf8');
-  const { manifest, issues } = parseCompose([checkout], { resolveArtifact: (service) => {
+  const customer = await readFile(resolve(import.meta.dirname, '../compose.customer.yaml'), 'utf8');
+  const { manifest, issues } = parseCompose([checkout, customer], { resolveArtifact: (service) => {
     const image = candidate.images[service];
     if (!image) throw new Error(`Candidate has no pinned image for ${service}`);
     return `${image.image}@${image.digest}`;
@@ -56,17 +57,31 @@ export async function launchCustomerControlPlane(stage: Stage, plan: Awaited<Ret
   await stage.setConfig(identity.service, 'KC_BOOTSTRAP_ADMIN_PASSWORD', admin).catch(() => {
     throw new Error('Railway rejected the customer Keycloak bootstrap credential');
   });
-  await stage.deployImage(identity.service);
-  await Promise.all([stage.deployImage(api.service), stage.deployImage(site.service)]);
-  for (const [origin, path] of [[identity.origin, '/realms/master'], [api.origin, '/status'], [site.origin, '/status']] as const) {
-    let healthy = false;
-    for (let attempt = 0; attempt < 40; attempt++) {
-      const response = await fetch(origin + path, { redirect: 'error', signal: AbortSignal.timeout(3000) }).catch(() => undefined);
-      await response?.body?.cancel();
-      if (response?.ok) { healthy = true; break; }
-      await delay(1500);
+  const pending = new Map(services.map((item) => [item.name, item]));
+  const complete = new Set<string>();
+  while (pending.size) {
+    const next = [...pending.values()].filter(({ spec }) => spec.dependsOn.every((name) => complete.has(name)));
+    if (!next.length) throw new Error('Customer launch dependencies form a cycle or refer to a missing service');
+    for (const { spec } of next) {
+      if (Object.values(spec.dependencyConditions ?? {}).includes('service_completed_successfully')) {
+        throw new Error('This launcher needs a verified job result before it can start that dependent service');
+      }
     }
-    if (!healthy) throw new Error(`Railway ingress did not become ready for ${origin}${path}`);
+    await Promise.all(next.map(async (item) => {
+      await stage.deployImage(item.service);
+      const path = item.spec.healthPath ?? '/status';
+      for (let attempt = 0; attempt < 40; attempt++) {
+        const response = await fetch(item.origin + path, { redirect: 'error', signal: AbortSignal.timeout(3000) }).catch(() => undefined);
+        await response?.body?.cancel();
+        if (response?.ok) {
+          complete.add(item.name);
+          pending.delete(item.name);
+          return;
+        }
+        await delay(1500);
+      }
+      throw new Error(`Railway ingress did not become ready for ${item.origin}${path}`);
+    }));
   }
   return { api: api.origin, site: site.origin, identity: identity.origin, sourceCommit: plan.sourceCommit };
 }

@@ -41,6 +41,7 @@
 export const WEB_CLIENT_ID = 'platfolio-web';
 export const API_CLIENT_ID = 'platfolio-api';
 export const REQUIRED_SCOPE = 'platfolio.user';
+export const LOGIN_SCOPES = 'openid profile email';
 /** The path the UI signs in from. Derived from the origin so seed, smoke and UI agree on one string. */
 export const CALLBACK_PATH = '/callback';
 

@@ -3,6 +3,7 @@ import { EndpointKeySource, IdentityConfigSchema, redactCredentialShaped } from 
 import { ROUTE_MANIFEST } from './routes.ts';
 import { buildCapabilities } from './capabilities.ts';
 import { describeAllowedOriginsConfig, parseAllowedOrigins, type CorsBootConfig } from './cors.ts';
+import type { StarterLaunch } from './starter-launch.ts';
 import { isReleaseTag } from './release-tag.ts';
 
 export { ROUTE_MANIFEST };
@@ -12,6 +13,7 @@ export interface BootConfig {
   issuer: string;
   audience: string;
   marketplaceEnabled?: boolean;
+  starterLaunch?: StarterLaunch;
   jwksUri?: string;
   host: string;
   port: number;
@@ -200,7 +202,7 @@ export async function boot(config: BootConfig, fetchImpl: typeof fetch = fetch) 
     // that exists only in the operator's head. An empty list is passed through rather than dropped, so "no list"
     // has one spelling all the way down to the transport.
     server: { host: config.host, port: config.port, cors: { allowedOrigins: [...config.cors?.allowedOrigins ?? []] } },
-    extensions: buildCapabilities({ build: config.build, marketplaceEnabled: config.marketplaceEnabled ?? false }),
+    extensions: buildCapabilities({ build: config.build, marketplaceEnabled: config.marketplaceEnabled ?? false, ...(config.starterLaunch ? { starterLaunch: config.starterLaunch } : {}) }),
     requiredServices: ['identity', 'server', 'store', 'extensions'],
   });
   ctx.identity.attachKeySource(new EndpointKeySource(identity, fetchImpl, config.jwksUri));

@@ -71,6 +71,7 @@ const Service = z.object({
   ownership: z.enum(['maintained', 'external']).default('maintained'),
   domains: z.array(z.string().min(1)).default([]),
   dependsOn: z.array(Name).default([]),
+  dependencyConditions: z.record(Name, z.enum(['service_started', 'service_healthy', 'service_completed_successfully'])).optional(),
   public: z.boolean().default(false),
   /**
    * Wiring from a declared database into a service variable. Deliberately NOT part of `secrets[]`: a

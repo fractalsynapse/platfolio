@@ -55,6 +55,7 @@ import {
   LOGOUT_CLEAR,
   PKCE_METHOD,
   RECOMMENDED_STORE,
+  LOGIN_SCOPES,
   REQUIRED_SCOPE,
   TOKEN_STORAGE,
   WEB_CLIENT_ID,
@@ -248,7 +249,7 @@ export function createBrowserAuthSource(
   deps: { request: IssuerRequest; digest: Digest; random: RandomBytes; handoff: HandoffStore; now?: () => number },
 ): BrowserAuthSource {
   const clientId = config.clientId ?? WEB_CLIENT_ID;
-  const scope = config.scope ?? REQUIRED_SCOPE;
+  const scope = config.scope ?? LOGIN_SCOPES;
   const endpoints = endpointsForIssuer(config.issuerBaseUrl);
   const now = deps.now ?? (() => Date.now());
   const bag = createTokenBag();

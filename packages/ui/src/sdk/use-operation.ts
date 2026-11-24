@@ -1,5 +1,5 @@
 import * as React from 'react';
-import type { OperationId, ParamsOf } from '@platfolio/api-contract/generated/types';
+import type { OperationId, ParamsOf, RequestBodyOf } from '@platfolio/api-contract/generated/types';
 import type { AuthSource, Freshness, Loaded, OperationResult, State, Transport } from './transport.ts';
 import { isLoaded } from './transport.ts';
 import { applyResult, initial } from './state.ts';
@@ -123,3 +123,10 @@ export function useOperation<O extends OperationId>(operation: O, input: UseOper
 
 export { isLoaded };
 export type { Loaded };
+
+/** Commands are called from a user action and never acquire the polling subscription. */
+export function useCommand<O extends OperationId>(operation: O) {
+  const { transport, auth } = useSdk();
+  return React.useCallback((input: { params: ParamsOf<O>; body?: RequestBodyOf<O> }) =>
+    transport.call(operation, input, auth), [operation, transport, auth]);
+}

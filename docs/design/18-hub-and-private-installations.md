@@ -207,8 +207,9 @@ owner assigns one. Paid claims build on the free install path.
 
 ## Customer launcher and free claim pilot
 
-The operator runs the launcher in a customer-owned Railway workspace, targeting a project
-with a single staging environment. The customer supplies the workspace credential locally,
+The operator runs the launcher in a customer-owned Railway workspace. The installation uses
+a project named `platfolio` and each hosted app uses its own project named for that app.
+The pilot uses one staging environment in each project. The customer supplies the workspace credential locally,
 a verified Platfolio CI candidate, and a strong Keycloak bootstrap password in a private
 file. The launcher locates the project in that workspace before applying anything. It
 renders the candidate using the existing Platfolio description, provisions a private
@@ -235,7 +236,7 @@ owner links a customer-generated installation ID and claims the fixed free relea
 hub persists the link and disconnects it permanently. The owner obtains a fresh access
 token for these operations. The launcher writes the claim receipt locally and hands Railway
 only the source files read through Git at the exact pinned revision. The install step uses
-a staging starter service and its private PostgreSQL, reusing them when present. Runtime
+a staging starter service and its private PostgreSQL in `starter-web`, reusing them when present. Runtime
 build base images retain the template's own policy. The pilot pins the template source revision.
 
 ```sh
@@ -244,7 +245,7 @@ pnpm exec tsx scripts/customer-marketplace.ts connect --hub "$hub" --team "$team
 pnpm exec tsx scripts/customer-marketplace.ts claim --hub "$hub" --team "$team" \
   --installation "$installation" --identity-file "$owner_token_file" --receipt "$receipt"
 pnpm exec tsx scripts/customer-marketplace.ts install --installation "$installation" \
-  --receipt "$receipt" --project "$project"
+  --receipt "$receipt" --project "$app_project"
 pnpm exec tsx scripts/customer-marketplace.ts disconnect --hub "$hub" --team "$team" \
   --installation "$installation" --identity-file "$owner_token_file"
 ```
@@ -264,8 +265,8 @@ use its existing instance and deployment records.
 ### Pilot results
 
 On November 24, 2026, the launcher placed the private site, API and Keycloak from CI candidate
-`36442bc15a0de5f2dcc6976fd3769dc875744c5d` in the existing `platfolio-starter-web` staging
-project. The private issuer, site and API answered over HTTPS. The six authorization-code and
+`36442bc15a0de5f2dcc6976fd3769dc875744c5d` in the original `platfolio-starter-web` staging
+pilot. That project has since been removed. The private issuer, site and API answered over HTTPS. The six authorization-code and
 PKCE checks passed against the private issuer and API. Platfolio and Keycloak use their own
 private Postgres service, separate from the starter database.
 
@@ -285,3 +286,47 @@ private Postgres service, separate from the starter database.
 The local hub ran the new registry code. The private Railway installation used the previously
 published CI candidate, with marketplace operations disabled. Hub enrollment and the private
 installation's sign-in remained independent throughout the pilot.
+
+
+### Browser launch and app removal
+
+The customer runs a local launch preview connected to a single team and Railway workspace.
+A team owner signs in, selects the connected team, and clicks **Launch starter** to install
+`starter-web` from the pinned free release. The launcher provides a Railway HTTPS link and
+creates the database automatically. The public template needs no GitHub grant, custom DNS,
+or app credential. The generated URL is public. Connecting a private repository and setting
+up Railway authorization for a first-time user are future steps.
+
+The launcher checks project ownership and service placement before making changes. It refuses
+an unrelated project that happens to have the same name. Platfolio uses the dependencies in
+`compose.customer.yaml` to wait for Keycloak and then API readiness before starting the site.
+Railway reports the state of each exact deployment. The launcher also checks its HTTPS health
+endpoint. The API readiness endpoint checks identity configuration and the database. OpenBao
+has private ingress only. Its worker can distinguish network reachability from a sealed store.
+This pilot refuses app secret delivery until customer-owned OpenBao authorization is wired.
+
+The browser shows each stage and offers a JSON troubleshooting report. It records the pinned
+release, provider resource IDs and statuses, operation timestamps, and safe recovery messages.
+Credentials, environment values, and raw build output stay out of the report. Keep the journal
+in a private location so a restarted preview can resume setup without duplicating resources.
+
+- **Remove and keep data** stops the app and database deployments and verifies the same volume
+  IDs still exist. The project retains its service settings and volumes. **Restore app** uses
+  that project again. Railway can continue to charge for the retained storage.
+- **Remove and wipe data** requires typing the app name. It deletes the app's Railway project
+  and schedules its storage for deletion under Railway's recovery policy. [Railway volume lifecycle](https://docs.railway.com/volumes/reference)
+
+The pilot's browser operations are owner-scoped and limited to the connected team. The
+workspace grant stays in the local runner. The hosted hub and the published private
+Platfolio candidate do not run this preview runner.
+
+The staging replacement used separate Railway projects named
+[`platfolio`](https://railway.com/project/25da1227-410c-4d3c-9bde-7b5faced4ee0) and
+[`starter-web`](https://railway.com/project/f74ef54e-178a-4dd9-93e9-66da088ca833).
+The old mixed pilot was removed, with three volumes queued for deletion. The local browser
+launched Starter Web, showed the report, and removed the app with data kept. Its public
+endpoint stopped answering and both deployments were gone from the active list. Restore
+started both services with the same project ID and a read-back of the original attached
+volume ID. The test verified the volume identity. It did not inspect stored database rows.
+Private Platfolio passed six browser sign-in checks against its new issuer. Its worker
+reached OpenBao privately while the store was sealed and uninitialized.

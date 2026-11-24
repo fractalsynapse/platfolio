@@ -1118,6 +1118,11 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+        '503':
+          description: OpenBao is not ready in the customer launcher.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
   /api/v1/instances/{instanceId}/dispatches:
     parameters:
       - name: instanceId
@@ -1760,6 +1765,80 @@ paths:
                   version: { type: string }
                   revision: { type: string, pattern: '^[a-f0-9]{40}$' }
                   priceMinor: { type: integer, enum: [0] }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+
+  /api/v1/teams/{teamId}/starter-launch:
+    parameters:
+      - { name: teamId, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getStarterLaunch
+      summary: Read the deployment timeline and troubleshooting evidence
+      security: [{ bearerJwt: [] }]
+      responses:
+        '200': &starter-launch-response
+          description: The current launch state and safe operation history.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [state, events, template, revision, retainedVolumes]
+                properties:
+                  state: { type: string, enum: [idle, running, ready, failed, removing, kept, wiped] }
+                  template: { type: string }
+                  revision: { type: string }
+                  projectId: { type: string }
+                  deploymentId: { type: string }
+                  origin: { type: string, format: uri }
+                  retainedVolumes: { type: array, items: { type: string } }
+                  events:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [at, step, state]
+                      properties:
+                        at: { type: string, format: date-time }
+                        step: { type: string }
+                        state: { type: string }
+                        resourceId: { type: string }
+                        detail: { type: string }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      operationId: startStarterLaunch
+      summary: Launch or resume the free starter using the connected customer runner
+      security: [{ bearerJwt: [] }]
+      responses:
+        '200': *starter-launch-response
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/teams/{teamId}/starter-launch/remove:
+    parameters:
+      - { name: teamId, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: removeStarterLaunch
+      summary: Remove this starter using the explicitly selected storage policy
+      security: [{ bearerJwt: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [data]
+              properties:
+                data: { type: string, enum: [keep, wipe] }
+                confirmation: { type: string }
+      responses:
+        '200': *starter-launch-response
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
