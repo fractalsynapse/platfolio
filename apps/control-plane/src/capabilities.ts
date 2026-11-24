@@ -5,9 +5,10 @@ import {
 } from '@platfolio/contracts';
 import { RepositoryReadError } from '@platfolio/contracts';
 import { ScmNotConfiguredError } from '@platfolio/kernel';
-import { buildPlan, parseCompose } from '@platfolio/manifest';
+import { buildPlan, FREE_STARTER_RELEASE, parseCompose, templateCatalogEntry } from '@platfolio/manifest';
 import type { ExtensionDescriptor, KernelContext, Request, Response_, RouteDefinition } from '@platfolio/kernel';
 import { ArtifactRecordSchema, secretWriteScope } from '@platfolio/contracts';
+import type { StarterLaunch } from './starter-launch.ts';
 import { badRequest, bearerToken, notFound, send, unauthorized } from './respond.ts';
 
 /**
@@ -26,6 +27,8 @@ export interface CapabilityDeps {
   /** Injected so the controller can be tested without waiting on a wall clock. */
   now?: () => Date;
   dispatchTtlMs?: number;
+  marketplaceEnabled?: boolean;
+  starterLaunch?: StarterLaunch;
 }
 
 const nowOf = (deps: CapabilityDeps): Date => (deps.now?.() ?? new Date());
@@ -1087,6 +1090,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
     requires: ['store', 'identity', 'infra'],
     routes: [
       scoped('PUT', '/api/v1/instances/{instanceId}/secrets/{name}', 'putSecret', 'instance.secret.write', async (scope, request, params) => {
+        if (deps.starterLaunch) return { status: 503, body: { error: 'secret-store-unavailable', message: 'Wait for your customer OpenBao connection before sending app secrets.' } };
         // Write-through: the value is handed to the provider and kept nowhere. There is no assignment to a
         // local variable that survives this function, no audit field that could carry it, and the success
         // response is 204 with no body -- an echo would be the leak.
@@ -1182,7 +1186,53 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
     ],
   };
 
-  return [core, instances, dispatches, audit, teams, bindings, invitations, secrets, controller];
+  const marketplacePath = '/api/v1/teams/{teamId}/marketplace/installations/{installationId}';
+  const marketplaceRoute = (method: string, path: string, operationId: string, handle: (scope: Scope, id: string) => Promise<Response_>) =>
+    scoped(method, path, operationId, 'marketplace.manage', async (scope, _request, params) => {
+      if (!deps.marketplaceEnabled) return notFound('marketplace installation', '');
+      const id = params.installationId ?? '';
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id)) return badRequest('installationId must be a lowercase UUID v4');
+      return handle(scope, id);
+    });
+  const marketplace: ExtensionDescriptor = {
+    id: 'marketplace',
+    requires: ['identity', 'store'],
+    routes: [
+      marketplaceRoute('PUT', marketplacePath, 'connectMarketplaceInstallation', async ({ context, teamId }, id) =>
+        await context.store.connectMarketplaceInstallation(teamId, id) ? { status: 204, body: undefined } : notFound('marketplace installation', '')),
+      marketplaceRoute('DELETE', marketplacePath, 'disconnectMarketplaceInstallation', async ({ context, teamId }, id) =>
+        await context.store.disconnectMarketplaceInstallation(teamId, id) ? { status: 204, body: undefined } : notFound('marketplace installation', '')),
+      marketplaceRoute('POST', `${marketplacePath}/claim`, 'claimFreeMarketplaceRelease', async ({ context, teamId, personId }, id) => {
+        if (!await context.store.marketplaceInstallationConnected(teamId, id)) return notFound('marketplace installation', '');
+        const release = FREE_STARTER_RELEASE;
+        await context.store.appendAudit({ actorKind: 'user', actorRef: personId, action: 'marketplace.claim', target: id,
+          detail: { teamId, template: release.template, commit: release.revision } });
+        return send('claimFreeMarketplaceRelease', 200, { ...release, installationId: id, repo: templateCatalogEntry(release.template).repo });
+      }),
+    ],
+  };
+
+  const launcher: ExtensionDescriptor = {
+    id: 'starter-launch',
+    requires: ['identity', 'store'],
+    routes: [
+      scoped('GET', '/api/v1/teams/{teamId}/starter-launch', 'getStarterLaunch', 'marketplace.manage', async ({ teamId }) =>
+        deps.starterLaunch?.teamId === teamId
+          ? send('getStarterLaunch', 200, deps.starterLaunch.read()) : notFound('launch', 'starter')),
+      scoped('POST', '/api/v1/teams/{teamId}/starter-launch', 'startStarterLaunch', 'marketplace.manage', async ({ teamId }) =>
+        deps.starterLaunch?.teamId === teamId
+          ? send('startStarterLaunch', 200, deps.starterLaunch.start()) : notFound('launch', 'starter')),
+      scoped('POST', '/api/v1/teams/{teamId}/starter-launch/remove', 'removeStarterLaunch', 'marketplace.manage', async ({ teamId }, request) => {
+        if (deps.starterLaunch?.teamId !== teamId) return notFound('launch', 'starter');
+        const body = bodyOf<{ data: 'keep' | 'wipe'; confirmation?: string }>(request);
+        if (!body.ok || !body.value || !['keep', 'wipe'].includes(body.value.data)) return badRequest('Select keep data or wipe data');
+        if (body.value.data === 'wipe' && body.value.confirmation !== 'starter-web') return badRequest('Type starter-web to confirm deletion of its data');
+        return send('removeStarterLaunch', 200, deps.starterLaunch.remove(body.value.data));
+      }),
+    ],
+  };
+
+  return [core, instances, dispatches, audit, teams, bindings, invitations, secrets, controller, marketplace, launcher];
 }
 
 export type { VerifiedClaims };

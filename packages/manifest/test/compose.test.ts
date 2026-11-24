@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import { buildPlan } from '../src/build-plan.ts';
 import { parseCompose, renderProdOverlay } from '../src/compose.ts';
 import { validateManifest } from '../src/validate.ts';
+import { renderCompose } from '../src/render.ts';
 
 // Digests that look like registry output. buildPlan refuses a single repeated character as a template
 // placeholder (issue #84), so a fixture built from '2'.repeat(64) would trip the guard it means to exercise.
@@ -73,6 +74,16 @@ test('the generated overlay supplies the pin and the merge is clean', () => {
   assert.equal(parsed.manifest!.spec.services.db, undefined, 'a managed service becomes a resource, not a container');
   assert.deepEqual(parsed.manifest!.spec.resources.database, { name: 'db', kind: 'postgres' });
   assert.deepEqual(validateManifest(parsed.manifest!), [], JSON.stringify(validateManifest(parsed.manifest)));
+});
+
+test('Compose preserves an explicit health dependency when it renders the manifest', () => {
+  const customer = 'services:\n  web:\n    depends_on:\n      worker:\n        condition: service_healthy\n';
+  const { manifest, issues } = parseCompose([BASE, overlay(), customer]);
+  assert.deepEqual(issues, []);
+  assert.ok(manifest);
+  assert.deepEqual(manifest.spec.services.web?.dependsOn, ['worker']);
+  assert.deepEqual(manifest.spec.services.web?.dependencyConditions, { worker: 'service_healthy' });
+  assert.match(renderCompose(manifest).files['docker-compose.yml'] ?? '', /depends_on:\n      worker:\n        condition: service_healthy/);
 });
 
 test('the overlay pins tag AND digest, because a bare digest is accepted and never deploys (E26)', () => {

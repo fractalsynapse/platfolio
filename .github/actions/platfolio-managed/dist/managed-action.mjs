@@ -25068,7 +25068,7 @@ function date4(params) {
 }
 
 // packages/contracts/src/generated/contract-version.ts
-var CONTRACT_VERSION = "5.1.0";
+var CONTRACT_VERSION = "5.2.0";
 
 // packages/contracts/src/infra.ts
 var OPERATIONS = [
@@ -27570,6 +27570,7 @@ var PolicyActionSchema = external_exports.enum([
   "capability.bind",
   "audit.read",
   "team.member.manage",
+  "marketplace.manage",
   "team.invite",
   "invitation.list",
   "invitation.revoke"

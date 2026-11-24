@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { InstanceListScreen, createShellContext } from '@platfolio/ui';
+import { InstanceListScreen, StarterLaunchScreen, createShellContext } from '@platfolio/ui';
 import { endpointsForIsland, runtimeConfigFrom, type SitePublicConfig } from '../lib/site-config.ts';
 import { browserCapabilities } from '../lib/browser-capabilities.ts';
 
@@ -28,9 +28,8 @@ import { browserCapabilities } from '../lib/browser-capabilities.ts';
  *    `transportWord` — the only spelling of that parenthetical. D64 made real-time a required capability while
  *    11 §9.10 and gate §R5 refuse the vocabulary until the push operations exist in
  *    `apps/control-plane/openapi.yaml`; this change adds none, and the §D65 rule re-measures that over this app.
- *  - **No sign-in UI.** A signed-out dashboard shows what the control plane answered, with the age of the answer
- *    beside it: 11 §8's R10 ("delete the server: what does the screen show?") is answered by the screen, not by a
- *    spinner invented here.
+ *  - The sign-in callback uses the same island and updates the URL without a page reload, preserving the
+ *    in-memory session from the PKCE exchange.
  *
  * ## Why the page mounts this `client:only`, and what that costs
  *
@@ -45,6 +44,7 @@ import { browserCapabilities } from '../lib/browser-capabilities.ts';
  */
 export interface DashboardIslandProps {
   readonly config: SitePublicConfig;
+  readonly callback?: boolean;
 }
 
 export default function DashboardIsland(props: DashboardIslandProps): React.ReactElement {
@@ -55,5 +55,30 @@ export default function DashboardIsland(props: DashboardIslandProps): React.Reac
     [props.config],
   );
 
-  return shell.wrap(<InstanceListScreen now={shell.sdk.now().toISOString()} />);
+  const [signedIn, setSignedIn] = React.useState(() => shell.auth.signedIn());
+  const [showInstances, setShowInstances] = React.useState(false);
+  const [problem, setProblem] = React.useState('');
+  const exchanged = React.useRef(false);
+  React.useEffect(() => {
+    if (!props.callback || exchanged.current) return;
+    exchanged.current = true;
+    const params = new URLSearchParams(globalThis.location.search);
+    void shell.auth.complete(params).then((status) => {
+      if (status !== 'signed-in') { setProblem('Sign-in could not finish. Start again.'); return; }
+      globalThis.history.replaceState(null, '', '/dashboard');
+      setSignedIn(true);
+    }).catch(() => setProblem('Sign-in could not finish. Start again.'));
+  }, [shell, props.callback]);
+  if (!signedIn) return <>
+    {problem && <p role="alert">{problem}</p>}
+    {props.callback && !problem ? <p role="status">Completing sign-in…</p>
+      : <button type="button" className="ui-hit-primary" onClick={() => {
+        void shell.auth.begin().then((target) => globalThis.location.assign(target))
+          .catch(() => setProblem('Sign-in could not start. Try again.'));
+      }}>Sign in</button>}
+  </>;
+  return shell.wrap(<>
+    <nav aria-label="Dashboard"><button type="button" className="ui-hit-primary" onClick={() => setShowInstances(!showInstances)}>{showInstances ? 'Set up starter app' : 'View instances'}</button></nav>
+    {showInstances ? <InstanceListScreen now={shell.sdk.now().toISOString()} /> : <StarterLaunchScreen />}
+  </>);
 }

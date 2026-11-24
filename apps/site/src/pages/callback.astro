@@ -1,24 +1,10 @@
 ---
-/**
- * `/callback` — the redirect target the realm knows, and a page that renders nothing.
- *
- * `scripts/browser-auth.ts` fixes the shape of this address once for everyone: `CALLBACK_PATH` is `/callback`, the
- * realm's `platfolio-web` client carries `<origin>/callback` as its only redirect URI, and `apps/control-plane`
- * admits the same origin through `PLATFOLIO_ALLOWED_ORIGINS`. So this route exists because the policy says it
- * must, not because a page was wanted.
- *
- * What it does is the exchange and nothing else: read `code` and `state`, hand them to
- * `browser-auth.ts`'s `complete()`, and leave. A failure leaves the same way — back to `/`, with the reason in the
- * query so the landing page can be honest about it rather than this one inventing an error design. No markup
- * belongs here, and the reason is not austerity: a page that paints while a redirect is in flight is a page whose
- * first paint is a lie about the session, and 11 §8's rule about states is that the screen says what is known.
- */
 import Page from '../layouts/page.astro';
-import CallbackIsland from '../islands/callback-island.tsx';
+import DashboardIsland from '../islands/dashboard-island.tsx';
 import { publicConfigOf, resolveSiteConfig } from '../lib/site-config.ts';
 
 const config = resolveSiteConfig(process.env);
 ---
-<Page title="Signing in — platfolio" scriptSrc="/config.js">
-  <CallbackIsland client:only="react" config={publicConfigOf(config)} />
+<Page title="Dashboard — platfolio" scriptSrc="/config.js">
+  <DashboardIsland client:only="react" config={publicConfigOf(config)} callback />
 </Page>

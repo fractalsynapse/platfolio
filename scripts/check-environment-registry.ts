@@ -60,12 +60,14 @@ const EXTERNAL = new Set([
   'GITHUB_STEP_SUMMARY', 'GITHUB_API_URL', 'GITHUB_SERVER_URL', 'ACTIONS_ID_TOKEN_REQUEST_URL',
   'ACTIONS_ID_TOKEN_REQUEST_TOKEN', 'GH_TOKEN', 'IMAGE_NAME', 'IMAGE_REPO_OWNER', 'EVENT_NAME',
   'EVENT_ACTION', 'REGISTRY',
+  // Injected by Railway. These names describe the running service's scope.
+  'RAILWAY_PROJECT_NAME', 'RAILWAY_ENVIRONMENT_NAME',
 ]);
 /** GitHub synthesises `INPUT_*` from an action's `with:` keys; the rest is the runner's own namespace. */
 const EXTERNAL_PREFIXES = ['INPUT_', 'GITHUB_', 'ACTIONS_'];
 
 /** The name shapes that are ours: our prefix, a provider we configure, or a credential-shaped suffix. */
-const OURS = /^(PLATFOLIO|RAILWAY|KEYCLOAK|KC_|MP_|MAILPIT|SESSION_|APP_|POSTGRES_|PGHOST|PGPORT|PGUSER|PGPASSWORD|PGDATABASE|PGDATA|LIVE_|CONTROL_PLANE_|DATABASE_URL$|CR_)|(_TOKEN|_KEY|_SECRET|_PASSWORD|_URL)$/;
+const OURS = /^(PLATFOLIO|RAILWAY|KEYCLOAK|KC_|MP_|MAILPIT|SESSION_|APP_|POSTGRES_|PGHOST|PGPORT|PGUSER|PGPASSWORD|PGDATABASE|PGDATA|LIVE_|CONTROL_PLANE_|DATABASE_URL$|CR_|BAO_)|(_TOKEN|_KEY|_SECRET|_PASSWORD|_URL)$/;
 
 /**
  * Where configuration lives: our code, our composition, our CI.
@@ -224,6 +226,12 @@ function loadRegistry(): { entries: Entry[]; error?: string } {
  * regenerated. Each one is a claim about custody, so each says why.
  */
 const HUMAN: Record<string, Partial<Entry>> = {
+  PLATFOLIO_MARKETPLACE_ENABLED: { kind: 'value', secret: false, environments: 'all', deployedTo: 'local:compose-overlay', note: 'Enables hub-only free-template links and claims.' },
+  PLATFOLIO_OPENBAO_URL: { kind: 'value', secret: false, environments: ['staging'], deployedTo: 'railway:variable', note: 'Private OpenBao service origin, supplied to the customer installation worker.' },
+  PLATFOLIO_STARTER_HEALTH_URL: { kind: 'value', secret: false, environments: ['staging'], deployedTo: 'railway:variable', note: 'Optional private starter runtime health URL for the pilot worker.' },
+  RAILWAY_RUN_UID: { kind: 'value', secret: false, environments: ['staging'], deployedTo: 'railway:variable', note: 'Allows the OpenBao entrypoint to prepare its volume before dropping privileges.' },
+  BAO_LOCAL_CONFIG: { kind: 'value', secret: false, environments: ['staging'], deployedTo: 'railway:variable', note: 'OpenBao private listener and Raft storage settings. Contains no recovery material.' },
+  RAILWAY_API_TOKEN: { kind: 'secret', secret: true, environments: ['development'], deployedTo: 'host:shell', note: 'Workspace token forwarded in memory to the customer-side Railway CLI process.' },
   // The tenant application reads it; platfolio never does. It is credential-bearing, and it is the reason
   // `references` exist instead of a typed URL (D4, OD13).
   DATABASE_URL: { note: 'read by the tenant application (starter-web); platfolio resolves the production value from the database reference' },

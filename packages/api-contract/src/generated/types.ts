@@ -4,7 +4,7 @@
  * hand, because every line reproduces from the specification.
  *
  * Source: apps/control-plane/openapi.yaml (OpenAPI 3.1.0, info.version 0.1.0)
- * Input digest: sha256/b2140e880ea02f18
+ * Input digest: sha256/bc360dd6db765a12
  *
  * Reproduce it with `pnpm run api:types`. `pnpm run api:types:check` fails when this file stops matching
  * what the committed spec produces, which is the only way a generated type deserves to be trusted.
@@ -291,6 +291,16 @@ export interface ApiParameters {
     instanceId: string;
     capability: string;
   };
+  /** POST /api/v1/teams/{teamId}/marketplace/installations/{installationId}/claim */
+  claimFreeMarketplaceRelease: {
+    teamId: string;
+    installationId: string;
+  };
+  /** PUT /api/v1/teams/{teamId}/marketplace/installations/{installationId} */
+  connectMarketplaceInstallation: {
+    teamId: string;
+    installationId: string;
+  };
   /** POST /api/v1/instances/{instanceId}/dispatches */
   createDispatch: {
     instanceId: string;
@@ -306,6 +316,11 @@ export interface ApiParameters {
   /** DELETE /api/v1/instances/{instanceId} */
   destroyInstance: {
     instanceId: string;
+  };
+  /** DELETE /api/v1/teams/{teamId}/marketplace/installations/{installationId} */
+  disconnectMarketplaceInstallation: {
+    teamId: string;
+    installationId: string;
   };
   /** GET /api/v1/me */
   getCurrentPerson: Record<string, never>;
@@ -326,6 +341,10 @@ export interface ApiParameters {
   };
   /** GET /readyz */
   getReady: Record<string, never>;
+  /** GET /api/v1/teams/{teamId}/starter-launch */
+  getStarterLaunch: {
+    teamId: string;
+  };
   /** GET /status */
   getStatus: Record<string, never>;
   /** GET /version */
@@ -387,6 +406,10 @@ export interface ApiParameters {
   registerPlanFromRepository: {
     instanceId: string;
   };
+  /** POST /api/v1/teams/{teamId}/starter-launch/remove */
+  removeStarterLaunch: {
+    teamId: string;
+  };
   /** POST /api/v1/instances/{instanceId}/artifacts */
   reportArtifact: {
     instanceId: string;
@@ -406,6 +429,10 @@ export interface ApiParameters {
   shareCapability: {
     instanceId: string;
     capability: string;
+  };
+  /** POST /api/v1/teams/{teamId}/starter-launch */
+  startStarterLaunch: {
+    teamId: string;
   };
   /** POST /api/v1/instances/{instanceId}/dispatches/{dispatchId}/trigger */
   triggerDispatch: {
@@ -499,6 +526,11 @@ export interface ApiRequestBodies {
     /** The pinned production overlay. Default `compose.prod.yaml`. Absent is allowed only when every service in `path` already carries a digest; otherwise the refusal says which service is unpinned. */
     overlayPath?: string;
   };
+  /** POST /api/v1/teams/{teamId}/starter-launch/remove */
+  removeStarterLaunch: {
+    data: 'keep' | 'wipe';
+    confirmation?: string;
+  };
   /** POST /api/v1/instances/{instanceId}/artifacts */
   reportArtifact: {
     /** The compose service name this artifact belongs to. */
@@ -551,6 +583,29 @@ export interface ApiResponses {
     '401': Error;
     '404': Error;
   };
+  /** POST /api/v1/teams/{teamId}/marketplace/installations/{installationId}/claim */
+  claimFreeMarketplaceRelease: {
+    '200': {
+      installationId: string;
+      template: 'starter-web';
+      repo: string;
+      version: string;
+      revision: string;
+      priceMinor: 0;
+    };
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+  };
+  /** PUT /api/v1/teams/{teamId}/marketplace/installations/{installationId} */
+  connectMarketplaceInstallation: {
+    '204': void;
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+  };
   /** POST /api/v1/instances/{instanceId}/dispatches */
   createDispatch: {
     '201': {
@@ -601,6 +656,14 @@ export interface ApiResponses {
     '404': Error;
     '409': Error;
   };
+  /** DELETE /api/v1/teams/{teamId}/marketplace/installations/{installationId} */
+  disconnectMarketplaceInstallation: {
+    '204': void;
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+  };
   /** GET /api/v1/me */
   getCurrentPerson: {
     '200': CurrentPerson;
@@ -638,6 +701,28 @@ export interface ApiResponses {
   getReady: {
     '200': Ready;
     '503': Ready;
+  };
+  /** GET /api/v1/teams/{teamId}/starter-launch */
+  getStarterLaunch: {
+    '200': {
+      state: 'idle' | 'running' | 'ready' | 'failed' | 'removing' | 'kept' | 'wiped';
+      template: string;
+      revision: string;
+      projectId?: string;
+      deploymentId?: string;
+      origin?: string;
+      retainedVolumes: string[];
+      events: Array<{
+        at: string;
+        step: string;
+        state: string;
+        resourceId?: string;
+        detail?: string;
+      }>;
+    };
+    '401': Error;
+    '403': Error;
+    '404': Error;
   };
   /** GET /status */
   getStatus: {
@@ -759,6 +844,7 @@ export interface ApiResponses {
     '404': Error;
     '501': Error;
     '502': Error;
+    '503': Error;
   };
   /** POST /api/v1/instances/{instanceId}/redeploy */
   redeployInstance: {
@@ -820,6 +906,29 @@ export interface ApiResponses {
     '404': Error;
     '503': Error;
   };
+  /** POST /api/v1/teams/{teamId}/starter-launch/remove */
+  removeStarterLaunch: {
+    '200': {
+      state: 'idle' | 'running' | 'ready' | 'failed' | 'removing' | 'kept' | 'wiped';
+      template: string;
+      revision: string;
+      projectId?: string;
+      deploymentId?: string;
+      origin?: string;
+      retainedVolumes: string[];
+      events: Array<{
+        at: string;
+        step: string;
+        state: string;
+        resourceId?: string;
+        detail?: string;
+      }>;
+    };
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+  };
   /** POST /api/v1/instances/{instanceId}/artifacts */
   reportArtifact: {
     '201': {
@@ -855,6 +964,28 @@ export interface ApiResponses {
   shareCapability: {
     '200': CapabilityShare;
     '400': Error;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+  };
+  /** POST /api/v1/teams/{teamId}/starter-launch */
+  startStarterLaunch: {
+    '200': {
+      state: 'idle' | 'running' | 'ready' | 'failed' | 'removing' | 'kept' | 'wiped';
+      template: string;
+      revision: string;
+      projectId?: string;
+      deploymentId?: string;
+      origin?: string;
+      retainedVolumes: string[];
+      events: Array<{
+        at: string;
+        step: string;
+        state: string;
+        resourceId?: string;
+        detail?: string;
+      }>;
+    };
     '401': Error;
     '403': Error;
     '404': Error;
@@ -936,6 +1067,10 @@ export const ENDPOINTS = {
   acceptInvitation: { method: 'post', path: '/api/v1/me/invitations/{invitationId}/accept' },
   /** PUT /api/v1/instances/{instanceId}/bindings/{capability} */
   bindCapability: { method: 'put', path: '/api/v1/instances/{instanceId}/bindings/{capability}' },
+  /** POST /api/v1/teams/{teamId}/marketplace/installations/{installationId}/claim */
+  claimFreeMarketplaceRelease: { method: 'post', path: '/api/v1/teams/{teamId}/marketplace/installations/{installationId}/claim' },
+  /** PUT /api/v1/teams/{teamId}/marketplace/installations/{installationId} */
+  connectMarketplaceInstallation: { method: 'put', path: '/api/v1/teams/{teamId}/marketplace/installations/{installationId}' },
   /** POST /api/v1/instances/{instanceId}/dispatches */
   createDispatch: { method: 'post', path: '/api/v1/instances/{instanceId}/dispatches' },
   /** POST /api/v1/instances */
@@ -946,6 +1081,8 @@ export const ENDPOINTS = {
   createTeam: { method: 'post', path: '/api/v1/teams' },
   /** DELETE /api/v1/instances/{instanceId} */
   destroyInstance: { method: 'delete', path: '/api/v1/instances/{instanceId}' },
+  /** DELETE /api/v1/teams/{teamId}/marketplace/installations/{installationId} */
+  disconnectMarketplaceInstallation: { method: 'delete', path: '/api/v1/teams/{teamId}/marketplace/installations/{installationId}' },
   /** GET /api/v1/me */
   getCurrentPerson: { method: 'get', path: '/api/v1/me' },
   /** GET /api/v1/instances/{instanceId}/dispatches/{dispatchId} */
@@ -958,6 +1095,8 @@ export const ENDPOINTS = {
   getLatestAttestation: { method: 'get', path: '/api/v1/instances/{instanceId}/latest-attestation' },
   /** GET /readyz */
   getReady: { method: 'get', path: '/readyz' },
+  /** GET /api/v1/teams/{teamId}/starter-launch */
+  getStarterLaunch: { method: 'get', path: '/api/v1/teams/{teamId}/starter-launch' },
   /** GET /status */
   getStatus: { method: 'get', path: '/status' },
   /** GET /version */
@@ -994,6 +1133,8 @@ export const ENDPOINTS = {
   redeployInstance: { method: 'post', path: '/api/v1/instances/{instanceId}/redeploy' },
   /** POST /api/v1/instances/{instanceId}/plan/from-repository */
   registerPlanFromRepository: { method: 'post', path: '/api/v1/instances/{instanceId}/plan/from-repository' },
+  /** POST /api/v1/teams/{teamId}/starter-launch/remove */
+  removeStarterLaunch: { method: 'post', path: '/api/v1/teams/{teamId}/starter-launch/remove' },
   /** POST /api/v1/instances/{instanceId}/artifacts */
   reportArtifact: { method: 'post', path: '/api/v1/instances/{instanceId}/artifacts' },
   /** DELETE /api/v1/instances/{instanceId}/capability/{capability}/shares/{toTeamId} */
@@ -1002,6 +1143,8 @@ export const ENDPOINTS = {
   revokeInvitation: { method: 'delete', path: '/api/v1/teams/{teamId}/invitations/{invitationId}' },
   /** PUT /api/v1/instances/{instanceId}/capability/{capability}/shares */
   shareCapability: { method: 'put', path: '/api/v1/instances/{instanceId}/capability/{capability}/shares' },
+  /** POST /api/v1/teams/{teamId}/starter-launch */
+  startStarterLaunch: { method: 'post', path: '/api/v1/teams/{teamId}/starter-launch' },
   /** POST /api/v1/instances/{instanceId}/dispatches/{dispatchId}/trigger */
   triggerDispatch: { method: 'post', path: '/api/v1/instances/{instanceId}/dispatches/{dispatchId}/trigger' },
   /** DELETE /api/v1/instances/{instanceId}/bindings/{capability} */

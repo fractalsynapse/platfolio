@@ -5,6 +5,10 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+- Added a browser launch pilot for the pinned Starter Web release with progress and a downloadable troubleshooting report.
+- Placed private Platfolio and hosted apps in separate Railway projects. App removal has explicit options to retain storage for restore or schedule storage deletion.
+- Fixed browser sign-in to preserve the in-memory session through the Keycloak callback.
+
 ## [0.5.0]
 
 Release baseline: `0.4.0..36442bc`. The hosted API and site at that baseline passed the live Railway

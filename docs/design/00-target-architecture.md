@@ -13,6 +13,8 @@ that protects a tenant may be gated behind a paid tier.
 Written for agents and reviewers working in this repo. If a change here feels faster than an invariant,
 the invariant wins and the change is wrong.
 
+The current north star is [D71’s hub and private installation model](18-hub-and-private-installations.md). The legacy custody and tenancy descriptions below still describe the deployed model until the proof and migration land. The hub never enters the private installation’s secret custody boundary.
+
 ## How to use this document
 
 - **Before implementing**, test the change against § 2. A constraint that blocks the change is

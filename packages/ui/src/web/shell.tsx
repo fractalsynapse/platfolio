@@ -3,7 +3,7 @@ import { createSignalBus } from '../signals.ts';
 import { PollTransport } from '../sdk/poll.ts';
 import { SdkContext, type SdkContextValue } from '../sdk/use-operation.ts';
 import { SignalsContext } from '../signals-context.ts';
-import { REQUIRED_SCOPE, WEB_CLIENT_ID } from './browser-auth-policy.ts';
+import { LOGIN_SCOPES, WEB_CLIENT_ID } from './browser-auth-policy.ts';
 import type { SignalBus } from '../signals.ts';
 import type { Transport } from '../sdk/transport.ts';
 import {
@@ -115,7 +115,7 @@ const fingerprintOf = (endpoints: ShellEndpoints): string => [
   endpoints.issuerBaseUrl,
   endpoints.siteOrigin,
   endpoints.clientId ?? WEB_CLIENT_ID,
-  endpoints.scope ?? REQUIRED_SCOPE,
+  endpoints.scope ?? LOGIN_SCOPES,
 ].join('\u0000');
 
 /** The named endpoint in the conflict message: the origin, never the whole table, and never a token (D4). */

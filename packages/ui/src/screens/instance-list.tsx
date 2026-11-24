@@ -77,11 +77,13 @@ export interface InstanceListScreenProps {
  * words.
  */
 export function InstanceListScreen(props: InstanceListScreenProps): React.ReactElement {
-  const instances = useOperation('listInstances', { params: {} });
-  const teams = useOperation('listTeams', { params: {} });
+  const params = React.useMemo(() => ({}), []);
+  const instances = useOperation('listInstances', { params });
+  const teams = useOperation('listTeams', { params });
   const context = useSignalValue('context.switched');
   const selectedInstanceId = context?.instanceId ?? null;
-  const attestation = useOperation('getLatestAttestation', { params: { instanceId: selectedInstanceId ?? '' } });
+  const attestationParams = React.useMemo(() => ({ instanceId: selectedInstanceId ?? '' }), [selectedInstanceId]);
+  const attestation = useOperation('getLatestAttestation', { params: attestationParams });
 
   const rows: readonly InstanceResponse[] = isLoaded(instances.state) ? instances.state.data : [];
   const teamRows: readonly TeamWithRole[] = isLoaded(teams.state) ? teams.state.data : [];

@@ -115,6 +115,31 @@ export class PostgresStore implements Store {
     }
   }
 
+  async connectMarketplaceInstallation(teamId: string, installationId: string): Promise<boolean> {
+    const table = this.q('marketplace_links');
+    const result = await this.pool.query(
+      `INSERT INTO ${table} AS link (installation_id, team_id)
+       SELECT $1, id FROM ${this.q('teams')} WHERE id = $2
+       ON CONFLICT (installation_id) DO UPDATE SET team_id = link.team_id
+       WHERE link.team_id = EXCLUDED.team_id AND NOT link.disconnected RETURNING installation_id`, [installationId, teamId],
+    );
+    return result.rowCount === 1;
+  }
+
+  async marketplaceInstallationConnected(teamId: string, installationId: string): Promise<boolean> {
+    const result = await this.pool.query(
+      `SELECT installation_id FROM ${this.q('marketplace_links')} WHERE installation_id = $1 AND team_id = $2 AND NOT disconnected`, [installationId, teamId],
+    );
+    return result.rowCount === 1;
+  }
+
+  async disconnectMarketplaceInstallation(teamId: string, installationId: string): Promise<boolean> {
+    const result = await this.pool.query(
+      `UPDATE ${this.q('marketplace_links')} SET disconnected = TRUE WHERE installation_id = $1 AND team_id = $2`, [installationId, teamId],
+    );
+    return result.rowCount === 1;
+  }
+
   async createTeam(input: { name: string }) {
     const name = normaliseName(input.name);
     const admitted = admit(TeamSchema, { id: newId('team'), name, createdAt: new Date().toISOString() }, 'team');
