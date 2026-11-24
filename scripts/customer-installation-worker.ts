@@ -4,6 +4,7 @@ import { createServer } from 'node:http';
 import { join } from 'node:path';
 import { customerLaunchRun } from './customer-launch-run.ts';
 import { customerOpenBao } from './customer-openbao.ts';
+import { customerMarketplaceConnection, privateMarketplaceOrigin } from './customer-marketplace-connection.ts';
 import { customerRailwayOAuth } from './customer-railway-oauth.ts';
 
 const directory = process.env.PLATFOLIO_LAUNCH_STATE_DIR;
@@ -20,6 +21,7 @@ if (!directory || !workerKey || workerKey.length < 32 || !team || !client || !ca
 }
 mkdirSync(directory, { recursive: true, mode: 0o700 });
 const bao = customerOpenBao(baoOrigin, baoSecret, directory);
+const marketplace = customerMarketplaceConnection(privateMarketplaceOrigin(process.env.PLATFOLIO_REGISTRY_ORIGIN), bao);
 const oauth = customerRailwayOAuth(client, callback, workspace, bao, project);
 const launch = customerLaunchRun(team, join(directory, 'launch.json'), oauth.credential);
 const expected = Buffer.from('Bearer ' + workerKey);
@@ -45,6 +47,8 @@ const server = createServer({ requestTimeout: 10000 }, (request, response) => {
     const command = JSON.parse(text) as { action: string; body?: Record<string, unknown> };
     const body = command.body ?? {};
     switch (command.action) {
+      case 'marketplace-status': reply(200, await marketplace.connection()); return;
+      case 'marketplace-enroll': reply(200, await marketplace.enroll(String(body.handoff))); return;
       case 'report': reply(200, await launch.read()); return;
       case 'setup': {
         const openBao = await bao.status();

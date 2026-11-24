@@ -4,9 +4,13 @@ import { join } from 'node:path';
 
 interface Recovery { shares: string[]; bootstrap: string }
 export interface RailwayGrant { access: string; refresh: string; expires: number }
+export interface MarketplaceGrant { hub: string; installationId: string; credential: string; claimed: boolean }
 type BaoState = 'unreachable' | 'uninitialized' | 'sealed' | 'setup-required' | 'ready';
 const policy = 'platfolio-launcher';
 const path = 'customer-launch/data/railway';
+const marketplacePath = 'customer-launch/data/marketplace';
+const workerPolicy = [path, marketplacePath].map((entry) =>
+  `path "${entry}" { capabilities = ["create", "read", "update"] }`).join('\n');
 const settings = { padding: constants.RSA_PKCS1_OAEP_PADDING, oaepHash: 'sha256' };
 
 export function customerOpenBao(origin: string, secretId: string, directory: string) {
@@ -75,7 +79,7 @@ export function customerOpenBao(origin: string, secretId: string, directory: str
     };
     if (!mounts.data?.['customer-launch/']) await put('sys/mounts/customer-launch', { type: 'kv', options: { version: '2' } });
     if (!auth.data?.['approle/']) await put('sys/auth/approle', { type: 'approle' });
-    await put('sys/policies/acl/' + policy, { policy: `path "${path}" { capabilities = ["create", "read", "update"] }` });
+    await put('sys/policies/acl/' + policy, { policy: workerPolicy });
     await put('auth/approle/role/' + policy, { token_policies: [policy], token_no_default_policy: true, token_type: 'batch', token_ttl: '120s' });
     await put('auth/approle/role/' + policy + '/role-id', { role_id: policy });
     await put('auth/approle/role/' + policy + '/custom-secret-id', { secret_id: secretId });
@@ -103,21 +107,27 @@ export function customerOpenBao(origin: string, secretId: string, directory: str
     } finally { changing = false; }
   }
 
-  async function readGrant() {
+  async function read<T>(key: string) {
     const token = await serviceToken();
-    if (!token) throw new Error('Unlock OpenBao before connecting Railway');
-    const stored = await request<{ data?: { data?: RailwayGrant; metadata?: { version?: number } } }>(path, undefined, token);
+    if (!token) throw new Error('Unlock OpenBao before connecting providers');
+    const stored = await request<{ data?: { data?: T; metadata?: { version?: number } } }>(key, undefined, token);
     if (stored.status === 404) return { version: 0, grant: undefined };
-    if (!stored.ok || !stored.data?.data?.metadata?.version) throw new Error('OpenBao could not read the Railway grant');
+    if (!stored.ok || !stored.data?.data?.metadata?.version) throw new Error('OpenBao could not read the provider grant');
     return { version: stored.data.data.metadata.version, grant: stored.data.data.data };
   }
 
-  async function writeGrant(grant: RailwayGrant, version: number) {
+  async function write(key: string, grant: RailwayGrant | MarketplaceGrant, version: number) {
     const token = await serviceToken();
-    if (!token || !(await request(path, { options: { cas: version }, data: grant }, token)).ok) {
-      throw new Error('OpenBao could not save the Railway grant');
+    if (!token || !(await request(key, { options: { cas: version }, data: grant }, token)).ok) {
+      throw new Error('OpenBao could not save the provider grant');
     }
   }
 
-  return { publicKey, status, initialize, unlock, readGrant, writeGrant };
+  return {
+    publicKey, status, initialize, unlock,
+    readGrant: () => read<RailwayGrant>(path),
+    writeGrant: (grant: RailwayGrant, version: number) => write(path, grant, version),
+    readMarketplaceGrant: () => read<MarketplaceGrant>(marketplacePath),
+    writeMarketplaceGrant: (grant: MarketplaceGrant, version: number) => write(marketplacePath, grant, version),
+  };
 }

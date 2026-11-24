@@ -4,7 +4,7 @@
  * hand, because every line reproduces from the specification.
  *
  * Source: apps/control-plane/openapi.yaml (OpenAPI 3.1.0, info.version 0.1.0)
- * Input digest: sha256/89e9bb0b733c521e
+ * Input digest: sha256/05d2832b2a4afdd2
  *
  * Reproduce it with `pnpm run api:types`. `pnpm run api:types:check` fails when this file stops matching
  * what the committed spec produces, which is the only way a generated type deserves to be trusted.
@@ -365,6 +365,10 @@ export interface ApiParameters {
     teamId: string;
     installationId: string;
   };
+  /** POST /api/v1/teams/{teamId}/marketplace/connection */
+  enrollPrivateMarketplaceConnection: {
+    teamId: string;
+  };
   /** GET /api/v1/me/profile */
   getAccountProfile: Record<string, never>;
   /** GET /api/v1/me */
@@ -392,6 +396,10 @@ export interface ApiParameters {
   /** GET /api/v1/instances/{instanceId}/latest-attestation */
   getLatestAttestation: {
     instanceId: string;
+  };
+  /** GET /api/v1/teams/{teamId}/marketplace/connection */
+  getPrivateMarketplaceConnection: {
+    teamId: string;
   };
   /** GET /readyz */
   getReady: Record<string, never>;
@@ -603,6 +611,10 @@ export interface ApiRequestBodies {
   /** POST /api/v1/teams */
   createTeam: {
     name: Slug;
+  };
+  /** POST /api/v1/teams/{teamId}/marketplace/connection */
+  enrollPrivateMarketplaceConnection: {
+    handoff: string;
   };
   /** POST /api/v1/teams/{teamId}/starter-launch/openbao */
   initializeStarterOpenBao: {
@@ -850,6 +862,16 @@ export interface ApiResponses {
     '403': Error;
     '404': Error;
   };
+  /** POST /api/v1/teams/{teamId}/marketplace/connection */
+  enrollPrivateMarketplaceConnection: {
+    '204': void;
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '409': Error;
+    '503': Error;
+  };
   /** GET /api/v1/me/profile */
   getAccountProfile: {
     '200': {
@@ -934,6 +956,21 @@ export interface ApiResponses {
     '200': AttestationRecord;
     '401': Error;
     '404': Error;
+  };
+  /** GET /api/v1/teams/{teamId}/marketplace/connection */
+  getPrivateMarketplaceConnection: {
+    '200': {
+      state: 'unconfigured' | 'openbao-required' | 'disconnected' | 'connected' | 'unavailable';
+      release?: {
+        template: string;
+        version: string;
+        revision: string;
+      };
+    };
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '503': Error;
   };
   /** GET /readyz */
   getReady: {
@@ -1489,6 +1526,8 @@ export const ENDPOINTS = {
   destroyInstance: { method: 'delete', path: '/api/v1/instances/{instanceId}' },
   /** DELETE /api/v1/teams/{teamId}/marketplace/installations/{installationId} */
   disconnectMarketplaceInstallation: { method: 'delete', path: '/api/v1/teams/{teamId}/marketplace/installations/{installationId}' },
+  /** POST /api/v1/teams/{teamId}/marketplace/connection */
+  enrollPrivateMarketplaceConnection: { method: 'post', path: '/api/v1/teams/{teamId}/marketplace/connection' },
   /** GET /api/v1/me/profile */
   getAccountProfile: { method: 'get', path: '/api/v1/me/profile' },
   /** GET /api/v1/me */
@@ -1505,6 +1544,8 @@ export const ENDPOINTS = {
   getInstanceEnvironment: { method: 'get', path: '/api/v1/instances/{instanceId}/environments/{environment}' },
   /** GET /api/v1/instances/{instanceId}/latest-attestation */
   getLatestAttestation: { method: 'get', path: '/api/v1/instances/{instanceId}/latest-attestation' },
+  /** GET /api/v1/teams/{teamId}/marketplace/connection */
+  getPrivateMarketplaceConnection: { method: 'get', path: '/api/v1/teams/{teamId}/marketplace/connection' },
   /** GET /readyz */
   getReady: { method: 'get', path: '/readyz' },
   /** GET /api/v1/teams/{teamId}/starter-launch */

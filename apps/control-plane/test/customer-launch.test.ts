@@ -30,6 +30,8 @@ test('customer launch is owner scoped and passes only the intended fields to a p
     last = JSON.parse(String(init?.body)) as typeof last;
     if (last?.action === 'report') return Response.json(workerReport);
     if (last?.action === 'redeploy') return Response.json({ state: 'running' });
+    if (last?.action === 'marketplace-status') return Response.json({ state: 'disconnected' });
+    if (last?.action === 'marketplace-enroll') return Response.json('enrolled');
     return Response.json(last?.action === 'setup' ? { openBao: 'sealed', railway: 'connect', workerKey: 'public' } : false);
   };
   const kernel = await createKernel({
@@ -55,6 +57,19 @@ test('customer launch is owner scoped and passes only the intended fields to a p
     const setup = await fetch(path + '/setup', { headers: headers('owner') });
     assert.equal(setup.status, 200);
     assert.deepEqual(await setup.json(), { openBao: 'sealed', railway: 'connect', workerKey: 'public' });
+    const marketplace = api + '/teams/' + teamId + '/marketplace/connection';
+    assert.equal((await fetch(marketplace, { headers: headers('other') })).status, 404);
+    const connection = await fetch(marketplace, { headers: headers('owner') });
+    assert.equal(connection.headers.get('cache-control'), 'no-store');
+    assert.deepEqual(await connection.json(), { state: 'disconnected' });
+    const handoff = randomUUID() + ':' + 'c'.repeat(43);
+    const connect = (actor: string, input: string) => fetch(marketplace, {
+      method: 'POST', headers: headers(actor), body: JSON.stringify({ handoff: input }),
+    });
+    assert.equal((await connect('other', handoff)).status, 404);
+    assert.equal((await connect('owner', 'wrong-format')).status, 400);
+    assert.equal((await connect('owner', handoff)).status, 204);
+    assert.deepEqual(last, { action: 'marketplace-enroll', body: { handoff } });
     const response = await fetch(api + '/railway/callback?state=' + 'a'.repeat(43) + '&code=local-test', { redirect: 'manual' });
     assert.equal(response.status, 303);
     assert.equal(response.headers.get('location'), siteOrigin + '/dashboard/launch?railway=retry');

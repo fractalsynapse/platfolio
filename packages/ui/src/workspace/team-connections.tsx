@@ -2,6 +2,7 @@ import * as React from 'react';
 import { ageLabel, useClock } from '../components/freshness.ts';
 import { StarterLaunchSetup } from '../components/starter-launch-setup.tsx';
 import { useOperation } from '../sdk/use-operation.ts';
+import { MarketplaceConnection } from './marketplace-connection.tsx';
 
 export function TeamConnections({ teamId }: { readonly teamId: string }) {
   const params = React.useMemo(() => ({ teamId }), [teamId]);
@@ -17,6 +18,7 @@ export function TeamConnections({ teamId }: { readonly teamId: string }) {
     {setup.state.status === 'loaded' && <>
       <p className="ui-workspace-meta">{ageLabel(setup.state.freshness, clock().toISOString()).text}</p>
       <StarterLaunchSetup teamId={teamId} setup={setup.state.data} refresh={setup.reload} />
+      <MarketplaceConnection key={teamId} teamId={teamId} />
     </>}
   </section>;
 }

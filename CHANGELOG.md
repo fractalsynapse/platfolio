@@ -5,6 +5,7 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+- Private owners can connect to the marketplace from their workspace and acquire the pinned starter using a registry credential held in their OpenBao (#288).
 - Owners can rebuild the pinned Starter Web release from Deployments while retaining its Railway project and database (#288).
 - Added personal in-app notification rules for failed deployments, outages, and environment secret updates, scoped to current team memberships (#288).
 - Added private availability checks and an outage timeline for hosted Starter Web. Planned stops remain visible separately from outages (#288).

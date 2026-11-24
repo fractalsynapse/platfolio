@@ -1344,6 +1344,33 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
     if (!output.ok) return unavailable();
     return action === 'unlock' ? { status: 204, body: null } : send(operation, 200, output.body);
   };
+  const privateMarketplacePath = '/api/v1/teams/{teamId}/marketplace/connection';
+  const marketplaceUnavailable = () => ({
+    status: 503,
+    body: { error: 'marketplace-unavailable', message: 'Check that OpenBao is unlocked and the marketplace is reachable, then try again.' },
+  });
+  const privateMarketplace: ExtensionDescriptor = {
+    id: 'private-marketplace',
+    requires: ['identity', 'store'],
+    routes: [
+      scoped('GET', privateMarketplacePath, 'getPrivateMarketplaceConnection', 'marketplace.manage', async ({ teamId }) => {
+        if (!customer || customer.teamId !== teamId) return notFound('marketplace connection', '');
+        const result = await customer.call('marketplace-status');
+        return result.ok ? { ...send('getPrivateMarketplaceConnection', 200, result.body), headers: { 'cache-control': 'no-store' } }
+          : marketplaceUnavailable();
+      }),
+      scoped('POST', privateMarketplacePath, 'enrollPrivateMarketplaceConnection', 'marketplace.manage', async ({ teamId }, request) => {
+        if (!customer || customer.teamId !== teamId) return notFound('marketplace connection', '');
+        const body = bodyOf<{ handoff?: unknown }>(request);
+        const handoff = body.ok ? body.value?.handoff : undefined;
+        if (typeof handoff !== 'string' || !/^[0-9a-f-]{36}:[A-Za-z0-9_-]{43}$/.test(handoff)) return badRequest('Paste the complete marketplace connection code');
+        const result = await customer.call('marketplace-enroll', { handoff });
+        if (!result.ok || result.body === 'unavailable') return marketplaceUnavailable();
+        return result.body === 'enrolled' ? { status: 204, body: null } :
+          { status: 409, body: { error: 'marketplace-code-refused', message: 'Check the connection code and whether this installation is already connected.' } };
+      }),
+    ],
+  };
   const launchPath = '/api/v1/teams/{teamId}/starter-launch';
   const launcher: ExtensionDescriptor = {
     id: 'starter-launch',
@@ -1486,7 +1513,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
     }],
   };
 
-  return [core, instances, dispatches, audit, teams, bindings, invitations, secrets, controller, marketplace, launcher, catalog, availability, notifications,
+  return [core, instances, dispatches, audit, teams, bindings, invitations, secrets, controller, marketplace, privateMarketplace, launcher, catalog, availability, notifications,
     accountProfile(authorize, deps.accountIssuer)];
 }
 
