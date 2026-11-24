@@ -5,6 +5,7 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+- Added environment tabs for deployment reports, configuration presence, and planned domains. The workspace only shows name and presence for app secrets (#288).
 - Added the Platfolio Account page for username and display-name edits, sign-in email status, and access to the themed password change flow (#288).
 - Added the pinned free Starter Web template picker and a launch route scoped to the active team (#288).
 - Authorize private installations with a one-use hub enrollment code and let them claim the pinned Starter Web release with a revocable registry credential stored in their own OpenBao (#288).

@@ -78,7 +78,7 @@ export const workspaceContent = defineComponent({
   props: z.object({}).strict(),
   reads: ['listTeams', 'listInstances', 'getStarterLaunch', 'startStarterLaunch', 'removeStarterLaunch',
     'createTeam', 'listMyInvitations', 'acceptInvitation', 'listInvitations', 'createInvitation', 'revokeInvitation', 'listInstallableTemplates',
-    'getAccountProfile', 'updateAccountProfile'],
+    'getAccountProfile', 'updateAccountProfile', 'getInstanceEnvironment', 'listSecretPresence'],
   slots: ['full-page'],
   render: WorkspaceContent,
 });

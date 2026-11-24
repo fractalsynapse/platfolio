@@ -606,6 +606,7 @@ export interface Store {
   latestAttestation(instanceId: string): Promise<StoreResult<AttestationRecord>>;
   /** Newest first (see `recentAudit`). */
   listAttestations(instanceId: string, limit?: number): Promise<AttestationRecord[]>;
+  listEnvironmentAttestations(instanceId: string, environment: string, limit?: number): Promise<AttestationRecord[]>;
 
   /** StoreResult, not a bare entry: an audit write that throws would abort the controller loop it is trying
    *  to record, so a failed record must be a value the caller can decide about. */

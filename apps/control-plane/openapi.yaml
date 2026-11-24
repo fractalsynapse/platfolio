@@ -669,6 +669,59 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
+  /api/v1/instances/{instanceId}/environments/{environment}:
+    parameters:
+      - { name: instanceId, in: path, required: true, schema: { type: string, minLength: 1 } }
+      - { name: environment, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 60 } }
+    get:
+      operationId: getInstanceEnvironment
+      summary: Read the environment's planned services, domains, and deployment reports
+      description: Secret names are included. Values and private credential material are excluded. A planned domain is not a report of public availability.
+      security: [{ bearerJwt: [] }]
+      responses:
+        '200':
+          description: Planned resources and recent reports scoped to this environment.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [planned, services, domains, deployments]
+                properties:
+                  planned: { type: boolean }
+                  services:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [name, secrets]
+                      properties:
+                        name: { type: string }
+                        secrets: { type: array, items: { type: string } }
+                  domains:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [host, service]
+                      properties:
+                        host: { type: string }
+                        service: { type: string }
+                  deployments:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [id, result, reportedAt]
+                      properties:
+                        id: { type: string }
+                        result: { type: string, enum: [ok, partial, failed, noop] }
+                        reportedAt: { type: string, format: date-time }
+                        commit: { type: string }
+                        problem: { type: string }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   /api/v1/instances/{instanceId}/plan:
     parameters:
       - name: instanceId
