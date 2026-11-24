@@ -47,10 +47,8 @@ services:
       # starts before traffic, so there is no race to lose. Replicas would use PLATFOLIO_DB_MIGRATE=false.
       PLATFOLIO_DB_MIGRATE: 'true'
       PLATFOLIO_RECONCILE_INTERVAL_MS: '60000'
-      # Email (D46). `none` until a relay is configured deliberately: the null transport refuses, reports
-      # honestly and leaves the routes mounted, which is safer than a half-configured sender that appears to work.
-      PLATFOLIO_EMAIL_DRIVER: none
-      PLATFOLIO_EMAIL_FROM: platfolio@platfolio.dev
+      # Operators configure a sender per installation. The API defaults to no delivery when the
+      # driver is absent. Leaving the sender and driver unset here preserves the provider configuration.
       PLATFOLIO_SMTP_STARTTLS: require
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/status').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
@@ -67,11 +65,7 @@ services:
       # Declared by NAME, never by value (D4). The validator refused the literal I first wrote -- a credential
       # appearing in an env assignment is exactly what this platform must not store or read -- so the hosting
       # layer supplies it at run time and platfolio only knows it exists.
-      # No SMTP secret is declared while PLATFOLIO_EMAIL_DRIVER is `none`. Declaring a credential the running
-      # config never reads is not caution, it is noise: the provider correctly refuses a plan whose declared
-      # secret has no value, so a phantom name would block the very deploy this file is meant to describe.
-      # Add the entry back the moment a relay is configured -- with `driver: smtp`, the provider will require
-      # the name to exist, and that is the point of declaring it rather than inlining a value (D4).
+      # SMTP is optional and its credential lives on the environment's API service when configured.
       secrets:
         # Names, never values (D4). The GitHub App's id, installation and signing key are what the two
         # repository operations need (#172's middle); they live as variables in the tenant's own Railway

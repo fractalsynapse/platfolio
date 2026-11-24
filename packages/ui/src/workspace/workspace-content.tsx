@@ -14,6 +14,10 @@ import { WorkspaceHeader } from './workspace-header.tsx';
 import { WorkspaceLink } from './workspace-link.tsx';
 import { CreateTeam } from './create-team.tsx';
 import { MyInvitations } from './my-invitations.tsx';
+import { TeamTabs } from './team-tabs.tsx';
+import { TeamMemberTabs } from './team-member-tabs.tsx';
+import { TeamRoster } from './team-roster.tsx';
+import { TeamConnections } from './team-connections.tsx';
 import { TeamInvitations } from './team-invitations.tsx';
 import { FreeTemplatePicker } from './free-template-picker.tsx';
 import { AccountWorkspace } from './account-workspace.tsx';
@@ -62,10 +66,17 @@ function WorkspaceContent() {
           <p><WorkspaceLink href={workspacePaths.templates(team.name)}>Choose template</WorkspaceLink></p>
           <StarterLaunchScreen selectedTeamId={team.teamId} />
         </> : <UnavailablePage />
-        : route.kind === 'team-invitations' ? team?.role === 'owner' ? <>
-          <h1>Team invitations</h1>
-          <p><WorkspaceLink href={workspacePaths.team(team.name)}>Team workspace</WorkspaceLink></p>
-          <TeamInvitations key={team.teamId} teamId={team.teamId} />
+        : route.kind === 'team-invitations' || route.kind === 'team-members' ? team?.role === 'owner' ? <>
+          <h1>Members</h1>
+          <TeamTabs team={team} current="members" />
+          <TeamMemberTabs team={team.name} current={route.kind === 'team-members' ? 'roster' : 'invitations'} />
+          {route.kind === 'team-members' ? <TeamRoster key={team.teamId} teamId={team.teamId} />
+            : <TeamInvitations key={team.teamId} teamId={team.teamId} />}
+        </> : <UnavailablePage />
+        : route.kind === 'team-connections' ? team?.role === 'owner' ? <>
+          <h1>Connections</h1>
+          <TeamTabs team={team} current="connections" />
+          <TeamConnections key={team.teamId} teamId={team.teamId} />
         </> : <UnavailablePage /> : route.kind === 'launch' ? <>
         <p><WorkspaceLink href={workspacePaths.home}>Your teams</WorkspaceLink></p><StarterLaunchScreen />
       </> : team && 'team' in route ? <TeamWorkspace team={team} route={route} /> : <UnavailablePage />)}
@@ -78,7 +89,9 @@ export const workspaceContent = defineComponent({
   props: z.object({}).strict(),
   reads: ['listTeams', 'listInstances', 'getStarterLaunch', 'startStarterLaunch', 'removeStarterLaunch',
     'createTeam', 'listMyInvitations', 'acceptInvitation', 'listInvitations', 'createInvitation', 'revokeInvitation', 'listInstallableTemplates',
-    'getAccountProfile', 'updateAccountProfile', 'getInstanceEnvironment', 'listSecretPresence'],
+    'getAccountProfile', 'updateAccountProfile', 'getInstanceEnvironment', 'listSecretPresence',
+    'getStarterLaunchSetup', 'initializeStarterOpenBao', 'unlockStarterOpenBao', 'beginStarterRailwayAuthorization',
+    'listTeamMembers', 'updateTeamMemberRole', 'removeTeamMember'],
   slots: ['full-page'],
   render: WorkspaceContent,
 });

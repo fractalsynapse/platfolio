@@ -17,13 +17,14 @@ const tabs = [
 
 interface EnvironmentWorkspaceProps {
   readonly instanceId: string;
+  readonly canManage: boolean;
   readonly environment: InstanceResponse['environments'][number];
   readonly route: Extract<WorkspaceRoute, { kind: 'environment' }>;
   readonly freshness: Freshness;
   readonly now: string;
 }
 
-export function EnvironmentWorkspace({ instanceId, environment, route, freshness, now }: EnvironmentWorkspaceProps): React.ReactElement {
+export function EnvironmentWorkspace({ instanceId, canManage, environment, route, freshness, now }: EnvironmentWorkspaceProps): React.ReactElement {
   const params = React.useMemo(() => ({ instanceId, environment: route.environment }), [instanceId, route.environment]);
   const { state, reload } = useOperation('getInstanceEnvironment', { params, key: `environment-${instanceId}-${route.environment}` });
   const clock = useClock();
@@ -47,10 +48,10 @@ export function EnvironmentWorkspace({ instanceId, environment, route, freshness
         <p>Project <code>{state.data.hosting.projectId.slice(0, 12)}</code></p>
         <p>Last confirmed {new Date(state.data.hosting.observedAt).toLocaleString()}</p>
         {state.data.hosting.state !== 'paused' && state.data.hosting.state !== 'removed' && <p><a href={state.data.hosting.origin}>Open app</a></p>}
-        <p><WorkspaceLink href={workspacePaths.launchForTeam(route.team)}>Open app setup</WorkspaceLink></p>
+        {canManage && <p><WorkspaceLink href={workspacePaths.instanceSetup(route.team, route.instance)}>Open app setup</WorkspaceLink></p>}
       </section>}
       {route.tab === 'deployments' && <EnvironmentDeployments deployments={state.data.deployments} />}
-      {route.tab === 'domains' && <EnvironmentDomains domains={state.data.domains} planned={state.data.planned} />}
+      {route.tab === 'domains' && <EnvironmentDomains domains={state.data.domains} planned={state.data.planned} hosting={state.data.hosting} />}
       {route.tab === 'configuration' && <section aria-label="Environment configuration">
         <h2>Configuration</h2>
         {!state.data.planned && <p>Register a deployment plan to check this environment’s settings.</p>}

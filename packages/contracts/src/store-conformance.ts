@@ -101,6 +101,28 @@ const expectErr = (result: { ok: boolean; value?: unknown } & Partial<StoreError
       : { status: 'fail', detail: 'marketplace ownership or revocation differed' };
   });
 
+  await add('membership changes keep an acting owner and refuse a former owner', async () => {
+    const { store, team } = await seed();
+    const owner = mustOk(await store.resolvePerson({ issuer: 'https://membership.example.test', subject: randomUUID() }), 'owner').person;
+    const member = mustOk(await store.resolvePerson({ issuer: 'https://membership.example.test', subject: randomUUID() }), 'member').person;
+    mustOk(await store.putTeamMember({ teamId: team.id, personId: owner.id, role: 'owner' }), 'owner member');
+    mustOk(await store.putTeamMember({ teamId: team.id, personId: member.id, role: 'member' }), 'new member');
+    if ((await store.changeTeamMember(team.id, owner.id, owner.id, null)).ok ||
+        (await store.changeTeamMember(team.id, member.id, owner.id, 'member')).ok) throw new Error('Non-owner or self removal was accepted');
+    mustOk(await store.changeTeamMember(team.id, owner.id, member.id, 'owner'), 'promote');
+    const decisions = await Promise.all([
+      store.changeTeamMember(team.id, owner.id, member.id, 'member'),
+      store.changeTeamMember(team.id, member.id, owner.id, 'member'),
+    ]);
+    const roster = await store.listTeamMembers(team.id);
+    const survivor = roster.find(({ role }) => role === 'owner');
+    const removed = roster.find(({ role }) => role === 'member');
+    if (decisions.filter(({ ok }) => ok).length !== 1 || !survivor || !removed) throw new Error('Concurrent demotion lost the remaining owner');
+    mustOk(await store.changeTeamMember(team.id, survivor.personId, removed.personId, null), 'remove');
+    if ((await store.teamsForPerson(removed.personId)).includes(team.id)) throw new Error('Removed member kept access');
+    return { status: 'pass', detail: 'owner checked at write, concurrent demotion leaves an owner, access revoked on removal' };
+  });
+
   await add('verified hosted starter updates are ordered, team-scoped and durable', async () => {
     const { store, team, instance: unrelated } = await seed();
     const peer = mustOk(await store.createTeam({ name: tName('starter-peer') }), 'peer team');

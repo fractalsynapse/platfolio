@@ -2,16 +2,18 @@ import * as React from 'react';
 import type { TeamWithRole } from '@platfolio/api-contract/generated/types';
 import { ageLabel, useClock } from '../components/freshness.ts';
 import { useOperation } from '../sdk/use-operation.ts';
+import { AppSetup } from './app-setup.tsx';
 import { AppList } from './app-list.tsx';
 import { Breadcrumbs, type Breadcrumb } from './breadcrumbs.tsx';
 import { EnvironmentList } from './environment-list.tsx';
 import { EnvironmentWorkspace } from './environment-workspace.tsx';
 import { workspacePaths, type WorkspaceRoute } from './routes.ts';
 import { WorkspaceLink } from './workspace-link.tsx';
+import { TeamTabs } from './team-tabs.tsx';
 import { UnavailablePage } from './unavailable-page.tsx';
 
 const params = {};
-type TeamRoute = Extract<WorkspaceRoute, { kind: 'team' | 'instance' | 'environment' }>;
+type TeamRoute = Extract<WorkspaceRoute, { kind: 'team' | 'instance' | 'instance-setup' | 'environment' }>;
 
 export function TeamWorkspace({ team, route }: { readonly team: TeamWithRole; readonly route: TeamRoute }): React.ReactElement {
   const { state, reload } = useOperation('listInstances', { params });
@@ -27,9 +29,9 @@ export function TeamWorkspace({ team, route }: { readonly team: TeamWithRole; re
   const age = ageLabel(state.freshness, now).text;
   if (route.kind === 'team') return <>
     <h1>Team workspace</h1>
+    <TeamTabs team={team} current="apps" />
     {team.role === 'owner' && <p className="ui-workspace-links">
       <WorkspaceLink href={workspacePaths.templates(team.name)}>Create an app</WorkspaceLink>
-      <WorkspaceLink href={workspacePaths.teamInvitations(team.name)}>Manage invitations</WorkspaceLink>
     </p>}
     <section aria-labelledby="workspace-apps"><div className="ui-workspace-heading">
       <h2 id="workspace-apps">Apps</h2><small className="ui-workspace-meta">{age}</small>
@@ -42,18 +44,27 @@ export function TeamWorkspace({ team, route }: { readonly team: TeamWithRole; re
   if (route.kind === 'instance') return <>
     <Breadcrumbs items={[parent, { label: app.name }]} />
     <h1>{app.name}</h1>
+    {team.role === 'owner' && app.template === 'starter-web' && <p>
+      <WorkspaceLink href={workspacePaths.instanceSetup(team.name, app.name)}>Manage app</WorkspaceLink>
+    </p>}
     <p className="ui-workspace-meta">{app.template}{app.templateRef && <> · <code>{app.templateRef.commitSha.slice(0, 12)}</code></>}</p>
     <section aria-labelledby="app-environments"><div className="ui-workspace-heading">
       <h2 id="app-environments">Environments</h2>{app.environments.length === 0 && <small className="ui-workspace-meta">{age}</small>}
     </div><EnvironmentList team={team.name} app={app} freshness={state.freshness} now={now} /></section>
   </>;
 
+  if (route.kind === 'instance-setup') return team.role === 'owner' ? <>
+    <Breadcrumbs items={[parent, { label: app.name, href: workspacePaths.instance(team.name, app.name) }, { label: 'Manage app' }]} />
+    <h1>Manage app</h1>
+    <AppSetup key={app.id} instanceId={app.id} teamId={team.teamId} />
+  </> : <UnavailablePage />;
+
   const environment = app.environments.find((item) => item.environment === route.environment);
   if (!environment) return <UnavailablePage />;
   return <>
     <Breadcrumbs items={[parent, { label: app.name, href: workspacePaths.instance(team.name, app.name) }, { label: environment.environment }]} />
     <h1>{environment.environment}</h1>
-    <EnvironmentWorkspace key={`${app.id}-${environment.environment}`} instanceId={app.id}
+    <EnvironmentWorkspace key={`${app.id}-${environment.environment}`} instanceId={app.id} canManage={team.role === 'owner'}
       environment={environment} route={route} freshness={state.freshness} now={now} />
   </>;
 }

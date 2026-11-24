@@ -3,7 +3,7 @@ import type { Attestation } from './attestation.ts';
 import { AttestationRecordSchema, AuditEntrySchema, BindingRecordSchema, CapabilityOfferSchema, CapabilityShareSchema, IdentitySchema, PersonSchema, TeamMemberSchema, DispatchRecordSchema, InstanceEnvironmentStateSchema, InstanceSchema, InvitationSchema, ProviderConnectionSchema, RepoConnectionSchema, TeamSchema, newId,
   HostedStarterSchema, rollupState, type HostedStarter, type NewHostedStarter,
   ArtifactRecordSchema,
-  type ArtifactRecord, type AttestationRecord, type AuditEntry, type BindingRecord, type CapabilityOffer, type CapabilityShare, type NewBinding, type NewCapabilityOffer, type NewCapabilityShare, type DispatchRecord, type Instance, type InstanceEnvironmentState, type Invitation, type NewInvitation, type ProviderConnection, type RepoConnection, type Store, type StoreError, type NewInstance, type StoreResult, type Team, type TeamMember, type Identity, type Person } from './persistence.ts';
+  type ArtifactRecord, type AttestationRecord, type AuditEntry, type BindingRecord, type CapabilityOffer, type CapabilityShare, type NewBinding, type NewCapabilityOffer, type NewCapabilityShare, type DispatchRecord, type Instance, type InstanceEnvironmentState, type Invitation, type NewInvitation, type ProviderConnection, type RepoConnection, type Store, type StoreError, type NewInstance, type StoreResult, type Team, type TeamMember, type TeamRole, type Identity, type Person } from './persistence.ts';
 import { reasonOf } from './persistence.ts';
 import { normaliseEmail, normaliseName } from './persistence.ts';
 import { checkAttestationPolicy } from './dispatch-policy.ts';
@@ -318,6 +318,24 @@ export class MemoryStore implements Store {
   async listTeamMembers(teamId: string) {
     return [...this.members.values()].filter((m) => m.teamId === teamId).map(copy);
   }
+
+  async changeTeamMember(teamId: string, actorId: string, personId: string, role: TeamRole | null): Promise<StoreResult<TeamMember>> {
+    if (this.closed) return this.refuse('changeTeamMember');
+    const owner = this.members.get(`${teamId}\u0000${actorId}`);
+    if (owner?.role !== 'owner') return err({ code: 'not-found', what: 'ownership', id: teamId });
+    if (actorId === personId) return err({ code: 'conflict', reason: 'Another owner must change your membership' });
+    const key = `${teamId}\u0000${personId}`;
+    const member = this.members.get(key);
+    if (!member) return err({ code: 'not-found', what: 'team membership', id: personId });
+    if (role === null) {
+      this.members.delete(key);
+      return ok(copy(member));
+    }
+    const updated = { ...member, role };
+    this.members.set(key, updated);
+    return ok(copy(updated));
+  }
+
   async teamsForPerson(personId: string) {
     return [...this.members.values()].filter((m) => m.personId === personId).map((m) => m.teamId);
   }
@@ -458,9 +476,7 @@ export class MemoryStore implements Store {
     // direction. The double has no transaction; the database does, and the shared suite asserts the outcome.
     const memberKey = `${accepted.teamId}\u0000${personId}`;
     const existing = this.members.get(memberKey);
-    const member: TeamMember = existing
-      ? { ...existing, role: accepted.role }
-      : { teamId: accepted.teamId, personId, role: accepted.role, addedAt: now };
+    const member: TeamMember = existing ?? { teamId: accepted.teamId, personId, role: accepted.role, addedAt: now };
     this.members.set(memberKey, member);
     this.invitations.set(invitationId, accepted);
     return ok({ invitation: copy(accepted), member: copy(member) });

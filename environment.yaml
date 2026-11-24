@@ -345,13 +345,13 @@ variables:
     secret: false
     environments: all
     deployedTo: railway:variable
-    note: "referenced by apps/control-plane/src/index.ts, compose.dev.yaml, compose.yaml"
+    note: "Optional mail relay configured on the installation API service. The development overlay can use Mailpit."
   - name: PLATFOLIO_EMAIL_FROM
     kind: value
     secret: false
     environments: all
     deployedTo: railway:variable
-    note: "referenced by apps/control-plane/src/index.ts, compose.dev.yaml, compose.yaml"
+    note: "Optional mail relay configured on the installation API service. The development overlay can use Mailpit."
   - name: PLATFOLIO_EXPIRES_AT
     kind: value
     secret: false
@@ -527,26 +527,26 @@ variables:
     kind: value
     secret: false
     environments: all
-    deployedTo: host:shell
-    note: "referenced by apps/control-plane/src/index.ts, compose.dev.yaml"
+    deployedTo: railway:variable
+    note: "Optional mail relay configured on the installation API service. The development overlay can use Mailpit."
   - name: PLATFOLIO_SMTP_PASSWORD
     kind: secret
     secret: true
     environments: [staging, production]
-    deployedTo: host:shell
-    note: "referenced by apps/control-plane/src/index.ts"
+    deployedTo: railway:variable
+    note: "Optional mail relay configured on the installation API service. The development overlay can use Mailpit."
   - name: PLATFOLIO_SMTP_PORT
     kind: value
     secret: false
     environments: all
-    deployedTo: host:shell
-    note: "referenced by apps/control-plane/src/index.ts, compose.dev.yaml"
+    deployedTo: railway:variable
+    note: "Optional mail relay configured on the installation API service. The development overlay can use Mailpit."
   - name: PLATFOLIO_SMTP_SECURE
     kind: value
     secret: false
     environments: [staging, production]
-    deployedTo: host:shell
-    note: "referenced by apps/control-plane/src/index.ts"
+    deployedTo: railway:variable
+    note: "Optional mail relay configured on the installation API service. The development overlay can use Mailpit."
   - name: PLATFOLIO_SMTP_STARTTLS
     kind: value
     secret: false
@@ -557,8 +557,8 @@ variables:
     kind: value
     secret: false
     environments: [staging, production]
-    deployedTo: host:shell
-    note: "referenced by apps/control-plane/src/index.ts"
+    deployedTo: railway:variable
+    note: "Optional mail relay configured on the installation API service. The development overlay can use Mailpit."
   - name: PLATFOLIO_STARTER_HEALTH_URL
     kind: value
     secret: false

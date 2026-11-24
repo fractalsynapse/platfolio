@@ -101,6 +101,21 @@ and could only reach `production`. When staging was created those three App cred
 the plan check correctly reported `secret-unavailable` for both environments -- the honest failure that produced
 `--deliver-secrets`. Retiring the raw-GraphQL blocks is #213.
 
+## Staging mail relay
+
+Configure SMTP on the staging API service in Railway. Set `PLATFOLIO_EMAIL_DRIVER=smtp`,
+`PLATFOLIO_EMAIL_FROM`, `PLATFOLIO_SMTP_HOST`, `PLATFOLIO_SMTP_PORT`,
+`PLATFOLIO_SMTP_USER`, and `PLATFOLIO_SMTP_PASSWORD`. Use STARTTLS on port 587 with the
+default `PLATFOLIO_SMTP_STARTTLS=require`. Keep the credential in the service's runtime
+variables and the operator's credential store. The planner leaves these optional values
+on the service when applying a candidate. A fresh installation without an SMTP selection
+starts with email delivery disabled.
+
+Keycloak has its own SMTP settings on the realm. Apply these to the isolated staging realm
+and verify mail delivery before enabling self-service registration and password recovery.
+Use a disposable address you can read when verifying the links and confirm that the team
+invitation delivery receipt appears in Platfolio.
+
 ## Two realms, one Keycloak (D56)
 
 platfolio's production and staging control planes share the hosted identity service -- one container, one
