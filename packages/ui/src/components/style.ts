@@ -29,6 +29,26 @@ export interface ComponentRule {
 /** The classes a component may attach, each with the reason it exists. One list; the CSS is emitted from it. */
 export const COMPONENT_RULES = [
   {
+    selector: '.ui-workspace-links',
+    declarations: ['display: flex;', 'flex-wrap: wrap;', 'gap: var(--ui-space-4);'],
+    why: 'Place related workspace actions together at each supported width.',
+  },
+  {
+    selector: '.ui-template-card',
+    declarations: ['max-inline-size: 32rem;', 'border: 1px solid var(--ui-color-border);', 'border-radius: var(--ui-space-4);', 'overflow: hidden;'],
+    why: 'Keep the starter details and action on one bordered card.',
+  },
+  {
+    selector: '.ui-template-card header',
+    declarations: ['padding: var(--ui-space-5);', 'background: linear-gradient(140deg, color-mix(in srgb, var(--ui-color-accent) 19%, var(--ui-color-surface)), var(--ui-color-surface));'],
+    why: 'Use the approved template gradient with a dark surface for readable headings.',
+  },
+  {
+    selector: '.ui-template-card-body',
+    declarations: ['padding: var(--ui-space-5);'],
+    why: 'Group the source metadata and launch action below the card title.',
+  },
+  {
     selector: '.ui-workspace-form',
     declarations: ['display: grid;', 'gap: var(--ui-space-3);', 'max-inline-size: 28rem;', 'margin-block: var(--ui-space-4);'],
     why: 'Keep labels and fields together and limit the line length on wider screens.',

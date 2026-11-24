@@ -4,7 +4,7 @@
  * hand, because every line reproduces from the specification.
  *
  * Source: apps/control-plane/openapi.yaml (OpenAPI 3.1.0, info.version 0.1.0)
- * Input digest: sha256/8c705a8f6f7acbfa
+ * Input digest: sha256/78ea29d134a033de
  *
  * Reproduce it with `pnpm run api:types`. `pnpm run api:types:check` fails when this file stops matching
  * what the committed spec produces, which is the only way a generated type deserves to be trusted.
@@ -377,6 +377,8 @@ export interface ApiParameters {
   listConsumers: {
     instanceId: string;
   };
+  /** GET /api/v1/templates */
+  listInstallableTemplates: Record<string, never>;
   /** GET /api/v1/instances */
   listInstances: Record<string, never>;
   /** GET /api/v1/teams/{teamId}/invitations */
@@ -805,6 +807,18 @@ export interface ApiResponses {
     '401': Error;
     '404': Error;
   };
+  /** GET /api/v1/templates */
+  listInstallableTemplates: {
+    '200': Array<{
+      template: string;
+      repo: string;
+      version: string;
+      revision: string;
+      priceMinor: 0;
+    }>;
+    '401': Error;
+    '403': Error;
+  };
   /** GET /api/v1/instances */
   listInstances: {
     '200': InstanceResponse[];
@@ -1163,6 +1177,8 @@ export const ENDPOINTS = {
   listBindings: { method: 'get', path: '/api/v1/instances/{instanceId}/bindings' },
   /** GET /api/v1/instances/{instanceId}/consumers */
   listConsumers: { method: 'get', path: '/api/v1/instances/{instanceId}/consumers' },
+  /** GET /api/v1/templates */
+  listInstallableTemplates: { method: 'get', path: '/api/v1/templates' },
   /** GET /api/v1/instances */
   listInstances: { method: 'get', path: '/api/v1/instances' },
   /** GET /api/v1/teams/{teamId}/invitations */

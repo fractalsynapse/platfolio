@@ -375,6 +375,31 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
+  /api/v1/templates:
+    get:
+      operationId: listInstallableTemplates
+      summary: List pinned free templates supported by the current installer
+      security: [{ bearerJwt: [] }]
+      responses:
+        '200':
+          description: Installable public templates and their pinned source coordinates.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: false
+                  required: [template, repo, version, revision, priceMinor]
+                  properties:
+                    template: { type: string }
+                    repo: { type: string }
+                    version: { type: string }
+                    revision: { type: string, pattern: '^[a-f0-9]{40}$' }
+                    priceMinor: { type: integer, enum: [0] }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
   /api/v1/teams:
     get:
       operationId: listTeams

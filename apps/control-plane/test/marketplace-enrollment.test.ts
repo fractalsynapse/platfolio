@@ -47,6 +47,11 @@ test('a private installation can exchange an owner’s code for registry access 
     assert.equal(claim.status, 200);
     const receipt = await claim.json() as { installationId: string; template: string; priceMinor: number };
     assert.deepEqual([receipt.installationId, receipt.template, receipt.priceMinor], [installationId, 'starter-web', 0]);
+    assert.equal((await call('/api/v1/templates', registry, 'GET')).status, 401);
+    const catalog = await call('/api/v1/templates', owner, 'GET');
+    assert.equal(catalog.status, 200);
+    const { installationId: _scope, ...release } = receipt;
+    assert.deepEqual(await catalog.json(), [release]);
     assert.equal((await call(teamPath, owner, 'DELETE')).status, 204);
     assert.equal((await call(`${registryPath}/claim`, registry)).status, 404);
   } finally {

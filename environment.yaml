@@ -440,8 +440,8 @@ variables:
     kind: value
     secret: false
     environments: all
-    deployedTo: local:compose-overlay
-    note: "Enables hub-only free-template links and claims."
+    deployedTo: railway:variable
+    note: "Enables hub-only free-template enrollment and claims. Enabled for the staging hub and the local hub proof."
   - name: PLATFOLIO_OPENBAO_URL
     kind: value
     secret: false
