@@ -705,6 +705,20 @@ not contradict them, and a framework spec is what "make it testable" needed):
   E9 as **done (measured: passed, 2026-11-07)** and E10 as contract-versioning, not a frontend check. The
   next experiment for *this* document is proposed below, and 09's owners decide whether to take it.
 
+## Adding a workspace feature
+
+The static host serves the same React root on dashboard URLs. The root owns the browser
+session and navigation. The workspace resolves a route against the signed-in person's SDK
+data. A feature contributes a compiled screen document and separate React components in
+`packages/ui`. Keep route matching, provider calls, and credential storage out of reusable
+controls. Use the generated SDK and its freshness source for server data. Web navigation
+and authentication stay with the host so another React shell can bind its own adapters.
+
+A capability such as feedback intake can start with an OpenAPI operation and a first-party
+Cordis extension descriptor that declares its dependencies. External platforms call that
+operation through the API. A workspace screen can then show the same records and use the
+same operations for issue creation or follow-up. See [the Cordis extension boundary](10-cordis-kernel-and-extension-seams.md#the-collision-and-the-resolution).
+
 ## Open decisions
 
 Five remain open. UI-OD2 (push channel) and UI-OD6 (design tokens) were **answered by the maintainer on

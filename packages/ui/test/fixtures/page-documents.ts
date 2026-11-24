@@ -80,6 +80,7 @@ export const SAMPLE_NOW = '2026-11-15T09:30:40.000Z';
 export const SAMPLE_PROPS: Readonly<Record<string, Record<string, unknown>>> = {
   'context.switcher': { teams: SAMPLE_TEAMS, instances: SAMPLE_INSTANCES },
   'launch.starter': { teamId: '01TEAMAAA' },
+  'workspace.content': {},
   'freshness.label': { freshness: SAMPLE_FRESHNESS, now: SAMPLE_NOW, describes: 'Instances' },
   'instance.detail': { instance: SAMPLE_INSTANCES[0], attestation: SAMPLE_ATTESTATION, freshness: SAMPLE_FRESHNESS, now: SAMPLE_NOW },
   'instance.list': { instances: SAMPLE_INSTANCES, teams: SAMPLE_TEAMS, observedAt: SAMPLE_FRESHNESS.observedAt, now: SAMPLE_NOW },

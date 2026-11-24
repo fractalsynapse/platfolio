@@ -5,6 +5,8 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+- Added the React team workspace with direct app and environment links, a shared team selector and navigation, and return to the original workspace page after Keycloak sign-in.
+
 - Added a browser launch pilot for the pinned Starter Web release with progress and a downloadable troubleshooting report.
 - Placed private Platfolio and hosted apps in separate Railway projects. App removal has explicit options to retain storage for restore or schedule storage deletion.
 - Fixed browser sign-in to preserve the in-memory session through the Keycloak callback.

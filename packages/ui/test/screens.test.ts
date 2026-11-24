@@ -151,6 +151,7 @@ function propsForComponent(id: string): Record<string, unknown> {
     case 'instance.state': return { state: 'degraded', observedAt: SAMPLE_FRESHNESS.observedAt, now: SAMPLE_NOW };
     case 'freshness.label': return { freshness: SAMPLE_FRESHNESS, now: SAMPLE_NOW, describes: 'Instances' };
     case 'context.switcher': return { teams: SAMPLE_TEAMS, instances: SAMPLE_INSTANCES };
+    case 'workspace.content': return {};
     case 'launch.starter': return { teamId: SAMPLE_TEAMS[0]?.teamId };
     default: throw new TypeError(`screens.test.ts has no props for ${id}`);
   }

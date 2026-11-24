@@ -211,6 +211,32 @@ test('a reload re-authenticates: the session never persisted, and the spent hand
   assert.ok(requests.at(-1)!.code_verifier === midVerifier, 'the verifier that reached the realm is the one the tab was holding, read once');
 });
 
+test('the PKCE handoff restores a workspace path only after the matching callback', async () => {
+  const path = '/dashboard/teams/example/instances/sample/environments/staging';
+  const { source, store, requests } = harness();
+  const authorize = new URL(await source.begin(path));
+  const state = authorize.searchParams.get('state') ?? '';
+  assert.match(state, /^[A-Za-z0-9_-]+$/);
+  assert.equal(store.size, 2);
+  assert.equal(store.get(HANDOFF_KEYS.state), `${state}:${path}`);
+  let returned: string | undefined;
+  const receive = (destination: string) => { returned = destination; };
+  assert.equal(await source.complete(new URLSearchParams({ code: 'CODE', state }), receive), 'signed-in');
+  assert.equal(returned, path);
+  assert.equal(store.size, 0);
+  assert.equal(await source.complete(new URLSearchParams({ code: 'CODE', state }), receive), 'no-handoff');
+  assert.equal(requests.length, 1);
+
+  for (const external of ['//example.test/dashboard', 'https://example.test/dashboard', '/dashboard/../callback', '/dashboard/teams/example\n']) {
+    const unsafe = harness();
+    const next = new URL(await unsafe.source.begin(external));
+    const nonce = next.searchParams.get('state') ?? '';
+    assert.equal(unsafe.store.get(HANDOFF_KEYS.state), nonce);
+    assert.equal(await unsafe.source.complete(new URLSearchParams({ code: 'CODE', state: nonce }), receive), 'signed-in');
+    assert.equal(returned, '/dashboard');
+  }
+});
+
 test('the policy the browser exports is the operator policy, value for value', () => {
   assert.equal(authPolicy.webClient, WEB_CLIENT_ID);
   assert.equal(authPolicy.requiredScope, REQUIRED_SCOPE);
