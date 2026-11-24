@@ -3,7 +3,7 @@
  * packages/ui/src/components/style.ts and it is the only one.
  *
  * Source: packages/ui/src/components/style.ts
- * Input digest: sha256/cb8d1f9c0b25d652
+ * Input digest: sha256/bf4e8a94ce52d236
  *
  * Reproduce with `pnpm run ui:css`; `pnpm run ui:css:check` fails when this stops matching the module. The
  * numbers in here are not literals: they reference the custom properties in ../tokens.css, which is what makes
@@ -11,6 +11,32 @@
  * appears in this file -- a threshold belongs to a layout primitive's `@container` rule, and gate §9.3 audits
  * both sheets for the difference.
  */
+
+/* Place related workspace actions together at each supported width. */
+.ui-workspace-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ui-space-4);
+}
+
+/* Keep the starter details and action on one bordered card. */
+.ui-template-card {
+  max-inline-size: 32rem;
+  border: 1px solid var(--ui-color-border);
+  border-radius: var(--ui-space-4);
+  overflow: hidden;
+}
+
+/* Use the approved template gradient with a dark surface for readable headings. */
+.ui-template-card header {
+  padding: var(--ui-space-5);
+  background: linear-gradient(140deg, color-mix(in srgb, var(--ui-color-accent) 19%, var(--ui-color-surface)), var(--ui-color-surface));
+}
+
+/* Group the source metadata and launch action below the card title. */
+.ui-template-card-body {
+  padding: var(--ui-space-5);
+}
 
 /* Keep labels and fields together and limit the line length on wider screens. */
 .ui-workspace-form {

@@ -1281,7 +1281,21 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
     ],
   };
 
-  return [core, instances, dispatches, audit, teams, bindings, invitations, secrets, controller, marketplace, launcher];
+  const catalog: ExtensionDescriptor = {
+    id: 'template-catalog',
+    requires: ['identity'],
+    routes: [{
+      method: 'GET', path: '/api/v1/templates', operationId: 'listInstallableTemplates',
+      async handle(request, _params, context) {
+        const auth = await authorize(context, request);
+        if (!auth.ok) return auth.response;
+        const release = FREE_STARTER_RELEASE;
+        return send('listInstallableTemplates', 200, [{ ...release, repo: templateCatalogEntry(release.template).repo }]);
+      },
+    }],
+  };
+
+  return [core, instances, dispatches, audit, teams, bindings, invitations, secrets, controller, marketplace, launcher, catalog];
 }
 
 export type { VerifiedClaims };

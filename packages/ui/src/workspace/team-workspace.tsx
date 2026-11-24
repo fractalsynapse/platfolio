@@ -27,7 +27,10 @@ export function TeamWorkspace({ team, route }: { readonly team: TeamWithRole; re
   const age = ageLabel(state.freshness, now).text;
   if (route.kind === 'team') return <>
     <h1>Team workspace</h1>
-    {team.role === 'owner' && <p><WorkspaceLink href={workspacePaths.teamInvitations(team.name)}>Manage invitations</WorkspaceLink></p>}
+    {team.role === 'owner' && <p className="ui-workspace-links">
+      <WorkspaceLink href={workspacePaths.templates(team.name)}>Create an app</WorkspaceLink>
+      <WorkspaceLink href={workspacePaths.teamInvitations(team.name)}>Manage invitations</WorkspaceLink>
+    </p>}
     <section aria-labelledby="workspace-apps"><div className="ui-workspace-heading">
       <h2 id="workspace-apps">Apps</h2><small className="ui-workspace-meta">{age}</small>
     </div><AppList team={team.name} apps={apps} /></section>

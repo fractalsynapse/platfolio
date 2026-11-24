@@ -102,6 +102,7 @@ services:
       # is not production's either. A value map is the honest place to say so.
       environmentValues:
         staging:
+          PLATFOLIO_MARKETPLACE_ENABLED: 'true'
           PLATFOLIO_IDENTITY_ISSUER: &staging-issuer https://auth.platfolio.dev/realms/platfolio-staging
           PLATFOLIO_IDENTITY_JWKS_URI: https://auth.platfolio.dev/realms/platfolio-staging/protocol/openid-connect/certs
           # The staging UI host is `preview.platfolio.dev`. Do not read that as the `preview` environment below

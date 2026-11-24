@@ -226,7 +226,7 @@ function loadRegistry(): { entries: Entry[]; error?: string } {
  * regenerated. Each one is a claim about custody, so each says why.
  */
 const HUMAN: Record<string, Partial<Entry>> = {
-  PLATFOLIO_MARKETPLACE_ENABLED: { kind: 'value', secret: false, environments: 'all', deployedTo: 'local:compose-overlay', note: 'Enables hub-only free-template links and claims.' },
+  PLATFOLIO_MARKETPLACE_ENABLED: { kind: 'value', secret: false, environments: 'all', deployedTo: 'railway:variable', note: 'Enables hub-only free-template enrollment and claims. Enabled for the staging hub and the local hub proof.' },
   PLATFOLIO_OPENBAO_URL: { kind: 'value', secret: false, environments: ['staging'], deployedTo: 'railway:variable', note: 'Private OpenBao service origin, supplied to the customer installation worker.' },
   PLATFOLIO_STARTER_HEALTH_URL: { kind: 'value', secret: false, environments: ['staging'], deployedTo: 'railway:variable', note: 'Optional private starter runtime health URL for the pilot worker.' },
   RAILWAY_RUN_UID: { kind: 'value', secret: false, environments: ['staging'], deployedTo: 'railway:variable', note: 'Allows the OpenBao entrypoint to prepare its volume before dropping privileges.' },

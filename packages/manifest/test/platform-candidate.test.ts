@@ -45,6 +45,7 @@ test('an older release candidate can be replayed after a later publish', () => {
   }
   const production = replay.environments.find(({ name }) => name === 'production');
   assert.equal(production?.services.find(({ name }) => name === 'identity')?.digest, digestB);
+  assert.ok(!production?.services.find(({ name }) => name === 'api')?.env.some(({ name }) => name === 'PLATFOLIO_MARKETPLACE_ENABLED'));
 });
 
 test('domain bootstrap options change the hash of the plan they change', () => {
@@ -63,6 +64,9 @@ test('staging selection excludes production from the plan and its hash', () => {
   const staging = planFor(record, { environment: 'staging' });
   assert.deepEqual(staging.environments.map(({ name }) => name), ['staging']);
   assert.ok(staging.environments.every(({ services }) => services.every(({ name }) => name !== 'identity')));
+  const marketplace = staging.environments[0]?.services.find(({ name }) => name === 'api')?.env
+    .find(({ name }) => name === 'PLATFOLIO_MARKETPLACE_ENABLED');
+  assert.equal(marketplace?.literal, 'true');
   assert.notEqual(staging.planHash, planFor(record).planHash);
   assert.throws(() => planFor(record, { environment: 'preview' }), /not enabled/);
 });
