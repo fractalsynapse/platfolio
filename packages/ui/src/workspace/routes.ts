@@ -16,6 +16,7 @@ export const workspacePaths = {
   teamInvitations: (team: string) => `/dashboard/teams/${team}/members/invitations`,
   templates: (team: string) => `/dashboard/teams/${team}/create-instance`,
   launchForTeam: (team: string) => `/dashboard/teams/${team}/create-instance/launch`,
+  instanceStatus: (team: string, instance: string) => `/dashboard/teams/${team}/instances/${instance}/status`,
   instanceSetup: (team: string, instance: string) => `/dashboard/teams/${team}/instances/${instance}/setup`,
   instance: (team: string, instance: string) => `/dashboard/teams/${team}/instances/${instance}`,
   environment: (team: string, instance: string, environment: string, tab: EnvironmentTab = 'overview') =>
@@ -34,6 +35,7 @@ export type WorkspaceRoute =
   | { kind: 'team-launch'; team: string }
   | { kind: 'instance'; team: string; instance: string }
   | { kind: 'instance-setup'; team: string; instance: string }
+  | { kind: 'instance-status'; team: string; instance: string }
   | { kind: 'environment'; team: string; instance: string; environment: string; tab: EnvironmentTab };
 
 const teamRoute = new RegExp(`^${workspacePaths.team(`(${slug})`)}$`);
@@ -43,6 +45,7 @@ const teamConnectionsRoute = new RegExp(`^${workspacePaths.teamConnections(`(${s
 const teamInvitationsRoute = new RegExp(`^${workspacePaths.teamInvitations(`(${slug})`)}$`);
 const templatesRoute = new RegExp(`^${workspacePaths.templates(`(${slug})`)}$`);
 const teamLaunchRoute = new RegExp(`^${workspacePaths.launchForTeam(`(${slug})`)}$`);
+const appStatusRoute = new RegExp(`^${workspacePaths.instanceStatus(`(${slug})`, `(${slug})`)}$`);
 const appSetupRoute = new RegExp(`^${workspacePaths.instanceSetup(`(${slug})`, `(${slug})`)}$`);
 const appRoute = new RegExp(`^${workspacePaths.instance(`(${slug})`, `(${slug})`)}$`);
 const environmentRoute = new RegExp(`^${workspacePaths.environment(`(${slug})`, `(${slug})`, `(${slug})`)}(?:/(deployments|configuration|domains))?$`);
@@ -73,6 +76,8 @@ export function matchWorkspaceRoute(path: string): WorkspaceRoute {
     kind: 'environment', team, instance, environment,
     tab: subpage === 'deployments' || subpage === 'configuration' || subpage === 'domains' ? subpage : 'overview',
   };
+  const [, statusTeam, statusApp] = appStatusRoute.exec(pathname) ?? [];
+  if (statusTeam && statusApp) return { kind: 'instance-status', team: statusTeam, instance: statusApp };
   const [, setupTeam, setupApp] = appSetupRoute.exec(pathname) ?? [];
   if (setupTeam && setupApp) return { kind: 'instance-setup', team: setupTeam, instance: setupApp };
   const [, appTeam, app] = appRoute.exec(pathname) ?? [];

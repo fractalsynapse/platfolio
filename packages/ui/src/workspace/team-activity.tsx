@@ -10,6 +10,8 @@ type Audit = SuccessOf<'listTeamActivity'>[number];
 const titleByAction: Readonly<Record<string, string>> = {
   'attestation.record': 'Deployment reported',
   'dispatch.trigger': 'Deployment requested',
+  'availability.down': 'App outage confirmed',
+  'availability.up': 'App is responding again',
   'hosting.verified': 'Deployment verified',
   'hosting.paused': 'App stopped and storage kept',
   'hosting.removed': 'App removed and storage scheduled for deletion',
@@ -26,7 +28,8 @@ const reportedResults: Readonly<Record<string, string>> = { ok: 'Completed', par
 function entryFor(event: Audit, team: string, apps: readonly InstanceResponse[]): ActivityEntry {
   const app = apps.find(({ id }) => id === event.target || `instance/${id}` === event.target);
   const environment = app?.environments.find((item) => item.environment === event.detail.environment)?.environment;
-  const url = app && (environment && deploymentActions.has(event.action)
+  const url = app && (event.action.startsWith('availability.') ? workspacePaths.instanceStatus(team, app.name)
+    : environment && deploymentActions.has(event.action)
     ? workspacePaths.environment(team, app.name, environment, 'deployments')
     : workspacePaths.instance(team, app.name));
   const result = typeof event.detail.result === 'string' ? reportedResults[event.detail.result] : undefined;

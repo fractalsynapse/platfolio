@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { Pool, type PoolClient } from 'pg';
 import {
-  HostedStarterSchema, rollupState, type HostedStarter, type NewHostedStarter,
+  HostedStarterSchema, rollupState, type HostedStarter, type NewHostedStarter, type HostedAppCheck,
   ArtifactRecordSchema, AttestationRecordSchema, AuditEntrySchema, BindingRecordSchema, CapabilityOfferSchema, CapabilityShareSchema, DispatchRecordSchema, IdentitySchema, PersonSchema, TeamMemberSchema, InstanceEnvironmentStateSchema, InstanceSchema, InvitationSchema, ProviderConnectionSchema, RepoConnectionSchema, TeamSchema, newId,
   type ArtifactRecord, type AttestationRecord, type AuditEntry, type BindingRecord, type CapabilityOffer, type NewBinding, type NewCapabilityOffer, type NewCapabilityShare, type DispatchRecord, type Instance, type InstanceEnvironmentState, type Invitation, type NewInvitation, type ProviderConnection, type RepoConnection, type Store, type StoreError, type NewInstance, type StoreResult, type Team, type Person, type TeamMember, type TeamRole,
 } from './persistence.ts';
@@ -9,6 +9,7 @@ import { reasonOf } from './persistence.ts';
 import { normaliseEmail, normaliseName } from './persistence.ts';
 import { checkAttestationPolicy } from './dispatch-policy.ts';
 import type { Attestation } from './attestation.ts';
+import { nextAppCheck } from './hosted-availability.ts';
 import { CONTRACT_VERSION } from './generated/contract-version.ts';
 
 /**
@@ -322,6 +323,53 @@ export class PostgresStore implements Store {
       instanceId, projectId: row.project_id, deploymentId: row.deployment_id, origin: row.origin, state: row.state, observedAt: iso(row.observed_at),
     }, 'hosted starter row');
     return parsed.accepted ? ok(parsed.value) : err({ code: 'conflict', reason: parsed.reason });
+  }
+
+  async recordHostedAppCheck(input: Parameters<Store['recordHostedAppCheck']>[0]): Promise<void> {
+    const client = await this.pool.connect();
+    let committed = false;
+    try {
+      await client.query('BEGIN');
+      // Use the same lock order as starter registration when a restore overlaps a health check.
+      await client.query(`SELECT id FROM ${this.q('instances')} WHERE id = $1 FOR UPDATE`, [input.instanceId]);
+      const [hosting] = (await client.query(`SELECT deployment_id, state FROM ${this.q('hosted_starters')} WHERE instance_id = $1`, [input.instanceId])).rows;
+      if (hosting?.state !== 'live' || hosting.deployment_id !== input.deploymentId) return;
+      const [row] = (await client.query(`SELECT * FROM ${this.q('hosted_app_checks')} WHERE instance_id = $1`, [input.instanceId])).rows;
+      const next = nextAppCheck(this.asHostedAppCheck(row), input);
+      if (!next) return;
+      const { check, changed } = next;
+      await client.query(
+        `INSERT INTO ${this.q('hosted_app_checks')} (instance_id, deployment_id, state, failures, checked_at)
+         VALUES ($1,$2,$3,$4,$5) ON CONFLICT (instance_id) DO UPDATE SET deployment_id = EXCLUDED.deployment_id,
+           state = EXCLUDED.state, failures = EXCLUDED.failures, checked_at = EXCLUDED.checked_at`,
+        [check.instanceId, check.deploymentId, check.state, check.failures, check.checkedAt],
+      );
+      if (changed) {
+        const audit = await this.appendAuditRecord(client, {
+          actorKind: 'controller', actorRef: 'private-app-check', action: `availability.${changed}`,
+          target: input.instanceId, at: check.checkedAt, detail: { environment: 'staging' },
+        });
+        if (!audit.ok) throw new Error('Could not record the verified app availability transition');
+      }
+      await client.query('COMMIT');
+      committed = true;
+    } finally {
+      try { if (!committed) await client.query('ROLLBACK'); }
+      finally { client.release(); }
+    }
+  }
+
+  async getHostedAppCheck(instanceId: string): Promise<HostedAppCheck | undefined> {
+    const [row] = (await this.pool.query(`SELECT * FROM ${this.q('hosted_app_checks')} WHERE instance_id = $1`, [instanceId])).rows;
+    return this.asHostedAppCheck(row);
+  }
+
+  private asHostedAppCheck(row: Row | undefined): HostedAppCheck | undefined {
+    if (!row || (row.state !== 'checking' && row.state !== 'up' && row.state !== 'down')) return;
+    return {
+      instanceId: String(row.instance_id), deploymentId: String(row.deployment_id), state: row.state,
+      failures: Number(row.failures), checkedAt: iso(row.checked_at),
+    };
   }
 
   async getInstance(id: string) {
