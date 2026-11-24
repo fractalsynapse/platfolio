@@ -22,7 +22,7 @@ export async function customerControlPlanePlan(candidateFile: string) {
 
 type Stage = Awaited<ReturnType<typeof customerRailway>>;
 
-export async function launchCustomerControlPlane(stage: Stage, plan: Awaited<ReturnType<typeof customerControlPlanePlan>>, adminFile: string) {
+export async function launchCustomerControlPlane(stage: Stage, plan: Awaited<ReturnType<typeof customerControlPlanePlan>>, adminFile: string, updateImages = false) {
   const mode = await stat(adminFile);
   if (!mode.isFile() || (mode.mode & 0o077)) throw new Error('Use a private file for the customer Keycloak bootstrap credential');
   const admin = (await readFile(adminFile, 'utf8')).trim();
@@ -31,7 +31,7 @@ export async function launchCustomerControlPlane(stage: Stage, plan: Awaited<Ret
   const database = 'private-db-staging';
   await stage.privatePostgres(database);
   const services = await Promise.all(Object.entries({ api: plan.api, site: plan.site, identity: plan.identity }).map(async ([name, spec]) => {
-    const service = await stage.ensureService(`private-${name}-staging`, `${spec.image}@${spec.digest}`);
+    const service = await stage.ensureService(`private-${name}-staging`, `${spec.image}@${spec.digest}`, { updateImage: updateImages });
     const origin = await stage.publicOrigin(service, spec.port);
     return { name, spec, service, origin };
   }));

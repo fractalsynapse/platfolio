@@ -478,6 +478,9 @@ export interface Store {
   connectMarketplaceInstallation(teamId: string, installationId: string): Promise<boolean>;
   marketplaceInstallationConnected(teamId: string, installationId: string): Promise<boolean>;
   disconnectMarketplaceInstallation(teamId: string, installationId: string): Promise<boolean>;
+  issueMarketplaceEnrollment(teamId: string, installationId: string, enrollmentDigest: string, expiresAt: string): Promise<boolean>;
+  redeemMarketplaceEnrollment(installationId: string, enrollmentDigest: string, registryDigest: string, now: string): Promise<boolean>;
+  verifyMarketplaceCredential(installationId: string, registryDigest: string): Promise<boolean>;
 
   createTeam(input: NewTeam): Promise<StoreResult<Team>>;
   getTeam(id: string): Promise<StoreResult<Team>>;

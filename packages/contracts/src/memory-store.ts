@@ -34,7 +34,12 @@ export interface MemoryStoreOptions {
 
 export class MemoryStore implements Store {
   readonly driver = 'memory';
-  private readonly marketplaceLinks = new Map<string, { teamId: string; disconnected: boolean }>();
+  private readonly marketplaceLinks = new Map<string, {
+    teamId: string;
+    disconnected: boolean;
+    enrollment?: { digest: string; expiresAt: string };
+    registryDigest?: string;
+  }>();
   private readonly teams = new Map<string, Team>();
   private readonly instances = new Map<string, Instance>();
   private readonly repos = new Map<string, RepoConnection>();
@@ -78,21 +83,45 @@ export class MemoryStore implements Store {
   async connectMarketplaceInstallation(teamId: string, installationId: string): Promise<boolean> {
     if (this.closed || !this.teams.has(teamId)) return false;
     const found = this.marketplaceLinks.get(installationId);
-    if (found) return found.teamId === teamId && !found.disconnected;
+    if (found) return found.teamId === teamId && !found.disconnected && !found.enrollment;
     this.marketplaceLinks.set(installationId, { teamId, disconnected: false });
     return true;
   }
 
   async marketplaceInstallationConnected(teamId: string, installationId: string): Promise<boolean> {
     const found = this.marketplaceLinks.get(installationId);
-    return !this.closed && found?.teamId === teamId && !found.disconnected;
+    return !this.closed && found?.teamId === teamId && !found.disconnected && !found.enrollment;
   }
 
   async disconnectMarketplaceInstallation(teamId: string, installationId: string): Promise<boolean> {
     const found = this.marketplaceLinks.get(installationId);
     if (this.closed || found?.teamId !== teamId) return false;
     found.disconnected = true;
+    delete found.enrollment;
+    delete found.registryDigest;
     return true;
+  }
+
+  async issueMarketplaceEnrollment(teamId: string, installationId: string, digest: string, expiresAt: string): Promise<boolean> {
+    if (this.closed || !this.teams.has(teamId)) return false;
+    const found = this.marketplaceLinks.get(installationId);
+    if (found && (found.teamId !== teamId || found.disconnected || !found.enrollment)) return false;
+    this.marketplaceLinks.set(installationId, { teamId, disconnected: false, enrollment: { digest, expiresAt } });
+    return true;
+  }
+
+  async redeemMarketplaceEnrollment(installationId: string, enrollmentDigest: string, registryDigest: string, now: string): Promise<boolean> {
+    const found = this.marketplaceLinks.get(installationId);
+    if (this.closed || !found?.enrollment || found.disconnected || found.enrollment.digest !== enrollmentDigest ||
+        Date.parse(found.enrollment.expiresAt) <= Date.parse(now)) return false;
+    delete found.enrollment;
+    found.registryDigest = registryDigest;
+    return true;
+  }
+
+  async verifyMarketplaceCredential(installationId: string, registryDigest: string): Promise<boolean> {
+    const found = this.marketplaceLinks.get(installationId);
+    return !this.closed && !!found && !found.disconnected && found.registryDigest === registryDigest;
   }
 
   async createTeam(input: { name: string }) {

@@ -121,21 +121,55 @@ export class PostgresStore implements Store {
       `INSERT INTO ${table} AS link (installation_id, team_id)
        SELECT $1, id FROM ${this.q('teams')} WHERE id = $2
        ON CONFLICT (installation_id) DO UPDATE SET team_id = link.team_id
-       WHERE link.team_id = EXCLUDED.team_id AND NOT link.disconnected RETURNING installation_id`, [installationId, teamId],
+       WHERE link.team_id = EXCLUDED.team_id AND NOT link.disconnected AND link.enrollment_digest IS NULL
+       RETURNING installation_id`, [installationId, teamId],
     );
     return result.rowCount === 1;
   }
 
   async marketplaceInstallationConnected(teamId: string, installationId: string): Promise<boolean> {
     const result = await this.pool.query(
-      `SELECT installation_id FROM ${this.q('marketplace_links')} WHERE installation_id = $1 AND team_id = $2 AND NOT disconnected`, [installationId, teamId],
+      `SELECT installation_id FROM ${this.q('marketplace_links')}
+       WHERE installation_id = $1 AND team_id = $2 AND NOT disconnected AND enrollment_digest IS NULL`, [installationId, teamId],
     );
     return result.rowCount === 1;
   }
 
   async disconnectMarketplaceInstallation(teamId: string, installationId: string): Promise<boolean> {
     const result = await this.pool.query(
-      `UPDATE ${this.q('marketplace_links')} SET disconnected = TRUE WHERE installation_id = $1 AND team_id = $2`, [installationId, teamId],
+      `UPDATE ${this.q('marketplace_links')}
+       SET disconnected = TRUE, enrollment_digest = NULL, enrollment_expires_at = NULL, registry_digest = NULL
+       WHERE installation_id = $1 AND team_id = $2`, [installationId, teamId],
+    );
+    return result.rowCount === 1;
+  }
+
+  async issueMarketplaceEnrollment(teamId: string, installationId: string, digest: string, expiresAt: string): Promise<boolean> {
+    const result = await this.pool.query(
+      `INSERT INTO ${this.q('marketplace_links')} AS link (installation_id, team_id, enrollment_digest, enrollment_expires_at)
+       SELECT $1, id, $3, $4::timestamptz FROM ${this.q('teams')} WHERE id = $2
+       ON CONFLICT (installation_id) DO UPDATE
+       SET enrollment_digest = EXCLUDED.enrollment_digest, enrollment_expires_at = EXCLUDED.enrollment_expires_at
+       WHERE link.team_id = EXCLUDED.team_id AND NOT link.disconnected AND link.enrollment_digest IS NOT NULL
+       RETURNING installation_id`, [installationId, teamId, digest, expiresAt],
+    );
+    return result.rowCount === 1;
+  }
+
+  async redeemMarketplaceEnrollment(installationId: string, enrollmentDigest: string, registryDigest: string, now: string): Promise<boolean> {
+    const result = await this.pool.query(
+      `UPDATE ${this.q('marketplace_links')}
+       SET enrollment_digest = NULL, enrollment_expires_at = NULL, registry_digest = $3
+       WHERE installation_id = $1 AND enrollment_digest = $2 AND enrollment_expires_at > $4 AND NOT disconnected`,
+      [installationId, enrollmentDigest, registryDigest, now],
+    );
+    return result.rowCount === 1;
+  }
+
+  async verifyMarketplaceCredential(installationId: string, registryDigest: string): Promise<boolean> {
+    const result = await this.pool.query(
+      `SELECT installation_id FROM ${this.q('marketplace_links')}
+       WHERE installation_id = $1 AND registry_digest = $2 AND NOT disconnected`, [installationId, registryDigest],
     );
     return result.rowCount === 1;
   }

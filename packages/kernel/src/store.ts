@@ -62,6 +62,9 @@ export class StoreService extends Service<z.infer<typeof StoreConfigSchema>> {
   connectMarketplaceInstallation(...args: Parameters<Store['connectMarketplaceInstallation']>) { return this.inner.connectMarketplaceInstallation(...args); }
   marketplaceInstallationConnected(...args: Parameters<Store['marketplaceInstallationConnected']>) { return this.inner.marketplaceInstallationConnected(...args); }
   disconnectMarketplaceInstallation(...args: Parameters<Store['disconnectMarketplaceInstallation']>) { return this.inner.disconnectMarketplaceInstallation(...args); }
+  issueMarketplaceEnrollment(...args: Parameters<Store['issueMarketplaceEnrollment']>) { return this.inner.issueMarketplaceEnrollment(...args); }
+  redeemMarketplaceEnrollment(...args: Parameters<Store['redeemMarketplaceEnrollment']>) { return this.inner.redeemMarketplaceEnrollment(...args); }
+  verifyMarketplaceCredential(...args: Parameters<Store['verifyMarketplaceCredential']>) { return this.inner.verifyMarketplaceCredential(...args); }
   createTeam(input: { name: string }) { return this.inner.createTeam(input); }
   getTeam(id: string) { return this.inner.getTeam(id); }
   listTeams() { return this.inner.listTeams(); }

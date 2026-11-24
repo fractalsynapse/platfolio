@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import {
   AttestationSchema, checkBindingPolicy, CONTRACT_NAME, CONTRACT_VERSION, DispatchIntentSchema, InstanceSchema,
   reasonOf, decide, checkInvitationAcceptance, bindingImpact, normaliseName, rollupState, type BindingRecord, type CapabilityOffer, type PolicyAction, type VerifiedClaims,
@@ -34,6 +34,9 @@ export interface CapabilityDeps {
 
 const nowOf = (deps: CapabilityDeps): Date => (deps.now?.() ?? new Date());
 const REQUIRED_SCOPE = 'platfolio.user';
+const installationIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const registryCredentialPattern = /^[A-Za-z0-9_-]{43}$/;
+const digestCredential = (credential: string): string => createHash('sha256').update(credential).digest('hex');
 
 /** A request-time authorizer: the identity capability is read from the context, never captured at boot. */
 async function authorize(context: KernelContext, request: Request): Promise<{ ok: true; claims: VerifiedClaims } | { ok: false; response: Response_ }> {
@@ -1194,13 +1197,31 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
   };
 
   const marketplacePath = '/api/v1/teams/{teamId}/marketplace/installations/{installationId}';
+  const registryPath = '/api/v1/marketplace/installations/{installationId}';
+  const claim = (installationId: string) => ({
+    ...FREE_STARTER_RELEASE, installationId, repo: templateCatalogEntry(FREE_STARTER_RELEASE.template).repo,
+  });
   const marketplaceRoute = (method: string, path: string, operationId: string, handle: (scope: Scope, id: string) => Promise<Response_>) =>
     scoped(method, path, operationId, 'marketplace.manage', async (scope, _request, params) => {
       if (!deps.marketplaceEnabled) return notFound('marketplace installation', '');
       const id = params.installationId ?? '';
-      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id)) return badRequest('installationId must be a lowercase UUID v4');
+      if (!installationIdPattern.test(id)) return badRequest('installationId must be a lowercase UUID v4');
       return handle(scope, id);
     });
+  const registryRoute = (
+    path: string, operationId: string,
+    handle: (context: KernelContext, request: Request, id: string, credentialDigest: string) => Promise<Response_>,
+  ): RouteDefinition => ({
+    method: 'POST', path, operationId,
+    async handle(request, params, context) {
+      if (!deps.marketplaceEnabled) return notFound('marketplace installation', '');
+      const id = params.installationId ?? '';
+      if (!installationIdPattern.test(id)) return badRequest('installationId must be a lowercase UUID v4');
+      const credential = bearerToken(request.headers.authorization);
+      if (!credential || !registryCredentialPattern.test(credential)) return notFound('marketplace installation', '');
+      return handle(context, request, id, digestCredential(credential));
+    },
+  });
   const marketplace: ExtensionDescriptor = {
     id: 'marketplace',
     requires: ['identity', 'store'],
@@ -1214,7 +1235,28 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
         const release = FREE_STARTER_RELEASE;
         await context.store.appendAudit({ actorKind: 'user', actorRef: personId, action: 'marketplace.claim', target: id,
           detail: { teamId, template: release.template, commit: release.revision } });
-        return send('claimFreeMarketplaceRelease', 200, { ...release, installationId: id, repo: templateCatalogEntry(release.template).repo });
+        return send('claimFreeMarketplaceRelease', 200, claim(id));
+      }),
+      marketplaceRoute('POST', `${marketplacePath}/enrollment`, 'issueMarketplaceEnrollment', async ({ context, teamId }, id) => {
+        const enrollmentCode = randomBytes(32).toString('base64url');
+        const expiresAt = new Date(nowOf(deps).getTime() + 15 * 60_000).toISOString();
+        if (!await context.store.issueMarketplaceEnrollment(teamId, id, digestCredential(enrollmentCode), expiresAt)) {
+          return notFound('marketplace installation', '');
+        }
+        return { ...send('issueMarketplaceEnrollment', 201, { enrollmentCode, expiresAt }), headers: { 'cache-control': 'no-store' } };
+      }),
+      registryRoute(`${registryPath}/enrollment`, 'redeemMarketplaceEnrollment', async (context, request, id, enrollmentDigest) => {
+        const body = bodyOf<{ registryDigest?: unknown }>(request);
+        const registryDigest = body.ok ? body.value?.registryDigest : undefined;
+        if (typeof registryDigest !== 'string' || !/^[a-f0-9]{64}$/.test(registryDigest) || registryDigest === enrollmentDigest) {
+          return badRequest('Supply the SHA-256 verifier for the installation credential');
+        }
+        return await context.store.redeemMarketplaceEnrollment(id, enrollmentDigest, registryDigest, nowOf(deps).toISOString())
+          ? { status: 204, body: undefined } : notFound('marketplace installation', '');
+      }),
+      registryRoute(`${registryPath}/claim`, 'claimEnrolledMarketplaceRelease', async (context, _request, id, registryDigest) => {
+        if (!await context.store.verifyMarketplaceCredential(id, registryDigest)) return notFound('marketplace installation', '');
+        return send('claimEnrolledMarketplaceRelease', 200, claim(id));
       }),
     ],
   };

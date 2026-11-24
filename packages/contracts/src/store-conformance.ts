@@ -109,6 +109,33 @@ const expectErr = (result: { ok: boolean; value?: unknown } & Partial<StoreError
       : { status: 'fail', detail: `unhelpful describe(): ${JSON.stringify(info)}` };
   });
 
+  await add('marketplace enrollment expires, is spent once, and revokes its registry credential', async () => {
+    const store = await fresh();
+    const owner = mustOk(await store.createTeam({ name: tName('enrollment-owner') }), 'owner');
+    const peer = mustOk(await store.createTeam({ name: tName('enrollment-peer') }), 'peer');
+    const id = randomUUID();
+    const expiration = '2099-01-02T00:00:00Z';
+    const before = '2099-01-01T00:00:00Z';
+    const valid = await store.issueMarketplaceEnrollment(owner.id, id, 'first', expiration) &&
+      !await store.connectMarketplaceInstallation(owner.id, id) &&
+      !await store.issueMarketplaceEnrollment(peer.id, id, 'wrong-team', expiration) &&
+      !await store.redeemMarketplaceEnrollment(id, 'first', 'credential', expiration) &&
+      await store.issueMarketplaceEnrollment(owner.id, id, 'second', expiration) &&
+      !await store.redeemMarketplaceEnrollment(id, 'first', 'credential', before);
+    const redemptions = await Promise.all([
+      store.redeemMarketplaceEnrollment(id, 'second', 'credential', before),
+      store.redeemMarketplaceEnrollment(id, 'second', 'credential', before),
+    ]);
+    const ended = redemptions.filter(Boolean).length === 1 &&
+      await store.verifyMarketplaceCredential(id, 'credential') &&
+      !await store.verifyMarketplaceCredential(randomUUID(), 'credential') &&
+      !await store.issueMarketplaceEnrollment(owner.id, id, 'third', expiration) &&
+      await store.disconnectMarketplaceInstallation(owner.id, id) &&
+      !await store.verifyMarketplaceCredential(id, 'credential');
+    return valid && ended ? { status: 'pass', detail: 'expires, atomically spends, and revokes' }
+      : { status: 'fail', detail: 'marketplace enrollment or machine authorization differed' };
+  });
+
   await add('team and instance round-trip, ids assigned by the store', async () => {
     const { store, team, instance } = await seed();
     const readBack = await store.getInstance(instance.id);
