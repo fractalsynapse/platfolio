@@ -18,10 +18,19 @@ if (values['update-images'] || values['launch-config-file']) {
   if (!values.apply || !values.candidate || !values.project) throw new Error('Updating a hosted installation requires --apply, --candidate, and the exact --project ID');
   resolveCheckoutCandidate(values.candidate, resolve(import.meta.dirname, '..'));
 }
-async function ownerLaunchConfig(file: string) {
+async function privateConfig(file: string, description: string): Promise<Record<string, unknown>> {
   const mode = await stat(file);
-  if (!mode.isFile() || mode.mode & 0o077) throw new Error('Use a private file for the customer launch configuration');
-  const config = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>;
+  if (!mode.isFile() || mode.mode & 0o077) throw new Error(`Use a private file for ${description}`);
+  const saved = await readFile(file, 'utf8');
+  try {
+    const config = JSON.parse(saved) as Record<string, unknown> | null;
+    if (config && typeof config === 'object' && !Array.isArray(config)) return config;
+  } catch { /* Do not surface a JSON parse error that might quote the credential file. */ }
+  throw new Error(`Use a valid JSON object for ${description}`);
+}
+
+async function ownerLaunchConfig(file: string) {
+  const config = await privateConfig(file, 'the customer launch configuration');
   const { team, client, workerKey, openBaoSecret, appProject } = config;
   if (typeof team !== 'string' || !team || (client !== undefined && (typeof client !== 'string' || !client)) ||
       typeof workerKey !== 'string' || !/^[a-zA-Z0-9_-]{43,128}$/.test(workerKey) ||
@@ -32,9 +41,7 @@ async function ownerLaunchConfig(file: string) {
 const launchConfig = values['launch-config-file'] ? await ownerLaunchConfig(values['launch-config-file']) : undefined;
 const ownerFile = values['owner-bootstrap-file'];
 async function privateOwner(file: string) {
-  const mode = await stat(file);
-  if (!mode.isFile() || mode.mode & 0o077) throw new Error('Use a private file for the initial owner credentials');
-  const { email, password } = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>;
+  const { email, password } = await privateConfig(file, 'the initial owner credentials');
   if (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ||
     typeof password !== 'string' || !/^[A-Za-z0-9_-]{32,128}$/.test(password)) throw new Error('Supply the first owner email and a generated URL-safe password');
   return { email, password };

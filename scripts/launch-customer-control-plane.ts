@@ -69,7 +69,7 @@ export async function launchCustomerControlPlane(stage: Stage, plan: Awaited<Ret
       if (reference.database !== 'main') throw new Error('Unexpected Platfolio database reference');
       await stage.setConfig(item.service, reference.variable, '${{' + `${database}.${reference.output ?? 'DATABASE_URL'}` + '}}');
     }
-    const start = item.name === 'identity' && owner ? 'start-private' : item.spec.start;
+    const start = item.name === 'identity' && owner ? '/opt/keycloak/bin/platfolio-entrypoint.sh start-private' : item.spec.start;
     await stage.configure(item.service, { numReplicas: 1, healthcheckPath: item.spec.healthPath ?? '/status', healthcheckTimeout: 240,
       ...(start ? { startCommand: start } : {}) });
   }
