@@ -2,6 +2,7 @@ import { parseArgs } from 'node:util';
 import { API_CLIENT_ID, REQUIRED_SCOPE, WEB_CLIENT_ID } from './browser-auth.ts';
 import { isLoopback, LOOPBACK_CREDENTIAL, resolveCredential } from './identity-credentials.ts';
 import { OPERATOR_DISPLAY_NAME_ATTRIBUTE } from '../apps/control-plane/src/account-profile.ts';
+import { passwordResetAttributes } from '../apps/identity/src/password-recovery.ts';
 
 const { values } = parseArgs({ options: {
   base: { type: 'string', default: process.env.KC_BASE ?? 'http://localhost:8081' },
@@ -57,6 +58,7 @@ interface RealmSettings {
   verifyEmail?: boolean;
   editUsernameAllowed?: boolean;
   smtpServer?: Record<string, string>;
+  attributes?: Record<string, string>;
   defaultRole?: { id: string };
 }
 interface Client { id: string; enabled: boolean }
@@ -134,6 +136,7 @@ if (enableRecovery) {
   const smtp = patch.smtpServer ?? current.smtpServer;
   if (!smtp?.host || !smtp.from) throw new Error('Configure Keycloak SMTP and verify mail delivery before enabling registration or password recovery');
   patch.resetPasswordAllowed = true;
+  patch.attributes = { ...current.attributes, ...passwordResetAttributes };
 }
 if (values['enable-self-service']) {
   if (!current.defaultRole?.id) throw new Error('The realm default role is missing');
@@ -151,7 +154,8 @@ if (consoleClient?.enabled) await request(`${basePath}/clients/${consoleClient.i
 const readback = await (await request(basePath)).json() as RealmSettings;
 if (readback.loginTheme !== theme || (await findClient('account-console'))?.enabled ||
     (values['enable-account-profile'] && !readback.editUsernameAllowed) ||
-    (enableRecovery && !readback.resetPasswordAllowed) ||
+    (enableRecovery && (!readback.resetPasswordAllowed ||
+      Object.entries(passwordResetAttributes).some(([key, seconds]) => readback.attributes?.[key] !== seconds))) ||
     (values['enable-self-service'] && (!readback.registrationAllowed || !readback.verifyEmail))) {
   throw new Error('Keycloak did not read back the expected authentication settings');
 }

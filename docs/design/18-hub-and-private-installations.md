@@ -358,7 +358,7 @@ realm in the identity service and prints only its public origin.
 Set the optional `smtp` object in the same owner file to configure password recovery on a
 new private realm. Supply the installation's STARTTLS relay `host`, numeric `port`,
 `from` address, `user`, and `password`. The themed sign-in screen shows **Forgot password?**
-when recovery is configured. Registration stays closed. To enable the same capability on an
+when recovery is configured. Password reset links expire after 15 minutes. Registration stays closed. To enable the same capability on an
 existing private realm, configure its own SMTP relay and run `configure-auth-theme.ts` with
 `--enable-password-recovery`. Realm import leaves existing users and settings in place.
 

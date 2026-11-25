@@ -1,7 +1,7 @@
 FROM node:22-bookworm-slim AS private-realm
 WORKDIR /build
 COPY package.json ./
-COPY apps/identity/src/private-operator-realm.ts ./apps/identity/src/
+COPY apps/identity/src/ ./apps/identity/src/
 COPY scripts/keycloak-browser-client.ts ./scripts/
 COPY packages/ui/src/web/browser-auth-policy.ts ./packages/ui/src/web/
 RUN mkdir /realm \
