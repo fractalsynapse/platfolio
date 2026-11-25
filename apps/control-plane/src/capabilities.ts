@@ -36,6 +36,7 @@ export interface CapabilityDeps {
   now?: () => Date;
   dispatchTtlMs?: number;
   marketplaceEnabled?: boolean;
+  installationOffer?: import('@platfolio/api-contract/generated/types').SuccessOf<'getHubInstallationOffer'>;
   invitationOrigin?: string;
   accountIssuer?: AccountIssuer;
   notificationDirectory?: NotificationDirectory;
@@ -1306,6 +1307,9 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
     id: 'marketplace',
     requires: ['identity', 'store'],
     routes: [
+      scoped('GET', '/api/v1/teams/{teamId}/marketplace/installation-offer', 'getHubInstallationOffer', 'marketplace.manage', async () =>
+        deps.marketplaceEnabled && deps.installationOffer ? send('getHubInstallationOffer', 200, deps.installationOffer)
+          : notFound('installation offer', 'platfolio')),
       scoped('GET', marketplaceCollection, 'listMarketplaceInstallations', 'marketplace.manage', async ({ context, teamId }) =>
         deps.marketplaceEnabled ? send('listMarketplaceInstallations', 200, await context.store.listMarketplaceInstallations(teamId))
           : notFound('marketplace installations', '')),

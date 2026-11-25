@@ -103,7 +103,7 @@ export const workspaceContent = defineComponent({
     'listMyNotifications', 'createNotificationRule', 'updateNotificationRule', 'deleteNotificationRule', 'redeployHostedStarter',
     'getMyNotificationEmail', 'updateMyNotificationEmail',
     'listHostedCustomDomains', 'attachHostedCustomDomain', 'detachHostedCustomDomain', 'getHostedStarterBrand', 'updateHostedStarterBrand',
-    'listMarketplaceInstallations', 'issueMarketplaceEnrollment', 'disconnectMarketplaceInstallation',
+    'getHubInstallationOffer', 'listMarketplaceInstallations', 'issueMarketplaceEnrollment', 'disconnectMarketplaceInstallation',
     'getPrivateMarketplaceConnection', 'enrollPrivateMarketplaceConnection'],
   slots: ['full-page'],
   render: WorkspaceContent,

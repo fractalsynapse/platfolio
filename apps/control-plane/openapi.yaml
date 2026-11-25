@@ -2251,6 +2251,29 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
 
 
+  /api/v1/teams/{teamId}/marketplace/installation-offer:
+    parameters:
+      - { name: teamId, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getHubInstallationOffer
+      summary: Read the Railway template for a new private Platfolio
+      security: [{ bearerJwt: [] }]
+      responses:
+        '200':
+          description: A provider-native installer and the exact release it contains.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [templateCode, revision]
+                properties:
+                  templateCode: { type: string, pattern: '^[a-zA-Z0-9_-]{6,64}$' }
+                  revision: { type: string, pattern: '^[0-9a-f]{40}$' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+
   /api/v1/teams/{teamId}/marketplace/installations:
     parameters:
       - { name: teamId, in: path, required: true, schema: { type: string } }

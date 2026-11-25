@@ -1,4 +1,5 @@
-import { createKernel, disposeKernel } from '@platfolio/kernel';
+import { createKernel, disposeKernel, type KernelContext } from '@platfolio/kernel';
+import type { SuccessOf } from '@platfolio/api-contract/generated/types';
 import { EndpointKeySource, IdentityConfigSchema, redactCredentialShaped } from '@platfolio/contracts';
 import { ROUTE_MANIFEST } from './routes.ts';
 import { buildCapabilities } from './capabilities.ts';
@@ -15,6 +16,7 @@ export interface BootConfig {
   issuer: string;
   audience: string;
   marketplaceEnabled?: boolean;
+  installationOffer?: SuccessOf<'getHubInstallationOffer'>;
   starterLaunch?: StarterLaunch;
   customerLaunch?: CustomerLaunchConfig;
   jwksUri?: string;
@@ -50,6 +52,13 @@ export function configFromEnv(env: NodeJS.ProcessEnv): BootConfig {
   // name the registry cannot see. The constant and this spelling are kept identical by the test that uses both.
   const allowedOrigins = parseAllowedOrigins(env.PLATFOLIO_ALLOWED_ORIGINS);
   const launcher = customerLaunchConfig(env, allowedOrigins);
+  const templateCode = env.PLATFOLIO_RAILWAY_INSTALL_TEMPLATE;
+  const revision = env.PLATFOLIO_RAILWAY_INSTALL_REVISION;
+  if ((templateCode || revision) && (env.PLATFOLIO_MARKETPLACE_ENABLED !== 'true' ||
+      !templateCode || !/^[a-zA-Z0-9_-]{6,64}$/.test(templateCode) || !revision || !/^[0-9a-f]{40}$/.test(revision))) {
+    throw new Error('Offer a verified Railway installer and its exact pinned revision on the hub');
+  }
+
   const notificationClient = env.PLATFOLIO_NOTIFICATION_DIRECTORY_CLIENT;
   const notificationSecret = env.PLATFOLIO_NOTIFICATION_DIRECTORY_SECRET;
   if ((notificationClient || notificationSecret) && !(notificationClient && notificationSecret)) {
@@ -64,6 +73,7 @@ export function configFromEnv(env: NodeJS.ProcessEnv): BootConfig {
     audience: env.PLATFOLIO_IDENTITY_AUDIENCE as string,
     marketplaceEnabled: env.PLATFOLIO_MARKETPLACE_ENABLED === 'true',
     ...(launcher ? { customerLaunch: launcher } : {}),
+    ...(templateCode && revision ? { installationOffer: { templateCode, revision } } : {}),
     ...(notificationClient && notificationSecret ? { notificationDirectory: { client: notificationClient, secret: notificationSecret } } : {}),
     ...(env.PLATFOLIO_IDENTITY_JWKS_URI ? { jwksUri: env.PLATFOLIO_IDENTITY_JWKS_URI } : {}),
     host: env.HOST ?? '0.0.0.0',
@@ -198,6 +208,11 @@ export async function boot(config: BootConfig, fetchImpl: typeof fetch = fetch) 
   if (!storeUrl) {
     process.emitWarning('PLATFOLIO_DB_URL is not set: running on the in-memory store. Nothing survives a restart -- this is development, not a deployment.');
   }
+  const ownerSubject = config.customerLaunch?.ownerSubject;
+  const installationTeamId = config.customerLaunch?.teamId;
+  if (ownerSubject && (!storeUrl || config.marketplaceEnabled || !installationTeamId)) {
+    throw new Error('First owner setup requires a private installation and persistent storage');
+  }
   const ctx = await createKernel({
     provider: 'fake',
     custody: 'strict',
@@ -214,16 +229,34 @@ export async function boot(config: BootConfig, fetchImpl: typeof fetch = fetch) 
     // that exists only in the operator's head. An empty list is passed through rather than dropped, so "no list"
     // has one spelling all the way down to the transport.
     server: { host: config.host, port: config.port, cors: { allowedOrigins: [...config.cors?.allowedOrigins ?? []] } },
-    extensions: buildCapabilities({
-      build: config.build,
-      marketplaceEnabled: config.marketplaceEnabled ?? false,
-      accountIssuer: { issuer: config.issuer, request: fetchImpl },
-      ...(config.notificationDirectory ? { notificationDirectory: keycloakNotificationDirectory(config.issuer,
-        config.notificationDirectory.client, config.notificationDirectory.secret, fetchImpl) } : {}),
-      ...(config.cors?.allowedOrigins.length === 1 ? { invitationOrigin: config.cors.allowedOrigins[0]! } : {}),
-      ...(config.starterLaunch ? { starterLaunch: config.starterLaunch } : {}),
-      ...(config.customerLaunch ? { customerLaunch: customerLaunch(config.customerLaunch, fetchImpl) } : {}),
-    }),
+    extensions: [
+      ...(ownerSubject && installationTeamId ? [{
+        id: 'installation-owner',
+        requires: ['store'],
+        async onBoot(context: KernelContext) {
+          const existing = await context.store.getTeam(installationTeamId);
+          if (existing.ok) {
+            if (existing.value.name !== 'workspace') throw new Error('The installation team ID belongs to another team');
+            return;
+          }
+          const identity = await context.store.resolvePerson({ issuer: config.issuer, subject: ownerSubject });
+          if (!identity.ok) throw new Error('Could not prepare the first installation owner');
+          const team = await context.store.seedInstallationTeam({ id: installationTeamId, name: 'workspace', personId: identity.value.person.id });
+          if (!team.ok) throw new Error('Could not create the first installation workspace');
+        },
+      }] : []),
+      ...buildCapabilities({
+        build: config.build,
+        marketplaceEnabled: config.marketplaceEnabled ?? false,
+        ...(config.installationOffer ? { installationOffer: config.installationOffer } : {}),
+        accountIssuer: { issuer: config.issuer, request: fetchImpl },
+        ...(config.notificationDirectory ? { notificationDirectory: keycloakNotificationDirectory(config.issuer,
+          config.notificationDirectory.client, config.notificationDirectory.secret, fetchImpl) } : {}),
+        ...(config.cors?.allowedOrigins.length === 1 ? { invitationOrigin: config.cors.allowedOrigins[0]! } : {}),
+        ...(config.starterLaunch ? { starterLaunch: config.starterLaunch } : {}),
+        ...(config.customerLaunch ? { customerLaunch: customerLaunch(config.customerLaunch, fetchImpl) } : {}),
+      }),
+    ],
     requiredServices: ['identity', 'server', 'store', 'extensions'],
   });
   ctx.identity.attachKeySource(new EndpointKeySource(identity, fetchImpl, config.jwksUri));

@@ -4,9 +4,9 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { HttpRailwayTransport, type RailwayTransport } from '../packages/contracts/src/railway-transport.ts';
 import { customHostname, readRailwayCustomDomain, type RailwayCustomDomain } from '../packages/contracts/src/railway-domains.ts';
 
+import { openBaoConfig, openBaoData, openBaoImage, openBaoStart, workerData, workerStart } from './customer-installation-topology.ts';
+
 const provider = new HttpRailwayTransport();
-const baoImage = 'quay.io/openbao/openbao@sha256:71156a1c6623a5fa3f5e61b0c6a8ead0faf0df29a778339188443551995d1315';
-const dataPath = '/openbao/file';
 const baoService = 'openbao-staging';
 const workerService = 'installation-worker-staging';
 const platformProjectName = 'platfolio';
@@ -241,18 +241,15 @@ export async function customerRailway(target: CustomerProjectTarget, progress?: 
   }
 
   async function deployOpenBao() {
-    const serviceId = await ensureService(baoService, baoImage);
+    const serviceId = await ensureService(baoService, openBaoImage);
     await assertPrivate(serviceId);
-    const mounted = await ensureVolume(serviceId, dataPath);
+    const mounted = await ensureVolume(serviceId, openBaoData);
     const address = `${baoService}.railway.internal`;
-    const startCommand = 'docker-entrypoint.sh server';
     const current = (await instances()).find((item) => item.serviceId === serviceId);
-    if (!mounted || current?.startCommand !== startCommand || current.latestDeployment?.status !== 'SUCCESS') {
+    if (!mounted || current?.startCommand !== openBaoStart || current.latestDeployment?.status !== 'SUCCESS') {
       await setConfig(serviceId, 'RAILWAY_RUN_UID', '0');
-      await setConfig(serviceId, 'BAO_LOCAL_CONFIG', JSON.stringify({ disable_mlock: true, api_addr: `http://${address}:8200`,
-        cluster_addr: `http://${address}:8201`, storage: { raft: { path: dataPath, node_id: baoService } },
-        listener: { tcp: { address: '[::]:8200', tls_disable: true } } }));
-      await configure(serviceId, { startCommand, numReplicas: 1 });
+      await setConfig(serviceId, 'BAO_LOCAL_CONFIG', openBaoConfig(address, baoService));
+      await configure(serviceId, { startCommand: openBaoStart, numReplicas: 1 });
       await deployImage(serviceId);
     }
     await assertPrivate(serviceId);
@@ -306,18 +303,17 @@ export async function customerRailway(target: CustomerProjectTarget, progress?: 
     await assertPrivate(service);
     const worker = (await instances()).find(({ serviceId }) => serviceId === service);
     if (worker?.source?.repo || !/^[^@]+@sha256:[a-f0-9]{64}$/.test(image)) throw new Error('A launch worker requires a pinned candidate image');
-    const data = '/launch-state';
-    await ensureVolume(service, data);
+    await ensureVolume(service, workerData);
     const runtime = { PLATFOLIO_OPENBAO_URL: openbao, PLATFOLIO_OPENBAO_WORKER_SECRET: config.openBaoSecret,
       ...(config.registryOrigin ? { PLATFOLIO_REGISTRY_ORIGIN: config.registryOrigin } : {}),
-      PLATFOLIO_LAUNCH_STATE_DIR: data, PLATFOLIO_LAUNCH_WORKER_KEY: config.workerKey, PLATFOLIO_LAUNCH_TEAM: config.team,
+      PLATFOLIO_LAUNCH_STATE_DIR: workerData, PLATFOLIO_LAUNCH_WORKER_KEY: config.workerKey, PLATFOLIO_LAUNCH_TEAM: config.team,
       PLATFOLIO_RAILWAY_OAUTH_CLIENT: config.client ?? '', PLATFOLIO_RAILWAY_OAUTH_CALLBACK: config.callback,
       RAILWAY_WORKSPACE_ID: workspaceId, PLATFOLIO_LAUNCH_APP_PROJECT: config.appProject ?? '', RAILWAY_RUN_UID: '0', PORT: '8080', HOST: '::' };
     for (const [name, value] of Object.entries(runtime)) {
       await setConfig(service, name, value).catch(() => { throw new Error(`Railway did not apply worker setting ${name}`); });
     }
     await configure(service, { source: { image }, numReplicas: 1, healthcheckPath: '/status', healthcheckTimeout: 120,
-      startCommand: 'sh -c \"chown node:node /launch-state && exec su -s /bin/sh node -c \'node /app/scripts/customer-installation-worker.ts\'\"' });
+      startCommand: workerStart });
     const deployment = await deployImage(service);
     await assertPrivate(service);
     const verified = (await instances()).find(({ serviceId }) => serviceId === service);

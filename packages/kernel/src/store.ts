@@ -67,6 +67,7 @@ export class StoreService extends Service<z.infer<typeof StoreConfigSchema>> {
   redeemMarketplaceEnrollment(...args: Parameters<Store['redeemMarketplaceEnrollment']>) { return this.inner.redeemMarketplaceEnrollment(...args); }
   verifyMarketplaceCredential(...args: Parameters<Store['verifyMarketplaceCredential']>) { return this.inner.verifyMarketplaceCredential(...args); }
   createTeam(input: { name: string }) { return this.inner.createTeam(input); }
+  seedInstallationTeam(...args: Parameters<Store['seedInstallationTeam']>) { return this.inner.seedInstallationTeam(...args); }
   getTeam(id: string) { return this.inner.getTeam(id); }
   listTeams() { return this.inner.listTeams(); }
   // Parameters and returns come from the interface itself. Hand-copying a union here is how a new state

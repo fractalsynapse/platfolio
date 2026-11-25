@@ -5,13 +5,18 @@ export interface CustomerLaunchConfig {
   workerUrl: string;
   workerKey: string;
   siteOrigin: string;
+  ownerSubject?: string;
 }
 
 export function customerLaunchConfig(env: NodeJS.ProcessEnv, origins: readonly string[]): CustomerLaunchConfig | undefined {
   const workerUrl = env.PLATFOLIO_LAUNCH_WORKER_URL;
   const workerKey = env.PLATFOLIO_LAUNCH_WORKER_KEY;
   const teamId = env.PLATFOLIO_LAUNCH_TEAM;
-  if (!workerUrl && !workerKey && !teamId) return;
+  const ownerSubject = env.PLATFOLIO_INSTALL_OWNER_SUBJECT;
+  if (!workerUrl && !workerKey && !teamId && !ownerSubject) return;
+  if (ownerSubject && (!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(ownerSubject) || teamId !== 'team-' + ownerSubject)) {
+    throw new Error('The installation team must match the bootstrapped owner subject');
+  }
   if (!workerUrl || !workerKey || workerKey.length < 32 || !teamId || origins.length !== 1 || env.PLATFOLIO_MARKETPLACE_ENABLED === 'true') {
     throw new Error('The launcher requires a customer worker, team and exactly one site origin');
   }
@@ -21,7 +26,7 @@ export function customerLaunchConfig(env: NodeJS.ProcessEnv, origins: readonly s
       worker.username || worker.password || worker.pathname !== '/' || worker.search || worker.hash) {
     throw new Error('The customer worker must be on the installation private network');
   }
-  return { workerUrl: worker.origin, workerKey, teamId, siteOrigin: origins[0]! };
+  return { workerUrl: worker.origin, workerKey, teamId, siteOrigin: origins[0]!, ...(ownerSubject ? { ownerSubject } : {}) };
 }
 
 export function customerLaunch(config: CustomerLaunchConfig, request: typeof fetch) {

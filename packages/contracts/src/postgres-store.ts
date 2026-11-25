@@ -206,6 +206,26 @@ export class PostgresStore implements Store {
     return ok(team);
   }
 
+  async seedInstallationTeam({ id, name, personId }: { id: string; name: string; personId: string }) {
+    const admitted = admit(TeamSchema, { id, name, createdAt: new Date().toISOString() }, 'installation team');
+    if (!admitted.accepted) return err({ code: 'conflict', reason: admitted.reason });
+    const now = admitted.value.createdAt;
+    const result = await this.pool.query(
+      `WITH inserted AS (
+         INSERT INTO ${this.q('teams')} (id, name, created_at)
+         SELECT $1,$2,$3::timestamptz FROM ${this.q('persons')} WHERE id = $4
+         ON CONFLICT DO NOTHING
+         RETURNING id, name, created_at
+       ), membership AS (
+         INSERT INTO ${this.q('team_members')} (team_id, person_id, role, added_at)
+         SELECT id,$4,'owner',$3::timestamptz FROM inserted
+       )
+       SELECT id, name, created_at FROM inserted`, [id, name, now, personId]);
+    if (result.rows[0]) return this.asTeam(result.rows[0] as Row);
+    const existing = await this.getTeam(id);
+    return existing.ok && existing.value.name === name ? existing : err({ code: 'conflict', reason: 'The predefined installation team could not be created' });
+  }
+
   async getTeam(id: string) {
     const rows = (await this.pool.query(`SELECT id, name, created_at FROM ${this.q('teams')} WHERE id = $1`, [id])).rows as Row[];
     const row = rows[0];

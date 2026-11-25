@@ -157,6 +157,21 @@ export class MemoryStore implements Store {
     this.teams.set(admitted.value.id, admitted.value);
     return ok(admitted.value);
   }
+  async seedInstallationTeam({ id, name, personId }: { id: string; name: string; personId: string }) {
+    if (this.closed) return this.refuse('seedInstallationTeam');
+    const existing = this.teams.get(id);
+    if (existing?.name === name) return ok(copy(existing));
+    if (existing || [...this.teams.values()].some((team) => team.name === name) || !this.persons.has(personId)) {
+      return err({ code: 'conflict', reason: 'The predefined installation team could not be created' });
+    }
+    const now = this.clock();
+    const admitted = admit(TeamSchema, { id, name, createdAt: now }, 'installation team');
+    if (!admitted.accepted) return err({ code: 'conflict', reason: admitted.reason });
+    this.teams.set(id, admitted.value);
+    this.members.set(`${id}\u0000${personId}`, { teamId: id, personId, role: 'owner', addedAt: now });
+    return ok(copy(admitted.value));
+  }
+
   async getTeam(id: string) {
     const found = this.teams.get(id);
     return found ? ok(copy(found)) : err({ code: 'not-found', what: 'team', id });

@@ -7,6 +7,7 @@ import { buildCapabilities } from '../src/capabilities.ts';
 
 test('a private installation can exchange an owner’s code for registry access only', async () => {
   const fixture = createIdentityFixture();
+  const installationOffer = { templateCode: 'test-template', revision: 'b'.repeat(40) };
   const app: KernelContext = await createKernel({
     provider: 'fake', custody: 'strict', identity: defaultIdentityConfig(fixture), identityKeys: [fixture.jwk],
     store: { driver: 'memory' }, server: { port: 0 },
@@ -14,6 +15,7 @@ test('a private installation can exchange an owner’s code for registry access 
     extensions: buildCapabilities({
       build: { version: null, commit: 'a'.repeat(40), buildTime: '2026-11-24T00:00:00Z' },
       marketplaceEnabled: true,
+      installationOffer,
     }),
   });
   const owner = signToken(fixture, { scope: 'platfolio.user', subject: 'owner' });
@@ -31,12 +33,18 @@ test('a private installation can exchange an owner’s code for registry access 
     const installationId = randomUUID();
     const collection = `/api/v1/teams/${teamId}/marketplace/installations`;
     const teamPath = collection + '/' + installationId;
+    const offerPath = `/api/v1/teams/${teamId}/marketplace/installation-offer`;
     const registryPath = `/api/v1/marketplace/installations/${installationId}`;
     const memberPerson = await app.store.resolvePerson({ issuer: fixture.issuer, subject: 'member' });
     assert.ok(memberPerson.ok);
     assert.ok((await app.store.putTeamMember({ teamId, personId: memberPerson.value.person.id, role: 'member' })).ok);
     assert.equal((await call(collection, other, 'GET')).status, 404);
     assert.equal((await call(collection, member, 'GET')).status, 403);
+    assert.equal((await call(offerPath, other, 'GET')).status, 404);
+    assert.equal((await call(offerPath, member, 'GET')).status, 403);
+    const offer = await call(offerPath, owner, 'GET');
+    assert.equal(offer.status, 200);
+    assert.deepEqual(await offer.json(), installationOffer);
     const connections = async () => {
       const list = await call(collection, owner, 'GET');
       assert.equal(list.status, 200);
