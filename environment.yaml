@@ -644,17 +644,29 @@ variables:
     deployedTo: ci:env
     note: "referenced by .github/workflows/development.yml, .github/workflows/integration.yml, compose.dev.yaml"
   - name: POSTGRES_PASSWORD
-    kind: value
-    secret: false
+    kind: secret
+    secret: true
     environments: all
-    deployedTo: github:environment-secret
-    note: "a container password on loopback/CI; no real service listens"
+    deployedTo: railway:variable
+    note: "Railway generates the private installation’s database password. Development and CI use disposable values."
   - name: RAILWAY_API_TOKEN
     kind: secret
     secret: true
     environments: [development]
     deployedTo: host:shell
     note: "Workspace token forwarded in memory to the customer-side Railway CLI process."
+  - name: RAILWAY_PRIVATE_DOMAIN
+    kind: value
+    secret: false
+    environments: [staging, production]
+    deployedTo: railway:variable
+    note: "Railway supplies the service DNS name for same-environment private connections."
+  - name: RAILWAY_PUBLIC_DOMAIN
+    kind: value
+    secret: false
+    environments: [staging, production]
+    deployedTo: railway:variable
+    note: "Railway supplies the generated domain for each browser-facing installation service."
   - name: RAILWAY_RUN_UID
     kind: value
     secret: false
