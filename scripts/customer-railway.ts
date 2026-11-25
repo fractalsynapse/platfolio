@@ -1,7 +1,8 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { setTimeout as delay } from 'node:timers/promises';
-import { HttpRailwayTransport } from '../packages/contracts/src/railway-transport.ts';
+import { HttpRailwayTransport, type RailwayTransport } from '../packages/contracts/src/railway-transport.ts';
+import { customHostname, readRailwayCustomDomain, type RailwayCustomDomain } from '../packages/contracts/src/railway-domains.ts';
 
 const provider = new HttpRailwayTransport();
 const baoImage = 'quay.io/openbao/openbao@sha256:71156a1c6623a5fa3f5e61b0c6a8ead0faf0df29a778339188443551995d1315';
@@ -19,7 +20,7 @@ type Edges<T> = { edges: { node: T }[] };
 type Stage = { id: string; name: string; description?: string | null; environments: Edges<Entry> };
 type Instance = { serviceId: string; serviceName: string; source: { image?: string; repo?: string } | null; startCommand?: string | null; latestDeployment: { id: string; status: string } | null; activeDeployments: { id: string; status: string }[]; domains: { customDomains: { id: string }[]; serviceDomains: { id: string; domain: string }[] } };
 
-export async function customerRailway(target: CustomerProjectTarget, progress?: RailwayProgress, grant?: CustomerRailwayGrant) {
+export async function customerRailway(target: CustomerProjectTarget, progress?: RailwayProgress, grant?: CustomerRailwayGrant, transport: RailwayTransport = provider) {
   if (!/^[a-z][a-z0-9-]{1,62}$/.test(target.name) || (target.name === platformProjectName) !== (target.kind === 'installation')) {
     throw new Error('Platfolio must run in the project named platfolio. Every app requires its own project name.');
   }
@@ -29,7 +30,7 @@ export async function customerRailway(target: CustomerProjectTarget, progress?: 
   const workspaceId = grant?.workspaceId ?? process.env.RAILWAY_WORKSPACE_ID;
   if (!token || !workspaceId) throw new Error('Provide the customer workspace ID and workspace token locally');
   const call = <T>(operation: string, query: string, variables: Record<string, unknown>) =>
-    provider.graphql<T>({ operation, query, variables, credential: { kind: 'workspace', token } });
+    transport.graphql<T>({ operation, query, variables, credential: { kind: 'workspace', token } });
   const projectFields = 'id name description environments{edges{node{id name}}}';
   async function workspaceProjects(): Promise<Stage[]> {
     const result: Stage[] = [];
@@ -153,6 +154,49 @@ export async function customerRailway(target: CustomerProjectTarget, progress?: 
     if (!/^[a-z0-9-]+\.up\.railway\.app$/.test(domain)) throw new Error('Unexpected Railway ingress hostname');
     return `https://${domain}`;
   }
+
+  async function starterDomains(deploymentId: string, action: 'list' | 'attach' | 'detach', rawHost?: string) {
+    if (target.kind !== 'app' || target.name !== 'starter-web' || !target.id) throw new Error('Select the verified Starter Web project');
+    const host = rawHost && customHostname(rawHost);
+    if (action !== 'list' && !host) throw new Error('Supply a custom hostname');
+    const service = (await instances()).find(({ serviceName }) => serviceName === 'web-staging');
+    if (!service || service.source?.repo || service.latestDeployment?.id !== deploymentId ||
+        !service.activeDeployments.some(({ id, status }) => id === deploymentId && status === 'SUCCESS') ||
+        service.domains.serviceDomains.length === 0) return { outcome: 'conflict' as const };
+    const serviceId = service.serviceId;
+    const read = async () => {
+      const data = await call<{ environment: { serviceInstances: Edges<{ serviceId: string; domains: { customDomains: RailwayCustomDomain[] } }> } }>(
+        'starter custom domain status',
+        'query($projectId:String!,$environmentId:String!){environment(projectId:$projectId,id:$environmentId){serviceInstances(first:100){edges{node{serviceId domains{customDomains{id domain status{verified certificateStatus verificationDnsHost verificationToken dnsRecords{fqdn hostlabel zone recordType requiredValue currentValue status purpose}}}}}}}}}',
+        scope,
+      );
+      const selected = data.environment.serviceInstances.edges.find(({ node }) => node.serviceId === serviceId);
+      if (!selected) throw new Error('Railway did not return the approved service');
+      return selected.node.domains.customDomains;
+    };
+    const domains = await read();
+    if (action === 'list') return { outcome: 'listed' as const, domains: domains.map(readRailwayCustomDomain) };
+    const existing = domains.find(({ domain }) => domain === host);
+    if (action === 'detach') {
+      if (existing) {
+        if (!existing.id) throw new Error('Railway did not return the domain ID');
+        await call<{ customDomainDelete: boolean }>('detach starter custom domain',
+          'mutation($id:String!){customDomainDelete(id:$id)}', { id: existing.id }).catch(() => undefined);
+        if ((await read()).some(({ domain }) => domain === host)) throw new Error('Railway still reports the domain');
+      }
+      return { outcome: 'detached' as const };
+    }
+    if (existing) return { outcome: 'attached' as const, domain: readRailwayCustomDomain(existing) };
+    if (domains.length > 0) return { outcome: 'conflict' as const };
+    const accepted = await call<{ customDomainCreate: { domain: string } }>('attach starter custom domain',
+      'mutation($input:CustomDomainCreateInput!){customDomainCreate(input:$input){id domain}}',
+      { input: { ...scope, serviceId, domain: host, targetPort: 8080 } })
+      .then(({ customDomainCreate }) => customDomainCreate.domain === host, () => false);
+    const attached = (await read()).find(({ domain }) => domain === host);
+    if (!attached && !accepted) return { outcome: 'not-available' as const };
+    if (!attached) throw new Error('Railway did not confirm the requested domain');
+    return { outcome: 'attached' as const, domain: readRailwayCustomDomain(attached) };
+  }
   async function privatePostgres(name: string) {
     if (!allowed.has(name)) throw new Error('Database is outside the approved platform project');
     let database = (await instances()).find((item) => item.serviceName === name);
@@ -251,7 +295,7 @@ export async function customerRailway(target: CustomerProjectTarget, progress?: 
 
   await instances();
   progress?.({ step: 'Railway project', state: 'CONNECTED', resourceId: project.id });
-  return { project, scope, instances, ensureService, assertPrivate, setConfig, configure, upload, wait, deployImage, privatePostgres, publicOrigin, remove,
+  return { project, scope, instances, ensureService, assertPrivate, setConfig, configure, upload, wait, deployImage, privatePostgres, publicOrigin, starterDomains, remove,
   async installLaunchWorker(image: string, config: {
     team: string; workerKey: string; openBaoSecret: string; client: string; callback: string; appProject?: string; registryOrigin?: string;
   }) {

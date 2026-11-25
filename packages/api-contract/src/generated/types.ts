@@ -4,7 +4,7 @@
  * hand, because every line reproduces from the specification.
  *
  * Source: apps/control-plane/openapi.yaml (OpenAPI 3.1.0, info.version 0.1.0)
- * Input digest: sha256/077625d123fd3873
+ * Input digest: sha256/d3122cc4dd3e2dd4
  *
  * Reproduce it with `pnpm run api:types`. `pnpm run api:types:check` fails when this file stops matching
  * what the committed spec produces, which is the only way a generated type deserves to be trusted.
@@ -153,6 +153,22 @@ export interface Health {
   status: 'ok';
   /** sha256(commit + version), truncated. Not a credential. */
   livenessToken: string;
+}
+
+export interface HostedCustomDomain {
+  host: string;
+  dnsStatus: 'pending' | 'verified' | 'failed';
+  certificateStatus: 'pending' | 'issued' | 'failed';
+  records: Array<{
+    host: string;
+    fqdn: string;
+    zone: string;
+    type: 'A' | 'CNAME' | 'TXT' | 'NS';
+    value: string;
+    current?: string;
+    status: 'requires-update' | 'propagated' | 'unspecified';
+    purpose: 'traffic' | 'ownership' | 'challenge' | 'unspecified';
+  }>;
 }
 
 export interface HostedStarter {
@@ -305,6 +321,12 @@ export interface ApiParameters {
   acceptInvitation: {
     invitationId: string;
   };
+  /** PUT /api/v1/instances/{instanceId}/environments/{environment}/custom-domains/{hostname} */
+  attachHostedCustomDomain: {
+    instanceId: string;
+    environment: string;
+    hostname: string;
+  };
   /** POST /api/v1/teams/{teamId}/starter-launch/railway */
   beginStarterRailwayAuthorization: {
     teamId: string;
@@ -359,6 +381,12 @@ export interface ApiParameters {
   /** DELETE /api/v1/instances/{instanceId} */
   destroyInstance: {
     instanceId: string;
+  };
+  /** DELETE /api/v1/instances/{instanceId}/environments/{environment}/custom-domains/{hostname} */
+  detachHostedCustomDomain: {
+    instanceId: string;
+    environment: string;
+    hostname: string;
   };
   /** DELETE /api/v1/teams/{teamId}/marketplace/installations/{installationId} */
   disconnectMarketplaceInstallation: {
@@ -443,6 +471,11 @@ export interface ApiParameters {
   /** GET /api/v1/instances/{instanceId}/consumers */
   listConsumers: {
     instanceId: string;
+  };
+  /** GET /api/v1/instances/{instanceId}/environments/{environment}/custom-domains */
+  listHostedCustomDomains: {
+    instanceId: string;
+    environment: string;
   };
   /** GET /api/v1/templates */
   listInstallableTemplates: Record<string, never>;
@@ -738,6 +771,16 @@ export interface ApiResponses {
     '404': Error;
     '409': Error;
   };
+  /** PUT /api/v1/instances/{instanceId}/environments/{environment}/custom-domains/{hostname} */
+  attachHostedCustomDomain: {
+    '200': HostedCustomDomain;
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '409': Error;
+    '503': Error;
+  };
   /** POST /api/v1/teams/{teamId}/starter-launch/railway */
   beginStarterRailwayAuthorization: {
     '200': {
@@ -861,6 +904,16 @@ export interface ApiResponses {
     '403': Error;
     '404': Error;
     '409': Error;
+  };
+  /** DELETE /api/v1/instances/{instanceId}/environments/{environment}/custom-domains/{hostname} */
+  detachHostedCustomDomain: {
+    '204': void;
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '409': Error;
+    '503': Error;
   };
   /** DELETE /api/v1/teams/{teamId}/marketplace/installations/{installationId} */
   disconnectMarketplaceInstallation: {
@@ -1093,6 +1146,15 @@ export interface ApiResponses {
     '200': BindingRecord[];
     '401': Error;
     '404': Error;
+  };
+  /** GET /api/v1/instances/{instanceId}/environments/{environment}/custom-domains */
+  listHostedCustomDomains: {
+    '200': HostedCustomDomain[];
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '409': Error;
+    '503': Error;
   };
   /** GET /api/v1/templates */
   listInstallableTemplates: {
@@ -1527,6 +1589,8 @@ export interface Endpoint {
 export const ENDPOINTS = {
   /** POST /api/v1/me/invitations/{invitationId}/accept */
   acceptInvitation: { method: 'post', path: '/api/v1/me/invitations/{invitationId}/accept' },
+  /** PUT /api/v1/instances/{instanceId}/environments/{environment}/custom-domains/{hostname} */
+  attachHostedCustomDomain: { method: 'put', path: '/api/v1/instances/{instanceId}/environments/{environment}/custom-domains/{hostname}' },
   /** POST /api/v1/teams/{teamId}/starter-launch/railway */
   beginStarterRailwayAuthorization: { method: 'post', path: '/api/v1/teams/{teamId}/starter-launch/railway' },
   /** PUT /api/v1/instances/{instanceId}/bindings/{capability} */
@@ -1553,6 +1617,8 @@ export const ENDPOINTS = {
   deleteNotificationRule: { method: 'delete', path: '/api/v1/instances/{instanceId}/notification-rules/{ruleId}' },
   /** DELETE /api/v1/instances/{instanceId} */
   destroyInstance: { method: 'delete', path: '/api/v1/instances/{instanceId}' },
+  /** DELETE /api/v1/instances/{instanceId}/environments/{environment}/custom-domains/{hostname} */
+  detachHostedCustomDomain: { method: 'delete', path: '/api/v1/instances/{instanceId}/environments/{environment}/custom-domains/{hostname}' },
   /** DELETE /api/v1/teams/{teamId}/marketplace/installations/{installationId} */
   disconnectMarketplaceInstallation: { method: 'delete', path: '/api/v1/teams/{teamId}/marketplace/installations/{installationId}' },
   /** POST /api/v1/teams/{teamId}/marketplace/connection */
@@ -1601,6 +1667,8 @@ export const ENDPOINTS = {
   listBindings: { method: 'get', path: '/api/v1/instances/{instanceId}/bindings' },
   /** GET /api/v1/instances/{instanceId}/consumers */
   listConsumers: { method: 'get', path: '/api/v1/instances/{instanceId}/consumers' },
+  /** GET /api/v1/instances/{instanceId}/environments/{environment}/custom-domains */
+  listHostedCustomDomains: { method: 'get', path: '/api/v1/instances/{instanceId}/environments/{environment}/custom-domains' },
   /** GET /api/v1/templates */
   listInstallableTemplates: { method: 'get', path: '/api/v1/templates' },
   /** GET /api/v1/instances */

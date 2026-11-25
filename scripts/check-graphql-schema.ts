@@ -21,6 +21,7 @@ const SOURCES = [
   'packages/contracts/src/railway-provider.ts',
   'packages/contracts/src/railway-transport.ts',
   'scripts/railway-live-conformance.ts',
+  'scripts/customer-railway.ts',
 ];
 
 interface TypeRef { kind: string; name: string | null; ofType?: TypeRef }
@@ -31,7 +32,7 @@ interface Schema { types: Record<string, SchemaType> }
 const named = (ref: TypeRef | undefined): string | null => (!ref ? null : ref.name ? ref.name : named(ref.ofType));
 const unwrap = (ref: TypeRef | undefined): TypeRef | undefined => (!ref ? undefined : ref.name ? ref : unwrap(ref.ofType));
 
-const DOCS = /'((?:query|mutation)\s+[^']*?)'/g;
+const DOCS = /'((?:query|mutation)(?=[\s({])[^']*?)'/g;
 
 /** Field names used at each depth, plus the args each was given -- parsed with targeted regexes
  * rather than a hand-rolled GraphQL parser, because a gate that misparses is worse than none. */

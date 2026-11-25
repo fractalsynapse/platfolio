@@ -17,6 +17,7 @@ import { notificationEmail } from './notification-email.ts';
 import type { StarterLaunch } from './starter-launch.ts';
 import { badRequest, bearerToken, notFound, send, unauthorized } from './respond.ts';
 import { accountProfile, type AccountIssuer } from './account-profile.ts';
+import { customHostname } from '../../../packages/contracts/src/railway-domains.ts';
 
 /**
  * The control plane's capabilities, expressed as plugins (D40: everything is a plugin).
@@ -1374,11 +1375,51 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
       }),
     ],
   };
+  const domainPath = '/api/v1/instances/{instanceId}/environments/{environment}/custom-domains';
+  const domainConflict = (message: string) => ({ status: 409, body: { error: 'domain-conflict', message } });
+  async function hostedDomains({ context, teamId, personId }: Scope, params: Record<string, string>,
+    operation: 'listHostedCustomDomains' | 'attachHostedCustomDomain' | 'detachHostedCustomDomain'): Promise<Response_> {
+    const instanceId = params.instanceId ?? '';
+    if (!customer || customer.teamId !== teamId || params.environment !== 'staging') return notFound('hosted domains', instanceId);
+    const hosting = await context.store.getHostedStarter(instanceId);
+    if (!hosting.ok) return notFound('hosted domains', instanceId);
+    if (hosting.value.state !== 'live') return domainConflict('Restore the app before managing its public address.');
+    const action = operation === 'listHostedCustomDomains' ? 'domains-list' :
+      operation === 'attachHostedCustomDomain' ? 'domain-attach' : 'domain-detach';
+    const hostname = action === 'domains-list' ? undefined : customHostname(params.hostname ?? '');
+    if (action !== 'domains-list' && !hostname) return badRequest('Enter a hostname such as staging.example.com without https, a path, or a wildcard');
+    const result = await customer.call(action, {
+      projectId: hosting.value.projectId, deploymentId: hosting.value.deploymentId, ...(hostname ? { hostname } : {}),
+    });
+    if (!result.ok) return unavailable();
+    const body = result.body as { outcome?: string; domains?: unknown; domain?: unknown } | null;
+    if (body?.outcome === 'conflict') return domainConflict('Wait for the app or current update to finish. Remove any existing custom hostname before adding another.');
+    if (body?.outcome === 'not-available') return domainConflict('Railway could not reserve this hostname. Check that it belongs to a public DNS zone and is available.');
+    if (action === 'domains-list' && body?.outcome === 'listed') return send(operation, 200, body.domains);
+    if (action === 'domain-attach' && body?.outcome === 'attached') {
+      const response = send(operation, 200, body.domain);
+      if (response.status === 200) await context.store.appendAudit({ actorKind: 'user', actorRef: personId,
+        action: 'domain.attach', target: instanceId, detail: { hostname: hostname!, environment: 'staging' } });
+      return response;
+    }
+    if (action === 'domain-detach' && body?.outcome === 'detached') {
+      await context.store.appendAudit({ actorKind: 'user', actorRef: personId,
+        action: 'domain.detach', target: instanceId, detail: { hostname: hostname!, environment: 'staging' } });
+      return { status: 204, body: undefined };
+    }
+    return unavailable();
+  }
   const launchPath = '/api/v1/teams/{teamId}/starter-launch';
   const launcher: ExtensionDescriptor = {
     id: 'starter-launch',
     requires: ['identity', 'store'],
     routes: [
+      scoped('GET', domainPath, 'listHostedCustomDomains', 'instance.read', (scope, _request, params) =>
+        hostedDomains(scope, params, 'listHostedCustomDomains')),
+      scoped('PUT', domainPath + '/{hostname}', 'attachHostedCustomDomain', 'marketplace.manage', (scope, _request, params) =>
+        hostedDomains(scope, params, 'attachHostedCustomDomain')),
+      scoped('DELETE', domainPath + '/{hostname}', 'detachHostedCustomDomain', 'marketplace.manage', (scope, _request, params) =>
+        hostedDomains(scope, params, 'detachHostedCustomDomain')),
       scoped('POST', '/api/v1/instances/{instanceId}/environments/{environment}/deployments', 'redeployHostedStarter', 'marketplace.manage', async ({ teamId, context }, _request, params) => {
         const instanceId = params.instanceId ?? '';
         if (!customer || customer.teamId !== teamId || params.environment !== 'staging') return notFound('hosted deployment', instanceId);

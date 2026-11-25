@@ -330,4 +330,6 @@ export const AUDIT_DETAIL_KEYS_ALLOWLIST = [
   'template', 'teamId', 'from', 'state', 'planHash', 'repo', 'commit', 'files', 'service', 'image', 'digest',
   'dispatchId', 'action', 'environment', 'ref', 'workflow', 'result', 'resources', 'to', 'environmentState',
   'capability', 'toTeamId', 'providerInstanceId', 'email', 'role', 'sent', 'personId', 'reason', 'name',
+  // A normalized public hostname. The DNS verification value stays out of the audit row.
+  'hostname',
 ] as const;

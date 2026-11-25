@@ -19,6 +19,7 @@ test('customer launch is owner scoped and passes only the intended fields to a p
   let last: { action: string; body?: unknown } | undefined;
   const ids = { projectId: randomUUID(), deploymentId: randomUUID() };
   let workerReport: object | false = false;
+  const domain = { host: 'preview.example.test', dnsStatus: 'pending', certificateStatus: 'pending', records: [] };
   const config = {
     get teamId() { return teamId; },
     siteOrigin, workerKey, workerUrl: worker,
@@ -32,6 +33,9 @@ test('customer launch is owner scoped and passes only the intended fields to a p
     if (last?.action === 'redeploy') return Response.json({ state: 'running' });
     if (last?.action === 'marketplace-status') return Response.json({ state: 'disconnected' });
     if (last?.action === 'marketplace-enroll') return Response.json('enrolled');
+    if (last?.action === 'domains-list') return Response.json({ outcome: 'listed', domains: [domain] });
+    if (last?.action === 'domain-attach') return Response.json({ outcome: 'attached', domain });
+    if (last?.action === 'domain-detach') return Response.json({ outcome: 'detached' });
     return Response.json(last?.action === 'setup' ? { openBao: 'sealed', railway: 'connect', workerKey: 'public' } : false);
   };
   const kernel = await createKernel({
@@ -81,6 +85,23 @@ test('customer launch is owner scoped and passes only the intended fields to a p
       origin: 'https://starter.up.railway.app', observedAt: '2026-11-24T00:00:00.000Z',
     });
     assert.ok(managed.ok);
+    const member = await kernel.store.resolvePerson({ issuer: identity.issuer, subject: 'member' });
+    assert.ok(member.ok);
+    assert.ok((await kernel.store.putTeamMember({ teamId, personId: member.value.person.id, role: 'member' })).ok);
+    const domains = (environment: string) => api + '/instances/' + managed.value.id + '/environments/' + environment + '/custom-domains';
+    const read = (actor: string) => fetch(domains('staging'), { headers: headers(actor) });
+    const change = (hostname: string, actor: string, method = 'PUT', environment = 'staging') =>
+      fetch(domains(environment) + '/' + encodeURIComponent(hostname), { method, headers: headers(actor) });
+    assert.equal((await read('other')).status, 404);
+    assert.deepEqual(await (await read('member')).json(), [domain]);
+    assert.equal((await change(domain.host, 'member')).status, 403);
+    assert.equal((await change(domain.host, 'owner', 'PUT', 'production')).status, 404);
+    assert.equal((await change('https://invalid.example.test', 'owner')).status, 400);
+    assert.equal((await change('auto.up.railway.app', 'owner', 'DELETE')).status, 400);
+    assert.equal((await change(domain.host.toUpperCase(), 'owner')).status, 200);
+    assert.deepEqual(last, { action: 'domain-attach', body: { ...ids, hostname: domain.host } });
+    assert.equal((await change(domain.host, 'owner', 'DELETE')).status, 204);
+    assert.deepEqual(last, { action: 'domain-detach', body: { ...ids, hostname: domain.host } });
     const operation = (environment: string) => api + '/instances/' + managed.value.id + '/environments/' + environment + '/deployments';
     const deploy = (environment: string, actor = 'owner') => fetch(operation(environment), { method: 'POST', headers: headers(actor) });
     assert.equal((await deploy('staging', 'other')).status, 404);

@@ -6,6 +6,8 @@ import { customerLaunchRun } from './customer-launch-run.ts';
 import { customerOpenBao } from './customer-openbao.ts';
 import { customerMarketplaceConnection, privateMarketplaceOrigin } from './customer-marketplace-connection.ts';
 import { customerRailwayOAuth } from './customer-railway-oauth.ts';
+import { customerRailway } from './customer-railway.ts';
+import { FREE_STARTER_RELEASE } from '../packages/manifest/src/template-catalog.ts';
 
 const directory = process.env.PLATFOLIO_LAUNCH_STATE_DIR;
 const workerKey = process.env.PLATFOLIO_LAUNCH_WORKER_KEY;
@@ -26,6 +28,7 @@ const oauth = customerRailwayOAuth(client, callback, workspace, bao, project);
 const launch = customerLaunchRun(team, join(directory, 'launch.json'), oauth.credential);
 const expected = Buffer.from('Bearer ' + workerKey);
 const replyError = { error: 'launcher-setup-unavailable', message: 'Check OpenBao and Railway connection, then try again.' };
+let changingDomain = false;
 
 const server = createServer({ requestTimeout: 10000 }, (request, response) => {
   const reply = (status: number, body: unknown) => {
@@ -64,10 +67,28 @@ const server = createServer({ requestTimeout: 10000 }, (request, response) => {
       case 'callback':
         reply(200, await oauth.complete({ code: String(body.code), state: String(body.state), issuer: String(body.issuer), error: String(body.error) }));
         return;
+      case 'domains-list':
+      case 'domain-attach':
+      case 'domain-detach': {
+        const current = await launch.read();
+        if (current.state !== 'ready' || !current.projectId || !current.deploymentId || current.projectId !== body.projectId ||
+            current.deploymentId !== body.deploymentId) { reply(200, { outcome: 'conflict' }); return; }
+        const action = command.action === 'domains-list' ? 'list' : command.action === 'domain-attach' ? 'attach' : 'detach';
+        if (changingDomain) { reply(200, { outcome: 'conflict' }); return; }
+        if (action !== 'list') changingDomain = true;
+        try {
+          if (await bao.status() !== 'ready') { reply(503, replyError); return; }
+          const rail = await customerRailway({ name: FREE_STARTER_RELEASE.template, kind: 'app', id: current.projectId }, undefined, await oauth.credential());
+          const result = await rail.starterDomains(current.deploymentId, action, typeof body.hostname === 'string' ? body.hostname : undefined);
+          reply(200, result);
+        } finally { if (action !== 'list') changingDomain = false; }
+        return;
+      }
       case 'start':
       case 'redeploy':
       case 'remove':
         if (await bao.status() !== 'ready' || !(await bao.readGrant()).grant) { reply(503, replyError); return; }
+        if (changingDomain) { reply(409, null); return; }
         if (command.action === 'start') reply(200, await launch.start());
         else if (command.action === 'redeploy') {
           const current = await launch.read();
