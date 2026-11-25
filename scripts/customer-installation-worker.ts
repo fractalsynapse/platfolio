@@ -20,13 +20,13 @@ const project = process.env.PLATFOLIO_LAUNCH_APP_PROJECT || undefined;
 const workspace = process.env.RAILWAY_WORKSPACE_ID;
 const baoSecret = process.env.PLATFOLIO_OPENBAO_WORKER_SECRET;
 const baoOrigin = process.env.PLATFOLIO_OPENBAO_URL;
-if (!directory || !workerKey || workerKey.length < 32 || !team || !client || !callback || !workspace || !baoSecret || baoSecret.length < 32 || !baoOrigin) {
+if (!directory || !workerKey || workerKey.length < 32 || !team || !callback || !workspace || !baoSecret || baoSecret.length < 32 || !baoOrigin) {
   throw new Error('Complete customer installation worker configuration before starting');
 }
 mkdirSync(directory, { recursive: true, mode: 0o700 });
 const bao = customerOpenBao(baoOrigin, baoSecret, directory);
 const marketplace = customerMarketplaceConnection(privateMarketplaceOrigin(process.env.PLATFOLIO_REGISTRY_ORIGIN), bao);
-const oauth = customerRailwayOAuth(client, callback, workspace, bao, project);
+const oauth = customerRailwayOAuth({ callback, workspaceId: workspace, ...(client ? { clientId: client } : {}), ...(project ? { projectId: project } : {}) }, bao);
 const launch = customerLaunchRun(team, join(directory, 'launch.json'), oauth.credential);
 const expected = Buffer.from('Bearer ' + workerKey);
 const replyError = { error: 'launcher-setup-unavailable', message: 'Check OpenBao and Railway connection, then try again.' };
@@ -65,7 +65,7 @@ const server = createServer({ requestTimeout: 10000 }, (request, response) => {
       case 'unlock': await bao.unlock(String(body.recovery)); reply(200, null); return;
       case 'authorize':
         if (await bao.status() !== 'ready') { reply(503, replyError); return; }
-        reply(200, { authorizationUrl: oauth.begin() }); return;
+        reply(200, { authorizationUrl: await oauth.begin() }); return;
       case 'callback':
         reply(200, await oauth.complete({ code: String(body.code), state: String(body.state), issuer: String(body.issuer), error: String(body.error) }));
         return;
@@ -116,7 +116,14 @@ const server = createServer({ requestTimeout: 10000 }, (request, response) => {
       case 'remove':
         if (await bao.status() !== 'ready' || !(await bao.readGrant()).grant) { reply(503, replyError); return; }
         if (changingDomain) { reply(409, null); return; }
-        if (command.action === 'start') reply(200, await launch.start());
+        if (command.action === 'start') {
+          const current = await launch.read();
+          if (!current.deploymentId && !await marketplace.canLaunchStarter()) {
+            reply(409, { error: 'marketplace-claim-required' });
+            return;
+          }
+          reply(200, await launch.start());
+        }
         else if (command.action === 'redeploy') {
           const current = await launch.read();
           if (typeof body.projectId !== 'string' || typeof body.deploymentId !== 'string' ||

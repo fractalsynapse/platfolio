@@ -50,7 +50,9 @@ test('the worker keeps a scoped registry credential in its vault and retains the
   assert.equal(await first.enroll(handoff), 'unavailable');
   sealed = false;
   assert.deepEqual(await first.connection(), { state: 'disconnected' });
+  assert.equal(await first.canLaunchStarter(), false);
   assert.equal(await first.enroll(handoff), 'unavailable');
+  assert.equal(await first.canLaunchStarter(), false);
   const restarted = customerMarketplaceConnection(hub, bao, request);
   assert.equal(await restarted.enroll(handoff), 'enrolled');
   assert.equal(grant?.claimed, true);
@@ -60,9 +62,12 @@ test('the worker keeps a scoped registry credential in its vault and retains the
   assert.equal(await restarted.enroll(randomUUID() + ':' + code), 'refused');
   const unavailable = customerMarketplaceConnection(hub, bao, async () => { throw new Error('Hub offline'); });
   assert.deepEqual(await unavailable.connection(), { state: 'unavailable', release });
+  assert.equal(await unavailable.canLaunchStarter(), true);
   assert.deepEqual(await customerMarketplaceConnection('https://different.example.test', bao, request).connection(), { state: 'unavailable', release });
   digest = '';
   assert.deepEqual(await restarted.connection(), { state: 'disconnected', release });
+  assert.equal(await restarted.canLaunchStarter(), true);
+  assert.equal(await customerMarketplaceConnection(undefined, bao, request).canLaunchStarter(), true);
   assert.throws(() => privateMarketplaceOrigin('http://registry.example.test'), /HTTPS/);
   assert.throws(() => privateMarketplaceOrigin(hub + '/handoff'), /HTTPS/);
 });

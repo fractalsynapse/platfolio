@@ -1349,6 +1349,9 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
   const relay = async (teamId: string, operation: string, action: Parameters<NonNullable<typeof customer>['call']>[0], body?: object) => {
     if (!customer || customer.teamId !== teamId) return notFound('launch', 'starter');
     const output = await customer.call(action, body);
+    if (!output.ok && output.status === 409 && action === 'start') {
+      return { status: 409, body: { error: 'marketplace-claim-required', message: 'Go to Connections → Marketplace to claim Starter Web, then launch again.' } };
+    }
     if (!output.ok) return unavailable();
     return action === 'unlock' ? { status: 204, body: null } : send(operation, 200, output.body);
   };

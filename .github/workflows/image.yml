@@ -100,8 +100,14 @@ jobs:
           cmp packages/ui/src/tokens.css identity-tokens.css
           docker cp identity-smoke:/opt/keycloak/themes/platfolio/login/resources/css/components.css identity-components.css
           cmp packages/ui/src/components/components.css identity-components.css
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' "http://$address/realms/platfolio")" = 404
           test "$(curl --silent --output /dev/null --write-out '%{http_code}' -H 'Accept: text/html' "http://$address/realms/master/account/")" = 404
           test "$(curl --silent --output /dev/null --write-out '%{http_code}' -H 'Accept: application/json' "http://$address/realms/master/account/")" = 401
+          if docker run --rm "$IDENTITY_IMAGE" start-private > identity-missing-input.log 2>&1; then
+            echo 'Private identity started without its owner inputs' >&2
+            exit 1
+          fi
+          grep -q 'Set the private site origin' identity-missing-input.log
           echo "image=$IDENTITY_IMAGE" >> "$GITHUB_OUTPUT"
 
       # The image answers its own healthcheck during the run, so a green job means the container serves --
@@ -152,8 +158,8 @@ jobs:
             -e PLATFOLIO_LAUNCH_STATE_DIR=/launch-state -e PLATFOLIO_LAUNCH_TEAM=ci-team \
             -e PLATFOLIO_LAUNCH_WORKER_KEY="$(node -p 'require("node:crypto").randomBytes(32).toString("base64url")')" \
             -e PLATFOLIO_OPENBAO_WORKER_SECRET="$(node -p 'require("node:crypto").randomBytes(32).toString("base64url")')" \
-            -e PLATFOLIO_OPENBAO_URL=http://127.0.0.1:8200 -e PLATFOLIO_RAILWAY_OAUTH_CLIENT=ci-client \
-            -e PLATFOLIO_RAILWAY_OAUTH_CALLBACK=http://127.0.0.1:8080/api/v1/railway/callback \
+            -e PLATFOLIO_OPENBAO_URL=http://127.0.0.1:8200 \
+            -e PLATFOLIO_RAILWAY_OAUTH_CALLBACK=https://private-api.example.test/api/v1/railway/callback \
             -e RAILWAY_WORKSPACE_ID=ci-workspace -e HOST=127.0.0.1 platfolio-control-plane:build \
             sh -c "chown node:node /launch-state && exec su -s /bin/sh node -c 'node /app/scripts/customer-installation-worker.ts'"
           for attempt in $(seq 1 15); do

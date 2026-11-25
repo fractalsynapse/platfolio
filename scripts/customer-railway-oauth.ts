@@ -1,27 +1,81 @@
 import { createHash, randomBytes } from 'node:crypto';
+import { HttpRailwayTransport } from '../packages/contracts/src/railway-transport.ts';
 import { customerRailway, type CustomerRailwayGrant } from './customer-railway.ts';
-import type { customerOpenBao, RailwayGrant } from './customer-openbao.ts';
+import type { customerOpenBao, RailwayGrant, RailwayOAuthClient } from './customer-openbao.ts';
 
 const issuer = 'https://backboard.railway.com';
 
-export function customerRailwayOAuth(clientId: string, callback: string, workspaceId: string, bao: ReturnType<typeof customerOpenBao>, projectId?: string) {
+interface Options { clientId?: string; callback: string; workspaceId: string; projectId?: string }
+type Vault = Pick<ReturnType<typeof customerOpenBao>, 'readGrant' | 'writeGrant' | 'readRailwayClient' | 'writeRailwayClient'>;
+
+export function customerRailwayOAuth({ clientId, callback, workspaceId, projectId }: Options, bao: Vault, request: typeof fetch = fetch) {
   const providerScope = projectId ? 'project:admin' : 'workspace:admin';
   const scope = 'openid email profile ' + providerScope + ' offline_access';
   const forProvider = (access: string): CustomerRailwayGrant => ({ token: access, workspaceId, ...(projectId ? { projectId } : {}) });
+  const redirect = new URL(callback);
+  const localConfiguredClient = clientId && redirect.protocol === 'http:' && redirect.hostname === '127.0.0.1';
+  if ((redirect.protocol !== 'https:' && !localConfiguredClient) || redirect.hostname.includes('*') ||
+      redirect.username || redirect.password || redirect.search || redirect.hash ||
+      redirect.pathname !== '/api/v1/railway/callback') throw new Error('Use the installation’s exact HTTPS Railway callback');
   let pending: { state: string; verifier: string; until: number } | undefined;
   let refreshing: Promise<CustomerRailwayGrant> | undefined;
-  function begin() {
+  let registering: Promise<string> | undefined;
+  let unpersisted: RailwayOAuthClient | undefined;
+
+  async function register(): Promise<RailwayOAuthClient> {
+    const response = await request(issuer + '/oauth/register', {
+      method: 'POST', redirect: 'error', signal: AbortSignal.timeout(10000), headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ client_name: 'Private Platfolio', redirect_uris: [callback], token_endpoint_auth_method: 'none',
+        grant_types: ['authorization_code', 'refresh_token'], response_types: ['code'], scope }),
+    });
+    if (response.status !== 201) throw new Error('Railway could not register this installation’s callback');
+    const data = await response.json() as { client_id?: string; registration_client_uri?: string; registration_access_token?: string;
+      redirect_uris?: string[]; token_endpoint_auth_method?: string };
+    const management = data.registration_client_uri ? new URL(data.registration_client_uri) : undefined;
+    if (!data.client_id || !data.registration_access_token || data.token_endpoint_auth_method !== 'none' ||
+        data.redirect_uris?.length !== 1 || data.redirect_uris[0] !== callback || management?.origin !== issuer ||
+        management.username || management.password || management.search || management.hash || !/^\/oauth\/register\/[^/]+$/.test(management.pathname)) {
+      throw new Error('Railway returned an invalid registration');
+    }
+    return { id: data.client_id, callback, managementUrl: management.href, managementToken: data.registration_access_token };
+  }
+
+  async function savedClientId() {
+    const { version, grant } = await bao.readRailwayClient();
+    if (grant) {
+      if (unpersisted && unpersisted.id !== grant.id) {
+        await request(unpersisted.managementUrl, { method: 'DELETE', redirect: 'error', signal: AbortSignal.timeout(4000),
+          headers: { authorization: 'Bearer ' + unpersisted.managementToken } }).catch(() => undefined);
+      }
+      unpersisted = undefined;
+      if (grant.callback !== callback) throw new Error('Railway is registered to a different callback');
+      return grant.id;
+    }
+    const client = unpersisted ??= await register();
+    await bao.writeRailwayClient(client, version);
+    unpersisted = undefined;
+    return client.id;
+  }
+
+  function resolveClientId() {
+    if (clientId) return Promise.resolve(clientId);
+    registering ??= savedClientId().finally(() => { registering = undefined; });
+    return registering;
+  }
+
+  async function begin() {
+    const id = await resolveClientId();
     const verifier = randomBytes(32).toString('base64url');
     pending = { state: randomBytes(32).toString('base64url'), verifier, until: Date.now() + 5 * 60_000 };
     return issuer + '/oauth/auth?' + new URLSearchParams({
-      client_id: clientId, redirect_uri: callback, response_type: 'code', scope, state: pending.state,
+      client_id: id, redirect_uri: callback, response_type: 'code', scope, state: pending.state,
       code_challenge: createHash('sha256').update(verifier).digest('base64url'), code_challenge_method: 'S256', prompt: 'consent',
     });
   }
 
   async function token(body: Record<string, string>, previous?: string): Promise<RailwayGrant> {
-    const response = await fetch(issuer + '/oauth/token', {
-      method: 'POST', redirect: 'error', signal: AbortSignal.timeout(10000), body: new URLSearchParams({ client_id: clientId, ...body }),
+    const response = await request(issuer + '/oauth/token', {
+      method: 'POST', redirect: 'error', signal: AbortSignal.timeout(10000), body: new URLSearchParams({ client_id: await resolveClientId(), ...body }),
     });
     if (!response.ok) throw new Error('Railway authorization expired or was refused');
     const data = await response.json() as { access_token?: string; refresh_token?: string; expires_in?: number; scope?: string };
@@ -39,7 +93,7 @@ export function customerRailwayOAuth(clientId: string, callback: string, workspa
     try {
       const grant = await token({ grant_type: 'authorization_code', code: input.code, redirect_uri: callback, code_verifier: verifier });
       const target = projectId ? { kind: 'app' as const, name: 'starter-web', id: projectId } : { kind: 'installation' as const, name: 'platfolio' };
-      await customerRailway(target, undefined, forProvider(grant.access));
+      await customerRailway(target, undefined, forProvider(grant.access), new HttpRailwayTransport({ fetch: request }));
       await bao.writeGrant(grant, (await bao.readGrant()).version);
       return true;
     } catch { return false; }

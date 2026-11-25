@@ -1,37 +1,52 @@
-import { constants, createPublicKey, generateKeyPairSync, privateDecrypt, publicEncrypt } from 'node:crypto';
+import { constants, createHash, createPublicKey, generateKeyPairSync, privateDecrypt, publicEncrypt } from 'node:crypto';
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
 interface Recovery { shares: string[]; bootstrap: string }
 export interface RailwayGrant { access: string; refresh: string; expires: number }
+export interface RailwayOAuthClient { id: string; callback: string; managementUrl: string; managementToken: string }
 export interface MarketplaceGrant { hub: string; installationId: string; credential: string; claimed: boolean }
 type BaoState = 'unreachable' | 'uninitialized' | 'sealed' | 'setup-required' | 'ready';
 const policy = 'platfolio-launcher';
+const recoveryRole = 'platfolio-owner-recovery';
+const recoveryAttempt = 'sys/generate-root-token/attempt';
+const recoveryUpdate = 'sys/generate-root-token/update';
+const recoveryPolicy = `path "${recoveryAttempt}" { capabilities = ["create", "read", "update", "delete", "sudo"] }\n` +
+  `path "${recoveryUpdate}" { capabilities = ["update", "sudo"] }`;
 const path = 'customer-launch/data/railway';
 const marketplacePath = 'customer-launch/data/marketplace';
-const workerPolicy = [path, marketplacePath].map((entry) =>
+const clientPath = 'customer-launch/data/railway-client';
+const workerPolicy = [path, marketplacePath, clientPath].map((entry) =>
   `path "${entry}" { capabilities = ["create", "read", "update"] }`).join('\n');
 const settings = { padding: constants.RSA_PKCS1_OAEP_PADDING, oaepHash: 'sha256' };
 
-export function customerOpenBao(origin: string, secretId: string, directory: string) {
+function privateOpenBaoRequest(origin: string) {
   const url = new URL(origin);
   if (!['http:', 'https:'].includes(url.protocol) || !/^[a-z0-9-]+\.railway\.internal$|^127\.0\.0\.1$/.test(url.hostname) ||
       url.username || url.password || url.pathname !== '/' || url.search || url.hash) throw new Error('Use the private OpenBao origin');
-  const keys = generateKeyPairSync('rsa', { modulusLength: 3072 });
-  const publicKey = keys.publicKey.export({ format: 'der', type: 'spki' }).toString('base64');
-  const receipt = join(directory, 'encrypted-recovery.json');
-  let changing = false;
-
-  async function request<T>(path: string, body?: object, credential?: string, method = body ? 'POST' : 'GET') {
+  return async function request<T>(path: string, body?: object, credential?: string, method = body ? 'POST' : 'GET') {
     const init: RequestInit = {
-      method, redirect: 'error', signal: AbortSignal.timeout(8000),
+      // A fresh Raft store waits for leader election before returning the only copy of the recovery material.
+      method, redirect: 'error', signal: AbortSignal.timeout(path === 'sys/init' ? 30000 : 8000),
       headers: { ...(credential ? { 'x-vault-token': credential } : {}), ...(body ? { 'content-type': 'application/json' } : {}) },
       ...(body ? { body: JSON.stringify(body) } : {}),
     };
     const response = await fetch(new URL('/v1/' + path, url), init);
     return { ok: response.ok, status: response.status, data: await response.json().catch(() => undefined) as T | undefined };
-  }
+  };
+}
+
+function recoverySecret(first: string, second: string) {
+  return createHash('sha256').update('platfolio-openbao-owner-recovery\0').update([first, second].sort().join('\0')).digest('base64url');
+}
+
+export function customerOpenBao(origin: string, secretId: string, directory: string) {
+  const request = privateOpenBaoRequest(origin);
+  const keys = generateKeyPairSync('rsa', { modulusLength: 3072 });
+  const publicKey = keys.publicKey.export({ format: 'der', type: 'spki' }).toString('base64');
+  const receipt = join(directory, 'encrypted-recovery.json');
+  let changing = false;
 
   async function health() {
     return (await request<{ initialized: boolean; sealed: boolean }>('sys/health')).data;
@@ -78,7 +93,7 @@ export function customerOpenBao(origin: string, secretId: string, directory: str
     } finally { changing = false; }
   }
 
-  async function configure(root: string) {
+  async function configure(root: string, shares: readonly [string, string, string]) {
     const mounts = await request<Record<string, unknown>>('sys/mounts', undefined, root);
     if (!mounts.ok) throw new Error('OpenBao rejected bootstrap');
     const auth = await request<Record<string, unknown>>('sys/auth', undefined, root);
@@ -88,6 +103,16 @@ export function customerOpenBao(origin: string, secretId: string, directory: str
     };
     if (!mounts.data?.['customer-launch/']) await put('sys/mounts/customer-launch', { type: 'kv', options: { version: '2' } });
     if (!auth.data?.['approle/']) await put('sys/auth/approle', { type: 'approle' });
+    // Configure owner recovery before enabling the worker or revoking the initial administrator.
+    await put('sys/policies/acl/' + recoveryRole, { policy: recoveryPolicy });
+    await put('auth/approle/role/' + recoveryRole, { token_policies: [recoveryRole], token_no_default_policy: true, token_type: 'batch', token_ttl: '5m' });
+    await put('auth/approle/role/' + recoveryRole + '/role-id', { role_id: recoveryRole });
+    const [first, second, third] = shares;
+    for (const [left, right] of [[first, second], [first, third], [second, third]] as const) {
+      const secret = { secret_id: recoverySecret(left, right) };
+      const login = await request('auth/approle/login', { role_id: recoveryRole, ...secret });
+      if (!login.ok) await put('auth/approle/role/' + recoveryRole + '/custom-secret-id', secret);
+    }
     await put('sys/policies/acl/' + policy, { policy: workerPolicy });
     await put('auth/approle/role/' + policy, { token_policies: [policy], token_no_default_policy: true, token_type: 'batch', token_ttl: '120s' });
     await put('auth/approle/role/' + policy + '/role-id', { role_id: policy });
@@ -109,7 +134,7 @@ export function customerOpenBao(origin: string, secretId: string, directory: str
         }
       }
       await waitForActiveStorage();
-      if (!await serviceToken()) await configure(data.bootstrap);
+      if (!await serviceToken()) await configure(data.bootstrap, [data.shares[0]!, data.shares[1]!, data.shares[2]!]);
       if (!await serviceToken()) throw new Error('OpenBao did not authorize the worker');
       const root = await request('auth/token/lookup-self', undefined, data.bootstrap);
       if (root.ok && !(await request('auth/token/revoke-self', {}, data.bootstrap)).ok) throw new Error('OpenBao did not retire the bootstrap credential');
@@ -125,7 +150,7 @@ export function customerOpenBao(origin: string, secretId: string, directory: str
     return { version: stored.data.data.metadata.version, grant: stored.data.data.data };
   }
 
-  async function write(key: string, grant: RailwayGrant | MarketplaceGrant, version: number) {
+  async function write(key: string, grant: RailwayGrant | MarketplaceGrant | RailwayOAuthClient, version: number) {
     const token = await serviceToken();
     if (!token || !(await request(key, { options: { cas: version }, data: grant }, token)).ok) {
       throw new Error('OpenBao could not save the provider grant');
@@ -136,7 +161,53 @@ export function customerOpenBao(origin: string, secretId: string, directory: str
     publicKey, status, initialize, unlock,
     readGrant: () => read<RailwayGrant>(path),
     writeGrant: (grant: RailwayGrant, version: number) => write(path, grant, version),
+    readRailwayClient: () => read<RailwayOAuthClient>(clientPath),
+    writeRailwayClient: (client: RailwayOAuthClient, version: number) => write(clientPath, client, version),
     readMarketplaceGrant: () => read<MarketplaceGrant>(marketplacePath),
     writeMarketplaceGrant: (grant: MarketplaceGrant, version: number) => write(marketplacePath, grant, version),
   };
+}
+
+export async function restoreOpenBaoLauncherPolicy(origin: string, shares: readonly [string, string]) {
+  const [first, second] = shares;
+  if (first === second || shares.some((share) => !/^[a-zA-Z0-9+/=]{40,64}$/.test(share))) {
+    throw new Error('Use two distinct OpenBao shares');
+  }
+  const request = privateOpenBaoRequest(origin);
+  const login = await request<{ auth?: { client_token?: string } }>('auth/approle/login', {
+    role_id: recoveryRole, secret_id: recoverySecret(first, second),
+  });
+  const ownerToken = login.data?.auth?.client_token;
+  if (!login.ok || !ownerToken) throw new Error('OpenBao did not accept owner recovery. Use an existing vault administrator if it was initialized before this feature.');
+  const attempt = await request<{ data?: { nonce?: string; otp?: string } }>(recoveryAttempt, {}, ownerToken);
+  const nonce = attempt.data?.data?.nonce;
+  const otp = attempt.data?.data?.otp;
+  if (!attempt.ok || !nonce) throw new Error('OpenBao could not start a recovery session. Check whether one is already in progress.');
+  let root: string | undefined;
+  try {
+    if (!otp) throw new Error('OpenBao did not return the one-time recovery password');
+    let encoded: string | undefined;
+    for (const key of shares) {
+      const submitted = await request<{ data?: { encoded_token?: string; complete?: boolean } }>(recoveryUpdate, { key, nonce }, ownerToken);
+      if (!submitted.ok) throw new Error('OpenBao refused an owner share');
+      if (submitted.data?.data?.complete) encoded = submitted.data.data.encoded_token;
+    }
+    if (!encoded) throw new Error('OpenBao did not reach its recovery threshold');
+    const bytes = Buffer.from(encoded, 'base64');
+    if (bytes.length !== otp.length) throw new Error('OpenBao returned an invalid recovery token');
+    root = Buffer.from(bytes.map((byte, index) => byte ^ otp.charCodeAt(index))).toString('utf8');
+    const target = 'sys/policies/acl/' + policy;
+    const changed = await request(target, { policy: workerPolicy }, root);
+    const confirmed = await request<{ data?: { policy?: string } }>(target, undefined, root);
+    if (!changed.ok || confirmed.data?.data?.policy?.trim() !== workerPolicy.trim()) throw new Error('OpenBao could not verify the launcher policy');
+  } finally {
+    if (root) {
+      const retired = await request('auth/token/revoke-self', {}, root);
+      const rejected = await request('auth/token/lookup-self', undefined, root);
+      if (!retired.ok || rejected.status !== 403) throw new Error('OpenBao could not verify retirement of the temporary recovery token');
+    } else {
+      const current = await request<{ data?: { nonce?: string } }>(recoveryAttempt, undefined, ownerToken);
+      if (current.data?.data?.nonce === nonce) await request(recoveryAttempt, undefined, ownerToken, 'DELETE');
+    }
+  }
 }

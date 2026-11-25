@@ -2622,12 +2622,18 @@ paths:
     post:
       operationId: startStarterLaunch
       summary: Launch or resume the free starter using the connected customer runner
+      description: A new private launch configured for the marketplace requires a saved release claim. Restores use the release already acquired.
       security: [{ bearerJwt: [] }]
       responses:
         '200': *starter-launch-response
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: A new launch needs a free Starter Web claim from the marketplace.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '503': *launch-unavailable
   /api/v1/teams/{teamId}/starter-launch/remove:
     parameters:
