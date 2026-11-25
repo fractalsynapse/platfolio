@@ -4,7 +4,7 @@
  * hand, because every line reproduces from the specification.
  *
  * Source: apps/control-plane/openapi.yaml (OpenAPI 3.1.0, info.version 0.1.0)
- * Input digest: sha256/05d2832b2a4afdd2
+ * Input digest: sha256/077625d123fd3873
  *
  * Reproduce it with `pnpm run api:types`. `pnpm run api:types:check` fails when this file stops matching
  * what the committed spec produces, which is the only way a generated type deserves to be trusted.
@@ -397,6 +397,8 @@ export interface ApiParameters {
   getLatestAttestation: {
     instanceId: string;
   };
+  /** GET /api/v1/me/notification-email */
+  getMyNotificationEmail: Record<string, never>;
   /** GET /api/v1/teams/{teamId}/marketplace/connection */
   getPrivateMarketplaceConnection: {
     teamId: string;
@@ -551,6 +553,8 @@ export interface ApiParameters {
   };
   /** PUT /api/v1/me/profile */
   updateAccountProfile: Record<string, never>;
+  /** PUT /api/v1/me/notification-email */
+  updateMyNotificationEmail: Record<string, never>;
   /** PUT /api/v1/instances/{instanceId}/notification-rules/{ruleId} */
   updateNotificationRule: {
     instanceId: string;
@@ -698,6 +702,10 @@ export interface ApiRequestBodies {
   updateAccountProfile: {
     username: string;
     displayName: string;
+  };
+  /** PUT /api/v1/me/notification-email */
+  updateMyNotificationEmail: {
+    enabled: boolean;
   };
   /** PUT /api/v1/instances/{instanceId}/notification-rules/{ruleId} */
   updateNotificationRule: {
@@ -956,6 +964,16 @@ export interface ApiResponses {
     '200': AttestationRecord;
     '401': Error;
     '404': Error;
+  };
+  /** GET /api/v1/me/notification-email */
+  getMyNotificationEmail: {
+    '200': {
+      available: boolean;
+      enabled: boolean;
+    };
+    '401': Error;
+    '403': Error;
+    '503': Error;
   };
   /** GET /api/v1/teams/{teamId}/marketplace/connection */
   getPrivateMarketplaceConnection: {
@@ -1428,6 +1446,17 @@ export interface ApiResponses {
     '403': Error;
     '503': Error;
   };
+  /** PUT /api/v1/me/notification-email */
+  updateMyNotificationEmail: {
+    '200': {
+      available: boolean;
+      enabled: boolean;
+    };
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '503': Error;
+  };
   /** PUT /api/v1/instances/{instanceId}/notification-rules/{ruleId} */
   updateNotificationRule: {
     '200': NotificationRule;
@@ -1544,6 +1573,8 @@ export const ENDPOINTS = {
   getInstanceEnvironment: { method: 'get', path: '/api/v1/instances/{instanceId}/environments/{environment}' },
   /** GET /api/v1/instances/{instanceId}/latest-attestation */
   getLatestAttestation: { method: 'get', path: '/api/v1/instances/{instanceId}/latest-attestation' },
+  /** GET /api/v1/me/notification-email */
+  getMyNotificationEmail: { method: 'get', path: '/api/v1/me/notification-email' },
   /** GET /api/v1/teams/{teamId}/marketplace/connection */
   getPrivateMarketplaceConnection: { method: 'get', path: '/api/v1/teams/{teamId}/marketplace/connection' },
   /** GET /readyz */
@@ -1626,6 +1657,8 @@ export const ENDPOINTS = {
   unlockStarterOpenBao: { method: 'post', path: '/api/v1/teams/{teamId}/starter-launch/openbao/unlock' },
   /** PUT /api/v1/me/profile */
   updateAccountProfile: { method: 'put', path: '/api/v1/me/profile' },
+  /** PUT /api/v1/me/notification-email */
+  updateMyNotificationEmail: { method: 'put', path: '/api/v1/me/notification-email' },
   /** PUT /api/v1/instances/{instanceId}/notification-rules/{ruleId} */
   updateNotificationRule: { method: 'put', path: '/api/v1/instances/{instanceId}/notification-rules/{ruleId}' },
   /** PATCH /api/v1/teams/{teamId}/members/{personId} */

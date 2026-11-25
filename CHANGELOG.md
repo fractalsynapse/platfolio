@@ -5,6 +5,7 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+- Operators can opt in to email for their notification rules using their installation's verified primary account address (#288).
 - Private owners can connect to the marketplace from their workspace and acquire the pinned starter using a registry credential held in their OpenBao (#288).
 - Owners can rebuild the pinned Starter Web release from Deployments while retaining its Railway project and database (#288).
 - Added personal in-app notification rules for failed deployments, outages, and environment secret updates, scoped to current team memberships (#288).

@@ -10,6 +10,8 @@ import { normaliseEmail, normaliseName } from './persistence.ts';
 import { checkAttestationPolicy } from './dispatch-policy.ts';
 import type { Attestation } from './attestation.ts';
 import { nextAppCheck } from './hosted-availability.ts';
+import { notificationEvents } from './notification-events.ts';
+import type { NotificationEmailDelivery, NotificationEmailPreference } from './persistence.ts';
 import { CONTRACT_VERSION } from './generated/contract-version.ts';
 
 /**
@@ -1170,7 +1172,7 @@ export class PostgresStore implements Store {
       const values = [id, personId, instanceId, environment ?? null, event, enabled];
       const result = input.id
         ? await this.pool.query(
-          `UPDATE ${this.q('notification_rules')} SET environment = $4, event = $5, enabled = $6
+          `UPDATE ${this.q('notification_rules')} SET environment = $4, event = $5, enabled = $6, active_since = now()
            WHERE id = $1 AND person_id = $2 AND instance_id = $3 AND EXISTS (${allowed}) RETURNING *`, values,
         )
         : await this.pool.query(
@@ -1200,6 +1202,83 @@ export class PostgresStore implements Store {
       `DELETE FROM ${this.q('notification_rules')} WHERE id = $1 AND person_id = $2 AND instance_id = $3`, [id, personId, instanceId],
     );
     return result.rowCount === 1;
+  }
+
+  async getNotificationEmailPreference(personId: string): Promise<NotificationEmailPreference | undefined> {
+    const { rows } = await this.pool.query(
+      `SELECT * FROM ${this.q('notification_email_preferences')} WHERE person_id = $1`, [personId],
+    );
+    const row = rows[0];
+    if (row) return { personId, issuer: String(row.issuer), subject: String(row.subject), enabledAt: iso(row.enabled_at) };
+  }
+
+  async setNotificationEmailPreference(personId: string, preference: Omit<NotificationEmailPreference, 'personId'> | null) {
+    if (!preference) {
+      await this.pool.query(`DELETE FROM ${this.q('notification_email_preferences')} WHERE person_id = $1`, [personId]);
+      return true;
+    }
+    const result = await this.pool.query(
+      `INSERT INTO ${this.q('notification_email_preferences')} AS previous (person_id, issuer, subject, enabled_at)
+       SELECT person_id, issuer, subject, $4::timestamptz FROM ${this.q('identities')}
+       WHERE person_id = $1 AND issuer = $2 AND subject = $3
+       ON CONFLICT (person_id) DO UPDATE SET issuer = excluded.issuer, subject = excluded.subject, enabled_at =
+         CASE WHEN previous.issuer = excluded.issuer AND previous.subject = excluded.subject
+         THEN previous.enabled_at ELSE excluded.enabled_at END`,
+      [personId, preference.issuer, preference.subject, preference.enabledAt],
+    );
+    return result.rowCount === 1;
+  }
+
+  async leaseNotificationEmails(issuer: string, now: string): Promise<NotificationEmailDelivery[]> {
+    const leaseId = newId('lease');
+    const { rows } = await this.pool.query(
+      `WITH matches AS (
+         SELECT DISTINCT ON (audit.seq, preference.person_id)
+           audit.id AS audit_id, audit.at, audit.detail->>'environment' AS environment,
+           preference.person_id, preference.subject, preference.enabled_at,
+           app.id AS instance_id, app.team_id, rule.event
+         FROM ${this.q('notification_email_preferences')} AS preference
+         JOIN ${this.q('notification_rules')} AS rule ON rule.person_id = preference.person_id AND rule.enabled
+         JOIN ${this.q('instances')} AS app ON app.id = rule.instance_id
+         JOIN ${this.q('team_members')} AS member ON member.team_id = app.team_id AND member.person_id = preference.person_id
+         JOIN ${this.q('audit_log')} AS audit ON audit.target = app.id
+         JOIN jsonb_to_recordset($4::jsonb) AS event(action text, event text, result text)
+           ON event.action = audit.action AND event.event = rule.event
+           AND (event.result IS NULL OR event.result = audit.detail->>'result')
+         LEFT JOIN ${this.q('notification_email_deliveries')} AS delivery
+           ON delivery.person_id = preference.person_id AND delivery.audit_id = audit.id
+         WHERE preference.issuer = $1
+           AND (rule.environment IS NULL OR rule.environment = audit.detail->>'environment')
+           AND audit.at BETWEEN GREATEST(preference.enabled_at, rule.active_since, member.added_at, $2::timestamptz - interval '24 hours') AND $2
+           AND (delivery.attempts IS NULL OR (delivery.attempts < 4 AND delivery.due_at <= $2))
+         ORDER BY audit.seq, preference.person_id
+         LIMIT 5
+       ), leased AS (
+         INSERT INTO ${this.q('notification_email_deliveries')} AS previous (person_id, audit_id, lease_id, attempts, due_at)
+         SELECT person_id, audit_id, $3, 1, $2::timestamptz + interval '3 minutes' FROM matches
+         ON CONFLICT (person_id, audit_id) DO UPDATE SET lease_id = excluded.lease_id,
+           attempts = previous.attempts + 1, due_at = excluded.due_at
+         WHERE previous.due_at <= $2 AND previous.attempts < 4
+         RETURNING person_id, audit_id, attempts
+       )
+       SELECT matches.*, leased.attempts FROM matches JOIN leased USING (person_id, audit_id)`,
+      [issuer, now, leaseId, JSON.stringify(notificationEvents)],
+    );
+    return rows.map((row) => ({
+      auditId: String(row.audit_id), leaseId, attempts: Number(row.attempts),
+      preference: { personId: String(row.person_id), issuer, subject: String(row.subject), enabledAt: iso(row.enabled_at) },
+      instanceId: String(row.instance_id), teamId: String(row.team_id),
+      event: row.event as NotificationRule['event'], at: iso(row.at),
+      ...(typeof row.environment === 'string' ? { environment: row.environment } : {}),
+    }));
+  }
+
+  async settleNotificationEmail(delivery: Pick<NotificationEmailDelivery, 'auditId' | 'leaseId' | 'preference'>, retryAt: string | null) {
+    await this.pool.query(
+      `UPDATE ${this.q('notification_email_deliveries')} SET due_at = $4
+       WHERE person_id = $1 AND audit_id = $2 AND lease_id = $3`,
+      [delivery.preference.personId, delivery.auditId, delivery.leaseId, retryAt],
+    );
   }
 
   private asNotificationRule(row: Row): StoreResult<NotificationRule> {

@@ -490,6 +490,20 @@ variables:
     environments: [staging]
     deployedTo: railway:variable
     note: "Railway public OAuth client ID for this installation."
+  - name: PLATFOLIO_NOTIFICATION_DIRECTORY_CLIENT
+    kind: value
+    secret: false
+    environments: all
+    required: false
+    deployedTo: railway:variable
+    note: "Local Keycloak service client restricted to reading operator account metadata for opted-in email notifications."
+  - name: PLATFOLIO_NOTIFICATION_DIRECTORY_SECRET
+    kind: secret
+    secret: true
+    environments: all
+    required: false
+    deployedTo: railway:variable
+    note: "Operator-provided secret for the local read-only notification directory service client."
   - name: PLATFOLIO_OPENBAO_WORKER_SECRET
     kind: secret
     secret: true

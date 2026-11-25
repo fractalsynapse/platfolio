@@ -8,6 +8,8 @@ import { reasonOf } from './persistence.ts';
 import { normaliseEmail, normaliseName } from './persistence.ts';
 import { checkAttestationPolicy } from './dispatch-policy.ts';
 import { nextAppCheck } from './hosted-availability.ts';
+import { notificationEventFor } from './notification-events.ts';
+import type { NotificationEmailDelivery, NotificationEmailPreference } from './persistence.ts';
 import { CONTRACT_VERSION } from './generated/contract-version.ts';
 
 /**
@@ -43,7 +45,9 @@ export class MemoryStore implements Store {
     registryDigest?: string;
   }>();
   private readonly teams = new Map<string, Team>();
-  private readonly notificationRules = new Map<string, { personId: string; rule: NotificationRule }>();
+  private readonly notificationRules = new Map<string, { personId: string; rule: NotificationRule; activeSince: string }>();
+  private readonly notificationEmail = new Map<string, NotificationEmailPreference>();
+  private readonly notificationDeliveries = new Map<string, { leaseId: string; attempts: number; dueAt: string | null }>();
   private readonly hostedChecks = new Map<string, HostedAppCheck>();
   private readonly hostedStarters = new Map<string, HostedStarter>();
   private readonly instances = new Map<string, Instance>();
@@ -311,8 +315,14 @@ export class MemoryStore implements Store {
     return ok(admitted.value);
   }
   async unlinkIdentity(issuer: string, subject: string) {
-    const existed = this.identities.delete(`${issuer}\u0000${subject}`);
+    const key = `${issuer}\u0000${subject}`;
+    const personId = this.identities.get(key)?.personId;
+    const existed = this.identities.delete(key);
     if (!existed) return err({ code: 'not-found', what: 'identity', id: `${issuer}/${subject}` });
+    if (personId) {
+      const preference = this.notificationEmail.get(personId);
+      if (preference?.issuer === issuer && preference.subject === subject) this.notificationEmail.delete(personId);
+    }
     return ok({ removed: true });
   }
   async listIdentities(personId: string) {
@@ -693,7 +703,7 @@ export class MemoryStore implements Store {
         item.rule.instanceId === app.id && item.rule.event === value.event && item.rule.environment === value.environment)) {
       return err({ code: 'conflict', reason: 'This event already has a rule for that environment' });
     }
-    this.notificationRules.set(value.id, { personId, rule: value });
+    this.notificationRules.set(value.id, { personId, rule: value, activeSince: this.clock() });
     return ok(copy(value));
   }
 
@@ -709,6 +719,60 @@ export class MemoryStore implements Store {
     return current?.personId === personId && current.rule.instanceId === instanceId && this.notificationRules.delete(id);
   }
 
+  async getNotificationEmailPreference(personId: string) {
+    const preference = this.notificationEmail.get(personId);
+    if (preference && this.identities.get(`${preference.issuer}\u0000${preference.subject}`)?.personId === personId) return copy(preference);
+  }
+
+  async setNotificationEmailPreference(personId: string, preference: Omit<NotificationEmailPreference, 'personId'> | null) {
+    if (this.closed) return false;
+    if (!preference) {
+      this.notificationEmail.delete(personId);
+      return true;
+    }
+    if (this.identities.get(`${preference.issuer}\u0000${preference.subject}`)?.personId !== personId) return false;
+    const previous = this.notificationEmail.get(personId);
+    if (previous?.issuer !== preference.issuer || previous?.subject !== preference.subject) {
+      this.notificationEmail.set(personId, { ...preference, personId });
+    }
+    return true;
+  }
+
+  async leaseNotificationEmails(issuer: string, now: string): Promise<NotificationEmailDelivery[]> {
+    const nowMs = Date.parse(now);
+    const rows: NotificationEmailDelivery[] = [];
+    for (const audit of this.auditLog) {
+      const event = notificationEventFor(audit);
+      const app = this.instances.get(audit.target);
+      const at = Date.parse(audit.at);
+      if (!event || !app || at > nowMs || at < nowMs - 86_400_000) continue;
+      const environment = typeof audit.detail.environment === 'string' ? audit.detail.environment : undefined;
+      for (const { personId, rule, activeSince } of this.notificationRules.values()) {
+        if (rows.length === 5) return rows;
+        if (!rule.enabled || rule.instanceId !== app.id || event !== rule.event || at < Date.parse(activeSince) ||
+            (rule.environment !== undefined && rule.environment !== environment)) continue;
+        const preference = this.notificationEmail.get(personId);
+        const member = this.members.get(`${app.teamId}\u0000${personId}`);
+        if (!preference || preference.issuer !== issuer || !member || at < Date.parse(member.addedAt) ||
+            at < Date.parse(preference.enabledAt) || this.identities.get(`${issuer}\u0000${preference.subject}`)?.personId !== personId) continue;
+        const key = `${personId}\u0000${audit.id}`;
+        const previous = this.notificationDeliveries.get(key);
+        if (previous && (!previous.dueAt || Date.parse(previous.dueAt) > nowMs || previous.attempts >= 4)) continue;
+        const leaseId = newId('lease');
+        const attempts = (previous?.attempts ?? 0) + 1;
+        this.notificationDeliveries.set(key, { leaseId, attempts, dueAt: new Date(nowMs + 180_000).toISOString() });
+        rows.push({ auditId: audit.id, leaseId, attempts, preference: copy(preference), teamId: app.teamId, instanceId: app.id, event,
+          ...(environment ? { environment } : {}), at: audit.at });
+      }
+    }
+    return rows;
+  }
+
+  async settleNotificationEmail(delivery: Pick<NotificationEmailDelivery, 'auditId' | 'leaseId' | 'preference'>, retryAt: string | null) {
+    const current = this.notificationDeliveries.get(`${delivery.preference.personId}\u0000${delivery.auditId}`);
+    if (current?.leaseId === delivery.leaseId) current.dueAt = retryAt;
+  }
+
   async close(): Promise<void> {
     this.closed = true;
     this.teams.clear();
@@ -717,6 +781,8 @@ export class MemoryStore implements Store {
     this.hostedStarters.clear();
     this.hostedChecks.clear();
     this.notificationRules.clear();
+    this.notificationEmail.clear();
+    this.notificationDeliveries.clear();
     this.invitations.clear();
     this.members.clear();
     this.persons.clear();

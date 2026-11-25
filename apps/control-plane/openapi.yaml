@@ -226,6 +226,50 @@ paths:
                         environment: { type: string }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/me/notification-email:
+    get:
+      operationId: getMyNotificationEmail
+      summary: Read your email delivery preference
+      security: [{ bearerJwt: [] }]
+      responses:
+        '200': &notification-email-preference
+          description: The availability and state of email delivery for this account.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [available, enabled]
+                properties:
+                  available: { type: boolean }
+                  enabled: { type: boolean }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': &notification-email-unavailable
+          description: The installation could not read or update your email preference.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    put:
+      operationId: updateMyNotificationEmail
+      summary: Receive matching notifications at your verified primary address
+      security: [{ bearerJwt: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [enabled]
+              properties:
+                enabled: { type: boolean }
+      responses:
+        '200': *notification-email-preference
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': *notification-email-unavailable
   /api/v1/instances/{instanceId}/notification-rules:
     parameters:
       - { name: instanceId, in: path, required: true, schema: { type: string } }

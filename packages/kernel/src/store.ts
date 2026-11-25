@@ -134,6 +134,10 @@ export class StoreService extends Service<z.infer<typeof StoreConfigSchema>> {
   saveNotificationRule(...args: Parameters<Store['saveNotificationRule']>) { return this.inner.saveNotificationRule(...args); }
   listNotificationRules(...args: Parameters<Store['listNotificationRules']>) { return this.inner.listNotificationRules(...args); }
   removeNotificationRule(...args: Parameters<Store['removeNotificationRule']>) { return this.inner.removeNotificationRule(...args); }
+  getNotificationEmailPreference(...args: Parameters<Store['getNotificationEmailPreference']>) { return this.inner.getNotificationEmailPreference(...args); }
+  setNotificationEmailPreference(...args: Parameters<Store['setNotificationEmailPreference']>) { return this.inner.setNotificationEmailPreference(...args); }
+  leaseNotificationEmails(...args: Parameters<Store['leaseNotificationEmails']>) { return this.inner.leaseNotificationEmails(...args); }
+  settleNotificationEmail(...args: Parameters<Store['settleNotificationEmail']>) { return this.inner.settleNotificationEmail(...args); }
   close() { return this.inner.close(); }
 
   /** Errors are values, but a store that cannot be reached is a condition worth logging where it happens. */
