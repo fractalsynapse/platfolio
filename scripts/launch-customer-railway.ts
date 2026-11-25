@@ -40,11 +40,24 @@ async function ownerLaunchConfig(file: string) {
 }
 const launchConfig = values['launch-config-file'] ? await ownerLaunchConfig(values['launch-config-file']) : undefined;
 const ownerFile = values['owner-bootstrap-file'];
+function ownerMail(smtp: unknown) {
+  if (smtp === undefined) return;
+  const message = 'Supply the host, port, sender address, username and password for the private STARTTLS mail relay';
+  if (!smtp || typeof smtp !== 'object' || Array.isArray(smtp)) throw new Error(message);
+  const { host, port, from, user, password } = smtp as Record<string, unknown>;
+  if (typeof host !== 'string' || host.length > 253 || !/^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$/.test(host) ||
+      typeof port !== 'number' || !Number.isInteger(port) || port < 1 || port > 65535 ||
+      typeof from !== 'string' || from.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(from) ||
+      typeof user !== 'string' || !user || user.length > 512 ||
+      typeof password !== 'string' || !password || password.length > 1024) throw new Error(message);
+  return { host, port, from, user, password };
+}
 async function privateOwner(file: string) {
-  const { email, password } = await privateConfig(file, 'the initial owner credentials');
+  const { email, password, smtp } = await privateConfig(file, 'the initial owner credentials');
   if (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ||
     typeof password !== 'string' || !/^[A-Za-z0-9_-]{32,128}$/.test(password)) throw new Error('Supply the first owner email and a generated URL-safe password');
-  return { email, password };
+  const mail = ownerMail(smtp);
+  return { email, password, ...(mail ? { smtp: mail } : {}) };
 }
 if (ownerFile && (!values.apply || !values.candidate)) throw new Error('Private owner bootstrap requires --apply and --candidate');
 if (ownerFile && values.candidate) resolveCheckoutCandidate(values.candidate, resolve(import.meta.dirname, '..'));

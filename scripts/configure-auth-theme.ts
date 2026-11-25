@@ -2,12 +2,14 @@ import { parseArgs } from 'node:util';
 import { API_CLIENT_ID, REQUIRED_SCOPE, WEB_CLIENT_ID } from './browser-auth.ts';
 import { isLoopback, LOOPBACK_CREDENTIAL, resolveCredential } from './identity-credentials.ts';
 import { OPERATOR_DISPLAY_NAME_ATTRIBUTE } from '../apps/control-plane/src/account-profile.ts';
+import { passwordResetAttributes } from '../apps/identity/src/password-recovery.ts';
 
 const { values } = parseArgs({ options: {
   base: { type: 'string', default: process.env.KC_BASE ?? 'http://localhost:8081' },
   realm: { type: 'string', default: process.env.PLATFOLIO_IDENTITY_REALM ?? 'platfolio' },
   'allow-remote': { type: 'boolean' },
   'enable-self-service': { type: 'boolean' },
+  'enable-password-recovery': { type: 'boolean' },
   'enable-account-profile': { type: 'boolean' },
   'local-mailpit': { type: 'boolean' },
 } });
@@ -18,7 +20,8 @@ const local = isLoopback(base.origin);
 if (!realm || !/^[a-z0-9][a-z0-9-]*$/.test(realm) || realm === 'master') throw new Error('Select a Platfolio operator realm');
 if (base.username || base.password || base.pathname !== '/' || base.search || base.hash ||
     (!local && (base.protocol !== 'https:' || !values['allow-remote']))) throw new Error('Use a Keycloak origin. Hosted origins require HTTPS and --allow-remote.');
-if (values['local-mailpit'] && (!local || !values['enable-self-service'])) throw new Error('--local-mailpit requires a loopback origin and --enable-self-service');
+const enableRecovery = values['enable-self-service'] || values['enable-password-recovery'];
+if (values['local-mailpit'] && (!local || !enableRecovery)) throw new Error('--local-mailpit requires a loopback origin and password recovery');
 
 const credential = resolveCredential({
   label: 'Keycloak bootstrap administrator password', variable: 'KC_ADMIN_PASSWORD', fallback: LOOPBACK_CREDENTIAL,
@@ -55,6 +58,7 @@ interface RealmSettings {
   verifyEmail?: boolean;
   editUsernameAllowed?: boolean;
   smtpServer?: Record<string, string>;
+  attributes?: Record<string, string>;
   defaultRole?: { id: string };
 }
 interface Client { id: string; enabled: boolean }
@@ -127,10 +131,14 @@ if (values['enable-account-profile']) {
   }
   patch.editUsernameAllowed = true;
 }
-if (values['enable-self-service']) {
+if (enableRecovery) {
   if (values['local-mailpit']) patch.smtpServer = { host: 'mailpit', port: '1025', from: 'no-reply@platfolio.test' };
   const smtp = patch.smtpServer ?? current.smtpServer;
   if (!smtp?.host || !smtp.from) throw new Error('Configure Keycloak SMTP and verify mail delivery before enabling registration or password recovery');
+  patch.resetPasswordAllowed = true;
+  patch.attributes = { ...current.attributes, ...passwordResetAttributes };
+}
+if (values['enable-self-service']) {
   if (!current.defaultRole?.id) throw new Error('The realm default role is missing');
   const api = await client(API_CLIENT_ID);
   const role = await (await request(`${basePath}/clients/${api.id}/roles/${REQUIRED_SCOPE}`)).json() as Role;
@@ -138,7 +146,6 @@ if (values['enable-self-service']) {
   const roles = await (await request(composites)).json() as Role[];
   if (!roles.some(({ id }) => id === role.id)) await request(composites, 'POST', [role]);
   patch.registrationAllowed = true;
-  patch.resetPasswordAllowed = true;
   patch.verifyEmail = true;
 }
 
@@ -147,7 +154,9 @@ if (consoleClient?.enabled) await request(`${basePath}/clients/${consoleClient.i
 const readback = await (await request(basePath)).json() as RealmSettings;
 if (readback.loginTheme !== theme || (await findClient('account-console'))?.enabled ||
     (values['enable-account-profile'] && !readback.editUsernameAllowed) ||
-    (values['enable-self-service'] && (!readback.registrationAllowed || !readback.resetPasswordAllowed || !readback.verifyEmail))) {
+    (enableRecovery && (!readback.resetPasswordAllowed ||
+      Object.entries(passwordResetAttributes).some(([key, seconds]) => readback.attributes?.[key] !== seconds))) ||
+    (values['enable-self-service'] && (!readback.registrationAllowed || !readback.verifyEmail))) {
   throw new Error('Keycloak did not read back the expected authentication settings');
 }
-console.log(`Platfolio authentication theme enabled for realm ${realm}${values['enable-self-service'] ? ' with registration, verification, and password recovery' : ''}.`);
+console.log(`Platfolio authentication theme enabled for realm ${realm}${enableRecovery ? ' with password recovery' : ''}.`);

@@ -1,7 +1,9 @@
 import { API_CLIENT_ID, CALLBACK_PATH, REQUIRED_SCOPE, WEB_CLIENT_ID } from '../../../packages/ui/src/web/browser-auth-policy.ts';
 import { browserClientMappers, browserClientShape } from '../../../scripts/keycloak-browser-client.ts';
+import { passwordResetAttributes } from './password-recovery.ts';
 
 const siteOrigin = '${PLATFOLIO_SITE_ORIGIN}';
+const passwordRecovery = process.argv.includes('--password-recovery');
 const realm = {
   realm: 'platfolio',
   displayName: 'Platfolio',
@@ -9,6 +11,12 @@ const realm = {
   loginTheme: 'platfolio',
   sslRequired: 'external',
   registrationAllowed: false,
+  resetPasswordAllowed: passwordRecovery,
+  ...(passwordRecovery ? { attributes: passwordResetAttributes, smtpServer: {
+    host: '${PLATFOLIO_SMTP_HOST}', port: '${PLATFOLIO_SMTP_PORT}', from: '${PLATFOLIO_EMAIL_FROM}',
+    fromDisplayName: 'Platfolio', auth: 'true', authType: 'basic', starttls: 'true', ssl: 'false',
+    user: '${PLATFOLIO_SMTP_USER}', password: '${PLATFOLIO_SMTP_PASSWORD}',
+  } } : {}),
   duplicateEmailsAllowed: false,
   loginWithEmailAllowed: true,
   verifyEmail: false,
