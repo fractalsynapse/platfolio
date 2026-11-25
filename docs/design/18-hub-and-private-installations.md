@@ -422,5 +422,9 @@ A person can follow failed deployments, outages, and environment secret updates 
 apps that belong to their current teams. Each rule selects an environment or follows all
 environments of one app. Recent matching events appear in the private workspace.
 Notification results include the app, event, environment, and time. The event feed carries
-neither secret names nor values. Email destinations depend on D70's verified address
-management and recipient verification.
+neither secret names nor values. Email delivery starts with an explicit opt-in for the
+verified primary address. The installation's own Keycloak confirms that the identity is
+enabled and the address is verified before each delivery. Disabling email leaves the
+workspace rules intact. Deliveries reference the event and person and carry a bounded
+retry window. Address selection and team-specific destinations require the shared
+address-ownership check in D70.

@@ -92,6 +92,8 @@ export {
   type StoreResult,
   type Team,
 } from './persistence.ts';
+export type { NotificationEmailDelivery, NotificationEmailPreference } from './persistence.ts';
+export { notificationEventFor } from './notification-events.ts';
 export { checkAttestationPolicy, type PolicyVerdict } from './dispatch-policy.ts';
 export { MemoryStore, type MemoryStoreOptions } from './memory-store.ts';
 export { PostgresStore, type PostgresStoreOptions } from './postgres-store.ts';

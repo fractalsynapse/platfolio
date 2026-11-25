@@ -210,6 +210,41 @@ const expectErr = (result: { ok: boolean; value?: unknown } & Partial<StoreError
     return { status: 'pass', detail: 'scoped uniqueness, rule ownership, and recheck after membership removal' };
   });
 
+  await add('notification email leases deduplicate overlapping rules and respect revoked membership', async () => {
+    const { store, team, instance } = await seed();
+    const issuer = 'https://notification-delivery.example.test';
+    const subject = randomUUID();
+    const owner = mustOk(await store.resolvePerson({ issuer, subject: randomUUID() }), 'owner').person;
+    const person = mustOk(await store.resolvePerson({ issuer, subject }), 'recipient').person;
+    mustOk(await store.putTeamMember({ teamId: team.id, personId: owner.id, role: 'owner' }), 'owner membership');
+    mustOk(await store.putTeamMember({ teamId: team.id, personId: person.id, role: 'member' }), 'recipient membership');
+    mustOk(await store.setInstanceEnvironment({ instanceId: instance.id, environment: 'staging', state: 'live' }), 'staging');
+    const rule = { instanceId: instance.id, event: 'secret-updated' as const, enabled: true };
+    mustOk(await store.saveNotificationRule(person.id, rule), 'all environments');
+    mustOk(await store.saveNotificationRule(person.id, { ...rule, environment: 'staging' }), 'one environment');
+    const enabledAt = new Date().toISOString();
+    if (!await store.setNotificationEmailPreference(person.id, { issuer, subject, enabledAt })) throw new Error('Opt-in was refused');
+    const at = new Date(Date.now() + 1_500).toISOString();
+    const audit = { actorKind: 'user' as const, actorRef: owner.id, action: 'secret.deliver', target: instance.id,
+      detail: { environment: 'staging', name: 'sample-secret' }, at };
+    const update = mustOk(await store.appendAudit(audit), 'event');
+    const switchedOff = await store.leaseNotificationEmails('https://different.example.test', at);
+    if (switchedOff.length) throw new Error('A directory could lease a person from a different issuer');
+    const leases = (await Promise.all([store.leaseNotificationEmails(issuer, at), store.leaseNotificationEmails(issuer, at)])).flat();
+    if (leases.length !== 1) throw new Error('Expected exactly one lease for two overlapping rules and two workers');
+    const delivery = leases[0]!;
+    if (delivery.auditId !== update.id || delivery.preference.subject !== subject || delivery.environment !== 'staging' ||
+        JSON.stringify(delivery).includes('sample-secret')) throw new Error('Incorrect email projection');
+    await store.settleNotificationEmail(delivery, at);
+    const retry = await store.leaseNotificationEmails(issuer, at);
+    if (retry.length !== 1 || retry[0]?.attempts !== 2) throw new Error('A due retry could not be leased');
+    await store.settleNotificationEmail(retry[0]!, null);
+    mustOk(await store.appendAudit(audit), 'next event');
+    mustOk(await store.changeTeamMember(team.id, owner.id, person.id, null), 'remove recipient');
+    if ((await store.leaseNotificationEmails(issuer, at)).length !== 0) throw new Error('A former member received a lease');
+    return { status: 'pass', detail: 'isolated, bounded, deduplicated delivery with no secret naming or stale team membership' };
+  });
+
   await add('describe: names the driver and its readiness', async () => {
     const store = await fresh();
     const info = store.describe();

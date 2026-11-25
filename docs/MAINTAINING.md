@@ -116,6 +116,14 @@ and verify mail delivery before enabling self-service registration and password 
 Use a disposable address you can read when verifying the links and confirm that the team
 invitation delivery receipt appears in Platfolio.
 
+To enable notification emails, create a confidential Keycloak service client in that
+installation's operator realm. Add the built-in optional client scope `kc-admin-api`
+and grant the realm-management `view-users` role. Disable full scope and user sign-in
+flows. Give the service account no administrative write roles.
+Set `PLATFOLIO_NOTIFICATION_DIRECTORY_CLIENT` and `PLATFOLIO_NOTIFICATION_DIRECTORY_SECRET`
+on the API service alongside the relay configuration. The directory client is local to
+that realm. It confirms the active account's primary address before each send.
+
 ## Two realms, one Keycloak (D56)
 
 platfolio's production and staging control planes share the hosted identity service -- one container, one

@@ -3,6 +3,7 @@ import type { NotificationRule, TeamWithRole } from '@platfolio/api-contract/gen
 import { ageLabel, useClock } from '../components/freshness.ts';
 import { useCommand, useOperation } from '../sdk/use-operation.ts';
 import { ActivityFeed } from './activity-feed.tsx';
+import { NotificationEmailPreference } from './notification-email-preference.tsx';
 import { NotificationRuleForm, notificationEvents } from './notification-rule-form.tsx';
 import { workspacePaths } from './routes.ts';
 
@@ -37,7 +38,8 @@ export function NotificationsWorkspace({ teams }: { readonly teams: readonly Tea
     <div className="ui-workspace-heading"><h1>Notifications</h1>
       {!editing && teams.length > 0 && <button type="button" className="ui-workspace-primary ui-hit-primary" onClick={() => setEditing('new')}>New rule</button>}
     </div>
-    <p>Choose which app events appear here.</p>
+    <p>Choose which app events you follow.</p>
+    <NotificationEmailPreference />
     {editing && <NotificationRuleForm key={editing === 'new' ? 'new' : editing.id} teams={teams} apps={apps}
       initial={editing === 'new' ? undefined : editing} onSaved={() => { setEditing(undefined); feed.reload(); }}
       onCancel={() => setEditing(undefined)} />}

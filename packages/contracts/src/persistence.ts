@@ -503,6 +503,25 @@ export interface NewInstance { teamId: string; name: string; template: string; t
  * (memory today, another database or an embedded store later) must be able to satisfy it without being the
  * first implementation wearing a different name.
  */
+export interface NotificationEmailPreference {
+  personId: string;
+  issuer: string;
+  subject: string;
+  enabledAt: string;
+}
+
+export interface NotificationEmailDelivery {
+  auditId: string;
+  leaseId: string;
+  attempts: number;
+  preference: NotificationEmailPreference;
+  teamId: string;
+  instanceId: string;
+  event: NotificationRule['event'];
+  environment?: string;
+  at: string;
+}
+
 export interface Store {
   readonly driver: string;
   describe(): { driver: string; contract: string; schemaReady: boolean };
@@ -665,6 +684,10 @@ export interface Store {
   saveNotificationRule(personId: string, input: NewNotificationRule): Promise<StoreResult<NotificationRule>>;
   listNotificationRules(personId: string): Promise<NotificationRule[]>;
   removeNotificationRule(personId: string, instanceId: string, id: string): Promise<boolean>;
+  getNotificationEmailPreference(personId: string): Promise<NotificationEmailPreference | undefined>;
+  setNotificationEmailPreference(personId: string, preference: Omit<NotificationEmailPreference, 'personId'> | null): Promise<boolean>;
+  leaseNotificationEmails(issuer: string, now: string): Promise<NotificationEmailDelivery[]>;
+  settleNotificationEmail(delivery: Pick<NotificationEmailDelivery, 'auditId' | 'leaseId' | 'preference'>, retryAt: string | null): Promise<void>;
 
   close(): Promise<void>;
 }

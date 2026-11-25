@@ -12,6 +12,8 @@ import type { customerLaunch } from './customer-launch.ts';
 import { hostedStarterLink, hostedStarterObservation } from './hosted-starter.ts';
 import { checkHostedApp, hostedAppStatus } from './hosted-availability.ts';
 import { listNotificationMatches } from './notification-rules.ts';
+import type { NotificationDirectory } from './notification-directory.ts';
+import { notificationEmail } from './notification-email.ts';
 import type { StarterLaunch } from './starter-launch.ts';
 import { badRequest, bearerToken, notFound, send, unauthorized } from './respond.ts';
 import { accountProfile, type AccountIssuer } from './account-profile.ts';
@@ -35,6 +37,7 @@ export interface CapabilityDeps {
   marketplaceEnabled?: boolean;
   invitationOrigin?: string;
   accountIssuer?: AccountIssuer;
+  notificationDirectory?: NotificationDirectory;
   starterLaunch?: StarterLaunch;
   customerLaunch?: ReturnType<typeof customerLaunch>;
 }
@@ -1514,6 +1517,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
   };
 
   return [core, instances, dispatches, audit, teams, bindings, invitations, secrets, controller, marketplace, privateMarketplace, launcher, catalog, availability, notifications,
+    notificationEmail(authorize, now, deps.notificationDirectory, deps.invitationOrigin),
     accountProfile(authorize, deps.accountIssuer)];
 }
 
