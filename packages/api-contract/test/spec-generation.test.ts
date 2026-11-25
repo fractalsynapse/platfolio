@@ -80,10 +80,10 @@ test('what the generator owns, and what it deliberately leaves alone', () => {
   const generated = generatedComponentNames(names, side.all);
   assert.deepEqual(generated, [
     'ApplyResult', 'Attestation', 'AttestationRecord', 'AuditEntry', 'BindingRecord', 'CapabilityOffer',
-    'CapabilityShare', 'DeleteResult', 'DispatchIntent', 'HostedCustomDomain', 'HostedStarter', 'HostingRemovalRequest', 'Instance', 'InstanceResponse', 'Invitation', 'MarketplaceInstallation', 'NotificationRule', 'StarterBrandChange', 'StateSnapshot',
+    'CapabilityShare', 'DeleteResult', 'DispatchIntent', 'HostedCustomDomain', 'HostedStarter', 'HostingRemovalRequest', 'InstallationLaunchInput', 'Instance', 'InstanceResponse', 'Invitation', 'MarketplaceInstallation', 'NotificationRule', 'StarterBrandChange', 'StateSnapshot',
   ], 'the generated set is the matched set plus the composed response -- stated, so an addition is a decision');
   // The hand-written half is envelopes and operational shapes: no code-side definition shares their name.
-  for (const hand of ['Slug', 'TeamWithRole', 'CurrentPerson', 'Health', 'Ready', 'ReadinessCheck', 'Version', 'Whoami', 'Error']) {
+  for (const hand of ['HubInstallationLaunch', 'Slug', 'TeamWithRole', 'CurrentPerson', 'Health', 'Ready', 'ReadinessCheck', 'Version', 'Whoami', 'Error']) {
     assert.ok(!generated.includes(hand), `${hand} has no definition to generate it from`);
     assert.ok(names.includes(hand), `${hand} should still be in the document`);
   }
