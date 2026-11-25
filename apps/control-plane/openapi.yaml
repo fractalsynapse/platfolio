@@ -2202,6 +2202,71 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /api/v1/teams/{teamId}/marketplace/connection:
+    parameters:
+      - { name: teamId, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getPrivateMarketplaceConnection
+      summary: Check the private installation's marketplace connection
+      security: [{ bearerJwt: [] }]
+      responses:
+        '200':
+          description: Connection state and any pinned release acquired by this installation.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [state]
+                properties:
+                  state: { type: string, enum: [unconfigured, openbao-required, disconnected, connected, unavailable] }
+                  release:
+                    type: object
+                    additionalProperties: false
+                    required: [template, version, revision]
+                    properties:
+                      template: { type: string }
+                      version: { type: string }
+                      revision: { type: string, pattern: '^[0-9a-f]{40}$' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503':
+          description: The private installation worker is unavailable.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    post:
+      operationId: enrollPrivateMarketplaceConnection
+      summary: Exchange a one-use hub handoff and acquire the pinned free release
+      security: [{ bearerJwt: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [handoff]
+              properties:
+                handoff: { type: string, pattern: '^[0-9a-f-]{36}:[A-Za-z0-9_-]{43}$' }
+      responses:
+        '204': { description: The worker verified the connection and saved the release. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: The handoff was refused or there is already a connected installation.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '503':
+          description: The worker, OpenBao or the marketplace could not complete enrollment.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
   /api/v1/teams/{teamId}/starter-launch/setup:
     parameters:
       - { name: teamId, in: path, required: true, schema: { type: string } }

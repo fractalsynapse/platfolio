@@ -252,7 +252,9 @@ export async function customerRailway(target: CustomerProjectTarget, progress?: 
   await instances();
   progress?.({ step: 'Railway project', state: 'CONNECTED', resourceId: project.id });
   return { project, scope, instances, ensureService, assertPrivate, setConfig, configure, upload, wait, deployImage, privatePostgres, publicOrigin, remove,
-  async installLaunchWorker(image: string, config: { team: string; workerKey: string; openBaoSecret: string; client: string; callback: string; appProject?: string }) {
+  async installLaunchWorker(image: string, config: {
+    team: string; workerKey: string; openBaoSecret: string; client: string; callback: string; appProject?: string; registryOrigin?: string;
+  }) {
     if (target.kind !== 'installation') throw new Error('The launch worker belongs in the Platfolio project');
     const openbao = await deployOpenBao();
     const service = await ensureService(workerService);
@@ -262,6 +264,7 @@ export async function customerRailway(target: CustomerProjectTarget, progress?: 
     const data = '/launch-state';
     await ensureVolume(service, data);
     const runtime = { PLATFOLIO_OPENBAO_URL: openbao, PLATFOLIO_OPENBAO_WORKER_SECRET: config.openBaoSecret,
+      ...(config.registryOrigin ? { PLATFOLIO_REGISTRY_ORIGIN: config.registryOrigin } : {}),
       PLATFOLIO_LAUNCH_STATE_DIR: data, PLATFOLIO_LAUNCH_WORKER_KEY: config.workerKey, PLATFOLIO_LAUNCH_TEAM: config.team,
       PLATFOLIO_RAILWAY_OAUTH_CLIENT: config.client, PLATFOLIO_RAILWAY_OAUTH_CALLBACK: config.callback,
       RAILWAY_WORKSPACE_ID: workspaceId, PLATFOLIO_LAUNCH_APP_PROJECT: config.appProject ?? '', RAILWAY_RUN_UID: '0', PORT: '8080', HOST: '::' };

@@ -442,6 +442,12 @@ variables:
     environments: all
     deployedTo: railway:variable
     note: "Enables hub-only free-template enrollment and claims. Enabled for the staging hub and the local hub proof."
+  - name: PLATFOLIO_REGISTRY_ORIGIN
+    kind: value
+    secret: false
+    environments: all
+    deployedTo: railway:variable
+    note: "Installation owner's fixed HTTPS hub origin for the private worker. The browser cannot override it."
   - name: PLATFOLIO_LAUNCH_APP_PROJECT
     kind: value
     secret: false
@@ -489,7 +495,7 @@ variables:
     secret: true
     environments: [staging]
     deployedTo: railway:variable
-    note: "Local AppRole secret with access to the Railway grant path only."
+    note: "Local AppRole secret limited to the Railway and marketplace credential records."
   - name: PLATFOLIO_OPENBAO_URL
     kind: value
     secret: false

@@ -2,13 +2,17 @@ import { readFile, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { customerRailway } from './customer-railway.ts';
+import { privateMarketplaceOrigin } from './customer-marketplace-connection.ts';
 import { customerControlPlanePlan, launchCustomerControlPlane } from './launch-customer-control-plane.ts';
 import { resolveCheckoutCandidate } from './platform-candidate.ts';
 
 const { values } = parseArgs({ options: {
   project: { type: 'string' }, candidate: { type: 'string' }, 'identity-bootstrap-file': { type: 'string' },
   'launch-config-file': { type: 'string' }, apply: { type: 'boolean' }, 'update-images': { type: 'boolean' },
+  'registry-origin': { type: 'string' },
 } });
+const registryOrigin = privateMarketplaceOrigin(values['registry-origin']);
+if (registryOrigin && !values['launch-config-file']) throw new Error('A registry origin requires the customer launch configuration');
 if (values['update-images'] || values['launch-config-file']) {
   if (!values.apply || !values.candidate || !values.project) throw new Error('Updating a hosted installation requires --apply, --candidate, and the exact --project ID');
   resolveCheckoutCandidate(values.candidate, resolve(import.meta.dirname, '..'));
@@ -37,7 +41,7 @@ if (values.apply) {
     console.log(JSON.stringify(origins));
     if (launchConfig) {
       console.log(JSON.stringify(await stage.installLaunchWorker(plan.api.image + '@' + plan.api.digest, {
-        ...launchConfig, callback: origins.api + '/api/v1/railway/callback',
+        ...launchConfig, callback: origins.api + '/api/v1/railway/callback', ...(registryOrigin ? { registryOrigin } : {}),
       })));
     }
   }
