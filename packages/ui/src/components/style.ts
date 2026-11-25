@@ -404,26 +404,6 @@ export const COMPONENT_RULES = [
     why: 'Show the selected environment or page without a colored underline.',
   },
   {
-    selector: '.ui-workspace-section-stack',
-    declarations: ['display: grid;', 'gap: 1rem;'],
-    why: 'Group vertically related cards on team and environment screens.',
-  },
-  {
-    selector: '.ui-workspace-columns',
-    declarations: ['display: flex;', 'flex-wrap: wrap;', 'align-items: flex-start;', 'gap: 1rem;'],
-    why: 'Show the primary panel and its context side by side when both fit, and stack them in reading order on phones.',
-  },
-  {
-    selector: '.ui-workspace-columns > :first-child',
-    declarations: ['flex: 1.65 1 min(100%, 35.5rem);', 'min-inline-size: 0;'],
-    why: 'Give the primary panel the larger share of a wide row.',
-  },
-  {
-    selector: '.ui-workspace-columns > :last-child',
-    declarations: ['flex: 1 1 min(100%, 21.5rem);', 'min-inline-size: 0;'],
-    why: 'Give the context panel a readable width at either layout.',
-  },
-  {
     selector: '.ui-workspace-panel',
     declarations: ['min-inline-size: 0;', 'padding: 1.13rem;', 'background: var(--ui-color-surface);',
       'border: 1px solid var(--ui-color-border);', 'border-radius: 0.65rem;', 'box-shadow: var(--ui-panel-shadow);'],

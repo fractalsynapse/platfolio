@@ -7,6 +7,7 @@ change; entries describe merged intent, not aspirations.
 
 - Verify that workloads stop and storage remains for keep-data removal. Wipe requires confirmed project deletion and provider read-back (#288).
 - Resolve hosting from the instance's registered provider. Private worker and workflow execution use the infrastructure contract, and repository plans can target staging, production, or both (#288).
+- Compose workspace routes with shared page, navigation, field, action, and layout components. Profile edits update the avatar from the same confirmed account response (#288).
 - Fresh private Platfolio realms can offer themed password recovery using the owner's STARTTLS relay. Password reset links expire after 15 minutes (#288).
 - Private installation owners get the mockup's connection cards for secret storage, Railway, and the marketplace. A fresh private Keycloak can start with the owner account alone, and the launcher can verify an exact staging project when names repeat (#288).
 - Fresh private vaults let owners restore the launcher policy with two recovery shares using OpenBao's authenticated recovery API (#288).

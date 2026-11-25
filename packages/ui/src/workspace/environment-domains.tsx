@@ -1,9 +1,9 @@
-import type { ReactElement } from 'react';
+import * as React from 'react';
 import type { SuccessOf } from '@platfolio/api-contract/generated/types';
 
 type Environment = SuccessOf<'getInstanceEnvironment'>;
 
-export function EnvironmentDomains({ domains, planned, hosting }: Pick<Environment, 'domains' | 'planned'> & { readonly hosting: Environment['hosting'] }): ReactElement {
+export function EnvironmentDomains({ domains, planned, hosting }: Pick<Environment, 'domains' | 'planned'> & { readonly hosting: Environment['hosting'] }): React.ReactElement {
   const running = hosting && hosting.state !== 'paused' && hosting.state !== 'removed';
   return <section aria-label="Environment domains">
     <h2>Domains</h2>

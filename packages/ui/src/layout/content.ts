@@ -61,6 +61,7 @@ export interface ContentPrimitive {
   readonly tracks: number | null;
   /** An explicitly selected two-panel composition for a document with two related sections. */
   readonly pairedTracks?: 2;
+  readonly contextTracks?: readonly string[];
   readonly wideGapStep: SpacingStep | null;
   readonly note: string;
 }
@@ -94,6 +95,7 @@ export const CONTENT_TABLE = {
     wideFromRem: 48,
     tracks: 3,
     pairedTracks: 2,
+    contextTracks: ['minmax(0, 1.65fr)', 'minmax(0, 1fr)'],
     wideGapStep: 6,
     note: 'A group of blocks: one column at the floor, three when its container has room. Less scrolling, no new capability.',
   },
@@ -152,7 +154,8 @@ export function renderContentCss(digest: string): string {
     const wide = contentWideDeclarations(p);
     if (wide === null) return head;
     const pair = p.pairedTracks ? `\n  .${p.className}[data-columns="${p.pairedTracks}"] {\n    grid-template-columns: repeat(${p.pairedTracks}, minmax(0, 1fr));\n    align-items: center;\n  }` : '';
-    return `${head}\n\n/* ${p.slot} adds simultaneity when its own container has room. Nothing that exists only at\n   this width is a capability -- rule 2, and the reason a content threshold lives here rather than in an\n   app stylesheet, where gate \u00a7D65 refuses it as a second owner of one decision. */\n@container (min-width: ${String(p.wideFromRem)}rem) {\n  .${p.className} {\n${wide.map((d) => `    ${d}`).join('\n')}\n  }${pair}\n}`;
+    const context = p.contextTracks ? `\n  .${p.className}[data-columns="main-context"]:has(> :nth-child(2)) {\n    grid-template-columns: ${p.contextTracks.join(' ')};\n    align-items: start;\n  }\n  .${p.className}[data-columns="main-context"]:not(:has(> :nth-child(2))) {\n    grid-template-columns: minmax(0, 1fr);\n  }` : '';
+    return `${head}\n\n/* ${p.slot} adds simultaneity when its own container has room. Nothing that exists only at\n   this width is a capability -- rule 2, and the reason a content threshold lives here rather than in an\n   app stylesheet, where gate \u00a7D65 refuses it as a second owner of one decision. */\n@container (min-width: ${String(p.wideFromRem)}rem) {\n  .${p.className} {\n${wide.map((d) => `    ${d}`).join('\n')}\n  }${pair}${context}\n}`;
   }).join('\n\n');
 
   return `/*

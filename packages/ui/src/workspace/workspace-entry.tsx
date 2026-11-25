@@ -1,3 +1,4 @@
+import { WorkspaceAction } from './workspace-action.tsx';
 import * as React from 'react';
 interface WorkspaceEntryProps {
   readonly completing: boolean;
@@ -12,6 +13,6 @@ export function WorkspaceEntry({ completing, beginning, problem, begin }: Worksp
     <h1>Sign in to your workspace</h1>
     {problem && <p role="alert">{problem}</p>}
     {completing ? <p role="status">Completing sign-in…</p>
-      : <button type="button" className="ui-workspace-primary ui-hit-primary" disabled={beginning} onClick={begin}>{beginning ? 'Opening sign-in…' : 'Sign in'}</button>}
+      : <WorkspaceAction type="button" variant="primary" disabled={beginning} onClick={begin}>{beginning ? 'Opening sign-in…' : 'Sign in'}</WorkspaceAction>}
   </main>;
 }

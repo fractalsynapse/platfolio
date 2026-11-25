@@ -3,7 +3,7 @@
  * packages/ui/src/components/style.ts and it is the only one.
  *
  * Source: packages/ui/src/components/style.ts
- * Input digest: sha256/c00d6c2ed591b2bd
+ * Input digest: sha256/6e9abbedc2c813f6
  *
  * Reproduce with `pnpm run ui:css`; `pnpm run ui:css:check` fails when this stops matching the module. The
  * numbers in here are not literals: they reference the custom properties in ../tokens.css, which is what makes
@@ -574,32 +574,6 @@
   background: var(--ui-color-surface);
   color: var(--ui-color-accent);
   box-shadow: 0 1px 3px color-mix(in srgb, var(--ui-color-text) 12%, transparent);
-}
-
-/* Group vertically related cards on team and environment screens. */
-.ui-workspace-section-stack {
-  display: grid;
-  gap: 1rem;
-}
-
-/* Show the primary panel and its context side by side when both fit, and stack them in reading order on phones. */
-.ui-workspace-columns {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  gap: 1rem;
-}
-
-/* Give the primary panel the larger share of a wide row. */
-.ui-workspace-columns > :first-child {
-  flex: 1.65 1 min(100%, 35.5rem);
-  min-inline-size: 0;
-}
-
-/* Give the context panel a readable width at either layout. */
-.ui-workspace-columns > :last-child {
-  flex: 1 1 min(100%, 21.5rem);
-  min-inline-size: 0;
 }
 
 /* Use the bordered card surface, spacing, and shadow from the mockup. */

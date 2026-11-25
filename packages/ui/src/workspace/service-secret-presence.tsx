@@ -1,3 +1,4 @@
+import { WorkspaceAction } from './workspace-action.tsx';
 import * as React from 'react';
 import type { ParamsOf } from '@platfolio/api-contract/generated/types';
 import { ageLabel, useClock } from '../components/freshness.ts';
@@ -16,7 +17,7 @@ export function ServiceSecretPresence({ scope, names }: {
     <h3>{service}</h3>
     {state.status === 'pending' && <p role="status">Checking the declared secrets…</p>}
     {state.status === 'failed' && <p role="status">Couldn’t verify secret presence.{' '}
-      <button type="button" className="ui-workspace-trigger ui-hit-primary" onClick={reload}>Check again</button>
+      <WorkspaceAction type="button" onClick={reload}>Check again</WorkspaceAction>
     </p>}
     {state.status === 'loaded' && <p className="ui-workspace-meta">{ageLabel(state.freshness, clock().toISOString()).text}</p>}
     <ul className="ui-workspace-list">{names.map((name) => {

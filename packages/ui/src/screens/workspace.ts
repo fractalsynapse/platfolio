@@ -1,7 +1,3 @@
-import type { ScreenDocument } from './screen.ts';
+import { workspacePageIds, workspacePages } from '../workspace/workspace-pages.ts';
 
-export const WORKSPACE_SCREEN: ScreenDocument = {
-  id: 'screen.workspace',
-  title: 'Workspace',
-  root: { slot: 'full-page', components: ['workspace.content'] },
-};
+export const WORKSPACE_SCREENS = workspacePageIds.map((id) => workspacePages[id].screen);

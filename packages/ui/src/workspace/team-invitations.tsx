@@ -1,3 +1,6 @@
+import { OperationState } from './operation-state.tsx';
+import { WorkspaceField } from './workspace-field.tsx';
+import { WorkspaceAction } from './workspace-action.tsx';
 import * as React from 'react';
 import { ageLabel, useClock } from '../components/freshness.ts';
 import { useCommand, useOperation } from '../sdk/use-operation.ts';
@@ -53,23 +56,23 @@ export function TeamInvitations({ teamId }: { readonly teamId: string }): React.
   return <section aria-labelledby="team-invitations-heading">
     <h2 id="team-invitations-heading">Invitations</h2>
     <form className="ui-workspace-form" onSubmit={(event) => void invite(event)}>
-      <label htmlFor="team-invite-email">Invite a member</label>
-      <input id="team-invite-email" type="email" value={email} onChange={(event) => setEmail(event.target.value)} maxLength={320} required />
-      <button type="submit" className="ui-workspace-primary ui-hit-primary" disabled={busy}>Send invitation</button>
+      <WorkspaceField id="team-invite-email" label="Invite a member">
+        <input id="team-invite-email" type="email" value={email} onChange={(event) => setEmail(event.target.value)} maxLength={320} required />
+      </WorkspaceField>
+      <WorkspaceAction type="submit" variant="primary" disabled={busy}>Send invitation</WorkspaceAction>
     </form>
     {feedback && <p role={feedback.failed ? 'alert' : 'status'}>{feedback.text}</p>}
     <div className="ui-workspace-heading" role="group" aria-label="Invitation history">
-      <button type="button" className="ui-workspace-trigger ui-hit-primary" aria-pressed={!history} onClick={() => setHistory(false)}>Active</button>
-      <button type="button" className="ui-workspace-trigger ui-hit-primary" aria-pressed={history} onClick={() => setHistory(true)}>History</button>
+      <WorkspaceAction type="button" aria-pressed={!history} onClick={() => setHistory(false)}>Active</WorkspaceAction>
+      <WorkspaceAction type="button" aria-pressed={history} onClick={() => setHistory(true)}>History</WorkspaceAction>
     </div>
-    {state.status === 'pending' && <p role="status">Checking team invitations…</p>}
-    {state.status === 'failed' && <p role="status">Couldn’t load team invitations. <button type="button" className="ui-workspace-trigger ui-hit-primary" onClick={reload}>Try again</button></p>}
+    <OperationState status={state.status} pending="Checking team invitations…" failed="Couldn’t load team invitations." retry={reload} />
     {state.status === 'loaded' && <>
       <p className="ui-workspace-meta">{ageLabel(state.freshness, now.toISOString()).text}</p>
       {displayed.length === 0 ? <p>{history ? 'No past invitations.' : 'No active invitations.'}</p> : <ul className="ui-workspace-list">
         {displayed.map((entry) => <li className="ui-workspace-row" key={entry.id}>
           <div><strong>{entry.email}</strong><p className="ui-workspace-meta">{history ? entry.state === 'pending' ? 'Expired' : entry.state : 'Pending'} · {entry.emailReceipt ? 'Email sent' : entry.emailError ? 'Email failed' : 'No email receipt'} · Sent {new Date(entry.createdAt).toLocaleDateString()}</p></div>
-          {!history && <button type="button" className="ui-workspace-trigger ui-hit-primary" disabled={busy} onClick={() => void withdraw(entry.id)}>Withdraw</button>}
+          {!history && <WorkspaceAction type="button" disabled={busy} onClick={() => void withdraw(entry.id)}>Withdraw</WorkspaceAction>}
         </li>)}
       </ul>}
     </>}

@@ -1,3 +1,4 @@
+import { WorkspaceAction } from './workspace-action.tsx';
 import * as React from 'react';
 import { ageLabel, useClock } from '../components/freshness.ts';
 import { useOperation } from '../sdk/use-operation.ts';
@@ -14,7 +15,7 @@ export function HubInstallationLaunch({ teamId }: { readonly teamId: string }) {
 
   return <WorkspacePanel title="Launch private Platfolio">
     {state.status === 'failed' ? <p role="status">Couldn’t find the installer.{' '}
-      <button type="button" className="ui-workspace-trigger ui-hit-primary" onClick={offer.reload}>Try again</button>
+      <WorkspaceAction type="button" onClick={offer.reload}>Try again</WorkspaceAction>
     </p> : <>
       <p>Start a new Railway project named <strong>platfolio</strong>. Then sign in to your installation and open Connections to unlock secret storage.</p>
       <dl className="ui-workspace-facts">

@@ -1,3 +1,5 @@
+import * as React from 'react';
+import { MainContext } from '../layout/main-context.tsx';
 import type { InstanceResponse, TeamWithRole } from '@platfolio/api-contract/generated/types';
 import { ageLabel } from '../components/freshness.ts';
 import type { Freshness } from '../sdk/transport.ts';
@@ -12,11 +14,11 @@ export function InstanceOverview({ team, app, freshness, now }: {
   readonly app: InstanceResponse;
   readonly freshness: Freshness;
   readonly now: string;
-}) {
+}): React.ReactElement {
   return <>
     <header className="ui-workspace-page-heading"><h1>{app.name}</h1><p>Hosted app</p></header>
     <TeamTabs team={team} />
-    <div className="ui-workspace-columns">
+    <MainContext>
       <WorkspacePanel title="Environments">
         <p className="ui-workspace-meta">The most recent status for each environment.</p>
         <EnvironmentList team={team.name} app={app} freshness={freshness} now={now} />
@@ -36,6 +38,6 @@ export function InstanceOverview({ team, app, freshness, now }: {
         </div>}
         <small className="ui-workspace-meta">{ageLabel(freshness, now).text}</small>
       </WorkspacePanel>
-    </div>
+    </MainContext>
   </>;
 }

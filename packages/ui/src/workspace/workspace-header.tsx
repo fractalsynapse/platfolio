@@ -1,6 +1,7 @@
+import { WorkspaceAction } from './workspace-action.tsx';
 import * as React from 'react';
 import type { TeamWithRole } from '@platfolio/api-contract/generated/types';
-import { workspacePaths } from './routes.ts';
+import { teamSectionLinks, workspacePaths } from './routes.ts';
 import { WorkspaceLink } from './workspace-link.tsx';
 import { WorkspaceMenu } from './workspace-menu.tsx';
 
@@ -20,12 +21,8 @@ export function WorkspaceHeader({ teams, team, invitationCount, displayName, sig
     <WorkspaceMenu kind="wordmark" label="Platfolio navigation" trigger={<><span className="ui-workspace-mark" aria-hidden="true">P</span>Platfolio</>}>
       <a className="ui-workspace-item ui-hit-primary" href="/">Home</a>
       {active && <div className="ui-workspace-menu-section">
-        <WorkspaceLink className="ui-workspace-item ui-hit-primary" href={workspacePaths.team(active.name)}>Team workspace</WorkspaceLink>
-        <WorkspaceLink className="ui-workspace-item ui-hit-primary" href={workspacePaths.teamActivity(active.name)}>Activity</WorkspaceLink>
-        {active.role === 'owner' && <>
-          <WorkspaceLink className="ui-workspace-item ui-hit-primary" href={workspacePaths.teamMembers(active.name)}>Members</WorkspaceLink>
-          <WorkspaceLink className="ui-workspace-item ui-hit-primary" href={workspacePaths.teamConnections(active.name)}>Connections</WorkspaceLink>
-        </>}
+        {teamSectionLinks(active, undefined, true).map(({ href, label }) =>
+          <WorkspaceLink key={href} className="ui-workspace-item ui-hit-primary" href={href}>{label}</WorkspaceLink>)}
       </div>}
     </WorkspaceMenu>
     <nav aria-label="Workspace" className="ui-workspace-tools">
@@ -41,7 +38,7 @@ export function WorkspaceHeader({ teams, team, invitationCount, displayName, sig
         <WorkspaceLink className="ui-workspace-item ui-hit-primary" href={workspacePaths.invitations}>
           Invitations{invitationCount ? ` (${invitationCount})` : ''}
         </WorkspaceLink>
-        <button className="ui-workspace-item ui-hit-primary" type="button" onClick={signOut}>Log out</button>
+        <WorkspaceAction variant="menu" type="button" onClick={signOut}>Log out</WorkspaceAction>
       </WorkspaceMenu>
     </nav>
     </div>

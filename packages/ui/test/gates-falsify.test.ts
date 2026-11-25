@@ -206,6 +206,13 @@ const MUTATIONS: readonly Mutation[] = [
     append: '\n.status {\n  container-type: inline-size;\n}\n',
     expect: /an app declaring its own container/,
   },
+  {
+    gateId: 'component-files',
+    label: 'a second React component in the same file',
+    file: 'packages/ui/src/workspace/workspace-heading.tsx',
+    append: '\nexport function AnotherHeading() { return <h1>Another heading</h1>; }\n',
+    expect: /AnotherHeading share a component file/,
+  },
   /* ---------------------------------------------------------------- the #259 screens */
   {
     // The walk that used to be `.ts`-only. Every grep gate reads through `listSources`, so if it skipped `.tsx`
@@ -213,21 +220,21 @@ const MUTATIONS: readonly Mutation[] = [
     // that says whether the extension to `.tsx` is real or decorative.
     gateId: '9.2',
     label: 'a fetch in a .tsx component',
-    file: 'packages/ui/src/components/instances.tsx',
+    file: 'packages/ui/src/components/instance-list.tsx',
     append: '\nexport const __rogueFetchTsx = (): unknown => fetch("/api/v1/instances");\n',
     expect: /transport surface `fetch\(`/,
   },
   {
     gateId: '9.3',
     label: 'an isMobile prop in a .tsx component',
-    file: 'packages/ui/src/components/instances.tsx',
+    file: 'packages/ui/src/components/instance-list.tsx',
     append: '\nexport interface __ForkTsx { readonly isMobile: boolean }\n',
     expect: /fork prop or window query `isMobile`/,
   },
   {
     gateId: '9.4',
     label: 'an addEventListener in a .tsx component',
-    file: 'packages/ui/src/components/instances.tsx',
+    file: 'packages/ui/src/components/instance-list.tsx',
     append: '\nexport const __wireTsx = (el: EventTarget): void => { el.addEventListener("x", () => undefined); };\n',
     expect: /raw event mechanism `addEventListener\(`/,
   },
@@ -494,7 +501,7 @@ test('§9.11 is real in both directions: it permits a component with a floor hom
     assert.equal(clean.code, 0, `the honest screen was refused:\n${clean.output.slice(-700)}`);
     assert.match(clean.output, /reachable at both widths/);
 
-    const target = path.join(ROOT, 'packages/ui/src/components/instances.tsx');
+    const target = path.join(ROOT, 'packages/ui/src/components/instance-detail.tsx');
     // Give the list a slots list that cannot be a sheet, and its `reads` become reachable only when wide.
     // The detail pane is the component the screen places in the split's detail track, and `popout-sidebar`
     // projects its content to `overlay-sheet` at the floor. Take that slot away and its two operations become
@@ -503,7 +510,7 @@ test('§9.11 is real in both directions: it permits a component with a floor hom
     // The first version of this case removed `overlay-sheet` from `instance.list` instead and did not bite, which
     // was the test's error rather than the gate's: the list is placed in a `stack`, whose floor home it still
     // declared, so there was no violation to find. A mutation that cannot fail is not a falsification.
-    const original = sandbox.replaceOnce('packages/ui/src/components/instances.tsx',
+    const original = sandbox.replaceOnce('packages/ui/src/components/instance-detail.tsx',
       "  slots: ['overlay-sheet', 'popout-sidebar', 'stack', 'full-page'],",
       "  slots: ['popout-sidebar', 'stack', 'full-page'],");
     try {
@@ -513,7 +520,7 @@ test('§9.11 is real in both directions: it permits a component with a floor hom
       assert.match(output, /no floor home|reachable only when wide/);
     } finally {
       sandbox.restore();
-      assert.ok(original.equals(fs.readFileSync(target)), 'instances.tsx not restored');
+      assert.ok(original.equals(fs.readFileSync(target)), 'instance-detail.tsx not restored');
     }
   });
 });

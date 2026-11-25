@@ -35,11 +35,14 @@ import type { SuccessOf } from '@platfolio/api-contract/generated/types';
 export interface UseOperationInput<O extends OperationId> {
   readonly params: ParamsOf<O>;
   readonly key?: string;
+  readonly enabled?: boolean;
 }
 
 export interface UseOperationResult<O extends OperationId> {
   readonly state: State<O>;
   readonly reload: () => void;
+  /** Install a canonical result returned by a successful command for this same resource. */
+  readonly acceptConfirmed: (value: SuccessOf<O>) => void;
 }
 
 export interface SdkContextValue {
@@ -72,9 +75,11 @@ export function useOperation<O extends OperationId>(operation: O, input: UseOper
   const { transport, auth, now } = useSdk();
   const params = input.params;
   const key = input.key ?? String(operation);
+  const enabled = input.enabled ?? true;
 
   const [state, setState] = React.useState<State<O>>(() => initial(baseOf(operation, params), now().toISOString()));
   const alive = React.useRef(true);
+  const requestId = React.useRef(0);
   // Held in a ref so the freshness subscription reads the *current* state when deciding whether this is a
   // refresh, without re-subscribing the source on every render.
   const latest = React.useRef<State<O>>(state);
@@ -90,22 +95,24 @@ export function useOperation<O extends OperationId>(operation: O, input: UseOper
   );
 
   const load = React.useCallback(async () => {
-    settle(await transport.call(operation, { params }, auth));
+    const id = ++requestId.current;
+    const result = await transport.call(operation, { params }, auth);
+    if (id === requestId.current) settle(result);
   }, [transport, auth, settle, operation, params]);
 
   React.useEffect(() => {
     alive.current = true;
-    void load();
+    if (enabled) void load();
     return () => {
       alive.current = false;
     };
-  }, [load]);
+  }, [enabled, load]);
 
   /**
    * The one subscription to freshness in the whole stack. It lives here so it lives nowhere else: 11 §4
    * acceptance (b) counts this as the primitive's only call site, and gate §9.2 fails a timer anywhere above.
    */
-  const source = transport.freshness?.(key);
+  const source = enabled ? transport.freshness?.(key) : undefined;
   React.useEffect(() => {
     if (!source) return;
     const unsubscribe = source.subscribe(() => {
@@ -118,7 +125,13 @@ export function useOperation<O extends OperationId>(operation: O, input: UseOper
     void load();
   }, [load]);
 
-  return { state, reload };
+  const acceptConfirmed = React.useCallback((value: SuccessOf<O>) => {
+    // A read begun before the confirmed write must not restore the older value.
+    requestId.current += 1;
+    settle({ ok: true, value });
+  }, [settle]);
+
+  return { state, reload, acceptConfirmed };
 }
 
 export { isLoaded };

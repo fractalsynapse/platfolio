@@ -1,3 +1,4 @@
+import { WorkspaceAction } from './workspace-action.tsx';
 import * as React from 'react';
 import type { ParamsOf } from '@platfolio/api-contract/generated/types';
 import { ageLabel, useClock } from '../components/freshness.ts';
@@ -45,7 +46,7 @@ export function HostedStarterBrand({ params, canManage, progressPath }: {
     <h3>App appearance</h3>
     {brand.state.status === 'pending' && <p role="status">Checking the app’s header label…</p>}
     {brand.state.status === 'failed' && <p role="status">Couldn’t check the header label.{' '}
-      <button type="button" className="ui-workspace-trigger ui-hit-primary" onClick={brand.reload}>Try again</button>
+      <WorkspaceAction type="button" onClick={brand.reload}>Try again</WorkspaceAction>
     </p>}
     {brand.state.status === 'loaded' && <>
       <p>Current header label <strong>{brand.state.data.value ?? 'Unavailable'}</strong></p>
@@ -63,10 +64,10 @@ export function HostedStarterBrand({ params, canManage, progressPath }: {
       <p><label>Header label <input type="text" autoComplete="off" maxLength={60} required
         aria-describedby={hint} value={label} onChange={(event) => setDraft(event.currentTarget.value)} disabled={pending} /></label></p>
       <p id={hint}>This label appears publicly in your app. Saving it starts a new staging deployment and keeps the existing database.</p>
-      <button type="submit" className="ui-workspace-primary ui-hit-primary"
+      <WorkspaceAction type="submit" variant="primary"
         disabled={pending || !label.trim() || label.trim() === current.value}>
         {pending ? 'Requesting deployment…' : 'Save and deploy'}
-      </button>
+      </WorkspaceAction>
     </form>}
     {problem && <p role="alert">{problem}</p>}
   </section>;

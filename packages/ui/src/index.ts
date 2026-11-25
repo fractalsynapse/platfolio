@@ -34,10 +34,10 @@ export { componentById, documentProblems, isRegistryImmutable, registeredCompone
 
 export type {
   ContextSwitcherProps, FreshnessLabelProps, InstanceDetailProps, InstanceListProps, InstanceRowProps, InstanceStateProps,
-} from './components/instances.tsx';
+} from './components/instances.ts';
 export {
   contextSwitcher, freshnessLabel, INSTANCE_COMPONENTS, instanceDetail, instanceList, instanceRow, instanceState,
-} from './components/instances.tsx';
+} from './components/instances.ts';
 export { ROLLUP_IS_NOT_THE_TRUTH, statePresentation, STATE_PRESENTATION, type InstanceState, type StateTone } from './components/instance-state.ts';
 export { ageAt, ageIsDoubtful, ageLabel, STALE_AFTER_SECONDS, transportWord, useClock } from './components/freshness.ts';
 export { fieldLabel, schemaPropertyNames } from './components/props.ts';

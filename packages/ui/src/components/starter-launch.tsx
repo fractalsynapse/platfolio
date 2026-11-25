@@ -102,5 +102,5 @@ function LaunchPanel({ teamId, teamName }: z.infer<typeof props>) {
 
 export const starterLaunch = defineComponent({
   id: 'launch.starter', props, reads: ['getStarterLaunch', 'startStarterLaunch', 'removeStarterLaunch', 'getStarterLaunchSetup', 'initializeStarterOpenBao', 'unlockStarterOpenBao', 'beginStarterRailwayAuthorization'],
-  slots: ['full-page'], render: (value: z.infer<typeof props>) => <LaunchPanel {...value} />,
+  slots: ['full-page'], render: LaunchPanel,
 });

@@ -1,3 +1,4 @@
+import { WorkspaceAction } from './workspace-action.tsx';
 import * as React from 'react';
 import type { MarketplaceInstallation } from '@platfolio/api-contract/generated/types';
 import { ageLabel, useClock } from '../components/freshness.ts';
@@ -68,7 +69,7 @@ export function HubMarketplaceInstallations({ teamId }: { readonly teamId: strin
   if (state.status === 'failed') return state.error.status === 404
     ? <p>Connections are managed in the private Platfolio installation for this team.</p>
     : <p role="status">Couldn’t check marketplace connections.{' '}
-      <button className="ui-hit-primary ui-workspace-trigger" type="button" onClick={connections.reload}>Try again</button>
+      <WorkspaceAction type="button" onClick={connections.reload}>Try again</WorkspaceAction>
     </p>;
   if (state.status !== 'loaded') return null;
   const codeState = state.data.find(({ installationId }) => installationId === code?.installationId)?.state;
@@ -77,16 +78,16 @@ export function HubMarketplaceInstallations({ teamId }: { readonly teamId: strin
   return <WorkspacePanel title="Marketplace connections">
     <p>Create a one-time code for a private Platfolio to connect to your team’s marketplace.</p>
     <p className="ui-workspace-meta">{ageLabel(state.freshness, now.toISOString()).text}</p>
-    <button className="ui-hit-primary ui-workspace-primary" type="button" disabled={pending} onClick={() => void issueCode()}>
+    <WorkspaceAction variant="primary" type="button" disabled={pending} onClick={() => void issueCode()}>
       Create connection code
-    </button>
+    </WorkspaceAction>
     {showCode && <section aria-label="New connection code">
       <p>Paste the code into <strong>Connections → Marketplace</strong> in your private Platfolio.
         It expires at {new Date(code.expiresAt).toLocaleTimeString()}.</p>
       <label htmlFor={codeLabel}>One-time connection code</label>{' '}
       <input id={codeLabel} readOnly autoComplete="off" spellCheck={false} value={code.installationId + ':' + code.value}
         onFocus={(event) => event.currentTarget.select()} />{' '}
-      <button className="ui-hit-primary ui-workspace-trigger" type="button" onClick={() => setCode(undefined)}>Hide code</button>
+      <WorkspaceAction type="button" onClick={() => setCode(undefined)}>Hide code</WorkspaceAction>
     </section>}
     {problem && <p role="alert">{problem}</p>}
     {state.data.length === 0 ? <p>No marketplace connections yet.</p> :
@@ -97,14 +98,14 @@ export function HubMarketplaceInstallations({ teamId }: { readonly teamId: strin
         </div>
         {connection !== 'disconnected' && (confirm === installationId ? <div>
           <p>End marketplace access for this installation? Its apps and saved releases stay available.</p>
-          <button className="ui-hit-primary" type="button" disabled={pending} onClick={() => void revoke(installationId)}>End access</button>{' '}
-          <button className="ui-hit-primary ui-workspace-trigger" type="button" disabled={pending} onClick={() => setConfirm(undefined)}>Cancel</button>
+          <WorkspaceAction variant="plain" type="button" disabled={pending} onClick={() => void revoke(installationId)}>End access</WorkspaceAction>{' '}
+          <WorkspaceAction type="button" disabled={pending} onClick={() => setConfirm(undefined)}>Cancel</WorkspaceAction>
         </div> : <div>
-          {connection === 'pending' && <button className="ui-hit-primary ui-workspace-trigger" type="button" disabled={pending}
-            onClick={() => void issueCode(installationId)}>Replace code</button>}{' '}
-          <button className="ui-hit-primary ui-workspace-trigger" type="button" disabled={pending} onClick={() => setConfirm(installationId)}>
+          {connection === 'pending' && <WorkspaceAction type="button" disabled={pending}
+            onClick={() => void issueCode(installationId)}>Replace code</WorkspaceAction>}{' '}
+          <WorkspaceAction type="button" disabled={pending} onClick={() => setConfirm(installationId)}>
             {connection === 'pending' ? 'Cancel connection' : 'Disconnect'}
-          </button>
+          </WorkspaceAction>
         </div>)}
       </li>)}</ul>}
   </WorkspacePanel>;

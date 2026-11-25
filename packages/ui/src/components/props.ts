@@ -96,19 +96,12 @@ export const InstanceRowSchema = z.object({
   updatedAt: z.string().min(1),
 });
 
-export const InstanceDetailSchema = z.object({
-  id: z.string().min(1),
-  teamId: z.string().min(1),
-  name: z.string().min(1),
-  template: z.string().min(1),
+export const InstanceDetailSchema = InstanceRowSchema.extend({
   templateRef: z.object({ repo: z.string().min(1), commitSha: z.string().min(1) }).optional(),
-  state: z.string().min(1),
   provider: z.string().min(1),
   desiredPlanHash: z.string().optional(),
   lastAppliedPlanHash: z.string().optional(),
   createdAt: z.string().min(1),
-  updatedAt: z.string().min(1),
-  environments: z.array(EnvironmentStateSchema),
 });
 
 /**

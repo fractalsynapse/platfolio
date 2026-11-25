@@ -1,7 +1,7 @@
-import { workspaceContent } from './workspace/workspace-content.tsx';
+import { workspacePageComponents } from './workspace/workspace-pages.ts';
 import { starterLaunch } from './components/starter-launch.tsx';
 import { contractProblems, type AnyComponentContract } from './contract.ts';
-import { contextSwitcher, freshnessLabel, instanceDetail, instanceList, instanceRow, instanceState } from './components/instances.tsx';
+import { contextSwitcher, freshnessLabel, instanceDetail, instanceList, instanceRow, instanceState } from './components/instances.ts';
 
 /**
  * The component registry — **a security boundary, not a lookup table (D13, D14, D63, gate §9.6).**
@@ -41,7 +41,7 @@ import { contextSwitcher, freshnessLabel, instanceDetail, instanceList, instance
  *
  * The keys are the contracts' own `id` strings and `CACHE` below throws when a key and its contract disagree, so
  * this table cannot quietly become a second list of component names beside the components — #247's shape, one file
- * down. Six components, each declared in `components/instances.tsx` with its `reads`, `slots` and signal lists.
+ * down. Six components, each declared in `components/instances.ts` with its `reads`, `slots` and signal lists.
  */
 const COMPONENTS = {
   'context.switcher': contextSwitcher,
@@ -51,7 +51,7 @@ const COMPONENTS = {
   'instance.row': instanceRow,
   'instance.state': instanceState,
   'launch.starter': starterLaunch,
-  'workspace.content': workspaceContent,
+  ...workspacePageComponents,
 } as const satisfies Record<string, AnyComponentContract>;
 
 export type ComponentId = keyof typeof COMPONENTS;

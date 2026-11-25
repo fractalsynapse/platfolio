@@ -1,3 +1,4 @@
+import { WorkspaceAction } from './workspace-action.tsx';
 import * as React from 'react';
 import type { InstanceResponse, NotificationRule, TeamWithRole } from '@platfolio/api-contract/generated/types';
 import { useCommand } from '../sdk/use-operation.ts';
@@ -57,8 +58,8 @@ export function NotificationRuleForm({ teams, apps, initial, onSaved, onCancel }
     <NotificationChoice label="Event" value={event} options={notificationEvents} onChange={setEvent} />
     {problem && <p role="alert">{problem}</p>}
     <div className="ui-workspace-links">
-      <button type="submit" className="ui-workspace-primary ui-hit-primary" disabled={busy || !chosen}>Save rule</button>
-      <button type="button" className="ui-workspace-trigger ui-hit-primary" onClick={onCancel} disabled={busy}>Cancel</button>
+      <WorkspaceAction type="submit" variant="primary" disabled={busy || !chosen}>Save rule</WorkspaceAction>
+      <WorkspaceAction type="button" onClick={onCancel} disabled={busy}>Cancel</WorkspaceAction>
     </div>
   </form>;
 }

@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { componentById, documentProblems, isRegistryImmutable, registeredComponentIds, registrySize, UnknownComponentError } from '../src/registry.ts';
+import { workspacePageIds } from '../src/workspace/workspace-pages.ts';
 import { SAMPLE_PROPS } from './fixtures/page-documents.ts';
 
 /**
@@ -51,7 +52,8 @@ test('registeredComponentIds is derived from the table, not a list beside it', (
   const table = source.slice(source.indexOf('const COMPONENTS = {'), source.indexOf('} as const satisfies'));
   assert.ok(table.length > 'const COMPONENTS = {'.length, 'the closed table moved; update this test and the claim about what is registered');
   const keys = [...table.matchAll(/^\s*'([^']+)':/gm)].map((m) => m[1] as string);
-  assert.deepEqual([...ids].sort(), [...keys].sort(), 'the ids the module reports are not the keys in the source table');
+  assert.match(table, /\.\.\.workspacePageComponents/);
+  assert.deepEqual([...ids].sort(), [...keys, ...workspacePageIds].sort(),  'the ids the module reports are not the keys in the source table');
   assert.ok(ids.length >= 1, 'the registry is empty again: the gates that read it are reporting NOT RUN, and this test is the tripwire that says so');
 });
 

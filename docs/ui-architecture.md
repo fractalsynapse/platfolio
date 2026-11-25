@@ -41,6 +41,14 @@ written when the package it audits exists. Claiming the second half is protectin
 mistake this project keeps naming — a check that cannot run must not look like a check that passed
 ([MAINTAINING](MAINTAINING.md)).
 
+## Workspace composition
+
+Each workspace route uses a build-time screen document with its component placements and
+API operations. The shell supplies shared account and membership reads to those pages.
+Reuse the shared layout, section navigation, fields, actions, and operation states for
+feature pages. Each file declares one React component. The `component-files` and
+`9.11` checks in `ui:check` enforce component ownership and declared operation parity.
+
 ## Rule 1 — One data path
 
 **Invariant.** The specification is the only description of the API; components reach it through the

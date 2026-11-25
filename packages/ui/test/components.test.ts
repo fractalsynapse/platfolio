@@ -13,9 +13,10 @@ import { COMPONENT_RULES } from '../src/components/style.ts';
 import { SELECTABLE_ENVIRONMENTS } from '../src/components/enums.ts';
 import { STALE_AFTER_SECONDS } from '../src/components/freshness.ts';
 import {
-  SAMPLE_ATTESTATION, SAMPLE_FRESHNESS, SAMPLE_INSTANCES, SAMPLE_NOW, SAMPLE_PROPS,
+  SAMPLE_ATTESTATION, SAMPLE_FRESHNESS, SAMPLE_INSTANCES, SAMPLE_NOW, SAMPLE_PROPS, SAMPLE_TEAMS, workspaceFixtureRoute,
 } from './fixtures/page-documents.ts';
 import { createMutationSandbox } from './mutation-sandbox.ts';
+import { WorkspaceModelContext } from '../src/workspace/workspace-model.ts';
 import type { SignalBus } from '../src/signals.ts';
 
 /**
@@ -86,8 +87,19 @@ function render(componentId: string, props: Record<string, unknown>, bus: Signal
     auth: { token: async () => { throw new Error('No token during static rendering'); } },
     now: () => new Date(SAMPLE_NOW),
   };
+  const component = React.createElement(contract.render, props);
+  const route = workspaceFixtureRoute(componentId);
+  const refresh = () => undefined;
+  const mounted = route ? React.createElement(WorkspaceModelContext.Provider, { value: {
+    route,
+    team: SAMPLE_TEAMS[0],
+    teams: { operation: 'listTeams', params: {}, status: 'loaded', data: [...SAMPLE_TEAMS], freshness: SAMPLE_FRESHNESS },
+    reloadTeams: refresh,
+    invitations: { state: { operation: 'listMyInvitations', params: {}, status: 'pending', since: SAMPLE_NOW }, reload: refresh, acceptConfirmed: refresh },
+    profile: { state: { operation: 'getAccountProfile', params: {}, status: 'pending', since: SAMPLE_NOW }, reload: refresh, acceptConfirmed: refresh },
+  } }, component) : component;
   return renderToStaticMarkup(React.createElement(SdkProvider, { value: sdk },
-    React.createElement(SignalsProvider, { bus }, React.createElement(contract.render, props))));
+    React.createElement(SignalsProvider, { bus }, mounted)));
 }
 
 /* ------------------------------------------------------------------ registration renders */
