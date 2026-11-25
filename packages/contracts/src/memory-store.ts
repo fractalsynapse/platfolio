@@ -9,7 +9,7 @@ import { normaliseEmail, normaliseName } from './persistence.ts';
 import { checkAttestationPolicy } from './dispatch-policy.ts';
 import { nextAppCheck } from './hosted-availability.ts';
 import { notificationEventFor } from './notification-events.ts';
-import type { NotificationEmailDelivery, NotificationEmailPreference } from './persistence.ts';
+import type { MarketplaceInstallation, NotificationEmailDelivery, NotificationEmailPreference } from './persistence.ts';
 import { CONTRACT_VERSION } from './generated/contract-version.ts';
 
 /**
@@ -100,6 +100,17 @@ export class MemoryStore implements Store {
   async marketplaceInstallationConnected(teamId: string, installationId: string): Promise<boolean> {
     const found = this.marketplaceLinks.get(installationId);
     return !this.closed && found?.teamId === teamId && !found.disconnected && !found.enrollment;
+  }
+
+  async listMarketplaceInstallations(teamId: string): Promise<MarketplaceInstallation[]> {
+    if (this.closed) return [];
+    const result: MarketplaceInstallation[] = [];
+    for (const [installationId, link] of this.marketplaceLinks) {
+      if (link.teamId !== teamId) continue;
+      const state = link.disconnected ? 'disconnected' : link.registryDigest ? 'connected' : link.enrollment ? 'pending' : 'linked';
+      result.push({ installationId, state });
+    }
+    return result.sort((left, right) => left.installationId.localeCompare(right.installationId));
   }
 
   async disconnectMarketplaceInstallation(teamId: string, installationId: string): Promise<boolean> {

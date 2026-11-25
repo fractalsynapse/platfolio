@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { Pool, type PoolClient } from 'pg';
 import {
-  HostedStarterSchema, NotificationRuleSchema, rollupState, type NewNotificationRule, type NotificationRule, type HostedStarter, type NewHostedStarter, type HostedAppCheck,
+  HostedStarterSchema, MarketplaceInstallationSchema, NotificationRuleSchema, rollupState, type NewNotificationRule, type NotificationRule, type HostedStarter, type NewHostedStarter, type HostedAppCheck,
   ArtifactRecordSchema, AttestationRecordSchema, AuditEntrySchema, BindingRecordSchema, CapabilityOfferSchema, CapabilityShareSchema, DispatchRecordSchema, IdentitySchema, PersonSchema, TeamMemberSchema, InstanceEnvironmentStateSchema, InstanceSchema, InvitationSchema, ProviderConnectionSchema, RepoConnectionSchema, TeamSchema, newId,
   type ArtifactRecord, type AttestationRecord, type AuditEntry, type BindingRecord, type CapabilityOffer, type NewBinding, type NewCapabilityOffer, type NewCapabilityShare, type DispatchRecord, type Instance, type InstanceEnvironmentState, type Invitation, type NewInvitation, type ProviderConnection, type RepoConnection, type Store, type StoreError, type NewInstance, type StoreResult, type Team, type Person, type TeamMember, type TeamRole,
 } from './persistence.ts';
@@ -137,6 +137,18 @@ export class PostgresStore implements Store {
        WHERE installation_id = $1 AND team_id = $2 AND NOT disconnected AND enrollment_digest IS NULL`, [installationId, teamId],
     );
     return result.rowCount === 1;
+  }
+
+  async listMarketplaceInstallations(teamId: string) {
+    const result = await this.pool.query(
+      `SELECT installation_id AS "installationId",
+              CASE WHEN disconnected THEN 'disconnected'
+                   WHEN registry_digest IS NOT NULL THEN 'connected'
+                   WHEN enrollment_digest IS NOT NULL THEN 'pending'
+                   ELSE 'linked' END AS state
+       FROM ${this.q('marketplace_links')} WHERE team_id = $1 ORDER BY installation_id`, [teamId],
+    );
+    return result.rows.map((row) => MarketplaceInstallationSchema.parse(row));
   }
 
   async disconnectMarketplaceInstallation(teamId: string, installationId: string): Promise<boolean> {

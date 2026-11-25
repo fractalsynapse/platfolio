@@ -1275,7 +1275,8 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
     ],
   };
 
-  const marketplacePath = '/api/v1/teams/{teamId}/marketplace/installations/{installationId}';
+  const marketplaceCollection = '/api/v1/teams/{teamId}/marketplace/installations';
+  const marketplacePath = marketplaceCollection + '/{installationId}';
   const registryPath = '/api/v1/marketplace/installations/{installationId}';
   const claim = (installationId: string) => ({
     ...FREE_STARTER_RELEASE, installationId, repo: templateCatalogEntry(FREE_STARTER_RELEASE.template).repo,
@@ -1305,6 +1306,9 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
     id: 'marketplace',
     requires: ['identity', 'store'],
     routes: [
+      scoped('GET', marketplaceCollection, 'listMarketplaceInstallations', 'marketplace.manage', async ({ context, teamId }) =>
+        deps.marketplaceEnabled ? send('listMarketplaceInstallations', 200, await context.store.listMarketplaceInstallations(teamId))
+          : notFound('marketplace installations', '')),
       marketplaceRoute('PUT', marketplacePath, 'connectMarketplaceInstallation', async ({ context, teamId }, id) =>
         await context.store.connectMarketplaceInstallation(teamId, id) ? { status: 204, body: undefined } : notFound('marketplace installation', '')),
       marketplaceRoute('DELETE', marketplacePath, 'disconnectMarketplaceInstallation', async ({ context, teamId }, id) =>

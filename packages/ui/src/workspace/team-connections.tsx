@@ -2,6 +2,7 @@ import * as React from 'react';
 import { ageLabel, useClock } from '../components/freshness.ts';
 import { StarterLaunchSetup } from '../components/starter-launch-setup.tsx';
 import { useOperation } from '../sdk/use-operation.ts';
+import { HubMarketplaceInstallations } from './hub-marketplace-installations.tsx';
 import { MarketplaceConnection } from './marketplace-connection.tsx';
 
 export function TeamConnections({ teamId }: { readonly teamId: string }) {
@@ -11,7 +12,7 @@ export function TeamConnections({ teamId }: { readonly teamId: string }) {
   return <section aria-label="Private installation connections">
     {setup.state.status === 'pending' && <p role="status">Checking installation connections…</p>}
     {setup.state.status === 'failed' && (setup.state.error.status === 404
-      ? <p>Connections are managed in the private Platfolio installation for this team.</p>
+      ? <HubMarketplaceInstallations key={teamId} teamId={teamId} />
       : <p role="status">Couldn’t check the installation connection.{' '}
         <button type="button" className="ui-workspace-trigger ui-hit-primary" onClick={setup.reload}>Try again</button>
       </p>)}
