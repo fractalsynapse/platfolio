@@ -518,9 +518,11 @@ until those values are configured. Existing installations can continue to sign i
 their apps.
 
 Staging can use its reviewed installer artifact with an owned, unpublished Railway template.
-Set `PLATFOLIO_RAILWAY_INSTALL_CONFIG_JSON` to the renderer's JSON output. The hub checks
-the artifact's revision and digest before serving it to Railway through the template deployment
-API. Never put a password or token in the installer artifact.
+Set `PLATFOLIO_RAILWAY_INSTALL_CONFIG_JSON` from the renderer's output file. The file
+escapes dollar signs so Railway preserves the service references until it provisions the
+private installation. Pass the file directly to Railway without parsing and reformatting
+it. The hub checks the decoded artifact's revision and digest before using it. The installer
+artifact contains no passwords or tokens.
 
 The hub keeps a credential-free installation journal. Team owners can reopen the launch
 from Connections, reauthorize the original workspace, and continue. The provider binds

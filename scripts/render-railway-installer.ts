@@ -104,5 +104,6 @@ if (import.meta.url === 'file://' + process.argv[1]) {
   if (!values.candidate || !values.registry) throw new Error('Pass --candidate and --registry to render the installer');
   resolveCheckoutCandidate(values.candidate, fileURLToPath(new URL('..', import.meta.url)));
   const installer = await renderRailwayInstaller(values.candidate, values.registry);
-  process.stdout.write(JSON.stringify(installer, null, 2) + '\n');
+  // Railway expands references in its own variables. Preserve the JSON until the hub decodes it.
+  process.stdout.write(JSON.stringify(installer, null, 2).replaceAll('$', '\\u0024') + '\n');
 }
