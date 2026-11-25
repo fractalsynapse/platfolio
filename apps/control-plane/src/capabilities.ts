@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import {
-  AttestationSchema, NotificationRuleSchema, checkBindingPolicy, CONTRACT_NAME, CONTRACT_VERSION, DispatchIntentSchema, InstanceSchema,
+  AttestationSchema, NotificationRuleSchema, StarterBrandChangeSchema, checkBindingPolicy, CONTRACT_NAME, CONTRACT_VERSION, DispatchIntentSchema, InstanceSchema,
   reasonOf, decide, checkInvitationAcceptance, bindingImpact, normaliseName, rollupState, type BindingRecord, type CapabilityOffer, type PolicyAction, type VerifiedClaims,
 } from '@platfolio/contracts';
 import { RepositoryReadError } from '@platfolio/contracts';
@@ -1410,10 +1410,40 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
     return unavailable();
   }
   const launchPath = '/api/v1/teams/{teamId}/starter-launch';
+  const brandPath = '/api/v1/instances/{instanceId}/environments/{environment}/configuration/starter-brand';
+  async function hostedBrand({ context, teamId, personId }: Scope, request: Request, params: Record<string, string>,
+    operation: 'getHostedStarterBrand' | 'updateHostedStarterBrand'): Promise<Response_> {
+    const instanceId = params.instanceId ?? '';
+    if (!customer || customer.teamId !== teamId || params.environment !== 'staging') return notFound('hosted setting', instanceId);
+    const hosting = await context.store.getHostedStarter(instanceId);
+    if (!hosting.ok) return notFound('hosted setting', instanceId);
+    const conflict = () => ({ status: 409, body: { error: 'conflict', message: 'Finish the current setup or wait for the deployment to be recorded, then try again.' } });
+    if (hosting.value.state !== 'live') return conflict();
+    const target = { projectId: hosting.value.projectId, deploymentId: hosting.value.deploymentId };
+    const editing = operation === 'updateHostedStarterBrand';
+    const input = editing ? StarterBrandChangeSchema.safeParse(request.body) : undefined;
+    if (input && (request.bodyError || !input.success)) return badRequest('Use 1–60 characters, starting with a letter or number. Use plain letters, numbers, spaces or basic punctuation.');
+    const result = input?.success ? await customer.call('brand-apply', { ...target, value: input.data.value })
+      : await customer.call('brand-read', target);
+    if (!result.ok) return unavailable();
+    const body = result.body as { outcome?: string; configuration?: unknown } | null;
+    if (body?.outcome === 'conflict') return conflict();
+    if (!editing && body?.outcome === 'read') return { ...send(operation, 200, body.configuration), headers: { 'cache-control': 'no-store' } };
+    if (editing && body?.outcome === 'requested') {
+      await context.store.appendAudit({ actorKind: 'user', actorRef: personId, action: 'configuration.request', target: instanceId,
+        detail: { name: 'UI_BRAND', environment: 'staging' } });
+      return send(operation, 202, { state: 'requested' });
+    }
+    return unavailable();
+  }
   const launcher: ExtensionDescriptor = {
     id: 'starter-launch',
     requires: ['identity', 'store'],
     routes: [
+      scoped('GET', brandPath, 'getHostedStarterBrand', 'instance.read', (scope, request, params) =>
+        hostedBrand(scope, request, params, 'getHostedStarterBrand')),
+      scoped('PUT', brandPath, 'updateHostedStarterBrand', 'marketplace.manage', (scope, request, params) =>
+        hostedBrand(scope, request, params, 'updateHostedStarterBrand')),
       scoped('GET', domainPath, 'listHostedCustomDomains', 'instance.read', (scope, _request, params) =>
         hostedDomains(scope, params, 'listHostedCustomDomains')),
       scoped('PUT', domainPath + '/{hostname}', 'attachHostedCustomDomain', 'marketplace.manage', (scope, _request, params) =>

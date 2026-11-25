@@ -19,6 +19,7 @@ test('customer launch is owner scoped and passes only the intended fields to a p
   let last: { action: string; body?: unknown } | undefined;
   const ids = { projectId: randomUUID(), deploymentId: randomUUID() };
   let workerReport: object | false = false;
+  let brandOutcome = 'requested';
   const domain = { host: 'preview.example.test', dnsStatus: 'pending', certificateStatus: 'pending', records: [] };
   const config = {
     get teamId() { return teamId; },
@@ -36,6 +37,8 @@ test('customer launch is owner scoped and passes only the intended fields to a p
     if (last?.action === 'domains-list') return Response.json({ outcome: 'listed', domains: [domain] });
     if (last?.action === 'domain-attach') return Response.json({ outcome: 'attached', domain });
     if (last?.action === 'domain-detach') return Response.json({ outcome: 'detached' });
+    if (last?.action === 'brand-read') return Response.json({ outcome: 'read', configuration: { value: 'Starter', state: 'ready' } });
+    if (last?.action === 'brand-apply') return Response.json({ outcome: brandOutcome });
     return Response.json(last?.action === 'setup' ? { openBao: 'sealed', railway: 'connect', workerKey: 'public' } : false);
   };
   const kernel = await createKernel({
@@ -102,6 +105,27 @@ test('customer launch is owner scoped and passes only the intended fields to a p
     assert.deepEqual(last, { action: 'domain-attach', body: { ...ids, hostname: domain.host } });
     assert.equal((await change(domain.host, 'owner', 'DELETE')).status, 204);
     assert.deepEqual(last, { action: 'domain-detach', body: { ...ids, hostname: domain.host } });
+    const brand = (environment: string) => api + '/instances/' + managed.value.id + '/environments/' + environment + '/configuration/starter-brand';
+    const readBrand = (actor: string) => fetch(brand('staging'), { headers: headers(actor) });
+    const changeBrand = (body: object, actor = 'owner', environment = 'staging') =>
+      fetch(brand(environment), { method: 'PUT', headers: headers(actor), body: JSON.stringify(body) });
+    assert.equal((await readBrand('other')).status, 404);
+    assert.deepEqual(await (await readBrand('member')).json(), { value: 'Starter', state: 'ready' });
+    assert.deepEqual(last, { action: 'brand-read', body: ids });
+    assert.equal((await changeBrand({ value: 'Team app' }, 'member')).status, 403);
+    assert.equal((await changeBrand({ value: 'Team app' }, 'owner', 'production')).status, 404);
+    assert.equal((await changeBrand({ value: 'Hello <world>' })).status, 400);
+    assert.equal((await changeBrand({ value: 'Hello\n' })).status, 400);
+    assert.equal((await changeBrand({ value: 'Team app', key: 'DATABASE_URL' })).status, 400);
+    assert.deepEqual(last, { action: 'brand-read', body: ids });
+    const brandChanged = await changeBrand({ value: 'Team app' });
+    assert.equal(brandChanged.status, 202);
+    assert.deepEqual(await brandChanged.json(), { state: 'requested' });
+    assert.deepEqual(last, { action: 'brand-apply', body: { ...ids, value: 'Team app' } });
+    const audit = await kernel.store.recentAuditForTargets([managed.value.id], 15);
+    assert.deepEqual(audit.find(({ action }) => action === 'configuration.request')?.detail, { name: 'UI_BRAND', environment: 'staging' });
+    brandOutcome = 'conflict';
+    assert.equal((await changeBrand({ value: 'Another label' })).status, 409);
     const operation = (environment: string) => api + '/instances/' + managed.value.id + '/environments/' + environment + '/deployments';
     const deploy = (environment: string, actor = 'owner') => fetch(operation(environment), { method: 'POST', headers: headers(actor) });
     assert.equal((await deploy('staging', 'other')).status, 404);

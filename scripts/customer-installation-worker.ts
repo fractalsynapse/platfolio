@@ -8,6 +8,8 @@ import { customerMarketplaceConnection, privateMarketplaceOrigin } from './custo
 import { customerRailwayOAuth } from './customer-railway-oauth.ts';
 import { customerRailway } from './customer-railway.ts';
 import { FREE_STARTER_RELEASE } from '../packages/manifest/src/template-catalog.ts';
+import { StarterBrandChangeSchema } from '../packages/contracts/src/starter-brand.ts';
+import { readStarterBrand } from './launch-starter-app.ts';
 
 const directory = process.env.PLATFOLIO_LAUNCH_STATE_DIR;
 const workerKey = process.env.PLATFOLIO_LAUNCH_WORKER_KEY;
@@ -67,6 +69,31 @@ const server = createServer({ requestTimeout: 10000 }, (request, response) => {
       case 'callback':
         reply(200, await oauth.complete({ code: String(body.code), state: String(body.state), issuer: String(body.issuer), error: String(body.error) }));
         return;
+      case 'brand-read': {
+        const current = await launch.read();
+        if (current.projectId !== body.projectId || current.deploymentId !== body.deploymentId || !current.origin ||
+            !['running', 'ready', 'failed'].includes(current.state)) { reply(200, { outcome: 'conflict' }); return; }
+        const value = await readStarterBrand(current.origin);
+        const latest = await launch.read();
+        if (latest.deploymentId !== body.deploymentId || latest.origin !== current.origin ||
+            !['running', 'ready', 'failed'].includes(latest.state)) { reply(200, { outcome: 'conflict' }); return; }
+        reply(200, { outcome: 'read', configuration: { value, state: latest.state === 'running' ? 'deploying' : latest.state } });
+        return;
+      }
+      case 'brand-apply': {
+        const input = StarterBrandChangeSchema.safeParse({ value: body.value });
+        if (!input.success) { reply(400, null); return; }
+        if (await bao.status() !== 'ready' || !(await bao.readGrant()).grant) { reply(503, replyError); return; }
+        const current = await launch.read();
+        if (changingDomain || current.state !== 'ready' || !current.origin || !current.projectId || !current.deploymentId ||
+            current.projectId !== body.projectId || current.deploymentId !== body.deploymentId) {
+          reply(200, { outcome: 'conflict' });
+          return;
+        }
+        launch.changeBrand(input.data.value);
+        reply(200, { outcome: 'requested' });
+        return;
+      }
       case 'domains-list':
       case 'domain-attach':
       case 'domain-detach': {

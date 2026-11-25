@@ -1,8 +1,8 @@
 {
   "schema": 1,
-  "version": "5.12.0",
-  "bump": "MINOR 5.11.0 -> 5.12.0 (surface diff: 0 removed, 0 widened, 23 added, 0 reordered)",
-  "digest": "0ffa306e9a304d4d",
+  "version": "5.13.0",
+  "bump": "MINOR 5.12.0 -> 5.13.0 (surface diff: 0 removed, 0 widened, 3 added, 0 reordered)",
+  "digest": "dd1fb4ba6ac05b63",
   "declarations": [
     "attestation.d.ts: action: z.ZodEnum<{",
     "attestation.d.ts: action: z.ZodEnum<{",
@@ -642,6 +642,7 @@
     "index.d.ts: export { RailwayInfraProvider, physicalServiceName, type RailwayProviderOptions } from './railway-provider.ts';",
     "index.d.ts: export { STORE_CONTRACT, STORE_CONTRACT_VERSION, ArtifactRecordSchema, AttestationRecordSchema, AuditEntrySchema, DispatchRecordSchema, InstanceSchema, InstanceStateSchema, ProviderConnectionSchema, RepoConnectionSchema, SecretNameSchema, TeamSchema, newId, reasonOf, type ArtifactRecord, type AttestationRecord, type AuditEntry, type DispatchRecord, InstanceEnvironmentStateSchema, rollupState, type Instance, type InstanceEnvironmentState, type InstanceState, type NewInstance, type NewTeam, type ProviderConnection, type RepoConnection, type SecretName, type Store, type StoreError, type StoreResult, type Team, } from './persistence.ts';",
     "index.d.ts: export { SmtpEmailTransport, type SmtpOptions } from './smtp-email.ts';",
+    "index.d.ts: export { StarterBrandChangeSchema } from './starter-brand.ts';",
     "index.d.ts: export { applyMigrations, dropSchema, safeSchema, type MigrateOptions, type MigrateResult } from './migrations.ts';",
     "index.d.ts: export { checkAttestationPolicy, type PolicyVerdict } from './dispatch-policy.ts';",
     "index.d.ts: export { checkBindingPolicy, bindingImpact, type BindingRequest, type BindingVerdict } from './binding-policy.ts';",
@@ -4561,6 +4562,8 @@
     "smtp-email.d.ts: startTls?: 'require' | 'allow' | 'off';",
     "smtp-email.d.ts: timeoutMs?: number;",
     "smtp-email.d.ts: user: string;",
+    "starter-brand.d.ts: export declare const StarterBrandChangeSchema: z.ZodObject<{",
+    "starter-brand.d.ts: value: z.ZodString;",
     "store-conformance.d.ts: detail: string;",
     "store-conformance.d.ts: driver: string;",
     "store-conformance.d.ts: export declare function runStoreConformance(make: () => Promise<Store> | Store): Promise<StoreReport>;",

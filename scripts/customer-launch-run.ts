@@ -6,13 +6,17 @@ import { launchStarterApp } from './launch-starter-app.ts';
 
 const app = FREE_STARTER_RELEASE.template;
 
-export function customerLaunchRun(teamId: string, journalPath: string, grantForLaunch?: () => Promise<CustomerRailwayGrant>): StarterLaunch & { redeploy: () => StarterLaunchReport } {
-  let report: StarterLaunchReport = existsSync(journalPath)
-    ? JSON.parse(readFileSync(journalPath, 'utf8')) as StarterLaunchReport
+export function customerLaunchRun(teamId: string, journalPath: string, grantForLaunch?: () => Promise<CustomerRailwayGrant>): StarterLaunch & {
+  redeploy: () => StarterLaunchReport;
+  changeBrand: (value: string) => StarterLaunchReport;
+} {
+  const journal: StarterLaunchReport & { publicBrand?: string } = existsSync(journalPath)
+    ? JSON.parse(readFileSync(journalPath, 'utf8'))
     : { state: 'idle', events: [], template: app, revision: FREE_STARTER_RELEASE.revision, retainedVolumes: [] };
+  let { publicBrand, ...report } = journal;
   function save() {
     const pending = `${journalPath}.tmp`;
-    writeFileSync(pending, JSON.stringify(report, null, 2) + '\n', { mode: 0o600 });
+    writeFileSync(pending, JSON.stringify({ ...report, publicBrand }, null, 2) + '\n', { mode: 0o600 });
     renameSync(pending, journalPath);
   }
   function event(data: Omit<StarterLaunchEvent, 'at'>) {
@@ -23,10 +27,12 @@ export function customerLaunchRun(teamId: string, journalPath: string, grantForL
     report.state = 'failed';
     event({ step: 'Resume setup', state: 'FAILED', detail: 'The runner restarted. Resume the previous operation.' });
   }
-  function start(redeploy = false) {
+  function start(redeploy = false, brand?: string) {
     if (redeploy ? report.state !== 'ready' : ['running', 'removing', 'ready'].includes(report.state)) return report;
+    if (brand !== undefined) publicBrand = brand;
     report.state = 'running';
-    event(redeploy ? { step: 'Redeploy the pinned release', state: 'WORKING', detail: 'The project and its database stay in place.' }
+    event(redeploy ? { step: brand === undefined ? 'Redeploy the pinned release' : 'Publish the app header label',
+      state: 'WORKING', detail: 'The project and its database stay in place.' }
       : { step: 'Launch approved', state: 'READY', detail: 'One staging project, one database and one public HTTPS link.' });
     void (async () => {
       try {
@@ -38,7 +44,7 @@ export function customerLaunchRun(teamId: string, journalPath: string, grantForL
         const installed = await launchStarterApp(app, report.projectId, (data) => {
           if (data.step === 'Railway project' && data.resourceId) report.projectId = data.resourceId;
           event(data);
-        }, grant);
+        }, grant, publicBrand);
         report = { ...report, state: 'ready', projectId: installed.project, deploymentId: installed.deployment, origin: installed.origin };
         event({ step: 'Open your app', state: 'READY' });
       } catch {
@@ -60,6 +66,7 @@ export function customerLaunchRun(teamId: string, journalPath: string, grantForL
         delete report.origin;
         report.retainedVolumes = removal.retainedVolumes;
         if (data === 'wipe') {
+          publicBrand = undefined;
           delete report.projectId;
           delete report.deploymentId;
           report.state = 'wiped';
@@ -75,5 +82,5 @@ export function customerLaunchRun(teamId: string, journalPath: string, grantForL
     })();
     return report;
   }
-  return { teamId, read: () => report, start: () => start(), redeploy: () => start(true), remove };
+  return { teamId, read: () => report, start: () => start(), redeploy: () => start(true), changeBrand: (value) => start(true, value), remove };
 }

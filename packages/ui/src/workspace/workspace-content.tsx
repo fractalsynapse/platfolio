@@ -95,7 +95,7 @@ export const workspaceContent = defineComponent({
     'getStarterLaunchSetup', 'initializeStarterOpenBao', 'unlockStarterOpenBao', 'beginStarterRailwayAuthorization',
     'listTeamMembers', 'updateTeamMemberRole', 'removeTeamMember', 'listTeamActivity', 'getHostedAppStatus',
     'listMyNotifications', 'createNotificationRule', 'updateNotificationRule', 'deleteNotificationRule', 'redeployHostedStarter',
-    'listHostedCustomDomains', 'attachHostedCustomDomain', 'detachHostedCustomDomain'],
+    'listHostedCustomDomains', 'attachHostedCustomDomain', 'detachHostedCustomDomain', 'getHostedStarterBrand', 'updateHostedStarterBrand'],
   slots: ['full-page'],
   render: WorkspaceContent,
 });
