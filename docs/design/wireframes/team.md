@@ -1,6 +1,45 @@
 # Team workspace
 
-The team context applies to every list and operation here. Every team page uses the same navigation beneath the heading for Team workspace, Choose template, Activity, Members, and Team settings. Owners also see Publish template. Breadcrumbs on nested pages link to parents inside the team. Actions that require ownership stay subject to API policy. [Wireframe index](README.md)
+The team context applies to every list and operation here. Every team page uses the same navigation beneath the heading for Team workspace, Choose template, Activity, Members, and Team settings. Owners also see Connections and Publish template. Breadcrumbs on nested pages link to parents inside the team. Actions that require ownership stay subject to API policy. [Wireframe index](README.md)
+
+## Private installation connections
+
+`/dashboard/teams/:team/connections` · MVP
+
+**Desktop**
+
+```text
++------------------------------------------------------------------------+
+| [Platfolio]                                          [Team] [Avatar]   |
+| Connections                                                            |
+| [Team navigation]                                                      |
+| Set up Platfolio                                                       |
+| [Secret storage] [Status] [Owner key, recovery, and unlock actions]      |
+| [Railway]        [Status] [Review and connect access after unlock]       |
+| [Marketplace]   [Status] [One-time code or saved Starter Web release]    |
+| [Set up Starter Web]                                                    |
++------------------------------------------------------------------------+
+```
+
+**Mobile**
+
+```text
++--------------------------------------+
+| [Platfolio]         [Team] [Avatar]  |
+| Connections                          |
+| [Team navigation]                    |
+| Set up Platfolio                      |
+| [Secret storage] [Status]            |
+| [Owner key and recovery actions]     |
+| [Railway] [Status]                   |
+| [Connect Railway]                    |
+| [Marketplace] [Status]               |
+| [Code or saved release]              |
+| [Set up Starter Web]                 |
++--------------------------------------+
+```
+
+The owner saves the recovery files before unlocking secret storage. Railway access is stored in OpenBao when Railway confirms it. A marketplace connection saves the pinned Starter Web release for use in the private installation. The hub team's Connections page issues and revokes the marketplace code.
 
 ## Team instances
 

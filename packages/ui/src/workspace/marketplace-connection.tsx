@@ -36,18 +36,21 @@ export function MarketplaceConnection({ teamId }: { readonly teamId: string }) {
   if (connection.state.status !== 'loaded') return null;
   const { state, release } = connection.state.data;
   if (state === 'unconfigured') return null;
-  return <section aria-label="Marketplace connection">
-    <h3>Marketplace</h3>
+  return <section className="ui-setup-panel" aria-labelledby="setup-marketplace-title">
+    <div className="ui-workspace-heading">
+      <h3 id="setup-marketplace-title">Marketplace</h3>
+      <span className="ui-setup-status">{state === 'connected' ? 'Connected' : state === 'unavailable' ? 'Needs attention' : 'Connection required'}</span>
+    </div>
+    <p>Use a one-time code from your hub team to get a saved copy of the Starter Web release.</p>
     <p className="ui-workspace-meta">{ageLabel(connection.state.freshness, clock().toISOString()).text}</p>
     {state === 'connected' && <p>Connected. Your marketplace team can revoke access without stopping your apps.</p>}
     {state === 'openbao-required' && <p>Unlock OpenBao to check this connection.</p>}
     {state === 'unavailable' && <p>Check that the private worker can read its Marketplace entry in OpenBao and reach the marketplace.</p>}
     {release && <p>Saved release <strong>Starter Web {release.version}</strong></p>}
-    {state === 'disconnected' && <form onSubmit={(event) => void connect(event)}>
-      <label>Marketplace connection code{' '}
-        <input ref={input} type="password" required maxLength={80} autoComplete="off" spellCheck={false} disabled={pending} />
-      </label>{' '}
-      <button className="ui-hit-primary" type="submit" disabled={pending}>{pending ? 'Connecting…' : 'Connect marketplace'}</button>
+    {state === 'disconnected' && <form className="ui-workspace-form" onSubmit={(event) => void connect(event)}>
+      <label htmlFor="marketplace-code">Marketplace connection code</label>
+      <input id="marketplace-code" ref={input} type="password" required maxLength={80} autoComplete="off" spellCheck={false} disabled={pending} />
+      <div><button className="ui-workspace-primary ui-hit-primary" type="submit" disabled={pending}>{pending ? 'Connecting…' : 'Connect marketplace'}</button></div>
     </form>}
     {error && <p role="alert">{error}</p>}
   </section>;

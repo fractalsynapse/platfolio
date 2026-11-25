@@ -5,6 +5,7 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+- Private installation owners get the mockup's connection cards for secret storage, Railway, and the marketplace. A fresh private Keycloak can start with the owner account alone, and the launcher can verify an exact staging project when names repeat (#288).
 - Fresh private vaults let owners restore the launcher policy with two recovery shares using OpenBao's authenticated recovery API (#288).
 - The private identity image can create its operator realm and initial sign-in on first boot using installation-local inputs (#288).
 - Private installations can register their own Railway callback after OpenBao is ready. A new Starter Web launch configured for the marketplace uses a saved claim, including after hub disconnection (#288).

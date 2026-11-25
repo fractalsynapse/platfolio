@@ -18,6 +18,7 @@ const assets = new Map([
   ["/environment-management.mjs", ["environment-management.mjs", "text/javascript; charset=utf-8"]],
   ["/instance-lifecycle.mjs", ["instance-lifecycle.mjs", "text/javascript; charset=utf-8"]],
   ["/instance-setup.mjs", ["instance-setup.mjs", "text/javascript; charset=utf-8"]],
+  ["/installation-setup.mjs", ["installation-setup.mjs", "text/javascript; charset=utf-8"]],
 ]);
 const page = ["index.html", "text/html; charset=utf-8"];
 const routes = /^\/(?:sign-in|sign-up|forgot-password|reset-password|verify-email|callback|templates(?:\/[a-z0-9-]+)?|status\/[a-z0-9-]+\/[a-z0-9-]+|dashboard(?:\/[^.?#]*)?)?\/?$/;

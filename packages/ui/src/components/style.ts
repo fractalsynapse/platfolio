@@ -29,6 +29,21 @@ export interface ComponentRule {
 /** The classes a component may attach, each with the reason it exists. One list; the CSS is emitted from it. */
 export const COMPONENT_RULES = [
   {
+    selector: '.ui-setup-steps',
+    declarations: ['display: grid;', 'gap: var(--ui-space-4);', 'margin-block: var(--ui-space-4);'],
+    why: 'Keep the connection cards in setup order at every width.',
+  },
+  {
+    selector: '.ui-setup-panel',
+    declarations: ['min-inline-size: 0;', 'padding: var(--ui-space-5);', 'background: var(--ui-color-surface);', 'border: 1px solid var(--ui-color-border);', 'border-radius: var(--ui-space-4);', 'overflow-wrap: anywhere;'],
+    why: 'Match the mockup’s reusable connection panels and keep long names within the card.',
+  },
+  {
+    selector: '.ui-setup-status',
+    declarations: ['display: inline-block;', 'padding: var(--ui-space-1) var(--ui-space-2);', 'border-radius: var(--ui-space-4);', 'background: var(--ui-color-bg);', 'color: var(--ui-color-textMuted);', 'font-size: var(--ui-font-caption);'],
+    why: 'Keep setup status visible next to each card title.',
+  },
+  {
     selector: '.ui-workspace-links',
     declarations: ['display: flex;', 'flex-wrap: wrap;', 'gap: var(--ui-space-4);'],
     why: 'Place related workspace actions together at each supported width.',

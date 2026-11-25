@@ -78,7 +78,7 @@ function WorkspaceContent() {
         : route.kind === 'team-connections' ? team?.role === 'owner' ? <>
           <h1>Connections</h1>
           <TeamTabs team={team} current="connections" />
-          <TeamConnections key={team.teamId} teamId={team.teamId} />
+          <TeamConnections key={team.teamId} teamId={team.teamId} teamName={team.name} />
         </> : <UnavailablePage /> : route.kind === 'launch' ? <>
         <p><WorkspaceLink href={workspacePaths.home}>Your teams</WorkspaceLink></p><StarterLaunchScreen />
       </> : team && 'team' in route ? <TeamWorkspace team={team} route={route} /> : <UnavailablePage />)}
@@ -96,7 +96,8 @@ export const workspaceContent = defineComponent({
     'listTeamMembers', 'updateTeamMemberRole', 'removeTeamMember', 'listTeamActivity', 'getHostedAppStatus',
     'listMyNotifications', 'createNotificationRule', 'updateNotificationRule', 'deleteNotificationRule', 'redeployHostedStarter',
     'listHostedCustomDomains', 'attachHostedCustomDomain', 'detachHostedCustomDomain', 'getHostedStarterBrand', 'updateHostedStarterBrand',
-    'listMarketplaceInstallations', 'issueMarketplaceEnrollment', 'disconnectMarketplaceInstallation'],
+    'listMarketplaceInstallations', 'issueMarketplaceEnrollment', 'disconnectMarketplaceInstallation',
+    'getPrivateMarketplaceConnection', 'enrollPrivateMarketplaceConnection'],
   slots: ['full-page'],
   render: WorkspaceContent,
 });

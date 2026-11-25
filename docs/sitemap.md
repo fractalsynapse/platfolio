@@ -53,7 +53,7 @@ Paths in this table are relative to `/dashboard/teams/:team`. The team pages sha
 | `/publish-template` | Later | Let a team owner select a source platform and revision, describe the included materials, and preview the listing before publishing. |
 | `/members` | Later | Show the roster and roles. Owners can review role changes and removals. The owner-only Invitations tab separates active invitations from history and shows email status in both views. |
 | `/settings` | Later | Show the stable URL Name first and the editable Display name below it. |
-| `/connections` | MVP | Connect the customer's Railway workspace and optionally connect the private installation to the hub. Show who granted access and how to revoke it. Ask for a GitHub App connection when the team chooses to deploy from a private repository. |
+| `/connections` | MVP | Set up owner-controlled OpenBao, connect Railway, and connect the marketplace in a private installation. On the hub, issue and revoke private installation codes. Ask for a GitHub App connection when the team chooses to deploy from a private repository. |
 | `/activity` | Later | Show the full team activity timeline beyond the profile preview. Link to authorized deployment, environment, and lifecycle views. The backend audit trail is required for operations from the start. |
 
 The selected repository and Railway project are visible on the instance. The installation keeps its Railway authorization local. Unlinking from the hub ends registry access and leaves the private workspace and apps available.

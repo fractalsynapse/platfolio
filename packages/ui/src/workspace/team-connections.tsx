@@ -4,8 +4,10 @@ import { StarterLaunchSetup } from '../components/starter-launch-setup.tsx';
 import { useOperation } from '../sdk/use-operation.ts';
 import { HubMarketplaceInstallations } from './hub-marketplace-installations.tsx';
 import { MarketplaceConnection } from './marketplace-connection.tsx';
+import { WorkspaceLink } from './workspace-link.tsx';
+import { workspacePaths } from './routes.ts';
 
-export function TeamConnections({ teamId }: { readonly teamId: string }) {
+export function TeamConnections({ teamId, teamName }: { readonly teamId: string; readonly teamName: string }) {
   const params = React.useMemo(() => ({ teamId }), [teamId]);
   const setup = useOperation('getStarterLaunchSetup', { params, key: `starter-setup-${teamId}` });
   const clock = useClock();
@@ -17,9 +19,14 @@ export function TeamConnections({ teamId }: { readonly teamId: string }) {
         <button type="button" className="ui-workspace-trigger ui-hit-primary" onClick={setup.reload}>Try again</button>
       </p>)}
     {setup.state.status === 'loaded' && <>
+      <h2>Set up Platfolio</h2>
+      <p>Set up secret storage, connect Railway, then connect the marketplace to install Starter Web.</p>
       <p className="ui-workspace-meta">{ageLabel(setup.state.freshness, clock().toISOString()).text}</p>
-      <StarterLaunchSetup teamId={teamId} setup={setup.state.data} refresh={setup.reload} />
-      <MarketplaceConnection key={teamId} teamId={teamId} />
+      <div className="ui-setup-steps" aria-label="Installation setup">
+        <StarterLaunchSetup teamId={teamId} setup={setup.state.data} refresh={setup.reload} />
+        <MarketplaceConnection key={teamId} teamId={teamId} />
+      </div>
+      <p><WorkspaceLink href={workspacePaths.launchForTeam(teamName)}>Set up Starter Web</WorkspaceLink></p>
     </>}
   </section>;
 }
