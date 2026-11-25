@@ -5,6 +5,11 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+## [0.6.0]
+
+Release baseline `0.5.0..4ceb67c`. The candidate includes the themed Keycloak image and the
+React workspace. The shared public Keycloak host keeps separate staging and production realms.
+
 - Starter Web staging owners can update the public header label from Configuration. Platfolio confirms the value on the running app and keeps its existing Railway project and database (#288).
 - Starter Web staging owners can attach or detach a custom hostname and get DNS records and certificate status from Railway (#288).
 - Operators can opt in to email for their notification rules using their installation's verified primary account address (#288).
@@ -30,6 +35,11 @@ change; entries describe merged intent, not aspirations.
 - Added a browser launch pilot for the pinned Starter Web release with progress and a downloadable troubleshooting report.
 - Placed private Platfolio and hosted apps in separate Railway projects. App removal has explicit options to retain storage for restore or schedule storage deletion.
 - Fixed browser sign-in to preserve the in-memory session through the Keycloak callback.
+
+The private Railway launcher is a Starter Web pilot. First-time hosted provisioning, hosted
+marketplace enrollment with the private vault, general app settings, and public status publishing
+remain under [#288](https://github.com/fractalsynapse/platfolio/issues/288). The provider contract
+advances from `5.1.0` to `5.13.0` with additive changes.
 
 ## [0.5.0]
 
