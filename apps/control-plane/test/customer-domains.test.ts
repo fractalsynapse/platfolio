@@ -3,6 +3,30 @@ import { test } from 'node:test';
 import { customerRailway } from '../../../scripts/customer-railway.ts';
 import type { RailwayTransport } from '../../../packages/contracts/src/railway-transport.ts';
 
+test('an explicit installation project is checked directly and fails closed outside its workspace', async () => {
+  const target = { kind: 'installation', name: 'platfolio', id: 'chosen-installation' } as const;
+  const grant = { workspaceId: 'owner-workspace', token: 'fixture-workspace-grant' };
+  const project = { id: target.id, name: target.name, description: 'Platfolio project role installation/platfolio', workspaceId: grant.workspaceId,
+    environments: { edges: [{ node: { id: 'staging-env', name: 'staging' } }] } };
+  const transport: RailwayTransport = {
+    async graphql<T>({ operation, variables }: Parameters<RailwayTransport['graphql']>[0]): Promise<T> {
+      if (operation === 'selected installation project') {
+        assert.deepEqual(variables, { id: target.id });
+        return { project } as T;
+      }
+      assert.equal(operation, 'stage instances');
+      assert.deepEqual(variables, { projectId: target.id, environmentId: 'staging-env' });
+      return { environment: { serviceInstances: { edges: [] } } } as T;
+    },
+  };
+  assert.equal((await customerRailway(target, undefined, grant, transport)).scope.projectId, target.id);
+  project.workspaceId = 'other-workspace';
+  await assert.rejects(customerRailway(target, undefined, grant, transport), /different Railway workspace/);
+  project.workspaceId = grant.workspaceId;
+  project.description = 'A different installation';
+  await assert.rejects(customerRailway(target, undefined, grant, transport), /staging-only project/);
+});
+
 test('custom domains use the verified app service and read back every change from Railway', async () => {
   const domain = 'preview.example.test';
   const project = { id: 'app-project', name: 'starter-web', description: 'Platfolio project role app/starter-web', workspaceId: 'owner-workspace',

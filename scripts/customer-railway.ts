@@ -47,8 +47,9 @@ export async function customerRailway(target: CustomerProjectTarget, progress?: 
     return result;
   }
   if (grant?.projectId && (target.kind !== 'app' || target.id !== grant.projectId)) throw new Error('The Railway grant is limited to the selected app project');
-  const selected = grant?.projectId ? (await call<{ project: Stage & { workspaceId: string } }>('selected app project',
-    `query($id:String!){project(id:$id){${projectFields} workspaceId}}`, { id: grant.projectId })).project : undefined;
+  const selected = target.id ? (await call<{ project: Stage & { workspaceId: string } }>(
+    target.kind === 'app' ? 'selected app project' : 'selected installation project',
+    `query($id:String!){project(id:$id){${projectFields} workspaceId}}`, { id: target.id })).project : undefined;
   if (selected && selected.workspaceId !== workspaceId) throw new Error('The selected project is in a different Railway workspace');
   const matches = (selected ? [selected] : await workspaceProjects()).filter(({ name }) => name === target.name);
   if (matches.length > 1) throw new Error('More than one project has this name. Choose a unique app name.');

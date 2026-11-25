@@ -53,7 +53,9 @@ function LaunchPanel({ teamId, teamName }: z.infer<typeof props>) {
     {launch.state.status === 'failed' && <p role="status">{launch.state.error.status === 404
       ? 'This team needs a connected Railway launcher.' : `Could not check launch setup. Try again. (${launch.state.error.code})`}</p>}
     {setup.state.status === 'loaded' && <>
-      <StarterLaunchSetup teamId={teamId} setup={setup.state.data} refresh={setup.reload} />
+      <div className="ui-setup-steps" aria-label="Installation setup">
+        <StarterLaunchSetup teamId={teamId} setup={setup.state.data} refresh={setup.reload} />
+      </div>
       <small>{ageLabel(setup.state.freshness, now().toISOString()).text}</small>
     </>}
     {report && <>

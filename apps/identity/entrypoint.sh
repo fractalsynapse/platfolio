@@ -28,6 +28,10 @@ if [ "${1:-}" = start-private ]; then
     exit 1
   fi
 
+  if [ -z "${KC_BOOTSTRAP_ADMIN_PASSWORD:-}" ]; then
+    unset KC_BOOTSTRAP_ADMIN_USERNAME KC_BOOTSTRAP_ADMIN_PASSWORD
+  fi
+
   mkdir -p /opt/keycloak/data/import
   cp /opt/keycloak/platfolio-private/platfolio-realm.json /opt/keycloak/data/import/platfolio-realm.json
   exec /opt/keycloak/bin/kc.sh start --import-realm "$@"

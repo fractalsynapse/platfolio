@@ -3,7 +3,7 @@
  * packages/ui/src/components/style.ts and it is the only one.
  *
  * Source: packages/ui/src/components/style.ts
- * Input digest: sha256/bf4e8a94ce52d236
+ * Input digest: sha256/3fdc12c703341171
  *
  * Reproduce with `pnpm run ui:css`; `pnpm run ui:css:check` fails when this stops matching the module. The
  * numbers in here are not literals: they reference the custom properties in ../tokens.css, which is what makes
@@ -11,6 +11,33 @@
  * appears in this file -- a threshold belongs to a layout primitive's `@container` rule, and gate §9.3 audits
  * both sheets for the difference.
  */
+
+/* Keep the connection cards in setup order at every width. */
+.ui-setup-steps {
+  display: grid;
+  gap: var(--ui-space-4);
+  margin-block: var(--ui-space-4);
+}
+
+/* Match the mockup’s reusable connection panels and keep long names within the card. */
+.ui-setup-panel {
+  min-inline-size: 0;
+  padding: var(--ui-space-5);
+  background: var(--ui-color-surface);
+  border: 1px solid var(--ui-color-border);
+  border-radius: var(--ui-space-4);
+  overflow-wrap: anywhere;
+}
+
+/* Keep setup status visible next to each card title. */
+.ui-setup-status {
+  display: inline-block;
+  padding: var(--ui-space-1) var(--ui-space-2);
+  border-radius: var(--ui-space-4);
+  background: var(--ui-color-bg);
+  color: var(--ui-color-textMuted);
+  font-size: var(--ui-font-caption);
+}
 
 /* Place related workspace actions together at each supported width. */
 .ui-workspace-links {

@@ -9,6 +9,7 @@ import { createTemplatePublisher } from "./template-publishing.mjs";
 import { appManagementTitle, createInstanceLifecycle, lifecycleStatus } from "./instance-lifecycle.mjs";
 import { createEnvironmentManagement, environmentSections } from "./environment-management.mjs";
 import { createInstanceSetup, isSetupStep } from "./instance-setup.mjs";
+import { createInstallationSetup } from "./installation-setup.mjs";
 
 const app = document.querySelector("#app");
 const state = {
@@ -43,6 +44,7 @@ function environmentPath(team, instance, env, section = "overview", detail) {
 const initialPath = teamPath("fractalsynapse");
 const createInstancePath = team => `${teamPath(team.slug)}/create-instance`;
 const teamActivityPath = team => `${teamPath(team.slug)}/activity`;
+const teamConnectionsPath = team => `${teamPath(team.slug)}/connections`;
 const publishTemplatePath = team => `${teamPath(team.slug)}/publish-template`;
 const withTemplate = (path, template) => template ? `${path}?template=${template.id}` : path;
 const selectedTemplate = () => findTemplate(new URLSearchParams(location.search).get("template"));
@@ -53,6 +55,7 @@ const { findTemplate } = templateCatalog;
 const instanceSetup = createInstanceSetup({
   heading: teamHeading, panel, link, escape, authError, go, teamPath, createInstancePath,
 });
+const installationSetup = createInstallationSetup({ heading: teamHeading, escape, link });
 const person = () => state.people.find(item => item.id === state.personId);
 const teams = () => state.teams.filter(team => person() && Object.hasOwn(team.memberships, state.personId));
 const invites = () => {
@@ -148,7 +151,7 @@ function teamHeading(team, title, description) {
     [teamManagement.membersPath(team), "Members"],
     [teamManagement.settingsPath(team), "Team settings"],
   ];
-  if (teamManagement.isOwner(team)) pages.push([publishTemplatePath(team), "Publish template"]);
+  if (teamManagement.isOwner(team)) pages.push([teamConnectionsPath(team), "Connections"], [publishTemplatePath(team), "Publish template"]);
   const path = location.pathname.replace(/\/$/, "");
   const navigation = `<nav class="team-tabs" aria-label="Team workspace pages">
     ${pages.map(([href, label]) => navLink(href, label, path === href)).join("")}
@@ -550,6 +553,11 @@ function instancePage(team, instance) {
 }
 
 function workspacePage(path) {
+  const connections = teams().find(team => teamConnectionsPath(team) === path && teamManagement.isOwner(team));
+  if (connections) {
+    state.teamSlug = connections.slug;
+    return workspace(installationSetup.page(connections));
+  }
   const yourTeams = ["Your teams", dashboard];
   const pages = {
     [dashboard]: ["Your teams", teamCards],
@@ -646,6 +654,7 @@ function render() {
   templateCatalog.connect(app);
   templatePublisher.connect(app, activeTeam());
   instanceSetup.connect(app, activeTeam(), selectedTemplate());
+  installationSetup.connect(app, activeTeam(), render);
   environmentManagement.connect(app);
   instanceLifecycle.connect(app);
   appStatus.connect(app);
@@ -676,6 +685,7 @@ function publishTemplate(team, platform, details) {
 function completeSignIn(id, destination, message = "") {
   if (state.personId !== id) {
     instanceSetup.clear();
+    installationSetup.clear();
     environmentManagement.clear();
     teamActivity.clear();
   }
@@ -910,6 +920,7 @@ function acceptInvitation(id) {
 
 function signOut(destination = location.pathname + location.search) {
   instanceSetup.clear();
+  installationSetup.clear();
   environmentManagement.clear();
   teamActivity.clear();
   state.personId = null;
