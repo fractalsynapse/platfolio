@@ -74,7 +74,9 @@ export class InfraService extends Service<z.infer<typeof ProviderConfigSchema>> 
   validatePlan(plan: InfraPlan) { return this.selected.validatePlan(plan); }
   applyPlan(plan: InfraPlan) { return this.selected.applyPlan(plan); }
   readState(instanceId: string) { return this.selected.readState(instanceId); }
-  deleteInstance(instanceId: string) { return this.selected.deleteInstance(instanceId); }
+  deleteInstance(instanceId: string, options?: import('@platfolio/contracts').DeleteOptions) {
+    return options ? this.selected.deleteInstance(instanceId, options) : this.selected.deleteInstance(instanceId);
+  }
     // Forwarded, and the absence is reported: whether a driver implements these is answerable from
     // describe().operations, so a handler that assumes the fake provider can do what Railway can is a bug
     // in the handler. The error names the provider rather than the verb, because that is what an operator

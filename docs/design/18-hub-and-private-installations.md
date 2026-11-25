@@ -466,3 +466,11 @@ enabled and the address is verified before each delivery. Disabling email leaves
 workspace rules intact. Deliveries reference the event and person and carry a bounded
 retry window. Address selection and team-specific destinations require the shared
 address-ownership check in D70.
+
+## Verified removal
+
+A keep-data request stops workloads inside the bound provider project. The project, service
+configuration, and storage remain available for recovery. Verify that workloads stopped and
+that the same storage still exists. A wipe request can delete the bound project and its data.
+Require provider acceptance and an inventory read that confirms absence. A refused request,
+an unreadable inventory, or surviving resources cannot produce a successful removal report.

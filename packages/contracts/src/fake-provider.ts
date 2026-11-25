@@ -1,4 +1,4 @@
-import { CONTRACT_VERSION, OPERATIONS, planIssues, ProviderUnsupported, type CapabilityInfo, type Operation, type ApplyResult, type DeleteResult, type InfraPlan, type InfraProvider, type RedeployResult, type SecretPresence, type SecretWriteResult, type Issue, type StateSnapshot } from './infra.ts';
+import { CONTRACT_VERSION, OPERATIONS, planIssues, ProviderUnsupported, type CapabilityInfo, type Operation, type ApplyResult, type DeleteOptions, type DeleteResult, type InfraPlan, type InfraProvider, type RedeployResult, type SecretPresence, type SecretWriteResult, type Issue, type StateSnapshot } from './infra.ts';
 import { samplePlan } from './conformance.ts';
 
 export interface FakeOptions {
@@ -234,9 +234,16 @@ export class FakeInfraProvider implements InfraProvider {
     return { instanceId: input.instanceId, environment: input.environment, services, refused: [], budgetSkipped, verified };
   }
 
-  async deleteInstance(instanceId: string): Promise<DeleteResult> {
+  async deleteInstance(instanceId: string): Promise<DeleteResult>;
+  async deleteInstance(instanceId: string, options: DeleteOptions): Promise<DeleteResult>;
+  async deleteInstance(instanceId: string, { data }: DeleteOptions = { data: 'wipe' }): Promise<DeleteResult> {
     const found = this.instances.get(instanceId);
     if (!found) return { instanceId, removed: [], orphans: [] };
+    if (data === 'keep') {
+      this.instances.set(instanceId, { ...found, services: found.services.map((service) => ({ ...service, status: 'stopped' })) });
+      return { instanceId, removed: [], orphans: [], retained: found.plan.environments.flatMap(({ volumes }) => (volumes ?? []).map(({ name }) => name)) };
+    }
+    if (data !== 'wipe') throw new Error('Unknown storage removal option');
     const removed = [...found.services.map((s) => s.externalId), ...found.domains.map((d) => d.host)];
     // A deliberately injected orphan, so the orphan-reporting path is exercised, not theoretical.
     const orphans = this.opts.failService ? [`${this.opts.failService}(volume)`] : [];

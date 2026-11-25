@@ -1,7 +1,7 @@
 import {
   InfraPlanSchema, OPERATIONS, planIssues,
   CONTRACT_VERSION,
-  type ApplyResult, type CapabilityInfo, type DeleteResult, type InfraPlan, type InfraProvider,
+  type ApplyResult, type CapabilityInfo, type DeleteOptions, type DeleteResult, type InfraPlan, type InfraProvider,
   type Issue, type RedeployResult, type SecretPresence, type SecretWriteResult, type ServicePlan, type StateSnapshot,
 } from './infra.ts';
 import {
@@ -9,6 +9,7 @@ import {
 } from './railway-transport.ts';
 import { readRailwayCustomDomain, type RailwayCustomDomain } from './railway-domains.ts';
 import { redactCredentialShaped } from './managed-action.ts';
+import { stopRailwayDeployments, wipeRailwayProject, type RailwayDeployment } from './railway-removal.ts';
 
 /**
  * Railway provider. Its contract version is DERIVED (D59); `InfraPlan.contract` carries it, and it is
@@ -491,143 +492,114 @@ export class RailwayInfraProvider implements InfraProvider {
     };
   }
 
-  /**
-   * Tear an instance down. `retainMounts` names the mount paths whose volumes stay behind, attached to
-   * nothing -- the state half of the hibernate pattern, where compute is destroyed and the disk is kept for a
-   * future service to mount.
-   *
-   * Mounts, not names, because a name is not a shared identity: Railway names volumes itself as
-   * `<service>-volume` while the plan's `name` is a tenant-facing label, so an option keyed on either one
-   * would silently match nothing the other was called. The mount is what the plan declares and what the
-   * provider reads back, so it is the only thing both sides can agree on.
-   *
-   * The caller supplies it because retention is a plan decision and deleteInstance receives only an instance
-   * id; storing retention state inside the provider would be a second source of truth for a fact the plan owns.
-   */
-  async deleteInstance(instanceId: string, options: { retainMounts?: string[] } = {}): Promise<DeleteResult> {
-    // Resolve in the order the mapping guarantees: our derived name, then a stored Railway id, then a bare
-    // name for projects a tenant created by hand. applyPlan creates by derived name, so the first lookup is
-    // the one that makes read-back work -- and read-back is the whole point of the controller loop.
-    const project = await this.findProject(this.projectName({ instanceId }))
-      ?? await this.findProjectById(instanceId)
-      ?? await this.findProject(instanceId);
-    if (!project) throw new Error(`railway deleteInstance: no project for instance "${instanceId}"`);
+  async deleteInstance(instanceId: string, options?: { retainMounts?: string[] }): Promise<DeleteResult>;
+  async deleteInstance(instanceId: string, options: DeleteOptions): Promise<DeleteResult>;
+  async deleteInstance(instanceId: string, options?: DeleteOptions | { retainMounts?: string[] }): Promise<DeleteResult> {
+    // A legacy request to retain any mount now preserves the entire project and all storage.
+    const data = options && 'data' in options ? options.data : options?.retainMounts?.length ? 'keep' : 'wipe';
     const credential = await this.credentials.workspace();
-    const removed: string[] = [];
-    const orphans: string[] = [];
-    const releasedWithProject: string[] = [];
-    const deleteFailures: NonNullable<DeleteResult['failures']> = [];
+    const project = await this.findProject(this.projectName({ instanceId }));
+    if (!project) return { instanceId, removed: [], orphans: [] };
+    if (!project.description?.startsWith(MARKER)) {
+      throw new Error('Railway project is not managed by this provider');
+    }
 
     const environments = await this.environments(project.id, credential);
-    const services = await this.listServices(project.id, credential);
-
-    // Placement first, then the inventory. Since each environment holds its OWN services (D57), the project's
-    // service list and an environment's contents no longer coincide, and a teardown built from their cross
-    // product would attempt -- and then CLAIM -- deletes for pairs that never existed: `service:production/api-staging`
-    // is not a thing that was removed, it is a thing that was never there.
-    //
-    // Where the instance read itself fails, every service is assumed present here: the sweep then behaves like
-    // the old one, because silently skipping a service on the strength of a read that broke is the failure #111
-    // was filed about.
-    const placedHere = new Map<string, Set<string> | null>();
-    for (const environment of environments) {
-      const token = await this.credentials.forEnvironment(project.id, environment.name).catch(() => credential);
+    const volumes = await this.listVolumes(project.id, credential);
+    const projectExists = async () => (await this.workspaceProjects(credential)).some(({ id }) => id === project.id);
+    if (data === 'keep') {
       try {
-        placedHere.set(environment.id, new Set((await this.environmentInstances(project.id, environment.id, token)).keys()));
-      } catch {
-        placedHere.set(environment.id, null);
-      }
-    }
-
-    // #111: take the inventory BEFORE anything is removed. The old sweep ran after projectDelete, so with
-    // the project unreadable "nothing was left" and "nothing can be seen" produced the same answer, and a
-    // clean-looking orphan list quietly overstated what we had done. Every resource that existed at the
-    // start is now classified into one of three states: removed by us, taken along with the project, or
-    // still reachable afterwards -- the only case that earns the name orphan.
-    const volumesAtStart = await this.listVolumes(project.id, credential);
-    const bucketsAtStart = await this.buckets(project.id, credential);
-    const expected = new Set<string>([
-      ...volumesAtStart.map((v) => `volume:${v.name}`),
-      ...bucketsAtStart.map((b) => `bucket:${b}`),
-      ...environments.flatMap((e) => services.filter((s) => placedHere.get(e.id) === null || placedHere.get(e.id)!.has(s.id)).map((s) => `service:${e.name}/${s.name}`)),
-    ]);
-
-      // Volumes are released BEFORE the services they are attached to. Measured: a template-created database
-      // whose volume still existed was refused by serviceDelete ("Problem processing request"), while an
-      // identical volume-less one deleted cleanly -- so #107 was ordering, not a capability limit, and the
-      // previous order (services first, volumes after) guaranteed the refusal at every attempt.
-      // Instance rows carry the mounts; a volume with no live instance has no mount to match and is treated
-      // as already-orphaned, which is the state a retained volume reaches once its service is gone.
-      const instancesByVolume = new Map<string, string>();
-      for (const environment of environments) {
-        for (const row of await this.volumeInstances(project.id, environment.id, credential)) instancesByVolume.set(row.volumeId, row.mountPath);
-      }
-      const retain = new Set(options.retainMounts ?? []);
-      const retained: string[] = [];
-      for (const volume of volumesAtStart) {
-        const mount = instancesByVolume.get(volume.id);
-        if (mount && retain.has(mount)) { retained.push(`${volume.name} (mounted at ${mount})`); continue; }
-        // `volumeDelete` answers true and *schedules* removal: measured, the volume keeps `isPendingDeletion`
-        // with a `deletedAt` about two days out and stays listed meanwhile. So "removed" here means "we asked",
-        // which is why a retained volume is reported as retained rather than conflated with either outcome.
-        if (retain.has(volume.name)) { retained.push(volume.name); continue; }
-        await this.transport.graphql({ operation: 'volumeDelete', credential, query: 'mutation ($volumeId: String!) { volumeDelete(volumeId: $volumeId) }', variables: { volumeId: volume.id } })
-          .then(() => { removed.push(`volume:${volume.name}`); })
-          .catch(() => { /* unresolved: classified after the project goes */ });
-      }
-
-    for (const environment of environments) {
-      const placed = placedHere.get(environment.id);
-      for (const service of services) {
-        // Nothing runs here, so there is nothing for this environment to delete -- and saying we deleted it
-        // would be the same overstatement #111 exists to prevent, only about a pair that never existed.
-        if (placed && !placed.has(service.id)) continue;
-        try {
-          await this.deleteServiceWithRetry(project.id, environment, service, credential);
-          removed.push(`service:${environment.name}/${service.name}`);
-        } catch (error) {
-          // The empty catch was a bug in the family we keep chasing: the intent was "absent in this
-          // environment is not an orphan", but a real refusal -- exactly what happened to the
-          // template-created database in #80 -- disappeared, leaving a survivor reported with no reason.
-          // Placement decides whether to speak, but the placement read above can itself have failed -- a
-          // refused delete still deserves a reason either way, so the unknown case reports.
-          if (placed && !placed.has(service.id)) continue;   // genuinely absent here: not an orphan, nothing to report
-          deleteFailures.push({ step: `service:${environment.name}/${service.name}`, code: 'service-delete-failed', message: (error as Error).message.slice(0, 200) });
+        for (const environment of environments) {
+          const token = await this.credentials.forEnvironment(project.id, environment.name);
+          await stopRailwayDeployments({
+            transport: this.transport, credential: token, sleep: this.sleep,
+            read: () => this.readRemovableDeployments(project.id, environment.id, token),
+            attempts: Math.max(1, Math.ceil(this.deployTimeoutMs / this.pollIntervalMs)), intervalMs: this.pollIntervalMs,
+          });
         }
+        const stillPresent = new Set((await this.listVolumes(project.id, credential)).map(({ id }) => id));
+        if (!await projectExists() || stillPresent.size !== volumes.length || !volumes.every(({ id }) => stillPresent.has(id))) {
+          throw new Error('Railway storage changed while stopping workloads');
+        }
+        return { instanceId, removed: [], orphans: [], retained: volumes.map(({ name }) => name) };
+      } catch {
+        return { instanceId, removed: [], orphans: [], failures: [
+          { step: 'project', code: 'retention-unverified', message: 'Workload stop and retained storage could not both be verified' },
+        ] };
+      }
+    }
+    if (data !== 'wipe') throw new Error('Unknown storage removal option');
+
+    const services = await this.listServices(project.id, credential);
+    const placements = (await Promise.all(environments.map(async (environment) => {
+      const token = await this.credentials.forEnvironment(project.id, environment.name);
+      const placed = await this.environmentInstances(project.id, environment.id, token);
+      return services.filter((service) => placed.has(service.id)).map((service) => ({ environment, service }));
+    }))).flat();
+    const expected = [
+      ...volumes.map(({ name }) => `volume:${name}`),
+      ...(await this.buckets(project.id, credential)).map((name) => `bucket:${name}`),
+      ...placements.map(({ environment, service }) => `service:${environment.name}/${service.name}`),
+    ];
+    const accepted: string[] = [];
+    const failures: NonNullable<DeleteResult['failures']> = [];
+    for (const volume of volumes) {
+      const deleted = await this.transport.graphql<{ volumeDelete: boolean }>({
+        operation: 'volumeDelete',
+        credential,
+        query: 'mutation ($volumeId: String!) { volumeDelete(volumeId: $volumeId) }',
+        variables: { volumeId: volume.id },
+      }).catch(() => undefined);
+      if (deleted?.volumeDelete === true) accepted.push(`volume:${volume.name}`);
+    }
+    for (const { environment, service } of placements) {
+      const step = `service:${environment.name}/${service.name}`;
+      try {
+        await this.deleteServiceWithRetry(environment, service, credential);
+        accepted.push(step);
+      } catch (error) {
+        failures.push({ step, code: 'service-delete-failed', message: redactCredentialShaped((error as Error).message).slice(0, 200) });
       }
     }
 
-    // Anything still there is reported, never counted as gone.
-    // Volumes are project-level and outlive the service they were attached to, so they are removed
-    // explicitly and anything left is reported. "Removed everything" has to mean everything we can create.
-    // There is no bucketDelete mutation on this API -- the full *Delete set was enumerated while filing
-    // #106 -- so a bucket cannot be released individually and projectDelete is the mechanism that takes it.
-    // Reporting one as an orphan before the project is gone was accurate but misleading: nothing is left
-    // reachable afterwards. Anything that outlives a successful projectDelete is a genuine survivor.
-
-    await this.transport.graphql({
-      operation: 'projectDelete',
-      credential,
-      query: 'mutation ($id: String!) { projectDelete(id: $id) }',
-      variables: { id: project.id },
-    });
-    removed.push(`project:${project.name}`);
-
-    // Classify against the snapshot. Reachability after the delete is the only way to tell "released with
-    // the project" from "still out there", so it is probed rather than assumed.
-    // A retained volume is not an orphan and was not released with the project; it is a decision. Reported
-    // that way so the platform's own accounting cannot quietly turn "we kept it" into "it is gone".
-    const reachable = await this.reachableResources(project.id, credential);
-    for (const item of expected) {
-      if (removed.includes(item)) continue;
-      if (reachable === null) releasedWithProject.push(item);
-      else if (reachable.has(item)) orphans.push(item);
-      else releasedWithProject.push(item);
+    const failure = await wipeRailwayProject({ transport: this.transport, credential, projectId: project.id, projectExists });
+    if (failure) {
+      failures.push(failure);
+      const reachable = failure.code === 'teardown-incomplete' ? await this.reachableResources(project.id, credential) : null;
+      return { instanceId, removed: [], orphans: expected.filter((resource) => reachable?.has(resource)), failures };
     }
-    if (orphans.length) {
-      deleteFailures.push({ step: "orphans", code: "teardown-incomplete", message: `${String(orphans.length)} resource(s) still reachable after projectDelete: ${orphans.join(", ")}` });
-    }
-    return { instanceId, removed, orphans, ...(retained.length ? { retained } : {}), ...(releasedWithProject.length ? { releasedWithProject } : {}), ...(deleteFailures.length ? { failures: deleteFailures } : {}) };
+    const releasedWithProject = expected.filter((resource) => !accepted.includes(resource));
+    return {
+      instanceId, removed: [...accepted, `project:${project.name}`], orphans: [],
+      ...(releasedWithProject.length ? { releasedWithProject } : {}),
+      ...(failures.length ? { failures } : {}),
+    };
+  }
+
+  private async readRemovableDeployments(projectId: string, environmentId: string, credential: RailwayCredential): Promise<RailwayDeployment[]> {
+    type Row = { source: { repo?: string } | null; latestDeployment: RailwayDeployment | null; activeDeployments: RailwayDeployment[] };
+    let after: string | null = null;
+    const deployments: RailwayDeployment[] = [];
+    do {
+      const data: { environment: { serviceInstances: { edges: { node: Row }[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } } } | null } =
+        await this.transport.graphql({
+          operation: 'environment.removableDeployments',
+          credential,
+          query: 'query ($projectId: String!, $environmentId: String!, $after: String) { environment(projectId: $projectId, id: $environmentId) { serviceInstances(first: 100, after: $after) { edges { node { source { repo } latestDeployment { id status } activeDeployments { id status } } } pageInfo { hasNextPage endCursor } } } }',
+          variables: { projectId, environmentId, after },
+        });
+      const page = data.environment?.serviceInstances;
+      if (!page) throw new Error('Railway did not return a service inventory');
+      for (const { node } of page.edges) {
+        if (node.source?.repo) throw new Error('Disconnect automatic repository deployment before stopping the app');
+        deployments.push(...node.activeDeployments);
+        if (node.latestDeployment) deployments.push(node.latestDeployment);
+      }
+      if (!page.pageInfo.hasNextPage) return deployments;
+      if (!page.pageInfo.endCursor || page.pageInfo.endCursor === after) throw new Error('Incomplete Railway service inventory');
+      after = page.pageInfo.endCursor;
+    } while (after);
+    return deployments;
   }
 
   // --- internals -------------------------------------------------------------------------------
@@ -868,15 +840,33 @@ export class RailwayInfraProvider implements InfraProvider {
     return out;
   }
 
+  private async workspaceProjects(credential: RailwayCredential): Promise<ProjectNode[]> {
+    const projects: ProjectNode[] = [];
+    let after: string | null = null;
+    do {
+      const data: { projects: { edges: { node: { id: string; name: string; description: string | null } }[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } } } =
+        await this.transport.graphql({
+          operation: 'projects',
+          credential,
+          query: 'query ($workspaceId: String!, $after: String) { projects(workspaceId: $workspaceId, first: 100, after: $after) { edges { node { id name description } } pageInfo { hasNextPage endCursor } } }',
+          variables: { workspaceId: this.workspaceId, after },
+        });
+      for (const { node } of data.projects.edges) {
+        const project = this.toProject(node);
+        if (project) projects.push(project);
+      }
+      if (!data.projects.pageInfo.hasNextPage) return projects;
+      const cursor = data.projects.pageInfo.endCursor;
+      if (!cursor || cursor === after) throw new Error('Incomplete Railway workspace inventory');
+      after = cursor;
+    } while (after);
+    return projects;
+  }
+
   private async findProject(name: string): Promise<ProjectNode | null> {
-    const credential = await this.credentials.workspace();
-    const data = await this.transport.graphql<{ projects: { edges: { node: { id: string; name: string; description: string | null } }[] } }>({
-      operation: 'projects',
-      credential,
-      query: 'query ($workspaceId: String!) { projects(workspaceId: $workspaceId) { edges { node { id name description } } } }',
-      variables: { workspaceId: this.workspaceId },
-    });
-    return this.toProject(data.projects.edges.map((e) => e.node).find((n) => n.name === name));
+    const projects = (await this.workspaceProjects(await this.credentials.workspace())).filter((project) => project.name === name);
+    if (projects.length > 1) throw new Error('More than one Railway project matches this instance');
+    return projects[0] ?? null;
   }
 
   private async findProjectById(id: string): Promise<ProjectNode | null> {
@@ -1899,16 +1889,17 @@ export class RailwayInfraProvider implements InfraProvider {
      * deleted inside the window. One retry with a short pause keeps the surface honest -- if both attempts
      * fail, the reason still lands in DeleteResult.failures rather than in an empty catch.
      */
-    private async deleteServiceWithRetry(_projectId: string, environment: EnvironmentNode, service: ServiceNode, credential: RailwayCredential): Promise<void> {
+    private async deleteServiceWithRetry(environment: EnvironmentNode, service: ServiceNode, credential: RailwayCredential): Promise<void> {
       let lastError: unknown;
       for (let attempt = 0; attempt < 2; attempt += 1) {
         try {
-          await this.transport.graphql({
+          const result = await this.transport.graphql<{ serviceDelete: boolean }>({
             operation: 'serviceDelete',
             credential,
             query: 'mutation ($environmentId: String!, $id: String!) { serviceDelete(environmentId: $environmentId, id: $id) }',
             variables: { environmentId: environment.id, id: service.id },
           });
+          if (result.serviceDelete !== true) throw new Error('Railway refused serviceDelete');
           return;
         } catch (error) {
           lastError = error;
@@ -1919,9 +1910,7 @@ export class RailwayInfraProvider implements InfraProvider {
     }
 
   /**
-   * What still answers after the project delete. Null when the project itself is unreadable, which is a
-   * different fact from an empty set: unreadable means everything went with it, an empty set means we
-   * looked and found nothing, and a non-empty set is the case that deserves an orphan report.
+   * Find surviving resources when the project still exists. An unavailable inventory proves nothing.
    */
   private async reachableResources(projectId: string, credential: RailwayCredential): Promise<Set<string> | null> {
     try {
@@ -1961,13 +1950,26 @@ export class RailwayInfraProvider implements InfraProvider {
   }
 
   private async listVolumes(projectId: string, credential: RailwayCredential): Promise<{ id: string; name: string }[]> {
-    const data = await this.transport.graphql<{ project: { volumes?: { edges: { node: { id: string; name?: string } }[] } | null } | null }>({
-      operation: 'project.volumes',
-      credential,
-      query: 'query ($projectId: String!) { project(id: $projectId) { volumes(first: 50) { edges { node { id name } } } } }',
-      variables: { projectId },
-    });
-    return (data.project?.volumes?.edges ?? []).map((e) => ({ id: e.node.id, name: e.node.name ?? e.node.id }));
+    type Row = { id: string; name?: string };
+    const volumes: { id: string; name: string }[] = [];
+    let after: string | null = null;
+    do {
+      const data: { project: { volumes: { edges: { node: Row }[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } } } | null } =
+        await this.transport.graphql({
+          operation: 'project.volumes',
+          credential,
+          query: 'query ($projectId: String!, $after: String) { project(id: $projectId) { volumes(first: 100, after: $after) { edges { node { id name } } pageInfo { hasNextPage endCursor } } } }',
+          variables: { projectId, after },
+        });
+      const page = data.project?.volumes;
+      if (!page) throw new Error('Railway project volume inventory is unavailable');
+      volumes.push(...page.edges.map(({ node }) => ({ id: node.id, name: node.name ?? node.id })));
+      if (!page.pageInfo.hasNextPage) return volumes;
+      const cursor: string | null = page.pageInfo.endCursor;
+      if (!cursor || cursor === after) throw new Error('Incomplete Railway volume inventory');
+      after = cursor;
+    } while (after);
+    return volumes;
   }
 
   private async buckets(projectId: string, credential: RailwayCredential): Promise<string[]> {

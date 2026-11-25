@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { setTimeout as delay } from 'node:timers/promises';
 import { HttpRailwayTransport, type RailwayTransport } from '../packages/contracts/src/railway-transport.ts';
+import { stopRailwayDeployments, wipeRailwayProject } from '../packages/contracts/src/railway-removal.ts';
 import { customHostname, readRailwayCustomDomain, type RailwayCustomDomain } from '../packages/contracts/src/railway-domains.ts';
 
 import { openBaoConfig, openBaoData, openBaoImage, openBaoStart, workerData, workerStart } from './customer-installation-topology.ts';
@@ -29,8 +30,9 @@ export async function customerRailway(target: CustomerProjectTarget, progress?: 
   const token = grant?.token ?? process.env.RAILWAY_TOKEN;
   const workspaceId = grant?.workspaceId ?? process.env.RAILWAY_WORKSPACE_ID;
   if (!token || !workspaceId) throw new Error('Provide the customer workspace ID and workspace token locally');
+  const credential = { kind: 'workspace' as const, token };
   const call = <T>(operation: string, query: string, variables: Record<string, unknown>) =>
-    transport.graphql<T>({ operation, query, variables, credential: { kind: 'workspace', token } });
+    transport.graphql<T>({ operation, query, variables, credential });
   const projectFields = 'id name description environments{edges{node{id name}}}';
   async function workspaceProjects(): Promise<Stage[]> {
     const result: Stage[] = [];
@@ -258,37 +260,33 @@ export async function customerRailway(target: CustomerProjectTarget, progress?: 
 
   async function remove(data: 'keep' | 'wipe') {
     if (target.kind !== 'app') throw new Error('App removal must target its own project');
-    const services = await instances();
-    if (services.some((service) => service.source?.repo)) throw new Error('Disconnect automatic repository deployment before removing this app');
+    const read = async () => (await instances()).flatMap((service) => {
+      if (service.source?.repo) throw new Error('Disconnect automatic repository deployment before removing this app');
+      return [...service.activeDeployments, ...(service.latestDeployment ? [service.latestDeployment] : [])];
+    });
     if (data === 'wipe') {
+      await read();
       if (grant?.projectId) throw new Error('A project-only connection cannot verify permanent project removal');
-      const { projectDelete } = await call<{ projectDelete: boolean }>('schedule app project removal',
-        'mutation($id:String!){projectDelete(id:$id)}', { id: scope.projectId });
-      if (!projectDelete) throw new Error('Railway did not accept project deletion');
-      if ((await workspaceProjects()).some(({ id }) => id === scope.projectId)) throw new Error('Railway still reports the app project');
+      const failure = await wipeRailwayProject({
+        transport, credential, projectId: scope.projectId,
+        projectExists: async () => (await workspaceProjects()).some(({ id }) => id === scope.projectId),
+      });
+      if (failure) throw new Error(failure.message);
       return { projectId: scope.projectId, retainedVolumes: [] as string[] };
     }
-    const running = new Set(['INITIALIZING', 'QUEUED', 'WAITING', 'BUILDING', 'DEPLOYING', 'SUCCESS', 'SLEEPING', 'NEEDS_APPROVAL']);
-    const activeIds = (rows: Instance[], includeRemoving = false) => [...new Set(rows.flatMap((row) => [
-      ...row.activeDeployments, ...(row.latestDeployment ? [row.latestDeployment] : []),
-    ]).filter(({ status }) => running.has(status) || (includeRemoving && status === 'REMOVING')).map(({ id }) => id))];
-    const volumes = async () => (await call<{ environment: { volumeInstances: Edges<{ volumeId: string }> } }>('verify retained storage',
-      'query($e:String!){environment(id:$e){volumeInstances(first:100){edges{node{volumeId}}}}}', { e: scope.environmentId }))
-      .environment.volumeInstances.edges.map(({ node }) => node.volumeId).sort();
-    const kept = await volumes();
-    for (const id of activeIds(services)) {
-      // A mounted database can take longer to detach than the mutation request. The read-back decides.
-      await call<{ deploymentRemove: boolean }>('remove app deployment', 'mutation($id:String!){deploymentRemove(id:$id)}', { id })
-        .catch(() => undefined);
-    }
-    for (let attempt = 0; attempt < 60; attempt++) {
-      if (!(activeIds(await instances(), true).length)) {
-        if ((await volumes()).join() !== kept.join()) throw new Error('Storage changed while stopping the app');
-        return { projectId: scope.projectId, retainedVolumes: kept };
+    const volumes = async () => {
+      const result = await call<{ environment: { volumeInstances: Edges<{ volumeId: string; isPendingDeletion: boolean }> & { pageInfo: { hasNextPage: boolean } } } }>('verify retained storage',
+        'query ($e: String!) { environment(id: $e) { volumeInstances(first: 100) { edges { node { volumeId isPendingDeletion } } pageInfo { hasNextPage } } } }', { e: scope.environmentId });
+      const page = result.environment.volumeInstances;
+      if (page.pageInfo.hasNextPage || page.edges.some(({ node }) => node.isPendingDeletion)) {
+        throw new Error('Could not verify retained storage in the app project');
       }
-      await delay(1500);
-    }
-    throw new Error('An app deployment is still active');
+      return page.edges.map(({ node }) => node.volumeId).sort();
+    };
+    const kept = await volumes();
+    await stopRailwayDeployments({ transport, credential, read, sleep: delay, attempts: 60, intervalMs: 1500 });
+    if ((await volumes()).join() !== kept.join()) throw new Error('Storage changed while stopping the app');
+    return { projectId: scope.projectId, retainedVolumes: kept };
   }
 
   await instances();

@@ -252,6 +252,8 @@ export const ApplyResultSchema = z.object({
   noop: z.boolean(),
 });
 
+export type DeleteOptions = { data: 'keep' | 'wipe' };
+
 export const DeleteResultSchema = z.object({
   instanceId: NameSchema,
   removed: z.array(z.string().min(1)),
@@ -268,7 +270,7 @@ export const DeleteResultSchema = z.object({
    */
   releasedWithProject: z.array(z.string().min(1)).optional(),
   /**
-   * Volumes deliberately left in place because the plan said `retention: 'survive'`. Listed separately from
+   * Volumes deliberately left in place after a keep-data request. The plan can specify `retention: 'survive'`. Listed separately from
    * `removed` and `orphans` because the third meaning is different again: "we kept this on purpose". They are
    * also not free -- an unattached volume bills -- so the answer has to be visible to whoever asks.
    */
@@ -310,6 +312,7 @@ export interface InfraProvider {
   applyPlan(plan: InfraPlan): Promise<ApplyResult>;
   readState(instanceId: string): Promise<StateSnapshot>;
   deleteInstance(instanceId: string): Promise<DeleteResult>;
+  deleteInstance(instanceId: string, options: DeleteOptions): Promise<DeleteResult>;
   /**
    * Deliver one secret value into the tenant's own provider environment (D53). The value is a pass-through:
    * it is written and forgotten, never stored by platfolio, never echoed back, never logged. This is D34's
