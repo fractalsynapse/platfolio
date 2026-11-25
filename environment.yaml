@@ -495,7 +495,7 @@ variables:
     secret: true
     environments: [staging]
     deployedTo: railway:variable
-    note: "Local AppRole secret with access to the Railway grant path only."
+    note: "Local AppRole secret limited to the Railway and marketplace credential records."
   - name: PLATFOLIO_OPENBAO_URL
     kind: value
     secret: false

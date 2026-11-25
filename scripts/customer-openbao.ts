@@ -1,6 +1,7 @@
 import { constants, createPublicKey, generateKeyPairSync, privateDecrypt, publicEncrypt } from 'node:crypto';
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 
 interface Recovery { shares: string[]; bootstrap: string }
 export interface RailwayGrant { access: string; refresh: string; expires: number }
@@ -34,6 +35,14 @@ export function customerOpenBao(origin: string, secretId: string, directory: str
 
   async function health() {
     return (await request<{ initialized: boolean; sealed: boolean }>('sys/health')).data;
+  }
+  async function waitForActiveStorage() {
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const response = await request<{ initialized: boolean; sealed: boolean; standby: boolean }>('sys/health');
+      if (response.status === 200 && response.data?.initialized && response.data.sealed === false && response.data.standby === false) return;
+      await delay(250);
+    }
+    throw new Error('OpenBao storage is not ready. Wait for an active server and try again');
   }
   async function serviceToken() {
     const reply = await request<{ auth?: { client_token?: string } }>('auth/approle/login', { role_id: policy, secret_id: secretId });
@@ -99,7 +108,7 @@ export function customerOpenBao(origin: string, secretId: string, directory: str
           if (reply.data?.sealed === false) break;
         }
       }
-      if ((await health())?.sealed !== false) throw new Error('OpenBao is still sealed');
+      await waitForActiveStorage();
       if (!await serviceToken()) await configure(data.bootstrap);
       if (!await serviceToken()) throw new Error('OpenBao did not authorize the worker');
       const root = await request('auth/token/lookup-self', undefined, data.bootstrap);
