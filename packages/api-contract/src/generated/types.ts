@@ -4,7 +4,7 @@
  * hand, because every line reproduces from the specification.
  *
  * Source: apps/control-plane/openapi.yaml (OpenAPI 3.1.0, info.version 0.1.0)
- * Input digest: sha256/d3122cc4dd3e2dd4
+ * Input digest: sha256/ac68bc98ba9c2436
  *
  * Reproduce it with `pnpm run api:types`. `pnpm run api:types:check` fails when this file stops matching
  * what the committed spec produces, which is the only way a generated type deserves to be trusted.
@@ -276,6 +276,10 @@ export interface Ready {
 /** Repository-style slug. Lowercase alphanumerics with interior hyphens -- it is a URL segment and a CLI argument (D45). */
 export type Slug = string;
 
+export interface StarterBrandChange {
+  value: string;
+}
+
 export interface TeamWithRole {
   teamId: string;
   name: Slug;
@@ -411,6 +415,11 @@ export interface ApiParameters {
   /** GET /api/v1/instances/{instanceId}/status */
   getHostedAppStatus: {
     instanceId: string;
+  };
+  /** GET /api/v1/instances/{instanceId}/environments/{environment}/configuration/starter-brand */
+  getHostedStarterBrand: {
+    instanceId: string;
+    environment: string;
   };
   /** GET /api/v1/instances/{instanceId} */
   getInstance: {
@@ -586,6 +595,11 @@ export interface ApiParameters {
   };
   /** PUT /api/v1/me/profile */
   updateAccountProfile: Record<string, never>;
+  /** PUT /api/v1/instances/{instanceId}/environments/{environment}/configuration/starter-brand */
+  updateHostedStarterBrand: {
+    instanceId: string;
+    environment: string;
+  };
   /** PUT /api/v1/me/notification-email */
   updateMyNotificationEmail: Record<string, never>;
   /** PUT /api/v1/instances/{instanceId}/notification-rules/{ruleId} */
@@ -736,6 +750,8 @@ export interface ApiRequestBodies {
     username: string;
     displayName: string;
   };
+  /** PUT /api/v1/instances/{instanceId}/environments/{environment}/configuration/starter-brand */
+  updateHostedStarterBrand: StarterBrandChange;
   /** PUT /api/v1/me/notification-email */
   updateMyNotificationEmail: {
     enabled: boolean;
@@ -981,6 +997,18 @@ export interface ApiResponses {
     '401': Error;
     '403': Error;
     '404': Error;
+  };
+  /** GET /api/v1/instances/{instanceId}/environments/{environment}/configuration/starter-brand */
+  getHostedStarterBrand: {
+    '200': {
+      value: (string | null);
+      state: 'ready' | 'deploying' | 'failed';
+    };
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '409': Error;
+    '503': Error;
   };
   /** GET /api/v1/instances/{instanceId} */
   getInstance: {
@@ -1508,6 +1536,18 @@ export interface ApiResponses {
     '403': Error;
     '503': Error;
   };
+  /** PUT /api/v1/instances/{instanceId}/environments/{environment}/configuration/starter-brand */
+  updateHostedStarterBrand: {
+    '202': {
+      state: 'requested';
+    };
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '409': Error;
+    '503': Error;
+  };
   /** PUT /api/v1/me/notification-email */
   updateMyNotificationEmail: {
     '200': {
@@ -1633,6 +1673,8 @@ export const ENDPOINTS = {
   getHealth: { method: 'get', path: '/healthz' },
   /** GET /api/v1/instances/{instanceId}/status */
   getHostedAppStatus: { method: 'get', path: '/api/v1/instances/{instanceId}/status' },
+  /** GET /api/v1/instances/{instanceId}/environments/{environment}/configuration/starter-brand */
+  getHostedStarterBrand: { method: 'get', path: '/api/v1/instances/{instanceId}/environments/{environment}/configuration/starter-brand' },
   /** GET /api/v1/instances/{instanceId} */
   getInstance: { method: 'get', path: '/api/v1/instances/{instanceId}' },
   /** GET /api/v1/instances/{instanceId}/environments/{environment} */
@@ -1725,6 +1767,8 @@ export const ENDPOINTS = {
   unlockStarterOpenBao: { method: 'post', path: '/api/v1/teams/{teamId}/starter-launch/openbao/unlock' },
   /** PUT /api/v1/me/profile */
   updateAccountProfile: { method: 'put', path: '/api/v1/me/profile' },
+  /** PUT /api/v1/instances/{instanceId}/environments/{environment}/configuration/starter-brand */
+  updateHostedStarterBrand: { method: 'put', path: '/api/v1/instances/{instanceId}/environments/{environment}/configuration/starter-brand' },
   /** PUT /api/v1/me/notification-email */
   updateMyNotificationEmail: { method: 'put', path: '/api/v1/me/notification-email' },
   /** PUT /api/v1/instances/{instanceId}/notification-rules/{ruleId} */

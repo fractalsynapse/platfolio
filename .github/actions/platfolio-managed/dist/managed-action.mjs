@@ -25068,7 +25068,7 @@ function date4(params) {
 }
 
 // packages/contracts/src/generated/contract-version.ts
-var CONTRACT_VERSION = "5.12.0";
+var CONTRACT_VERSION = "5.13.0";
 
 // packages/contracts/src/infra.ts
 var OPERATIONS = [
@@ -27641,6 +27641,11 @@ var EmailFailureSchema = external_exports.object({
 var MailboxMessageSchema = EmailMessageSchema.extend({
   providerId: external_exports.string().max(200),
   receivedAt: external_exports.string().min(1)
+}).strict();
+
+// packages/contracts/src/starter-brand.ts
+var StarterBrandChangeSchema = external_exports.object({
+  value: external_exports.string().max(60).regex(/^[A-Za-z0-9][A-Za-z0-9 .,'()-]*$/)
 }).strict();
 
 // apps/managed-action/src/runner.ts

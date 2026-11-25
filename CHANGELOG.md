@@ -5,6 +5,7 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+- Starter Web staging owners can update the public header label from Configuration. Platfolio confirms the value on the running app and keeps its existing Railway project and database (#288).
 - Starter Web staging owners can attach or detach a custom hostname and get DNS records and certificate status from Railway (#288).
 - Operators can opt in to email for their notification rules using their installation's verified primary account address (#288).
 - Private owners can connect to the marketplace from their workspace and acquire the pinned starter using a registry credential held in their OpenBao (#288).

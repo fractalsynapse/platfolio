@@ -13,4 +13,5 @@ export function validateStarterSource(composeText: string, inventoryText: string
       database.service !== 'web' || database.database !== 'app-db' || database.output !== 'DATABASE_URL') {
     throw new Error('Pinned starter does not match the reviewed source-build and database placement');
   }
+  return inventory.entries;
 }
