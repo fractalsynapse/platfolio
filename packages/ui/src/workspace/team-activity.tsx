@@ -1,3 +1,4 @@
+import { WorkspaceAction } from './workspace-action.tsx';
 import * as React from 'react';
 import type { InstanceResponse, SuccessOf, TeamWithRole } from '@platfolio/api-contract/generated/types';
 import { ageLabel, useClock } from '../components/freshness.ts';
@@ -50,7 +51,7 @@ export function TeamActivity({ team, apps, summary }: {
   const clock = useClock();
   if (activity.state.status === 'pending') return <p role="status">Loading activity…</p>;
   if (activity.state.status === 'failed') return <p role="status">Couldn’t load activity.{' '}
-    <button type="button" className="ui-workspace-trigger ui-hit-primary" onClick={activity.reload}>Try again</button>
+    <WorkspaceAction type="button" onClick={activity.reload}>Try again</WorkspaceAction>
   </p>;
   const events = activity.state.data;
   return <>

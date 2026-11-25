@@ -1,3 +1,5 @@
+import { WorkspaceAction } from './workspace-action.tsx';
+import { Stack } from '../layout/index.ts';
 import * as React from 'react';
 import { ageLabel, useClock } from '../components/freshness.ts';
 import { StarterLaunchSetup } from '../components/starter-launch-setup.tsx';
@@ -12,7 +14,7 @@ export function TeamConnections({ teamId, teamName }: { readonly teamId: string;
   const params = React.useMemo(() => ({ teamId }), [teamId]);
   const setup = useOperation('getStarterLaunchSetup', { params, key: `starter-setup-${teamId}` });
   const clock = useClock();
-  return <section aria-label="Private installation connections" className="ui-workspace-section-stack">
+  return <section aria-label="Private installation connections"><Stack>
     {setup.state.status === 'pending' && <p role="status">Checking installation connections…</p>}
     {setup.state.status === 'failed' && (setup.state.error.status === 404
       ? <>
@@ -20,7 +22,7 @@ export function TeamConnections({ teamId, teamName }: { readonly teamId: string;
         <HubMarketplaceInstallations key={teamId} teamId={teamId} />
       </>
       : <p role="status">Couldn’t check the installation connection.{' '}
-        <button type="button" className="ui-workspace-trigger ui-hit-primary" onClick={setup.reload}>Try again</button>
+        <WorkspaceAction type="button" onClick={setup.reload}>Try again</WorkspaceAction>
       </p>)}
     {setup.state.status === 'loaded' && <>
       <h2>Set up Platfolio</h2>
@@ -32,5 +34,5 @@ export function TeamConnections({ teamId, teamName }: { readonly teamId: string;
       </div>
       <p><WorkspaceLink href={workspacePaths.launchForTeam(teamName)}>Set up Starter Web</WorkspaceLink></p>
     </>}
-  </section>;
+  </Stack></section>;
 }

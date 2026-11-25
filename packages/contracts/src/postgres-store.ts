@@ -1,3 +1,4 @@
+import { InstallationJournalSchema, type InstallationJournal } from './installation-journal.ts';
 import { z } from 'zod';
 import { Pool, type PoolClient } from 'pg';
 import {
@@ -85,6 +86,36 @@ export class PostgresStore implements Store {
 
   private q(table: string): string {
     return `${this.schema}.${table}`;
+  }
+
+  async listInstallationJournals(teamId: string, personId: string) {
+    const result = await this.pool.query(
+      `SELECT document FROM ${this.q('installation_journals')} WHERE team_id = $1 AND person_id = $2 ORDER BY name, id`, [teamId, personId]);
+    return result.rows.map(({ document }) => InstallationJournalSchema.parse(document));
+  }
+
+  async getInstallationJournal(teamId: string, personId: string, id: string) {
+    if (!z.uuid().safeParse(id).success) return;
+    const result = await this.pool.query(
+      `SELECT document FROM ${this.q('installation_journals')} WHERE team_id = $1 AND person_id = $2 AND id = $3`, [teamId, personId, id]);
+    const first = result.rows[0];
+    return first ? InstallationJournalSchema.parse(first.document) : undefined;
+  }
+
+  async saveInstallationJournal(input: InstallationJournal): Promise<boolean> {
+    const parsed = InstallationJournalSchema.safeParse(input);
+    if (this.closed || !parsed.success) return false;
+    const next = parsed.data;
+    const table = this.q('installation_journals');
+    const fields = [next.id, next.teamId, next.personId, next.workspaceId, next.provider, next.name, next.version, next];
+    const result = next.version === 0
+      ? await this.pool.query(
+        `INSERT INTO ${table} (id, team_id, person_id, workspace_id, provider, name, version, document)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT DO NOTHING`, fields)
+      : await this.pool.query(
+        `UPDATE ${table} SET version = $7, document = $8 WHERE id = $1 AND team_id = $2 AND person_id = $3
+         AND workspace_id = $4 AND provider = $5 AND name = $6 AND version = $7::integer - 1`, fields);
+    return result.rowCount === 1;
   }
 
   describe() {

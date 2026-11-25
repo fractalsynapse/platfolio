@@ -1,3 +1,4 @@
+import { OperationState } from './operation-state.tsx';
 import * as React from 'react';
 import { ageLabel, useClock } from '../components/freshness.ts';
 import { useOperation } from '../sdk/use-operation.ts';
@@ -11,8 +12,7 @@ export function FreeTemplatePicker({ team }: { readonly team: string }): React.R
   const clock = useClock();
 
   return <>
-    {state.status === 'pending' && <p role="status">Loading templates…</p>}
-    {state.status === 'failed' && <p role="status">Couldn’t load the templates. <button type="button" className="ui-workspace-trigger ui-hit-primary" onClick={reload}>Try again</button></p>}
+    <OperationState status={state.status} pending="Loading templates…" failed="Couldn’t load the templates." retry={reload} />
     {state.status === 'loaded' && <>
       <p className="ui-workspace-meta">{ageLabel(state.freshness, clock().toISOString()).text}</p>
       {state.data.length === 0 ? <p>No templates are available to install.</p> : state.data.map((release) => <article key={release.template} className="ui-template-card">

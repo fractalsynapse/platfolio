@@ -2,7 +2,7 @@
  * GENERATED FILE -- DO NOT EDIT. The writer is `renderLayoutCss()` in packages/ui/src/layout/primitives.ts.
  *
  * Source: packages/ui/src/layout/primitives.ts
- * Input digest: sha256/dcbcce4d631820a8
+ * Input digest: sha256/ee3c79e001308cbb
  *
  * Reproduce with `pnpm run ui:css`; `pnpm run ui:css:check` fails when this stops matching the primitive
  * table. Gate 9.3 audits this file too: it contains `@container` width queries and no `@media` width query,
@@ -12,6 +12,8 @@
 
 .ui-stack {
   container-type: inline-size;
+  display: grid;
+  gap: var(--ui-space-4);
   /* stack: Single ordered column: the default and the floor. One nested layout, and it is a stack. */
 }
 

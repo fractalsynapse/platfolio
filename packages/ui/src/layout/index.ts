@@ -45,7 +45,7 @@ function primitive<K extends LayoutSlot>(slot: K) {
     const className = props.class ? `${p.className} ${props.class}` : p.className;
     return React.createElement(
       'div',
-      { class: className, ...(props.id === undefined ? {} : { id: props.id }) },
+      { className, ...(props.id === undefined ? {} : { id: props.id }) },
       props.children ?? null,
     );
   };

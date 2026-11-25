@@ -1,3 +1,4 @@
+import { MainContext } from '../layout/main-context.tsx';
 import * as React from 'react';
 import type { InstanceResponse } from '@platfolio/api-contract/generated/types';
 import { ageLabel, useClock } from '../components/freshness.ts';
@@ -10,14 +11,12 @@ import { HostedCustomDomains } from './hosted-custom-domains.tsx';
 import { HostedStarterBrand } from './hosted-starter-brand.tsx';
 import { StarterRedeploy } from './starter-redeploy.tsx';
 import { ServiceSecretPresence } from './service-secret-presence.tsx';
-import { workspacePaths, type WorkspaceRoute } from './routes.ts';
+import { environmentTabs, workspacePaths, type EnvironmentTab, type WorkspaceRoute } from './routes.ts';
 import { WorkspaceLink } from './workspace-link.tsx';
 import { WorkspacePanel } from './workspace-panel.tsx';
 
-const tabs = [
-  { id: 'overview', label: 'Overview' }, { id: 'deployments', label: 'Deployments' },
-  { id: 'configuration', label: 'Configuration' }, { id: 'domains', label: 'Domains' },
-] as const;
+import { SectionNav } from './section-nav.tsx';
+import { OperationState } from './operation-state.tsx';
 
 interface EnvironmentWorkspaceProps {
   readonly instanceId: string;
@@ -36,23 +35,18 @@ export function EnvironmentWorkspace({ instanceId, canManage, environment, targe
 
   return <>
     <div className="ui-environment-navigation">
-      {targets.length > 1 && <nav className="ui-workspace-segments" aria-label="Target environment">
-        {targets.map((target) => <WorkspaceLink key={target} href={workspacePaths.environment(route.team, route.instance, target, route.tab)}
-          aria-current={route.environment === target ? 'page' : undefined}>{target.charAt(0).toUpperCase() + target.slice(1)}</WorkspaceLink>)}
-      </nav>}
-      <nav className="ui-workspace-segments" aria-label="Environment pages">
-        {tabs.map(({ id, label }) => <WorkspaceLink key={id}
-          href={workspacePaths.environment(route.team, route.instance, route.environment, id)}
-          aria-current={route.tab === id ? 'page' : undefined}>{label}</WorkspaceLink>)}
-      </nav>
+      {targets.length > 1 && <SectionNav label="Target environment" links={targets.map((target) => ({
+        href: workspacePaths.environment(route.team, route.instance, target, route.tab),
+        label: target.charAt(0).toUpperCase() + target.slice(1), current: route.environment === target,
+      }))} />}
+      <SectionNav label="Environment pages" links={(Object.keys(environmentTabs) as EnvironmentTab[]).map((id) => ({
+        href: workspacePaths.environment(route.team, route.instance, route.environment, id), label: environmentTabs[id], current: route.tab === id,
+      }))} />
     </div>
-    {state.status === 'pending' && <p role="status">Loading environment details…</p>}
-    {state.status === 'failed' && <p role="status">Couldn’t read the environment details.{' '}
-      <button type="button" className="ui-workspace-trigger ui-hit-primary" onClick={reload}>Try again</button>
-    </p>}
+    <OperationState status={state.status} pending="Loading environment details…" failed="Couldn’t read the environment details." retry={reload} />
     {state.status === 'loaded' && <>
       <p className="ui-workspace-meta">{ageLabel(state.freshness, clock().toISOString()).text}</p>
-      {route.tab === 'overview' && <div className="ui-workspace-columns">
+      {route.tab === 'overview' && <MainContext>
         <WorkspacePanel title="Last reported deployment">
           <EnvironmentOverview environment={environment} freshness={freshness} now={now} />
           {state.data.hosting && <p className="ui-workspace-meta">Railway last confirmed {new Date(state.data.hosting.observedAt).toLocaleString()}</p>}
@@ -66,8 +60,8 @@ export function EnvironmentWorkspace({ instanceId, canManage, environment, targe
             <li key={host} className="ui-workspace-row"><span>{host}</span><small>Planned for {service}</small></li>)}</ul>}
           <WorkspaceLink href={workspacePaths.environment(route.team, route.instance, route.environment, 'domains')}>View domains</WorkspaceLink>
         </WorkspacePanel>
-      </div>}
-      {route.tab === 'deployments' && <div className="ui-workspace-columns">
+      </MainContext>}
+      {route.tab === 'deployments' && <MainContext>
         <EnvironmentDeployments deployments={state.data.deployments} />
         {state.data.hosting && <WorkspacePanel title="Railway deployment" context>
           <p>Deployment <code>{state.data.hosting.deploymentId.slice(0, 12)}</code></p>
@@ -76,7 +70,7 @@ export function EnvironmentWorkspace({ instanceId, canManage, environment, targe
             <StarterRedeploy key={state.data.hosting.deploymentId} params={params} progressPath={workspacePaths.instanceSetup(route.team, route.instance)} />}
           {canManage && <p><WorkspaceLink href={workspacePaths.instanceSetup(route.team, route.instance)}>Open app setup</WorkspaceLink></p>}
         </WorkspacePanel>}
-      </div>}
+      </MainContext>}
       {route.tab === 'domains' && <>
         <EnvironmentDomains domains={state.data.domains} planned={state.data.planned} hosting={state.data.hosting} />
         {state.data.hosting && state.data.hosting.state !== 'paused' && state.data.hosting.state !== 'removed' &&

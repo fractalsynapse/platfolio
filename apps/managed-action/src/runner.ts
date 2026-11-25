@@ -21,9 +21,10 @@ import {
 
 export interface RunnerDeps {
   env: Record<string, string | undefined>;
+  missingCredentials(): readonly string[];
   /** Fetch the plan platfolio intends this dispatch to apply, with the digest platfolio computed for it. */
   fetchDispatch(intent: DispatchIntent): Promise<{ plan: InfraPlan; planHash: string }>;
-  applyPlan(plan: InfraPlan): Promise<ApplyResult>;
+  applyPlan(plan: InfraPlan, intent: DispatchIntent): Promise<ApplyResult>;
   postAttestation(attestation: Attestation): Promise<void>;
   /** Set a step output. Real implementations write $GITHUB_OUTPUT; tests collect into an array. */
   setOutput(name: string, value: string): void;
@@ -76,7 +77,7 @@ export async function runManagedAction(deps: RunnerDeps): Promise<RunResult> {
   const intent = readIntent(deps.env);
   const startedAt = deps.now();
 
-  const missing = deps.env.RAILWAY_TOKEN ? [] : ['RAILWAY_TOKEN'];
+  const missing = deps.missingCredentials();
   if (missing.length > 0) {
     const refusal = attestationFromApply({
       intent, appliedPlanHash: intent.planHash, durationMs: 0, finishedAt: new Date(deps.now()).toISOString(), release: RELEASE,
@@ -119,7 +120,7 @@ export async function runManagedAction(deps: RunnerDeps): Promise<RunResult> {
     return { status: stale.result, attestation: stale };
   }
 
-  const result = await deps.applyPlan(fetched.plan);
+  const result = await deps.applyPlan(fetched.plan, intent);
   const changed = result.services.filter((s) => s.status === 'live').map((s) => `${s.environment ?? intent.environment}/${s.name}`);
   const attestation = attestationFromApply({
     intent,

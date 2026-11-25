@@ -1,3 +1,6 @@
+import { customerInstallationNames, installationWorkerReadiness } from '../packages/contracts/src/customer-installation-services.ts';
+import { railwayTemplateDigest } from '../packages/contracts/src/railway-template.ts';
+import { RAILWAY_AUTHORIZATION_CALLBACK } from '../packages/contracts/src/customer-hosting-commands.ts';
 import { createHash } from 'node:crypto';
 import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
@@ -7,12 +10,7 @@ import { resolveCheckoutCandidate } from './platform-candidate.ts';
 
 const databaseImage = 'postgres:17.11@sha256:ff87138949ad9a46f32ff23bd6852b52ce024a13dffe9b4087be98292cdd3b4f';
 const databaseVolume = '/var/lib/postgresql/data';
-const database = 'private-db-staging';
-const identity = 'private-identity-staging';
-const site = 'private-site-staging';
-const api = 'private-api-staging';
-const worker = 'installation-worker-staging';
-const vault = 'openbao-staging';
+const { database, identity, site, api, worker, vault } = customerInstallationNames('staging');
 const reference = (service: string, variable: string) => '${{' + service + '.' + variable + '}}';
 const publicOrigin = (service: string) => 'https://' + reference(service, 'RAILWAY_PUBLIC_DOMAIN');
 const privateHost = (service: string) => reference(service, 'RAILWAY_PRIVATE_DOMAIN');
@@ -65,9 +63,7 @@ export async function renderRailwayInstaller(candidateFile: string, registryOrig
     return [variable, reference(database, output ?? 'DATABASE_URL')];
   }));
 
-  return {
-    sourceCommit: plan.sourceCommit,
-    serializedConfig: { services: {
+  const serializedConfig = { services: {
       [resourceId(database)]: service(database, databaseImage, variables({ POSTGRES_DB: 'platfolio', POSTGRES_USER: 'postgres', POSTGRES_PASSWORD: secret,
         'PGDATA': databaseVolume + '/pgdata',
         PGHOST: privateHost(database), PGPORT: '5432', DATABASE_URL: 'postgresql://postgres:' + pass + '@' + privateHost(database) + ':5432/platfolio',
@@ -94,13 +90,13 @@ export async function renderRailwayInstaller(candidateFile: string, registryOrig
         ...variables({ PORT: '8080', HOST: '::', RAILWAY_RUN_UID: '0', PLATFOLIO_LAUNCH_STATE_DIR: workerData,
           PLATFOLIO_LAUNCH_TEAM: team, PLATFOLIO_LAUNCH_WORKER_KEY: secret, PLATFOLIO_OPENBAO_WORKER_SECRET: secret,
           PLATFOLIO_OPENBAO_URL: 'http://' + privateHost(vault) + ':8200', PLATFOLIO_REGISTRY_ORIGIN: registryOrigin,
-          PLATFOLIO_RAILWAY_OAUTH_CALLBACK: publicOrigin(api) + '/api/v1/railway/callback',
+          PLATFOLIO_RAILWAY_OAUTH_CALLBACK: publicOrigin(api) + RAILWAY_AUTHORIZATION_CALLBACK,
         }),
         RAILWAY_WORKSPACE_ID: { defaultValue: '', description: 'The ID of the Railway workspace that owns this project.' },
         PLATFOLIO_LAUNCH_APP_PROJECT: { defaultValue: '', isOptional: true, description: 'Limit Railway authorization to an existing app project.' },
-      }, { start: workerStart, health: '/status', volume: workerData }),
-    } },
-  };
+      }, { start: workerStart, health: installationWorkerReadiness, volume: workerData }),
+    } };
+  return { sourceCommit: plan.sourceCommit, serializedConfig, configDigest: railwayTemplateDigest(serializedConfig) };
 }
 
 if (import.meta.url === 'file://' + process.argv[1]) {

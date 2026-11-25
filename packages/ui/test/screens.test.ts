@@ -12,7 +12,9 @@ import type { AuthSource, Result, Transport } from '../src/sdk/transport.ts';
 import type { OperationId, SuccessOf } from '@platfolio/api-contract/generated/types';
 import { createSignalBus } from '../src/signals.ts';
 import { SignalsProvider } from '../src/signals-context.ts';
-import { SAMPLE_FRESHNESS, SAMPLE_INSTANCES, SAMPLE_NOW, SAMPLE_TEAMS } from './fixtures/page-documents.ts';
+import { SAMPLE_FRESHNESS, SAMPLE_INSTANCES, SAMPLE_NOW, SAMPLE_TEAMS, workspaceFixtureRoutes } from './fixtures/page-documents.ts';
+import { workspacePageId, workspacePageIds, workspacePages } from '../src/workspace/workspace-pages.ts';
+import { matchWorkspaceRoute } from '../src/workspace/routes.ts';
 import type { ScreenDocument } from '../src/screens/screen.ts';
 
 
@@ -118,6 +120,7 @@ test('every registered component is reachable from a screen, or the registry has
   // claim is about reachability through the registry plus the components a placed component calls.
   const reachable = new Set(placed);
   for (const id of placed) {
+    if (id.startsWith('workspace.')) continue; // Workspace routes render inside their shell model.
     const markup = React.createElement(SignalsProvider, { bus: contextualBus() }, React.createElement(componentById(id).render, propsForComponent(id)));
     const transport: Transport = { kind: 'poll', async call() { throw new Error('Static render requested data'); } };
     const auth: AuthSource = { async token() { throw new Error('Static render requested a token'); } };
@@ -151,7 +154,6 @@ function propsForComponent(id: string): Record<string, unknown> {
     case 'instance.state': return { state: 'degraded', observedAt: SAMPLE_FRESHNESS.observedAt, now: SAMPLE_NOW };
     case 'freshness.label': return { freshness: SAMPLE_FRESHNESS, now: SAMPLE_NOW, describes: 'Instances' };
     case 'context.switcher': return { teams: SAMPLE_TEAMS, instances: SAMPLE_INSTANCES };
-    case 'workspace.content': return {};
     case 'launch.starter': return { teamId: SAMPLE_TEAMS[0]?.teamId };
     default: throw new TypeError(`screens.test.ts has no props for ${id}`);
   }
@@ -223,3 +225,15 @@ test('the container asks the operations its components declare, and nothing else
     'the instance list screen reached for an operation it does not declare');
 });
 
+
+test('workspace deep links each reach their own checked page document', () => {
+  const actual = new Set(Object.values(workspaceFixtureRoutes).map((route) => workspacePageId(matchWorkspaceRoute(route))));
+  assert.deepEqual([...actual].sort(), [...workspacePageIds].sort());
+  for (const id of actual) {
+    const { screen } = workspacePages[id];
+    assert.deepEqual(screenPlacements(screen).map(({ component }) => component), [id]);
+    assert.deepEqual(capabilityParityProblems(screen), []);
+  }
+  assert.ok(reachableOperations(workspacePages['workspace.account-profile'].screen, 'floor').includes('updateAccountProfile'));
+  assert.ok(!reachableOperations(workspacePages['workspace.account-emails'].screen, 'floor').includes('updateAccountProfile'));
+});

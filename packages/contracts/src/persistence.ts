@@ -1,5 +1,7 @@
+import type { InstallationJournal } from './installation-journal.ts';
 import { z } from 'zod';
 import { AttestationSchema, type Attestation } from './attestation.ts';
+import { HostingProviderIdSchema } from './infra.ts';
 import { CONTRACT_VERSION } from './generated/contract-version.ts';
 
 /**
@@ -88,7 +90,7 @@ export const InstanceSchema = z.object({
   }).strict().optional(),
   state: InstanceStateSchema,
   /** The provider is a swappable capability (D1); the instance records which one it is on. */
-  provider: z.enum(['railway', 'fake']).default('railway'),
+  provider: HostingProviderIdSchema.default('railway'),
   desiredPlanHash: z.string().optional(),
   lastAppliedPlanHash: z.string().optional(),
   createdAt: z.string().min(1),
@@ -502,7 +504,7 @@ export function reasonOf(error: StoreError): string {
 }
 
 export interface NewTeam { name: string }
-export interface NewInstance { teamId: string; name: string; template: string; templateRef?: { repo: string; commitSha: string }; state?: InstanceState; provider?: 'railway' | 'fake' }
+export interface NewInstance { teamId: string; name: string; template: string; templateRef?: { repo: string; commitSha: string }; state?: InstanceState; provider?: Instance['provider'] }
 
 /**
  * The capability. Deliberately free of `query`, `transaction`, `pool` and `row` -- a second implementation
@@ -529,6 +531,10 @@ export interface NotificationEmailDelivery {
 }
 
 export interface Store {
+  listInstallationJournals(teamId: string, personId: string): Promise<InstallationJournal[]>;
+  getInstallationJournal(teamId: string, personId: string, id: string): Promise<InstallationJournal | undefined>;
+  saveInstallationJournal(next: InstallationJournal): Promise<boolean>;
+
   readonly driver: string;
   describe(): { driver: string; contract: string; schemaReady: boolean };
   ping(): Promise<boolean>;

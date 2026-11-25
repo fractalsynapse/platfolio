@@ -1,4 +1,4 @@
-import { CONTRACT_VERSION, OPERATIONS, planIssues, ProviderUnsupported, type CapabilityInfo, type Operation, type ApplyResult, type DeleteResult, type InfraPlan, type InfraProvider, type RedeployResult, type SecretPresence, type SecretWriteResult, type Issue, type StateSnapshot } from './infra.ts';
+import { CONTRACT_VERSION, KEEP_DATA_FEATURE, OPERATIONS, planIssues, ProviderUnsupported, type CapabilityInfo, type Operation, type ApplyResult, type DeleteOptions, type DeleteResult, type InfraPlan, type InfraProvider, type RedeployResult, type SecretPresence, type SecretWriteResult, type Issue, type StateSnapshot } from './infra.ts';
 import { samplePlan } from './conformance.ts';
 
 export interface FakeOptions {
@@ -52,7 +52,7 @@ export class FakeInfraProvider implements InfraProvider {
       provider: this.opts.name,
       contract: this.opts.contract,
       operations: OPERATIONS.filter((op) => !this.opts.without?.includes(op)) as CapabilityInfo['operations'],
-      features: ['volumes', 'preview-environments'],
+      features: [KEEP_DATA_FEATURE, 'volumes', 'preview-environments'],
     };
   }
 
@@ -104,8 +104,11 @@ export class FakeInfraProvider implements InfraProvider {
         if (!domains.some((x) => x.host === d.host)) domains.push({ host: d.host, dnsStatus: 'verified', certificateStatus: 'issued', targetService: d.service });
       }
     }
-    const merged = [...(existing?.services ?? []), ...services];
-    const mergedDomains = [...(existing?.domains ?? []), ...domains];
+    const merged = [
+      ...(existing?.services ?? []).filter((prior) => !services.some((next) => next.environment === prior.environment && next.name === prior.name)),
+      ...services,
+    ];
+    const mergedDomains = [...(existing?.domains ?? []).filter((prior) => !domains.some((next) => next.host === prior.host)), ...domains];
     this.instances.set(plan.instanceId, { plan, services: merged, domains: mergedDomains, applied: [...(existing?.applied ?? []), plan.planHash] });
     // Read-back: confirm the model reflects what we intended to create, exactly as the real
     // provider path must confirm via `latestDeployment`/`domains` rather than trusting a 2xx.
@@ -234,9 +237,16 @@ export class FakeInfraProvider implements InfraProvider {
     return { instanceId: input.instanceId, environment: input.environment, services, refused: [], budgetSkipped, verified };
   }
 
-  async deleteInstance(instanceId: string): Promise<DeleteResult> {
+  async deleteInstance(instanceId: string): Promise<DeleteResult>;
+  async deleteInstance(instanceId: string, options: DeleteOptions): Promise<DeleteResult>;
+  async deleteInstance(instanceId: string, { data }: DeleteOptions = { data: 'wipe' }): Promise<DeleteResult> {
     const found = this.instances.get(instanceId);
     if (!found) return { instanceId, removed: [], orphans: [] };
+    if (data === 'keep') {
+      this.instances.set(instanceId, { ...found, applied: [], services: found.services.map((service) => ({ ...service, status: 'stopped' })) });
+      return { instanceId, removed: [], orphans: [], retained: found.plan.environments.flatMap(({ volumes }) => (volumes ?? []).map(({ name }) => name)) };
+    }
+    if (data !== 'wipe') throw new Error('Unknown storage removal option');
     const removed = [...found.services.map((s) => s.externalId), ...found.domains.map((d) => d.host)];
     // A deliberately injected orphan, so the orphan-reporting path is exercised, not theoretical.
     const orphans = this.opts.failService ? [`${this.opts.failService}(volume)`] : [];

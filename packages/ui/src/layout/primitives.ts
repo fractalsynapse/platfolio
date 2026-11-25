@@ -270,7 +270,8 @@ function indentDeclarations(rule: readonly string[]): string {
 export function renderLayoutCss(digest: string): string {
   const containers = LAYOUT_SLOTS.map((slot) => {
     const p: LayoutPrimitive = PRIMITIVES[slot];
-    return `.${p.className} {\n  container-type: ${p.containerType};\n  /* ${slot}: ${p.note} */\n}`;
+    const rhythm = slot === 'stack' ? '\n  display: grid;\n  gap: var(--ui-space-4);' : '';
+    return `.${p.className} {\n  container-type: ${p.containerType};${rhythm}\n  /* ${slot}: ${p.note} */\n}`;
   }).join('\n\n');
 
   const compositions = LAYOUT_SLOTS

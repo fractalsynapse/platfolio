@@ -1,7 +1,8 @@
+import { WorkspaceAction } from './workspace-action.tsx';
 import * as React from 'react';
 import type { InstanceResponse, NotificationRule, TeamWithRole } from '@platfolio/api-contract/generated/types';
 import { useCommand } from '../sdk/use-operation.ts';
-import { NotificationChoice } from './notification-choice.tsx';
+import { WorkspaceChoice } from './workspace-choice.tsx';
 
 export const notificationEvents = [
   { value: 'deployment-failed', label: 'Deployment failed' },
@@ -45,20 +46,20 @@ export function NotificationRuleForm({ teams, apps, initial, onSaved, onCancel }
 
   return <form className="ui-workspace-form" aria-label={initial ? 'Edit notification rule' : 'New notification rule'} onSubmit={(eventObject) => void submit(eventObject)}>
     {initial ? <p>{chosen?.name ?? 'App unavailable'}</p> : <>
-      <NotificationChoice label="Team" value={teamId} options={teams.map((team) => ({ value: team.teamId, label: team.name }))}
+      <WorkspaceChoice label="Team" value={teamId} options={teams.map((team) => ({ value: team.teamId, label: team.name }))}
         onChange={(value) => { setTeam(value); setInstance(''); setEnvironment(''); }} />
-      {options.length > 0 ? <NotificationChoice label="App" value={chosen?.id ?? ''} options={options.map((app) => ({ value: app.id, label: app.name }))}
+      {options.length > 0 ? <WorkspaceChoice label="App" value={chosen?.id ?? ''} options={options.map((app) => ({ value: app.id, label: app.name }))}
         onChange={(value) => { setInstance(value); setEnvironment(''); }} /> : <p>No apps in this team.</p>}
     </>}
-    <NotificationChoice label="Environment" value={environment} options={[
+    <WorkspaceChoice label="Environment" value={environment} options={[
       { value: '', label: 'Any environment' },
       ...(chosen?.environments.map((item) => ({ value: item.environment, label: item.environment })) ?? []),
     ]} onChange={setEnvironment} />
-    <NotificationChoice label="Event" value={event} options={notificationEvents} onChange={setEvent} />
+    <WorkspaceChoice label="Event" value={event} options={notificationEvents} onChange={setEvent} />
     {problem && <p role="alert">{problem}</p>}
     <div className="ui-workspace-links">
-      <button type="submit" className="ui-workspace-primary ui-hit-primary" disabled={busy || !chosen}>Save rule</button>
-      <button type="button" className="ui-workspace-trigger ui-hit-primary" onClick={onCancel} disabled={busy}>Cancel</button>
+      <WorkspaceAction type="submit" variant="primary" disabled={busy || !chosen}>Save rule</WorkspaceAction>
+      <WorkspaceAction type="button" onClick={onCancel} disabled={busy}>Cancel</WorkspaceAction>
     </div>
   </form>;
 }

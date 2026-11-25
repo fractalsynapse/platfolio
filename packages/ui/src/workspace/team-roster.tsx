@@ -1,3 +1,4 @@
+import { WorkspaceAction } from './workspace-action.tsx';
 import * as React from 'react';
 import type { SuccessOf } from '@platfolio/api-contract/generated/types';
 import { ageLabel, useClock } from '../components/freshness.ts';
@@ -35,7 +36,7 @@ export function TeamRoster({ teamId }: { readonly teamId: string }) {
     <h2 id="team-roster-heading">Roster</h2>
     {roster.state.status === 'pending' && <p role="status">Loading members…</p>}
     {roster.state.status === 'failed' && <p role="status">Couldn’t load members.{' '}
-      <button type="button" className="ui-workspace-trigger ui-hit-primary" onClick={roster.reload}>Try again</button>
+      <WorkspaceAction type="button" onClick={roster.reload}>Try again</WorkspaceAction>
     </p>}
     {problem && <p role="alert">{problem}</p>}
     {roster.state.status === 'loaded' && <>
@@ -51,11 +52,11 @@ export function TeamRoster({ teamId }: { readonly teamId: string }) {
             </p></div>
             {!member.self && (editing ? <div>
               <p>{selection.change === 'remove' ? `Remove ${name} from this team?` : `Set ${name} as ${selection.change}?`}</p>
-              <button type="button" className="ui-workspace-primary ui-hit-primary" disabled={busy} onClick={() => void apply(selection)}>Confirm</button>{' '}
-              <button type="button" className="ui-workspace-trigger ui-hit-primary" disabled={busy} onClick={() => setSelection(undefined)}>Cancel</button>
+              <WorkspaceAction type="button" variant="primary" disabled={busy} onClick={() => void apply(selection)}>Confirm</WorkspaceAction>{' '}
+              <WorkspaceAction type="button" disabled={busy} onClick={() => setSelection(undefined)}>Cancel</WorkspaceAction>
             </div> : <div className="ui-workspace-links">
-              <button type="button" className="ui-workspace-trigger ui-hit-primary" disabled={busy} onClick={() => { setProblem(''); setSelection({ member, change: role }); }}>Set as {role}</button>
-              <button type="button" className="ui-workspace-trigger ui-hit-primary" disabled={busy} onClick={() => { setProblem(''); setSelection({ member, change: 'remove' }); }}>Remove</button>
+              <WorkspaceAction type="button" disabled={busy} onClick={() => { setProblem(''); setSelection({ member, change: role }); }}>Set as {role}</WorkspaceAction>
+              <WorkspaceAction type="button" disabled={busy} onClick={() => { setProblem(''); setSelection({ member, change: 'remove' }); }}>Remove</WorkspaceAction>
             </div>)}
           </li>;
         })}

@@ -1,3 +1,4 @@
+import * as React from 'react';
 import { WorkspaceLink } from './workspace-link.tsx';
 import { WorkspacePanel } from './workspace-panel.tsx';
 
@@ -9,7 +10,7 @@ export interface ActivityEntry {
   readonly href?: string;
 }
 
-export function ActivityFeed({ title, empty, entries }: { title: string; empty: string; entries: readonly ActivityEntry[] }) {
+export function ActivityFeed({ title, empty, entries }: { title: string; empty: string; entries: readonly ActivityEntry[] }): React.ReactElement {
   return <WorkspacePanel title={title}>
     {entries.length ? <ol className="ui-workspace-list">
       {entries.map((entry) => <li className="ui-workspace-row" key={entry.id}>

@@ -1,18 +1,17 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import type { StarterLaunch, StarterLaunchEvent, StarterLaunchReport, StarterRemoval } from '../apps/control-plane/src/starter-launch.ts';
-import { FREE_STARTER_RELEASE } from '../packages/manifest/src/template-catalog.ts';
-import { customerRailway, type CustomerRailwayGrant } from './customer-railway.ts';
-import { launchStarterApp } from './launch-starter-app.ts';
+import type { SourceReleaseHosting } from '../packages/contracts/src/source-release-hosting.ts';
 
-const app = FREE_STARTER_RELEASE.template;
-
-export function customerLaunchRun(teamId: string, journalPath: string, grantForLaunch?: () => Promise<CustomerRailwayGrant>): StarterLaunch & {
+export function customerLaunchRun(teamId: string, journalPath: string, provider: SourceReleaseHosting): StarterLaunch & {
   redeploy: () => StarterLaunchReport;
   changeBrand: (value: string) => StarterLaunchReport;
 } {
   const journal: StarterLaunchReport & { publicBrand?: string } = existsSync(journalPath)
     ? JSON.parse(readFileSync(journalPath, 'utf8'))
-    : { state: 'idle', events: [], template: app, revision: FREE_STARTER_RELEASE.revision, retainedVolumes: [] };
+    : { state: 'idle', events: [], template: provider.template, revision: provider.revision, retainedVolumes: [] };
+  if (journal.template !== provider.template) {
+    throw new Error('The launch journal belongs to a different template');
+  }
   let { publicBrand, ...report } = journal;
   function save() {
     const pending = `${journalPath}.tmp`;
@@ -36,20 +35,18 @@ export function customerLaunchRun(teamId: string, journalPath: string, grantForL
       : { step: 'Launch approved', state: 'READY', detail: 'One staging project, one database and one public HTTPS link.' });
     void (async () => {
       try {
-        const grant = await grantForLaunch?.();
-        if (!grant?.projectId) {
-          await customerRailway({ kind: 'installation', name: 'platfolio' }, undefined, grant);
-          event({ step: 'Find your Platfolio installation', state: 'READY' });
-        }
-        const installed = await launchStarterApp(app, report.projectId, (data) => {
-          if (data.step === 'Railway project' && data.resourceId) report.projectId = data.resourceId;
-          event(data);
-        }, grant, publicBrand);
+        const installed = await provider.deploy({
+          ...(report.projectId ? { projectId: report.projectId } : {}),
+          ...(publicBrand === undefined ? {} : { publicLabel: publicBrand }),
+        }, {
+          step: event,
+          project(id) { report.projectId = id; save(); },
+        });
         report = { ...report, state: 'ready', projectId: installed.project, deploymentId: installed.deployment, origin: installed.origin };
         event({ step: 'Open your app', state: 'READY' });
       } catch {
         report.state = 'failed';
-        event({ step: 'Resume setup', state: 'FAILED', detail: 'Railway setup did not finish. Check the last completed step and resume to reuse its resources.' });
+        event({ step: 'Resume setup', state: 'FAILED', detail: 'Hosting setup did not finish. Check the last completed step and resume to reuse its resources.' });
       }
     })();
     return report;
@@ -61,8 +58,7 @@ export function customerLaunchRun(teamId: string, journalPath: string, grantForL
     event({ step: data === 'keep' ? 'Remove and keep data' : 'Remove and wipe data', state: 'WORKING', resourceId: projectId });
     void (async () => {
       try {
-        const rail = await customerRailway({ kind: 'app', name: app, id: projectId }, undefined, await grantForLaunch?.());
-        const removal = await rail.remove(data);
+        const removal = await provider.remove(projectId, data);
         delete report.origin;
         report.retainedVolumes = removal.retainedVolumes;
         if (data === 'wipe') {
@@ -70,14 +66,14 @@ export function customerLaunchRun(teamId: string, journalPath: string, grantForL
           delete report.projectId;
           delete report.deploymentId;
           report.state = 'wiped';
-          event({ step: 'Removal complete', state: 'READY', detail: 'Railway confirmed the app project is gone. Volume deletion follows Railway’s recovery window.' });
+          event({ step: 'Removal complete', state: 'READY', detail: 'The hosting provider confirmed the app project is gone. Stored data follows the provider’s deletion policy.' });
         } else {
           report.state = 'kept';
           event({ step: 'Removal complete', state: 'READY', detail: 'App and database deployments stopped. Storage remains attached for recovery and may incur storage charges.' });
         }
       } catch {
         report.state = 'failed';
-        event({ step: 'Remove app', state: 'FAILED', detail: 'Railway could not verify complete removal. Retry the selected removal option.' });
+        event({ step: 'Remove app', state: 'FAILED', detail: 'The hosting provider could not verify complete removal. Retry the selected removal option.' });
       }
     })();
     return report;

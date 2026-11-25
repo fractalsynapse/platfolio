@@ -1,3 +1,4 @@
+import { WorkspaceAction } from './workspace-action.tsx';
 import * as React from 'react';
 import { ageLabel, useClock } from '../components/freshness.ts';
 import { useCommand, useOperation } from '../sdk/use-operation.ts';
@@ -26,15 +27,15 @@ export function NotificationEmailPreference() {
 
   if (preference.state.status === 'pending') return <p role="status">Checking your email preference…</p>;
   if (preference.state.status === 'failed') return <p role="status">Couldn’t check your email preference.{' '}
-    <button type="button" className="ui-workspace-trigger ui-hit-primary" onClick={preference.reload}>Try again</button>
+    <WorkspaceAction type="button" onClick={preference.reload}>Try again</WorkspaceAction>
   </p>;
   if (preference.state.status !== 'loaded') return null;
   const { available, enabled } = preference.state.data;
   return <WorkspacePanel title="Email alerts">
     <p>{available ? 'Send matching alerts to your verified primary email address.' : 'Email delivery is unavailable in this installation.'}</p>
     <p className="ui-workspace-meta">{ageLabel(preference.state.freshness, clock().toISOString()).text}</p>
-    {(available || enabled) && <button type="button" className="ui-workspace-trigger ui-hit-primary" disabled={pending}
-      onClick={() => void change(!enabled)}>{pending ? 'Saving…' : enabled ? 'Turn off email alerts' : 'Turn on email alerts'}</button>}
+    {(available || enabled) && <WorkspaceAction type="button" disabled={pending}
+      onClick={() => void change(!enabled)}>{pending ? 'Saving…' : enabled ? 'Turn off email alerts' : 'Turn on email alerts'}</WorkspaceAction>}
     {error && <p role="alert">{error}</p>}
   </WorkspacePanel>;
 }

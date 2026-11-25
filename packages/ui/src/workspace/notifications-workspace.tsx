@@ -1,3 +1,4 @@
+import { WorkspaceAction } from './workspace-action.tsx';
 import * as React from 'react';
 import type { NotificationRule, TeamWithRole } from '@platfolio/api-contract/generated/types';
 import { ageLabel, useClock } from '../components/freshness.ts';
@@ -36,7 +37,7 @@ export function NotificationsWorkspace({ teams }: { readonly teams: readonly Tea
   const apps = instances.state.status === 'loaded' ? instances.state.data : [];
   return <>
     <div className="ui-workspace-heading"><h1>Notifications</h1>
-      {!editing && teams.length > 0 && <button type="button" className="ui-workspace-primary ui-hit-primary" onClick={() => setEditing('new')}>New rule</button>}
+      {!editing && teams.length > 0 && <WorkspaceAction type="button" variant="primary" onClick={() => setEditing('new')}>New rule</WorkspaceAction>}
     </div>
     <p>Choose which app events you follow.</p>
     <NotificationEmailPreference />
@@ -46,10 +47,10 @@ export function NotificationsWorkspace({ teams }: { readonly teams: readonly Tea
     {problem && <p role="alert">{problem}</p>}
     {feed.state.status === 'pending' && <p role="status">Loading notifications…</p>}
     {feed.state.status === 'failed' && <p role="status">Couldn’t load notifications.{' '}
-      <button type="button" className="ui-workspace-trigger ui-hit-primary" onClick={feed.reload}>Try again</button>
+      <WorkspaceAction type="button" onClick={feed.reload}>Try again</WorkspaceAction>
     </p>}
     {instances.state.status === 'failed' && <p role="status">Couldn’t load apps.{' '}
-      <button type="button" className="ui-workspace-trigger ui-hit-primary" onClick={instances.reload}>Try again</button>
+      <WorkspaceAction type="button" onClick={instances.reload}>Try again</WorkspaceAction>
     </p>}
     {feed.state.status === 'loaded' && <>
       <p className="ui-workspace-meta">{ageLabel(feed.state.freshness, clock().toISOString()).text}</p>
@@ -64,9 +65,9 @@ export function NotificationsWorkspace({ teams }: { readonly teams: readonly Tea
                 <p className="ui-workspace-meta">{[team?.name, app?.name, rule.environment ?? 'Any environment', rule.enabled ? 'Active' : 'Paused'].filter(Boolean).join(' · ')}</p>
               </div>
               <div className="ui-workspace-links">
-                <button type="button" className="ui-workspace-trigger ui-hit-primary" disabled={!app || busy || !!editing} onClick={() => setEditing(rule)}>Edit</button>
-                <button type="button" className="ui-workspace-trigger ui-hit-primary" disabled={busy || !!editing} onClick={() => void change(rule, 'toggle')}>{rule.enabled ? 'Pause' : 'Resume'}</button>
-                <button type="button" className="ui-workspace-trigger ui-hit-primary" disabled={busy || !!editing} onClick={() => void change(rule, 'remove')}>Remove</button>
+                <WorkspaceAction type="button" disabled={!app || busy || !!editing} onClick={() => setEditing(rule)}>Edit</WorkspaceAction>
+                <WorkspaceAction type="button" disabled={busy || !!editing} onClick={() => void change(rule, 'toggle')}>{rule.enabled ? 'Pause' : 'Resume'}</WorkspaceAction>
+                <WorkspaceAction type="button" disabled={busy || !!editing} onClick={() => void change(rule, 'remove')}>Remove</WorkspaceAction>
               </div>
             </li>;
           })}

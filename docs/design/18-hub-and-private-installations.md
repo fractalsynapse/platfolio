@@ -466,3 +466,72 @@ enabled and the address is verified before each delivery. Disabling email leaves
 workspace rules intact. Deliveries reference the event and person and carry a bounded
 retry window. Address selection and team-specific destinations require the shared
 address-ownership check in D70.
+
+## Verified removal
+
+A keep-data request stops workloads inside the bound provider project. The project, service
+configuration, and storage remain available for recovery. Verify that workloads stopped and
+that the same storage still exists. A wipe request can delete the bound project and its data.
+Require provider acceptance and an inventory read that confirms absence. A refused request,
+an unreadable inventory, or surviving resources cannot produce a successful removal report.
+
+## Hosting plugin selection
+
+A trusted runtime registers hosting provider implementations that declare the infrastructure
+contract they support. Each instance persists its provider identifier. Planning, execution,
+observation, and removal resolve that identifier from the authorized instance. Browser requests
+can select an installed provider when creating an instance. Operation requests use the stored
+binding and cannot choose a different provider or target.
+
+The execution location retains its existing custody boundary. A managed action loads its
+local adapter, and a private installation uses its customer-side worker. An unconfigured
+execution path reports that it is unavailable. The pinned Starter Web release uses a source
+deployment adapter for its build, configuration, domain, and removal operations. The
+customer worker still holds its grant in OpenBao and the existing launch journal follows the
+same exact project across retries.
+
+## Browser launch
+
+A team owner starts in Connections. Railway consent is the only provider page the owner
+needs to open. Platfolio lists workspaces included in the approval, then creates the named
+project with staging, production, or both. The configuration uses separate service placements
+and storage in each selected environment. Platfolio verifies the published installer config
+against the release digest before creating anything and refuses a pre-existing project of the
+same name. The progress report shows the resulting project ID and the site links that passed
+readiness checks. The worker's readiness check requires a private response from OpenBao.
+The owner initializes or unseals OpenBao before app secret operations become available.
+
+The OAuth grant authorizes one launch and is discarded after that run. The owner’s browser
+generates the first sign-in password and sends only its salted verifier for
+Keycloak to import. Save the password from Connections before leaving. The first sign-in
+requires a password change. Subsequent hosting authorization and OpenBao recovery are
+controlled in the private installation.
+
+To enable the browser launcher, publish the verified candidate installer rendered by
+`scripts/render-railway-installer.ts`. Configure the hub API's
+`PLATFOLIO_RAILWAY_INSTALL_TEMPLATE`, `PLATFOLIO_RAILWAY_INSTALL_CONFIG_SHA`, and
+`PLATFOLIO_RAILWAY_INSTALL_REVISION` from that published config and release.
+The hub uses a public PKCE client in `PLATFOLIO_HUB_RAILWAY_OAUTH_CLIENT` with the exact
+HTTPS `PLATFOLIO_HUB_RAILWAY_OAUTH_CALLBACK` ending in
+`/api/v1/hosting/installation-authorization/callback`. The browser launcher is unavailable
+until those values are configured. Existing installations can continue to sign in and manage
+their apps.
+
+Staging can use its reviewed installer artifact with an owned, unpublished Railway template.
+Set `PLATFOLIO_RAILWAY_INSTALL_CONFIG_JSON` to the renderer's JSON output. The hub checks
+the artifact's revision and digest before serving it to Railway through the template deployment
+API. Never put a password or token in the installer artifact.
+
+The hub keeps a credential-free installation journal. Team owners can reopen the launch
+from Connections, reauthorize the original workspace, and continue. The provider binds
+the customer's project to the journal ID before deploying and checks that binding
+on retry. Each selected environment has a durable submission checkpoint. Recovery
+checks an earlier submission instead of sending it a second time. If the provider
+cannot establish the outcome of an earlier submission, Platfolio reports the unresolved
+environment and preserves the customer's resources.
+
+A ready installation can add an environment from Connections. The new environment
+gets its own services, domain, database, OpenBao, and first owner sign-in. Previously
+verified environments and their data stay in place. An unfinished launch resumes with
+its original release and environment choices. An expansion uses the current installer
+release for the new environment.

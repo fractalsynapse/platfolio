@@ -1,23 +1,29 @@
+import { customerInstallationNames, installationWorkerReadiness } from '../packages/contracts/src/customer-installation-services.ts';
+import type { SourceReleaseProgress } from '../packages/contracts/src/source-release-hosting.ts';
+import { deployRailwayTemplate, readRailwayTemplate } from '../packages/contracts/src/railway-template.ts';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { setTimeout as delay } from 'node:timers/promises';
 import { HttpRailwayTransport, type RailwayTransport } from '../packages/contracts/src/railway-transport.ts';
+import { configureRailwayService, createRailwayServiceDomain, deployRailwayService, writeRailwayVariable } from '../packages/contracts/src/railway-service.ts';
+import { createRailwayProject, listRailwayProjects, type RailwayProject } from '../packages/contracts/src/railway-project.ts';
+import { railwayRetainedVolumeIds, stopRailwayDeployments, wipeRailwayProject } from '../packages/contracts/src/railway-removal.ts';
 import { customHostname, readRailwayCustomDomain, type RailwayCustomDomain } from '../packages/contracts/src/railway-domains.ts';
 
 import { openBaoConfig, openBaoData, openBaoImage, openBaoStart, workerData, workerStart } from './customer-installation-topology.ts';
 
 const provider = new HttpRailwayTransport();
-const baoService = 'openbao-staging';
-const workerService = 'installation-worker-staging';
+const installationNames = customerInstallationNames('staging');
+const { vault: baoService, worker: workerService } = installationNames;
 const platformProjectName = 'platfolio';
-const platformServices = new Set([baoService, workerService, 'private-api-staging', 'private-site-staging', 'private-identity-staging', 'private-db-staging']);
+const platformServices = new Set<string>(Object.values(installationNames));
 const appServices = new Set(['web-staging', 'app-db-staging']);
 export type CustomerProjectTarget = { name: string; kind: 'installation' | 'app'; id?: string; create?: boolean };
 export type CustomerRailwayGrant = { token: string; workspaceId: string; projectId?: string };
-export type RailwayProgress = (event: { step: string; state: string; resourceId?: string; detail?: string }) => void;
+type RailwayProgress = (event: SourceReleaseProgress) => void;
 type Entry = { id: string; name: string };
 type Edges<T> = { edges: { node: T }[] };
-type Stage = { id: string; name: string; description?: string | null; environments: Edges<Entry> };
+type Stage = RailwayProject;
 type Instance = { serviceId: string; serviceName: string; source: { image?: string; repo?: string } | null; startCommand?: string | null; latestDeployment: { id: string; status: string } | null; activeDeployments: { id: string; status: string }[]; domains: { customDomains: { id: string }[]; serviceDomains: { id: string; domain: string }[] } };
 
 export async function customerRailway(target: CustomerProjectTarget, progress?: RailwayProgress, grant?: CustomerRailwayGrant, transport: RailwayTransport = provider) {
@@ -29,23 +35,13 @@ export async function customerRailway(target: CustomerProjectTarget, progress?: 
   const token = grant?.token ?? process.env.RAILWAY_TOKEN;
   const workspaceId = grant?.workspaceId ?? process.env.RAILWAY_WORKSPACE_ID;
   if (!token || !workspaceId) throw new Error('Provide the customer workspace ID and workspace token locally');
+  const credential = { kind: 'workspace' as const, token };
   const call = <T>(operation: string, query: string, variables: Record<string, unknown>) =>
-    transport.graphql<T>({ operation, query, variables, credential: { kind: 'workspace', token } });
+    transport.graphql<T>({ operation, query, variables, credential });
   const projectFields = 'id name description environments{edges{node{id name}}}';
-  async function workspaceProjects(): Promise<Stage[]> {
-    const result: Stage[] = [];
-    let after: string | null = null;
-    do {
-      const page: { projects: Edges<Stage> & { pageInfo: { hasNextPage: boolean; endCursor: string | null } } } =
-        await call('customer projects', `query($w:String!,$after:String){projects(workspaceId:$w,first:100,after:$after){edges{node{${projectFields}}} pageInfo{hasNextPage endCursor}}}`, { w: workspaceId, after });
-      result.push(...page.projects.edges.map(({ node }) => node));
-      const next = page.projects.pageInfo;
-      if (!next.hasNextPage) return result;
-      if (!next.endCursor || next.endCursor === after) throw new Error('Could not verify the full Railway workspace');
-      after = next.endCursor;
-    } while (after);
-    return result;
-  }
+  const access = { transport, credential };
+  const workspaceProjects = () => listRailwayProjects(access, workspaceId);
+
   if (grant?.projectId && (target.kind !== 'app' || target.id !== grant.projectId)) throw new Error('The Railway grant is limited to the selected app project');
   const selected = target.id ? (await call<{ project: Stage & { workspaceId: string } }>(
     target.kind === 'app' ? 'selected app project' : 'selected installation project',
@@ -56,10 +52,14 @@ export async function customerRailway(target: CustomerProjectTarget, progress?: 
   let project = matches[0];
   if (target.id && project?.id !== target.id) throw new Error('Railway project ID does not match the approved name and workspace');
   if (!project && target.create) {
-    const result = await call<{ projectCreate: Stage }>('customer project creation',
-      `mutation($input:ProjectCreateInput!){projectCreate(input:$input){${projectFields}}}`,
-      { input: { name: target.name, description: marker, workspaceId, defaultEnvironmentName: 'staging', prDeploys: false, isPublic: false } });
-    project = result.projectCreate;
+    const id = await createRailwayProject(access, {
+      name: target.name, description: marker, workspaceId, defaultEnvironmentName: 'staging', prDeploys: false,
+    });
+    project = (await call<{ project: Stage }>('selected created project',
+      'query ($id: String!) { project(id: $id) { id name description workspaceId environments { edges { node { id name } } } } }', { id })).project;
+    if (project?.id !== id || project.workspaceId !== workspaceId || project.name !== target.name) {
+      throw new Error('Could not verify the newly created Railway project');
+    }
   }
   const environments = project?.environments.edges.map(({ node }) => node);
   const environment = environments?.find(({ name }) => name === 'staging');
@@ -94,17 +94,11 @@ export async function customerRailway(target: CustomerProjectTarget, progress?: 
       'mutation($input:ServiceCreateInput!){serviceCreate(input:$input){id name}}', { input: { ...scope, name, ...(image ? { source: { image } } : {}) } });
     return serviceCreate.id;
   }
-  async function configure(serviceId: string, input: Record<string, unknown>) {
-    const result = await call<{ serviceInstanceUpdate: boolean }>('stage instance settings',
-      'mutation($environmentId:String!,$serviceId:String!,$input:ServiceInstanceUpdateInput!){serviceInstanceUpdate(environmentId:$environmentId,serviceId:$serviceId,input:$input)}',
-      { environmentId: scope.environmentId, serviceId, input });
-    if (!result.serviceInstanceUpdate) throw new Error('Railway did not apply service settings');
-  }
-  async function setConfig(serviceId: string, name: string, value: string) {
-    const result = await call<{ variableUpsert: boolean }>('stage runtime configuration',
-      'mutation($input:VariableUpsertInput!){variableUpsert(input:$input)}', { input: { ...scope, serviceId, name, value, skipDeploys: true } });
-    if (!result.variableUpsert) throw new Error(`Railway did not apply ${name}`);
-  }
+  const placement = (serviceId: string) => ({ environmentId: scope.environmentId, serviceId });
+  const configure = (serviceId: string, input: Record<string, unknown>) =>
+    configureRailwayService(access, placement(serviceId), input);
+  const setConfig = (serviceId: string, name: string, value: string) =>
+    writeRailwayVariable(access, { ...scope, serviceId, name, value });
   async function assertPrivate(serviceId: string) {
     const service = (await instances()).find((item) => item.serviceId === serviceId);
     const { tcpProxies } = await call<{ tcpProxies: { id: string }[] }>('stage TCP ingress',
@@ -141,17 +135,14 @@ export async function customerRailway(target: CustomerProjectTarget, progress?: 
   }
   async function deployImage(serviceId: string) {
     const current = (await instances()).find((item) => item.serviceId === serviceId);
-    const { serviceInstanceDeploy } = await call<{ serviceInstanceDeploy: boolean }>('stage image deployment',
-      'mutation($serviceId:String!,$environmentId:String!){serviceInstanceDeploy(serviceId:$serviceId,environmentId:$environmentId,latestCommit:true)}',
-      { serviceId, environmentId: scope.environmentId });
-    if (!serviceInstanceDeploy) throw new Error('Railway did not accept the image deployment');
+    await deployRailwayService(access, placement(serviceId));
     return wait(serviceId, undefined, current?.latestDeployment?.id);
   }
   async function publicOrigin(serviceId: string, port: number) {
     const service = (await instances()).find((item) => item.serviceId === serviceId);
     if (!service) throw new Error('Railway service is outside the staging placement');
-    const domain = service.domains.serviceDomains[0]?.domain ?? (await call<{ serviceDomainCreate: { domain: string } }>('stage HTTPS ingress',
-      'mutation($input:ServiceDomainCreateInput!){serviceDomainCreate(input:$input){domain}}', { input: { environmentId: scope.environmentId, serviceId, targetPort: port } })).serviceDomainCreate.domain;
+    const domain = service.domains.serviceDomains[0]?.domain ??
+      await createRailwayServiceDomain(access, placement(serviceId), port);
     if (!/^[a-z0-9-]+\.up\.railway\.app$/.test(domain)) throw new Error('Unexpected Railway ingress hostname');
     return `https://${domain}`;
   }
@@ -203,14 +194,13 @@ export async function customerRailway(target: CustomerProjectTarget, progress?: 
     let database = (await instances()).find((item) => item.serviceName === name);
     const existingDatabase = Boolean(database);
     if (!database) {
-      type Template = { id: string; serializedConfig: { services: Record<string, Record<string, unknown>> } };
-      const { template } = await call<{ template: Template }>('Postgres template', 'query{template(code:"postgresql"){id serializedConfig}}', {});
-      const entries = Object.entries(template.serializedConfig.services);
-      if (entries.length !== 1 || !entries[0]) throw new Error('Unexpected Railway Postgres template');
+      const { id: templateId, serializedConfig } = await readRailwayTemplate(access, 'postgresql');
+      const entries = Object.entries(serializedConfig?.services ?? {});
+      if (!templateId || entries.length !== 1 || !entries[0]) throw new Error('Unexpected Railway Postgres template');
       const [key, configuration] = entries[0];
       const { networking: _networking, ...privateConfiguration } = configuration;
-      await call('stage private Postgres creation', 'mutation($input:TemplateDeployV2Input!){templateDeployV2(input:$input){operationId}}', {
-        input: { ...scope, workspaceId, templateId: template.id, serializedConfig: { services: { [key]: { ...privateConfiguration, name } } } },
+      await deployRailwayTemplate(access, {
+        ...scope, workspaceId: workspaceId!, templateId, serializedConfig: { services: { [key]: { ...privateConfiguration, name } } },
       });
       for (let attempt = 0; attempt < 60 && !database; attempt++) {
         await delay(2000);
@@ -258,37 +248,25 @@ export async function customerRailway(target: CustomerProjectTarget, progress?: 
 
   async function remove(data: 'keep' | 'wipe') {
     if (target.kind !== 'app') throw new Error('App removal must target its own project');
-    const services = await instances();
-    if (services.some((service) => service.source?.repo)) throw new Error('Disconnect automatic repository deployment before removing this app');
+    const read = async () => (await instances()).flatMap((service) => {
+      if (service.source?.repo) throw new Error('Disconnect automatic repository deployment before removing this app');
+      return [...service.activeDeployments, ...(service.latestDeployment ? [service.latestDeployment] : [])];
+    });
     if (data === 'wipe') {
+      await read();
       if (grant?.projectId) throw new Error('A project-only connection cannot verify permanent project removal');
-      const { projectDelete } = await call<{ projectDelete: boolean }>('schedule app project removal',
-        'mutation($id:String!){projectDelete(id:$id)}', { id: scope.projectId });
-      if (!projectDelete) throw new Error('Railway did not accept project deletion');
-      if ((await workspaceProjects()).some(({ id }) => id === scope.projectId)) throw new Error('Railway still reports the app project');
+      const failure = await wipeRailwayProject({
+        transport, credential, projectId: scope.projectId,
+        projectExists: async () => (await workspaceProjects()).some(({ id }) => id === scope.projectId),
+      });
+      if (failure) throw new Error(failure.message);
       return { projectId: scope.projectId, retainedVolumes: [] as string[] };
     }
-    const running = new Set(['INITIALIZING', 'QUEUED', 'WAITING', 'BUILDING', 'DEPLOYING', 'SUCCESS', 'SLEEPING', 'NEEDS_APPROVAL']);
-    const activeIds = (rows: Instance[], includeRemoving = false) => [...new Set(rows.flatMap((row) => [
-      ...row.activeDeployments, ...(row.latestDeployment ? [row.latestDeployment] : []),
-    ]).filter(({ status }) => running.has(status) || (includeRemoving && status === 'REMOVING')).map(({ id }) => id))];
-    const volumes = async () => (await call<{ environment: { volumeInstances: Edges<{ volumeId: string }> } }>('verify retained storage',
-      'query($e:String!){environment(id:$e){volumeInstances(first:100){edges{node{volumeId}}}}}', { e: scope.environmentId }))
-      .environment.volumeInstances.edges.map(({ node }) => node.volumeId).sort();
+    const volumes = () => railwayRetainedVolumeIds(access, scope.environmentId);
     const kept = await volumes();
-    for (const id of activeIds(services)) {
-      // A mounted database can take longer to detach than the mutation request. The read-back decides.
-      await call<{ deploymentRemove: boolean }>('remove app deployment', 'mutation($id:String!){deploymentRemove(id:$id)}', { id })
-        .catch(() => undefined);
-    }
-    for (let attempt = 0; attempt < 60; attempt++) {
-      if (!(activeIds(await instances(), true).length)) {
-        if ((await volumes()).join() !== kept.join()) throw new Error('Storage changed while stopping the app');
-        return { projectId: scope.projectId, retainedVolumes: kept };
-      }
-      await delay(1500);
-    }
-    throw new Error('An app deployment is still active');
+    await stopRailwayDeployments({ transport, credential, read, sleep: delay, attempts: 60, intervalMs: 1500 });
+    if ((await volumes()).join() !== kept.join()) throw new Error('Storage changed while stopping the app');
+    return { projectId: scope.projectId, retainedVolumes: kept };
   }
 
   await instances();
@@ -312,7 +290,7 @@ export async function customerRailway(target: CustomerProjectTarget, progress?: 
     for (const [name, value] of Object.entries(runtime)) {
       await setConfig(service, name, value).catch(() => { throw new Error(`Railway did not apply worker setting ${name}`); });
     }
-    await configure(service, { source: { image }, numReplicas: 1, healthcheckPath: '/status', healthcheckTimeout: 120,
+    await configure(service, { source: { image }, numReplicas: 1, healthcheckPath: installationWorkerReadiness, healthcheckTimeout: 120,
       startCommand: workerStart });
     const deployment = await deployImage(service);
     await assertPrivate(service);

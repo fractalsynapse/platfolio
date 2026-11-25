@@ -19,7 +19,7 @@ import { createMutationSandbox } from './mutation-sandbox.ts';
  *
  * ## Every case runs inside `mutation-sandbox.ts`
  *
- * This file plants a type error in `packages/ui/src/components/instances.tsx` -- the same file
+ * This file plants a type error in `packages/ui/src/components/instance-list.tsx` -- the same file
  * `gates-falsify.test.ts` plants `isMobile` in -- and `node --test` runs the two files in parallel processes.
  * Before the sandbox, whichever baseline ran second read the other's probe and failed an assertion that was
  * telling the truth about a tree it did not own. The sandbox holds the tree for the duration of each case and
@@ -93,12 +93,12 @@ test('a type error inside a .tsx screen fails the type-check step and names the 
   // The whole point of #259. Before it, this file would have been transpiled by `tsx` at run time and compiled by
   // nothing, and every gate that reads it as text would still have been green.
   sandbox.exclusive('type error in a .tsx screen', () => {
-    const target = path.join(ROOT, 'packages/ui/src/components/instances.tsx');
-    const original = sandbox.append('packages/ui/src/components/instances.tsx', '\nexport const __typeErrorProbe = (): string => 42;\n');
+    const target = path.join(ROOT, 'packages/ui/src/components/instance-list.tsx');
+    const original = sandbox.append('packages/ui/src/components/instance-list.tsx', '\nexport const __typeErrorProbe = (): string => 42;\n');
     try {
       const { code, output } = typecheck();
       assert.notEqual(code, 0, 'DID NOT BITE: a type error in a .tsx passed the type-check step');
-      assert.match(output, /instances\.tsx\(\d+,\d+\): error TS/);
+      assert.match(output, /instance-list\.tsx\(\d+,\d+\): error TS/);
       assert.match(output, /TS2322|not assignable/);
     } finally {
       sandbox.restore();

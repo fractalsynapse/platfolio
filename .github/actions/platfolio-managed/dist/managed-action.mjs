@@ -15,9 +15,9 @@ var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require
 var __commonJS = (cb, mod) => function __require2() {
   return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
 };
-var __export = (target, all) => {
+var __export = (target2, all) => {
   for (var name in all)
-    __defProp(target, name, { get: all[name], enumerable: true });
+    __defProp(target2, name, { get: all[name], enumerable: true });
 };
 var __copyProps = (to, from, except, desc) => {
   if (from && typeof from === "object" || typeof from === "function") {
@@ -27,12 +27,12 @@ var __copyProps = (to, from, except, desc) => {
   }
   return to;
 };
-var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
+var __toESM = (mod, isNodeMode, target2) => (target2 = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
   // If the importer is in node compatibility mode or this is not an ESM
   // file that has been converted to a CommonJS file using a Babel-
   // compatible transform (i.e. "__esModule" has not been set), then set
   // "default" to the CommonJS "module.exports" for node compatibility.
-  isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
+  isNodeMode || !mod || !mod.__esModule ? __defProp(target2, "default", { value: mod, enumerable: true }) : target2,
   mod
 ));
 
@@ -238,16 +238,16 @@ var require_mutable = __commonJS({
   "node_modules/.pnpm/xtend@4.0.2/node_modules/xtend/mutable.js"(exports, module) {
     module.exports = extend2;
     var hasOwnProperty = Object.prototype.hasOwnProperty;
-    function extend2(target) {
+    function extend2(target2) {
       for (var i = 1; i < arguments.length; i++) {
         var source = arguments[i];
         for (var key in source) {
           if (hasOwnProperty.call(source, key)) {
-            target[key] = source[key];
+            target2[key] = source[key];
           }
         }
       }
-      return target;
+      return target2;
     }
   }
 });
@@ -6098,8 +6098,8 @@ function defineLazy(object2, key, getter) {
 function objectClone(obj) {
   return Object.create(Object.getPrototypeOf(obj), Object.getOwnPropertyDescriptors(obj));
 }
-function assignProp(target, prop, value) {
-  Object.defineProperty(target, prop, {
+function assignProp(target2, prop, value) {
+  Object.defineProperty(target2, prop, {
     value,
     writable: true,
     enumerable: true,
@@ -6113,8 +6113,8 @@ function rawShape(def) {
 function sourceShape(schema) {
   return rawShape(schema._zod.def) ?? schema._zod.def.shape;
 }
-function deferProp(target, key, getter) {
-  Object.defineProperty(target, key, {
+function deferProp(target2, key, getter) {
+  Object.defineProperty(target2, key, {
     get() {
       const value = getter();
       assignProp(this, key, value);
@@ -6124,36 +6124,36 @@ function deferProp(target, key, getter) {
     configurable: true
   });
 }
-function putProp(target, key, value) {
-  if (key in target)
-    assignProp(target, key, value);
+function putProp(target2, key, value) {
+  if (key in target2)
+    assignProp(target2, key, value);
   else
-    target[key] = value;
+    target2[key] = value;
 }
-function mirrorShape(target, source, keys, wrap) {
+function mirrorShape(target2, source, keys, wrap) {
   const raw = sourceShape(source);
   for (const key of keys) {
     const desc = Object.getOwnPropertyDescriptor(raw, key);
     if (!desc.enumerable)
       continue;
     if (desc.get) {
-      deferProp(target, key, () => {
+      deferProp(target2, key, () => {
         const value = source._zod.def.shape[key];
         return wrap ? wrap(value, key) : value;
       });
     } else
-      putProp(target, key, wrap ? wrap(desc.value, key) : desc.value);
+      putProp(target2, key, wrap ? wrap(desc.value, key) : desc.value);
   }
 }
-function mirrorProps(target, source) {
+function mirrorProps(target2, source) {
   for (const key of Reflect.ownKeys(source)) {
     const desc = Object.getOwnPropertyDescriptor(source, key);
     if (!desc.enumerable)
       continue;
     if (desc.get)
-      deferProp(target, key, () => source[key]);
+      deferProp(target2, key, () => source[key]);
     else
-      putProp(target, key, desc.value);
+      putProp(target2, key, desc.value);
   }
 }
 function mergeDefs(...defs) {
@@ -6332,35 +6332,35 @@ function normalizeParams(_params) {
   return params;
 }
 function createTransparentProxy(getter) {
-  let target;
+  let target2;
   return new Proxy({}, {
     get(_, prop, receiver) {
-      target ?? (target = getter());
-      return Reflect.get(target, prop, receiver);
+      target2 ?? (target2 = getter());
+      return Reflect.get(target2, prop, receiver);
     },
     set(_, prop, value, receiver) {
-      target ?? (target = getter());
-      return Reflect.set(target, prop, value, receiver);
+      target2 ?? (target2 = getter());
+      return Reflect.set(target2, prop, value, receiver);
     },
     has(_, prop) {
-      target ?? (target = getter());
-      return Reflect.has(target, prop);
+      target2 ?? (target2 = getter());
+      return Reflect.has(target2, prop);
     },
     deleteProperty(_, prop) {
-      target ?? (target = getter());
-      return Reflect.deleteProperty(target, prop);
+      target2 ?? (target2 = getter());
+      return Reflect.deleteProperty(target2, prop);
     },
     ownKeys(_) {
-      target ?? (target = getter());
-      return Reflect.ownKeys(target);
+      target2 ?? (target2 = getter());
+      return Reflect.ownKeys(target2);
     },
     getOwnPropertyDescriptor(_, prop) {
-      target ?? (target = getter());
-      return Reflect.getOwnPropertyDescriptor(target, prop);
+      target2 ?? (target2 = getter());
+      return Reflect.getOwnPropertyDescriptor(target2, prop);
     },
     defineProperty(_, prop, descriptor) {
-      target ?? (target = getter());
-      return Reflect.defineProperty(target, prop, descriptor);
+      target2 ?? (target2 = getter());
+      return Reflect.defineProperty(target2, prop, descriptor);
     }
   });
 }
@@ -6843,10 +6843,10 @@ function $constructor(name, initializer3, proto, params) {
       let up = own2;
       while (up && up !== ctorProto)
         up = Object.getPrototypeOf(up);
-      const target = up ?? own2;
-      if (!initialized.has(target)) {
-        initialized.add(target);
-        members(target, protoMembers);
+      const target2 = up ?? own2;
+      if (!initialized.has(target2)) {
+        initialized.add(target2);
+        members(target2, protoMembers);
       }
     }
     const proto2 = _.prototype;
@@ -10568,15 +10568,15 @@ function bucketFor(state, inst) {
 var handoff;
 var open = [];
 var memo = {
-  alloc(_inst, payload, empty) {
+  alloc(_inst, payload, empty2) {
     const bucket = handoff;
     if (!bucket)
-      return empty;
+      return empty2;
     handoff = void 0;
-    const entry = { value: empty, issues: null };
+    const entry = { value: empty2, issues: null };
     bucket.set(payload.value, entry);
     open.push(entry);
-    return empty;
+    return empty2;
   },
   guard(inst) {
     var _a3;
@@ -18358,8 +18358,8 @@ function withParser(schema, parser) {
     installCompiledUserMethods(clone2, schema, parser);
   return clone2;
 }
-function installCompiledUserMethods(target, source, parser) {
-  const targetAny = target;
+function installCompiledUserMethods(target2, source, parser) {
+  const targetAny = target2;
   const sourceAny = source;
   if (typeof sourceAny.safeParse === "function") {
     const originalSafeParse = sourceAny.safeParse;
@@ -20962,26 +20962,26 @@ function _stringFormat(Class2, format, fnOrRegex, _params = {}) {
 }
 
 // node_modules/.pnpm/zod@4.6.7/node_modules/zod/v4/core/to-json-schema.js
-function assignProps(target, ...sources) {
+function assignProps(target2, ...sources) {
   for (const source of sources) {
     for (const key of Reflect.ownKeys(source)) {
       if (Object.prototype.propertyIsEnumerable.call(source, key)) {
-        assignProp(target, key, source[key]);
+        assignProp(target2, key, source[key]);
       }
     }
   }
-  return target;
+  return target2;
 }
 function initializeContext(params) {
-  let target = params?.target ?? "draft-2020-12";
-  if (target === "draft-4")
-    target = "draft-04";
-  if (target === "draft-7")
-    target = "draft-07";
+  let target2 = params?.target ?? "draft-2020-12";
+  if (target2 === "draft-4")
+    target2 = "draft-04";
+  if (target2 === "draft-7")
+    target2 = "draft-07";
   return {
     processors: params.processors ?? {},
     metadataRegistry: params?.metadata ?? globalRegistry,
-    target,
+    target: target2,
     unrepresentable: params?.unrepresentable ?? "throw",
     override: params?.override ?? (() => {
     }),
@@ -21484,8 +21484,8 @@ var createToJSONSchemaMethod = (schema, processors = {}) => (params) => {
   return finalize(ctx, schema);
 };
 var createStandardJSONSchemaMethod = (schema, io, processors = {}) => (params) => {
-  const { libraryOptions, target } = params ?? {};
-  const ctx = initializeContext({ ...libraryOptions ?? {}, target, io, processors });
+  const { libraryOptions, target: target2 } = params ?? {};
+  const ctx = initializeContext({ ...libraryOptions ?? {}, target: target2, io, processors });
   processSchema(schema, ctx);
   extractDefs(ctx, schema);
   return finalize(ctx, schema);
@@ -22679,8 +22679,8 @@ var ZodType = /* @__PURE__ */ $constructor("ZodType", (inst, def) => {
   catch(params) {
     return _catch2(this, params);
   },
-  pipe(target) {
-    return pipe(this, target);
+  pipe(target2) {
+    return pipe(this, target2);
   },
   readonly() {
     return readonly(this);
@@ -25068,9 +25068,10 @@ function date4(params) {
 }
 
 // packages/contracts/src/generated/contract-version.ts
-var CONTRACT_VERSION = "5.15.0";
+var CONTRACT_VERSION = "6.3.0";
 
 // packages/contracts/src/infra.ts
+var CONTRACT_NAME = "infra.provider";
 var OPERATIONS = [
   "describe",
   "validatePlan",
@@ -25089,6 +25090,7 @@ var HostSchema = external_exports.string().min(1).refine((host) => /^[a-z0-9]([a
   message: "host must be a lowercase FQDN without scheme, port or wildcard"
 });
 var NameSchema = external_exports.string().min(1).refine((v) => /^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$/i.test(v), { message: "names use letters, digits, dot, underscore, hyphen" });
+var HostingProviderIdSchema = external_exports.string().max(64).regex(/^[a-z0-9]+(-[a-z0-9]+)*$/);
 var SecretRefSchema = external_exports.object({
   /** Secret name only. A value here is a validation error by construction. */
   name: NameSchema,
@@ -25220,6 +25222,9 @@ var ApplyResultSchema = external_exports.object({
   notes: external_exports.array(external_exports.object({ step: external_exports.string().min(1), code: NameSchema, message: external_exports.string().min(1) })).optional(),
   noop: external_exports.boolean()
 });
+var KEEP_DATA_FEATURE = "keep-data-on-removal";
+var HostingRemovalSchema = external_exports.object({ data: external_exports.enum(["keep", "wipe"]) }).strict();
+var HostingRemovalRequestSchema = HostingRemovalSchema.extend({ confirmation: external_exports.string().optional() });
 var DeleteResultSchema = external_exports.object({
   instanceId: NameSchema,
   removed: external_exports.array(external_exports.string().min(1)),
@@ -25236,7 +25241,7 @@ var DeleteResultSchema = external_exports.object({
    */
   releasedWithProject: external_exports.array(external_exports.string().min(1)).optional(),
   /**
-   * Volumes deliberately left in place because the plan said `retention: 'survive'`. Listed separately from
+   * Volumes deliberately left in place after a keep-data request. The plan can specify `retention: 'survive'`. Listed separately from
    * `removed` and `orphans` because the third meaning is different again: "we kept this on purpose". They are
    * also not free -- an unattached volume bills -- so the answer has to be visible to whoever asks.
    */
@@ -25263,6 +25268,30 @@ var RedeployResultSchema = external_exports.object({
   /** True when every named service was observed to have a fresh deployment after the calls. */
   verified: external_exports.boolean()
 });
+function satisfiesRange(version2, range) {
+  const parse3 = (v2) => v2.replace(/^v/, "").split("+")[0].split("-")[0].split(".").map((n) => Number(n) || 0);
+  const [major, minor, patch] = parse3(version2);
+  const cmp = (a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
+  const v = [major ?? 0, minor ?? 0, patch ?? 0];
+  const trimmed = range.trim();
+  if (trimmed === "*" || trimmed === "x") return true;
+  if (trimmed.startsWith("^")) {
+    const base = parse3(trimmed.slice(1));
+    const b = [base[0] ?? 0, base[1] ?? 0, base[2] ?? 0];
+    if (cmp(v, b) < 0) return false;
+    if (b[0] > 0) return v[0] === b[0];
+    if (b[1] > 0) return v[0] === 0 && v[1] === b[1];
+    return v[0] === 0 && v[1] === 0 && v[2] === b[2];
+  }
+  return trimmed.split(/\s+/).filter(Boolean).every((clause) => {
+    const m = clause.match(/^(>=|<=|>|<|=)?v?(\d+)(?:\.(\d+))?(?:\.(\d+))?$/);
+    if (!m) return false;
+    const op = m[1] ?? "=";
+    const t = [Number(m[2]), Number(m[3] ?? 0), Number(m[4] ?? 0)];
+    const c = cmp(v, t);
+    return op === ">=" ? c >= 0 : op === "<=" ? c <= 0 : op === ">" ? c > 0 : op === "<" ? c < 0 : c === 0;
+  });
+}
 function planIssues(plan) {
   const parsed = InfraPlanSchema.safeParse(plan);
   if (!parsed.success) {
@@ -25592,9 +25621,29 @@ var MintingRailwayCredentials = class {
   }
 };
 
+// packages/contracts/src/railway-template.ts
+async function readRailwayTemplate({ transport, credential }, code) {
+  const data = await transport.graphql({
+    operation: "template",
+    credential,
+    query: "query ($code: String!) { template(code: $code) { id serializedConfig } }",
+    variables: { code }
+  });
+  return data.template;
+}
+async function deployRailwayTemplate({ transport, credential }, input2) {
+  const data = await transport.graphql({
+    operation: "templateDeployV2",
+    credential,
+    query: "mutation ($input: TemplateDeployV2Input!) { templateDeployV2(input: $input) { operationId workflowId } }",
+    variables: { input: input2 }
+  });
+  return data.templateDeployV2;
+}
+
 // packages/contracts/src/railway-domains.ts
-function readRailwayCustomDomain(domain2) {
-  const raw = domain2.status?.dnsRecords ?? [];
+function readRailwayCustomDomain(domain3) {
+  const raw = domain3.status?.dnsRecords ?? [];
   const records = raw.flatMap((record2) => {
     const { fqdn, zone: zone2, requiredValue, currentValue, recordType, status, purpose } = record2;
     const type = recordType?.endsWith("_CNAME") ? "CNAME" : recordType?.endsWith("_TXT") ? "TXT" : recordType?.endsWith("_A") ? "A" : recordType?.endsWith("_NS") ? "NS" : void 0;
@@ -25610,8 +25659,8 @@ function readRailwayCustomDomain(domain2) {
       purpose: purpose?.endsWith("TRAFFIC_ROUTE") ? "traffic" : purpose?.endsWith("ACME_DNS01_CHALLENGE") ? "challenge" : "unspecified"
     }];
   });
-  const verificationHost = domain2.status?.verificationDnsHost;
-  const verificationValue = domain2.status?.verificationToken;
+  const verificationHost = domain3.status?.verificationDnsHost;
+  const verificationValue = domain3.status?.verificationToken;
   const zone = raw.find((record2) => record2.zone)?.zone;
   if (verificationHost && verificationValue && zone) {
     const fqdn = verificationHost === zone || verificationHost.endsWith("." + zone) ? verificationHost : `${verificationHost}.${zone}`;
@@ -25622,17 +25671,17 @@ function readRailwayCustomDomain(domain2) {
       zone,
       type: "TXT",
       value: verificationValue,
-      status: domain2.status?.verified ? "propagated" : "requires-update",
+      status: domain3.status?.verified ? "propagated" : "requires-update",
       purpose: "ownership"
     });
     else records[index].purpose = "ownership";
   }
-  const certificate = domain2.status?.certificateStatus;
+  const certificate = domain3.status?.certificateStatus;
   const failed = certificate === "CERTIFICATE_STATUS_TYPE_ISSUE_FAILED";
   return {
-    host: domain2.domain,
+    host: domain3.domain,
     records,
-    dnsStatus: domain2.status?.verified ? "verified" : failed ? "failed" : "pending",
+    dnsStatus: domain3.status?.verified ? "verified" : failed ? "failed" : "pending",
     certificateStatus: certificate === "CERTIFICATE_STATUS_TYPE_VALID" ? "issued" : failed ? "failed" : "pending"
   };
 }
@@ -25696,6 +25745,147 @@ function redactCredentialShaped(text) {
   return text.replace(/(?:gh[pousr]_|github_pat_)[A-Za-z0-9]{8,}/g, "[redacted-token]").replace(/Bearer\s+[A-Za-z0-9._-]{8,}/g, "Bearer [redacted]").replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\\s\\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, "[redacted-key]").replace(/([?&](?:access_token|token|password)=)[^&\\s]+/gi, "$1[redacted]").replace(/:\/\/([^/:@\s]+):([^@\s]+)@/g, "://$1:[redacted]@");
 }
 
+// packages/contracts/src/railway-service.ts
+async function configureRailwayService({ transport, credential }, placement, input2) {
+  const result = await transport.graphql({
+    operation: "serviceInstanceUpdate",
+    credential,
+    query: "mutation ($environmentId: String!, $serviceId: String!, $input: ServiceInstanceUpdateInput!) { serviceInstanceUpdate(environmentId: $environmentId, serviceId: $serviceId, input: $input) }",
+    variables: { ...placement, input: input2 }
+  });
+  if (result.serviceInstanceUpdate !== true) throw new Error("Railway did not apply service settings");
+}
+async function writeRailwayVariable({ transport, credential }, input2) {
+  const result = await transport.graphql({
+    operation: "variableUpsert",
+    credential,
+    query: "mutation ($input: VariableUpsertInput!) { variableUpsert(input: $input) }",
+    variables: { input: { skipDeploys: true, ...input2 } }
+  });
+  if (result.variableUpsert !== true) throw new Error("Railway refused the configuration write");
+}
+async function deployRailwayService({ transport, credential }, placement) {
+  const result = await transport.graphql({
+    operation: "serviceInstanceDeploy",
+    credential,
+    query: "mutation ($environmentId: String!, $serviceId: String!) { serviceInstanceDeploy(environmentId: $environmentId, serviceId: $serviceId, latestCommit: true) }",
+    variables: placement
+  });
+  if (result.serviceInstanceDeploy !== true) throw new Error("Railway did not accept the deployment");
+}
+async function createRailwayServiceDomain({ transport, credential }, placement, targetPort) {
+  const result = await transport.graphql({
+    operation: "serviceDomainCreate",
+    credential,
+    query: "mutation ($input: ServiceDomainCreateInput!) { serviceDomainCreate(input: $input) { id domain } }",
+    variables: { input: { ...placement, targetPort } }
+  });
+  if (!result.serviceDomainCreate?.domain) throw new Error("Railway did not return the allocated domain");
+  return result.serviceDomainCreate.domain;
+}
+
+// packages/contracts/src/railway-project.ts
+async function createRailwayProject({ transport, credential }, input2) {
+  const data = await transport.graphql({
+    operation: "projectCreate",
+    credential,
+    query: "mutation ($input: ProjectCreateInput!) { projectCreate(input: $input) { id } }",
+    variables: { input: { ...input2, isPublic: false } }
+  });
+  return data.projectCreate.id;
+}
+async function createRailwayEnvironment({ transport, credential }, projectId, name) {
+  const data = await transport.graphql({
+    operation: "environmentCreate",
+    credential,
+    query: "mutation ($input: EnvironmentCreateInput!) { environmentCreate(input: $input) { id name } }",
+    // An empty environment owns its resources. Cloning would share the source environment's service rows.
+    variables: { input: { projectId, name, skipInitialDeploys: true } }
+  });
+  return data.environmentCreate;
+}
+async function listRailwayProjects({ transport, credential }, workspaceId) {
+  const projects = [];
+  let after = null;
+  do {
+    const data = await transport.graphql({
+      operation: "projects",
+      credential,
+      query: "query ($workspaceId: String!, $after: String) { projects(workspaceId: $workspaceId, first: 100, after: $after) { edges { node { id name description workspaceId environments { edges { node { id name } } } } } pageInfo { hasNextPage endCursor } } }",
+      variables: { workspaceId, after }
+    });
+    projects.push(...data.projects.edges.map(({ node: node2 }) => node2));
+    if (!data.projects.pageInfo.hasNextPage) return projects;
+    const cursor = data.projects.pageInfo.endCursor;
+    if (!cursor || cursor === after) throw new Error("Could not verify the full Railway workspace");
+    after = cursor;
+  } while (after);
+  return projects;
+}
+
+// packages/contracts/src/railway-removal.ts
+var stopped = /* @__PURE__ */ new Set(["FAILED", "CRASHED", "REMOVED", "SKIPPED"]);
+async function stopRailwayDeployments(input2) {
+  const { transport, credential, read, sleep } = input2;
+  const initial = await read();
+  const ids = new Set(initial.filter(({ status }) => !stopped.has(status) && status !== "REMOVING").map(({ id }) => id));
+  for (const id of ids) {
+    await transport.graphql({
+      operation: "deploymentRemove",
+      credential,
+      query: "mutation ($id: String!) { deploymentRemove(id: $id) }",
+      variables: { id }
+    }).catch(() => void 0);
+  }
+  for (let attempt = 0; attempt < input2.attempts; attempt++) {
+    if ((await read()).every(({ status }) => stopped.has(status))) return;
+    if (attempt + 1 < input2.attempts) await sleep(input2.intervalMs);
+  }
+  throw new Error("A deployment is still active or its stop could not be verified");
+}
+async function wipeRailwayProject(input2) {
+  let accepted;
+  try {
+    const result = await input2.transport.graphql({
+      operation: "projectDelete",
+      credential: input2.credential,
+      query: "mutation ($id: String!) { projectDelete(id: $id) }",
+      variables: { id: input2.projectId }
+    });
+    accepted = result.projectDelete === true;
+  } catch {
+    return { step: "project", code: "teardown-unverified", message: "Railway did not confirm the deletion request" };
+  }
+  if (!accepted) return { step: "project", code: "teardown-refused", message: "Railway refused project deletion" };
+  try {
+    if (await input2.projectExists()) {
+      return { step: "project", code: "teardown-incomplete", message: "Railway still lists the project" };
+    }
+  } catch {
+    return { step: "project", code: "teardown-unverified", message: "Railway project removal could not be verified" };
+  }
+}
+async function railwayRetainedVolumeIds({ transport, credential }, environmentId) {
+  const ids = [];
+  let after = null;
+  do {
+    const answer = await transport.graphql({
+      operation: "environment.retainedVolumes",
+      credential,
+      query: "query ($environmentId: String!, $after: String) { environment(id: $environmentId) { volumeInstances(first: 100, after: $after) { edges { node { volumeId isPendingDeletion } } pageInfo { hasNextPage endCursor } } } }",
+      variables: { environmentId, after }
+    });
+    const page = answer.environment?.volumeInstances;
+    if (!page || page.edges.some(({ node: node2 }) => node2.isPendingDeletion)) throw new Error("Railway storage is unavailable or scheduled for deletion");
+    ids.push(...page.edges.map(({ node: node2 }) => node2.volumeId));
+    if (!page.pageInfo.hasNextPage) return ids.sort();
+    const cursor = page.pageInfo.endCursor;
+    if (!cursor || cursor === after) throw new Error("Railway volume placement inventory is incomplete");
+    after = cursor;
+  } while (after);
+  return ids.sort();
+}
+
 // packages/contracts/src/railway-provider.ts
 var MARKER = "platfolio:plan=";
 function physicalServiceName(logical, environment) {
@@ -25736,6 +25926,7 @@ var RailwayInfraProvider = class {
   credentials;
   transport;
   workspaceId;
+  project;
   deployBudget;
   deployTimeoutMs;
   pollIntervalMs;
@@ -25749,6 +25940,7 @@ var RailwayInfraProvider = class {
     this.credentials = options.credentials;
     this.transport = options.transport ?? new HttpRailwayTransport();
     this.workspaceId = options.workspaceId;
+    this.project = options.project;
     this.databaseTemplates = { postgres: "postgresql", ...options.databaseTemplates };
     this.deployBudget = options.deployBudget ?? 4;
     this.deployTimeoutMs = options.deployTimeoutMs ?? 18e4;
@@ -25769,7 +25961,7 @@ var RailwayInfraProvider = class {
       // What is actually supported. Ceilings and databases/buckets are absent from this list on purpose.
       // `per-environment-provisioning` replaced `environment-cloning`: every environment is created from its own
       // declaration, because a duplicated environment inherits the source's database configuration (D57).
-      features: ["service-domains", "custom-domains", "literal-configuration", "preserve-secret-references", "per-environment-tokens", "deploy-waiting", "per-environment-provisioning"]
+      features: [KEEP_DATA_FEATURE, "service-domains", "custom-domains", "literal-configuration", "preserve-secret-references", "per-environment-tokens", "deploy-waiting", "per-environment-provisioning"]
     };
   }
   validatePlan(plan) {
@@ -25816,7 +26008,7 @@ var RailwayInfraProvider = class {
     const domains = [];
     const name = this.projectName(plan);
     const existing = await this.findProject(name);
-    const projectId = existing ? existing.id : await this.createProject(name);
+    const projectId = existing ? existing.id : await this.createProject(name, plan.environments[0].name);
     this.lastProjectId = projectId;
     const workspaceCredential = await this.credentials.workspace();
     await this.writeMarker(projectId, plan.planHash, workspaceCredential);
@@ -25920,17 +26112,17 @@ var RailwayInfraProvider = class {
           numReplicas: service.replicas
         });
       }
-      for (const domain2 of environment.domains) {
-        const targetServiceId = serviceIds.get(`${environment.name}/${domain2.service}`);
-        const domainServiceName = physical.get(domain2.service) ?? domain2.service;
-        const target = services.find((s) => s.name === domainServiceName && s.environment === environment.name);
-        if (!target || !targetServiceId) {
-          failures.push({ step: `domains.${domain2.host}`, code: "unknown-service", message: `domain targets "${domain2.service}", which this plan does not define in "${environment.name}"` });
+      for (const domain3 of environment.domains) {
+        const targetServiceId = serviceIds.get(`${environment.name}/${domain3.service}`);
+        const domainServiceName = physical.get(domain3.service) ?? domain3.service;
+        const target2 = services.find((s) => s.name === domainServiceName && s.environment === environment.name);
+        if (!target2 || !targetServiceId) {
+          failures.push({ step: `domains.${domain3.host}`, code: "unknown-service", message: `domain targets "${domain3.service}", which this plan does not define in "${environment.name}"` });
           continue;
         }
         const already = await this.instanceStatus(projectId, environmentId, targetServiceId, token);
-        const reused = already?.domainHosts.find((h) => h === domain2.host) ?? (domain2.host.endsWith(".up.railway.app") ? already?.domainHosts.find((h) => h.endsWith(".up.railway.app")) : void 0);
-        const placed2 = reused ? { host: reused, dnsStatus: already?.domainStates[reused]?.dnsStatus ?? "pending" } : await this.createDomain(projectId, environmentId, targetServiceId, domain2, token, failures);
+        const reused = already?.domainHosts.find((h) => h === domain3.host) ?? (domain3.host.endsWith(".up.railway.app") ? already?.domainHosts.find((h) => h.endsWith(".up.railway.app")) : void 0);
+        const placed2 = reused ? { host: reused, dnsStatus: already?.domainStates[reused]?.dnsStatus ?? "pending" } : await this.createDomain(projectId, environmentId, targetServiceId, domain3, token, failures);
         const settled = await this.instanceStatus(projectId, environmentId, targetServiceId, token);
         const state = settled?.domainStates[placed2.host];
         domains.push({
@@ -25976,7 +26168,7 @@ var RailwayInfraProvider = class {
     };
   }
   async readState(instanceId) {
-    const project = await this.findProject(this.projectName({ instanceId })) ?? await this.findProjectById(instanceId) ?? await this.findProject(instanceId);
+    const project = await this.findProject(this.projectName({ instanceId })) ?? (this.project ? null : await this.findProjectById(instanceId) ?? await this.findProject(instanceId));
     if (!project) throw new Error(`railway readState: no project for instance "${instanceId}"`);
     const state = await this.snapshot(project.id);
     return {
@@ -25989,97 +26181,113 @@ var RailwayInfraProvider = class {
       ceilings: []
     };
   }
-  /**
-   * Tear an instance down. `retainMounts` names the mount paths whose volumes stay behind, attached to
-   * nothing -- the state half of the hibernate pattern, where compute is destroyed and the disk is kept for a
-   * future service to mount.
-   *
-   * Mounts, not names, because a name is not a shared identity: Railway names volumes itself as
-   * `<service>-volume` while the plan's `name` is a tenant-facing label, so an option keyed on either one
-   * would silently match nothing the other was called. The mount is what the plan declares and what the
-   * provider reads back, so it is the only thing both sides can agree on.
-   *
-   * The caller supplies it because retention is a plan decision and deleteInstance receives only an instance
-   * id; storing retention state inside the provider would be a second source of truth for a fact the plan owns.
-   */
-  async deleteInstance(instanceId, options = {}) {
-    const project = await this.findProject(this.projectName({ instanceId })) ?? await this.findProjectById(instanceId) ?? await this.findProject(instanceId);
-    if (!project) throw new Error(`railway deleteInstance: no project for instance "${instanceId}"`);
+  async deleteInstance(instanceId, options) {
+    const data = options && "data" in options ? options.data : options?.retainMounts?.length ? "keep" : "wipe";
     const credential = await this.credentials.workspace();
-    const removed = [];
-    const orphans = [];
-    const releasedWithProject = [];
-    const deleteFailures = [];
+    const project = await this.findProject(this.projectName({ instanceId }));
+    if (!project) return { instanceId, removed: [], orphans: [] };
+    if (!this.ownsBoundProject(project)) {
+      throw new Error("Railway project is not managed by this provider");
+    }
     const environments = await this.environments(project.id, credential);
-    const services = await this.listServices(project.id, credential);
-    const placedHere = /* @__PURE__ */ new Map();
-    for (const environment of environments) {
-      const token = await this.credentials.forEnvironment(project.id, environment.name).catch(() => credential);
+    const volumes = await this.listVolumes(project.id, credential);
+    const projectExists = async () => (await this.workspaceProjects(credential)).some(({ id }) => id === project.id);
+    if (data === "keep") {
       try {
-        placedHere.set(environment.id, new Set((await this.environmentInstances(project.id, environment.id, token)).keys()));
-      } catch {
-        placedHere.set(environment.id, null);
-      }
-    }
-    const volumesAtStart = await this.listVolumes(project.id, credential);
-    const bucketsAtStart = await this.buckets(project.id, credential);
-    const expected = /* @__PURE__ */ new Set([
-      ...volumesAtStart.map((v) => `volume:${v.name}`),
-      ...bucketsAtStart.map((b) => `bucket:${b}`),
-      ...environments.flatMap((e) => services.filter((s) => placedHere.get(e.id) === null || placedHere.get(e.id).has(s.id)).map((s) => `service:${e.name}/${s.name}`))
-    ]);
-    const instancesByVolume = /* @__PURE__ */ new Map();
-    for (const environment of environments) {
-      for (const row of await this.volumeInstances(project.id, environment.id, credential)) instancesByVolume.set(row.volumeId, row.mountPath);
-    }
-    const retain = new Set(options.retainMounts ?? []);
-    const retained = [];
-    for (const volume of volumesAtStart) {
-      const mount = instancesByVolume.get(volume.id);
-      if (mount && retain.has(mount)) {
-        retained.push(`${volume.name} (mounted at ${mount})`);
-        continue;
-      }
-      if (retain.has(volume.name)) {
-        retained.push(volume.name);
-        continue;
-      }
-      await this.transport.graphql({ operation: "volumeDelete", credential, query: "mutation ($volumeId: String!) { volumeDelete(volumeId: $volumeId) }", variables: { volumeId: volume.id } }).then(() => {
-        removed.push(`volume:${volume.name}`);
-      }).catch(() => {
-      });
-    }
-    for (const environment of environments) {
-      const placed = placedHere.get(environment.id);
-      for (const service of services) {
-        if (placed && !placed.has(service.id)) continue;
-        try {
-          await this.deleteServiceWithRetry(project.id, environment, service, credential);
-          removed.push(`service:${environment.name}/${service.name}`);
-        } catch (error62) {
-          if (placed && !placed.has(service.id)) continue;
-          deleteFailures.push({ step: `service:${environment.name}/${service.name}`, code: "service-delete-failed", message: error62.message.slice(0, 200) });
+        const placements2 = () => Promise.all(environments.map(({ id }) => railwayRetainedVolumeIds({ transport: this.transport, credential }, id)));
+        const keptPlacements = await placements2();
+        for (const environment of environments) {
+          const token = await this.credentials.forEnvironment(project.id, environment.name);
+          await stopRailwayDeployments({
+            transport: this.transport,
+            credential: token,
+            sleep: this.sleep,
+            read: () => this.readRemovableDeployments(project.id, environment.id, token),
+            attempts: Math.max(1, Math.ceil(this.deployTimeoutMs / this.pollIntervalMs)),
+            intervalMs: this.pollIntervalMs
+          });
         }
+        const stillPresent = new Set((await this.listVolumes(project.id, credential)).map(({ id }) => id));
+        if (!await projectExists() || stillPresent.size !== volumes.length || !volumes.every(({ id }) => stillPresent.has(id)) || JSON.stringify(await placements2()) !== JSON.stringify(keptPlacements)) {
+          throw new Error("Railway storage changed while stopping workloads");
+        }
+        await this.writeMarker(project.id, "none", credential);
+        return { instanceId, removed: [], orphans: [], retained: volumes.map(({ name }) => name) };
+      } catch {
+        return { instanceId, removed: [], orphans: [], failures: [
+          { step: "project", code: "retention-unverified", message: "Workload stop and retained storage could not both be verified" }
+        ] };
       }
     }
-    await this.transport.graphql({
-      operation: "projectDelete",
-      credential,
-      query: "mutation ($id: String!) { projectDelete(id: $id) }",
-      variables: { id: project.id }
-    });
-    removed.push(`project:${project.name}`);
-    const reachable = await this.reachableResources(project.id, credential);
-    for (const item of expected) {
-      if (removed.includes(item)) continue;
-      if (reachable === null) releasedWithProject.push(item);
-      else if (reachable.has(item)) orphans.push(item);
-      else releasedWithProject.push(item);
+    if (data !== "wipe") throw new Error("Unknown storage removal option");
+    const services = await this.listServices(project.id, credential);
+    const placements = (await Promise.all(environments.map(async (environment) => {
+      const token = await this.credentials.forEnvironment(project.id, environment.name);
+      const placed = await this.environmentInstances(project.id, environment.id, token);
+      return services.filter((service) => placed.has(service.id)).map((service) => ({ environment, service }));
+    }))).flat();
+    const expected = [
+      ...volumes.map(({ name }) => `volume:${name}`),
+      ...(await this.buckets(project.id, credential)).map((name) => `bucket:${name}`),
+      ...placements.map(({ environment, service }) => `service:${environment.name}/${service.name}`)
+    ];
+    const accepted = [];
+    const failures = [];
+    for (const volume of volumes) {
+      const deleted = await this.transport.graphql({
+        operation: "volumeDelete",
+        credential,
+        query: "mutation ($volumeId: String!) { volumeDelete(volumeId: $volumeId) }",
+        variables: { volumeId: volume.id }
+      }).catch(() => void 0);
+      if (deleted?.volumeDelete === true) accepted.push(`volume:${volume.name}`);
     }
-    if (orphans.length) {
-      deleteFailures.push({ step: "orphans", code: "teardown-incomplete", message: `${String(orphans.length)} resource(s) still reachable after projectDelete: ${orphans.join(", ")}` });
+    for (const { environment, service } of placements) {
+      const step = `service:${environment.name}/${service.name}`;
+      try {
+        await this.deleteServiceWithRetry(environment, service, credential);
+        accepted.push(step);
+      } catch (error62) {
+        failures.push({ step, code: "service-delete-failed", message: redactCredentialShaped(error62.message).slice(0, 200) });
+      }
     }
-    return { instanceId, removed, orphans, ...retained.length ? { retained } : {}, ...releasedWithProject.length ? { releasedWithProject } : {}, ...deleteFailures.length ? { failures: deleteFailures } : {} };
+    const failure2 = await wipeRailwayProject({ transport: this.transport, credential, projectId: project.id, projectExists });
+    if (failure2) {
+      failures.push(failure2);
+      const reachable = failure2.code === "teardown-incomplete" ? await this.reachableResources(project.id, credential) : null;
+      return { instanceId, removed: [], orphans: expected.filter((resource) => reachable?.has(resource)), failures };
+    }
+    const releasedWithProject = expected.filter((resource) => !accepted.includes(resource));
+    return {
+      instanceId,
+      removed: [...accepted, `project:${project.name}`],
+      orphans: [],
+      ...releasedWithProject.length ? { releasedWithProject } : {},
+      ...failures.length ? { failures } : {}
+    };
+  }
+  async readRemovableDeployments(projectId, environmentId, credential) {
+    let after = null;
+    const deployments = [];
+    do {
+      const data = await this.transport.graphql({
+        operation: "environment.removableDeployments",
+        credential,
+        query: "query ($projectId: String!, $environmentId: String!, $after: String) { environment(projectId: $projectId, id: $environmentId) { serviceInstances(first: 100, after: $after) { edges { node { source { repo } latestDeployment { id status } activeDeployments { id status } } } pageInfo { hasNextPage endCursor } } } }",
+        variables: { projectId, environmentId, after }
+      });
+      const page = data.environment?.serviceInstances;
+      if (!page) throw new Error("Railway did not return a service inventory");
+      for (const { node: node2 } of page.edges) {
+        if (node2.source?.repo) throw new Error("Disconnect automatic repository deployment before stopping the app");
+        deployments.push(...node2.activeDeployments);
+        if (node2.latestDeployment) deployments.push(node2.latestDeployment);
+      }
+      if (!page.pageInfo.hasNextPage) return deployments;
+      if (!page.pageInfo.endCursor || page.pageInfo.endCursor === after) throw new Error("Incomplete Railway service inventory");
+      after = page.pageInfo.endCursor;
+    } while (after);
+    return deployments;
   }
   // --- internals -------------------------------------------------------------------------------
   /**
@@ -26090,6 +26298,10 @@ var RailwayInfraProvider = class {
    * succeeded, then readState could not find the project it had just created.
    */
   projectName(plan) {
+    if (this.project) {
+      if (this.project.instanceId !== plan.instanceId) throw new Error("Railway adapter is bound to a different instance");
+      return this.project.name;
+    }
     return `platfolio-${plan.instanceId}`.toLowerCase().replace(/[^a-z0-9._-]+/g, "-");
   }
   /**
@@ -26235,12 +26447,7 @@ var RailwayInfraProvider = class {
       }
       this.deploymentsUsed += 1;
       services.push(label);
-      await this.transport.graphql({
-        operation: "serviceInstanceDeploy",
-        credential: token,
-        query: "mutation ($environmentId: String!, $serviceId: String!) { serviceInstanceDeploy(environmentId: $environmentId, serviceId: $serviceId, latestCommit: true) }",
-        variables: { environmentId: env.id, serviceId }
-      });
+      await deployRailwayService({ transport: this.transport, credential: token }, { environmentId: env.id, serviceId });
     }
     const after = await this.deploymentStamps(project.id, env.id, token);
     const acted = /* @__PURE__ */ new Set();
@@ -26273,15 +26480,21 @@ var RailwayInfraProvider = class {
     for (const edge of data.environment?.serviceInstances?.edges ?? []) out.set(edge.node.serviceId, edge.node.latestDeployment?.id);
     return out;
   }
+  workspaceProjects(credential) {
+    return listRailwayProjects({ transport: this.transport, credential }, this.workspaceId);
+  }
+  ownsBoundProject(project) {
+    return this.project ? project.description?.startsWith(this.projectDescription("")) === true : project.description?.startsWith(MARKER) === true;
+  }
+  projectDescription(hash2) {
+    return `${this.project ? `platfolio:instance=${this.project.instanceId} ` : ""}${MARKER}${hash2}`;
+  }
   async findProject(name) {
-    const credential = await this.credentials.workspace();
-    const data = await this.transport.graphql({
-      operation: "projects",
-      credential,
-      query: "query ($workspaceId: String!) { projects(workspaceId: $workspaceId) { edges { node { id name description } } } }",
-      variables: { workspaceId: this.workspaceId }
-    });
-    return this.toProject(data.projects.edges.map((e) => e.node).find((n) => n.name === name));
+    const projects = (await this.workspaceProjects(await this.credentials.workspace())).filter((project2) => project2.name === name);
+    if (projects.length > 1) throw new Error("More than one Railway project matches this instance");
+    const project = this.toProject(projects[0]);
+    if (project && this.project && !this.ownsBoundProject(project)) throw new Error("The named Railway project belongs to another instance");
+    return project;
   }
   async findProjectById(id) {
     const credential = await this.credentials.workspace();
@@ -26301,15 +26514,14 @@ var RailwayInfraProvider = class {
     if (!node2) return null;
     return { id: node2.id, name: node2.name, ...node2.description ? { description: node2.description } : {} };
   }
-  async createProject(name) {
-    const credential = await this.credentials.workspace();
-    const data = await this.transport.graphql({
-      operation: "projectCreate",
-      credential,
-      query: "mutation ($input: ProjectCreateInput!) { projectCreate(input: $input) { id } }",
-      variables: { input: { name, workspaceId: this.workspaceId, isPublic: false, description: `${MARKER}none` } }
+  async createProject(name, defaultEnvironmentName) {
+    return createRailwayProject({ transport: this.transport, credential: await this.credentials.workspace() }, {
+      name,
+      workspaceId: this.workspaceId,
+      defaultEnvironmentName,
+      prDeploys: false,
+      description: this.projectDescription("none")
     });
-    return data.projectCreate.id;
   }
   async environments(projectId, credential) {
     const data = await this.transport.graphql({
@@ -26334,17 +26546,7 @@ var RailwayInfraProvider = class {
     const found = await this.environments(projectId, credential);
     const existing = found.find((e) => e.name === environment);
     if (existing) return existing.id;
-    const data = await this.transport.graphql({
-      operation: "environmentCreate",
-      credential,
-      query: "mutation ($input: EnvironmentCreateInput!) { environmentCreate(input: $input) { id } }",
-      // No `sourceEnvironmentId` is ever sent, and this is not a formatting choice: measured on the live API,
-      // creating an environment from a source gave the new environment the source's service ids, and its api
-      // failed with `connect ETIMEDOUT` against a database it does not own. The field stays in the input
-      // allowlist of the test double precisely so that nobody reintroduces it here unnoticed.
-      variables: { input: { projectId, name: environment, skipInitialDeploys: true } }
-    });
-    return data.environmentCreate.id;
+    return (await createRailwayEnvironment({ transport: this.transport, credential }, projectId, environment)).id;
   }
   async listServices(projectId, credential) {
     const cred = credential ?? await this.credentials.workspace();
@@ -26460,8 +26662,8 @@ var RailwayInfraProvider = class {
    *    one dataset in two. Neither outcome is a rename this provider should choose, so it refuses and names
    *    both rows.
    */
-  async renameLegacyRow(projectId, environmentId, environmentName, logical, target, projectServices, placedHere, workspaceCredential, notes, failures, kind = "service") {
-    if (logical === target) return { blocked: false };
+  async renameLegacyRow(projectId, environmentId, environmentName, logical, target2, projectServices, placedHere, workspaceCredential, notes, failures, kind = "service") {
+    if (logical === target2) return { blocked: false };
     const candidate = projectServices.find((s) => s.name === logical);
     if (!candidate) return { blocked: false };
     const elsewhere = [];
@@ -26472,9 +26674,9 @@ var RailwayInfraProvider = class {
     }
     if (!placedHere.has(candidate.id)) {
       notes.push({
-        step: `services.${target}@${environmentName}`,
+        step: `services.${target2}@${environmentName}`,
         code: elsewhere.length > 0 ? "legacy-row-belongs-to-another-environment" : "legacy-row-left-unplaced",
-        message: elsewhere.length > 0 ? `"${logical}" (service ${candidate.id}) runs in ${elsewhere.map((n) => `"${n}"`).join(" and ")}, not in "${environmentName}", so it was left exactly as it is: that is ${elsewhere.length === 1 ? "that environment" : "those environments"}' running service, and renaming or deleting it here would take it away from them. "${environmentName}" is being provisioned its own "${target}". Nothing was renamed and nothing was deleted (D57)` : `LEFTOVER SERVICE NOT TOUCHED: "${logical}" (service ${candidate.id}) has NO instance in ANY environment of this project -- it is the residue of an interrupted apply or of an environment that was deleted underneath it. platfolio deliberately did NOT delete it and did NOT rename it, and this apply will not either. Renaming it onto "${target}" would install the name with nothing behind it and permanently block the serviceCreate that is the only way to place an instance (the captured provider schema has no serviceInstanceCreate), so the environment could never converge without a human. Deleting it is destructive and is therefore the operator's call through the destroy path (D36/D43), never a side effect of a successful apply. This row may still own a volume, which costs money while it exists: if it is a database, its disk and the data on it survive until an operator deletes the service. Target: service ${candidate.id}, name "${logical}", in project ${projectId}`
+        message: elsewhere.length > 0 ? `"${logical}" (service ${candidate.id}) runs in ${elsewhere.map((n) => `"${n}"`).join(" and ")}, not in "${environmentName}", so it was left exactly as it is: that is ${elsewhere.length === 1 ? "that environment" : "those environments"}' running service, and renaming or deleting it here would take it away from them. "${environmentName}" is being provisioned its own "${target2}". Nothing was renamed and nothing was deleted (D57)` : `LEFTOVER SERVICE NOT TOUCHED: "${logical}" (service ${candidate.id}) has NO instance in ANY environment of this project -- it is the residue of an interrupted apply or of an environment that was deleted underneath it. platfolio deliberately did NOT delete it and did NOT rename it, and this apply will not either. Renaming it onto "${target2}" would install the name with nothing behind it and permanently block the serviceCreate that is the only way to place an instance (the captured provider schema has no serviceInstanceCreate), so the environment could never converge without a human. Deleting it is destructive and is therefore the operator's call through the destroy path (D36/D43), never a side effect of a successful apply. This row may still own a volume, which costs money while it exists: if it is a database, its disk and the data on it survive until an operator deletes the service. Target: service ${candidate.id}, name "${logical}", in project ${projectId}`
       });
       return { blocked: false };
     }
@@ -26495,29 +26697,29 @@ var RailwayInfraProvider = class {
         // rule that broke the marker write (E25/E26) applies to every mutation the API answers with an object.
         // The sub-selection is also the read-back: the name is asked for, not assumed from the call succeeding.
         query: "mutation ($id: String!, $input: ServiceUpdateInput!) { serviceUpdate(id: $id, input: $input) { id name } }",
-        variables: { id: candidate.id, input: { name: target } }
+        variables: { id: candidate.id, input: { name: target2 } }
       })).serviceUpdate;
     } catch (error62) {
       failures.push({
         step: `services.${logical}@${environmentName}`,
         code: "legacy-service-rename-failed",
-        message: `renaming "${logical}" to "${target}" was refused: ${redactCredentialShaped(error62.message).slice(0, 200)}. Nothing was deleted (D57)`
+        message: `renaming "${logical}" to "${target2}" was refused: ${redactCredentialShaped(error62.message).slice(0, 200)}. Nothing was deleted (D57)`
       });
       return { blocked: true };
     }
-    if (readBack?.name !== target) {
+    if (readBack?.name !== target2) {
       failures.push({
-        step: `services.${target}@${environmentName}`,
+        step: `services.${target2}@${environmentName}`,
         code: "legacy-service-rename-unverified",
-        message: `serviceUpdate for ${candidate.id} returned ${readBack?.name === void 0 ? "no name" : `name "${readBack.name}"`} instead of "${target}", so the rename was not confirmed and nothing further was provisioned against that row (D57)`
+        message: `serviceUpdate for ${candidate.id} returned ${readBack?.name === void 0 ? "no name" : `name "${readBack.name}"`} instead of "${target2}", so the rename was not confirmed and nothing further was provisioned against that row (D57)`
       });
       return { blocked: true };
     }
     if (kind === "service") {
       notes.push({
-        step: `services.${target}@${environmentName}`,
+        step: `services.${target2}@${environmentName}`,
         code: "legacy-service-renamed",
-        message: `"${logical}" (service ${candidate.id}) was renamed to "${target}" with serviceUpdate, so its environment instances, its domains and its private network all followed the service: nothing was deleted and no data was destroyed (D57)`
+        message: `"${logical}" (service ${candidate.id}) was renamed to "${target2}" with serviceUpdate, so its environment instances, its domains and its private network all followed the service: nothing was deleted and no data was destroyed (D57)`
       });
     }
     return { row: candidate, blocked: false };
@@ -26576,37 +26778,13 @@ var RailwayInfraProvider = class {
     };
     if (service.command) input2.startCommand = service.command;
     if (service.preDeployCommand) input2.preDeployCommand = service.preDeployCommand;
-    await this.transport.graphql({
-      operation: "serviceInstanceUpdate",
-      credential,
-      query: "mutation ($environmentId: String!, $serviceId: String!, $input: ServiceInstanceUpdateInput!) { serviceInstanceUpdate(environmentId: $environmentId, serviceId: $serviceId, input: $input) }",
-      variables: { environmentId, serviceId, input: input2 }
-    });
+    await configureRailwayService({ transport: this.transport, credential }, { environmentId, serviceId }, input2);
   }
-  async upsertVariable(projectId, environmentId, serviceId, name, value, credential, skipDeploys = true) {
-    await this.transport.graphql({
-      operation: "variableUpsert",
-      credential,
-      query: "mutation ($input: VariableUpsertInput!) { variableUpsert(input: $input) }",
-      // skipDeploys defaults to true: a configuration write must not trigger a redeploy we did not decide on.
-      // `false` is the deliberate exception, and only the refresh path passes it (see putSecretValue).
-      variables: { input: { projectId, environmentId, serviceId, name, value, skipDeploys } }
-    });
+  upsertVariable(projectId, environmentId, serviceId, name, value, credential, skipDeploys = true) {
+    return writeRailwayVariable({ transport: this.transport, credential }, { projectId, environmentId, serviceId, name, value, skipDeploys });
   }
-  /**
-   * Write one variable at ENVIRONMENT scope. Railway's `VariableUpsertInput` makes every field optional, and
-   * omitting `serviceId` is exactly what distinguishes a shared variable from a service variable: the value
-   * belongs to the environment, and services opt in to reading it.
-   */
-  async upsertSharedVariable(projectId, environmentId, name, value, credential, skipDeploys = true) {
-    await this.transport.graphql({
-      operation: "variableUpsert",
-      credential,
-      query: "mutation ($input: VariableUpsertInput!) { variableUpsert(input: $input) }",
-      // No serviceId: environment scope. skipDeploys for the same reason as the service-scoped write -- a
-      // credential arriving is not a decision to redeploy.
-      variables: { input: { projectId, environmentId, name, value, skipDeploys } }
-    });
+  upsertSharedVariable(projectId, environmentId, name, value, credential, skipDeploys = true) {
+    return writeRailwayVariable({ transport: this.transport, credential }, { projectId, environmentId, name, value, skipDeploys });
   }
   /**
    * Attach an environment-scoped variable to the service that declares it. This is the ONLY thing
@@ -26678,12 +26856,7 @@ var RailwayInfraProvider = class {
       return false;
     }
     this.deploymentsUsed += 1;
-    await this.transport.graphql({
-      operation: "serviceInstanceDeploy",
-      credential,
-      query: "mutation ($environmentId: String!, $serviceId: String!) { serviceInstanceDeploy(environmentId: $environmentId, serviceId: $serviceId, latestCommit: true) }",
-      variables: { environmentId, serviceId }
-    });
+    await deployRailwayService({ transport: this.transport, credential }, { environmentId, serviceId });
     return true;
   }
   async awaitDeployment(projectId, environmentId, serviceId, credential, failures, notes) {
@@ -26755,11 +26928,11 @@ var RailwayInfraProvider = class {
             states[d.domain] = { dnsStatus: active ? "verified" : "pending", certificateStatus: active ? "issued" : "pending" };
             if (d.id) ids[d.domain] = d.id;
           }
-          for (const domain2 of domains?.customDomains ?? []) {
-            const { host, records, dnsStatus, certificateStatus } = readRailwayCustomDomain(domain2);
+          for (const domain3 of domains?.customDomains ?? []) {
+            const { host, records, dnsStatus, certificateStatus } = readRailwayCustomDomain(domain3);
             if (records.length) recordsByHost[host] = records;
             states[host] = { dnsStatus, certificateStatus };
-            if (domain2.id) ids[host] = domain2.id;
+            if (domain3.id) ids[host] = domain3.id;
           }
           return { domainHosts: Object.keys(states), domainStates: states, domainIds: ids, domainRecords: recordsByHost };
         })()
@@ -26770,44 +26943,38 @@ var RailwayInfraProvider = class {
   async instanceStatus(projectId, environmentId, serviceId, credential) {
     return (await this.environmentInstances(projectId, environmentId, credential)).get(serviceId) ?? null;
   }
-  async createDomain(projectId, environmentId, serviceId, domain2, credential, failures) {
-    const isRailwayDomain = domain2.host.endsWith(".up.railway.app");
+  async createDomain(projectId, environmentId, serviceId, domain3, credential, failures) {
+    const isRailwayDomain = domain3.host.endsWith(".up.railway.app");
     try {
-      let actual = domain2.host;
+      let actual = domain3.host;
       if (isRailwayDomain) {
-        const created = await this.transport.graphql({
-          operation: "serviceDomainCreate",
-          credential,
-          query: "mutation ($input: ServiceDomainCreateInput!) { serviceDomainCreate(input: $input) { id domain } }",
-          variables: { input: { environmentId, serviceId, targetPort: domain2.port } }
-        });
-        actual = created.serviceDomainCreate.domain ?? domain2.host;
+        actual = await createRailwayServiceDomain({ transport: this.transport, credential }, { environmentId, serviceId }, domain3.port);
       } else {
         const availability = await this.transport.graphql({
           operation: "customDomainAvailable",
           credential,
           query: "query ($domain: String!) { customDomainAvailable(domain: $domain) { available message } }",
-          variables: { domain: domain2.host }
+          variables: { domain: domain3.host }
         });
         if (!availability.customDomainAvailable.available) {
           failures.push({
-            step: `domains.${domain2.host}`,
+            step: `domains.${domain3.host}`,
             code: "domain-not-available",
-            message: availability.customDomainAvailable.message || `"${domain2.host}" is not available`
+            message: availability.customDomainAvailable.message || `"${domain3.host}" is not available`
           });
-          return { host: domain2.host, dnsStatus: "failed" };
+          return { host: domain3.host, dnsStatus: "failed" };
         }
         await this.transport.graphql({
           operation: "customDomainCreate",
           credential,
           query: "mutation ($input: CustomDomainCreateInput!) { customDomainCreate(input: $input) { id domain } }",
-          variables: { input: { projectId, environmentId, serviceId, domain: domain2.host, targetPort: domain2.port } }
+          variables: { input: { projectId, environmentId, serviceId, domain: domain3.host, targetPort: domain3.port } }
         });
       }
       return { host: actual, dnsStatus: isRailwayDomain ? "verified" : "pending" };
     } catch (error62) {
-      failures.push({ step: `domains.${domain2.host}`, code: "domain-create-failed", message: error62.message.slice(0, 200) });
-      return { host: domain2.host, dnsStatus: "failed" };
+      failures.push({ step: `domains.${domain3.host}`, code: "domain-create-failed", message: error62.message.slice(0, 200) });
+      return { host: domain3.host, dnsStatus: "failed" };
     }
   }
   async snapshot(projectId) {
@@ -26912,7 +27079,8 @@ var RailwayInfraProvider = class {
       if (placedRow) {
         serviceIds.set(`${envName}/${database.name}`, existing.id);
         if (placedRow.status !== "live") {
-          const started = placedRow.rawStatus == null ? await this.deploy(existing.id, environmentId, token, failures) : true;
+          const stopped2 = placedRow.rawStatus == null || ["REMOVED", "SKIPPED"].includes(placedRow.rawStatus);
+          const started = stopped2 ? await this.deploy(existing.id, environmentId, token, failures) : true;
           if (started) {
             const outcome = await this.awaitDeployment(projectId, environmentId, existing.id, token, failures, notes);
             if (outcome.status !== "live") {
@@ -26940,14 +27108,8 @@ var RailwayInfraProvider = class {
     }
     try {
       const workspaceCredential2 = await this.credentials.workspace();
-      const fetched = await this.transport.graphql({
-        operation: "template",
-        credential: workspaceCredential2,
-        query: "query ($code: String!) { template(code: $code) { id serializedConfig } }",
-        variables: { code: templateCode }
-      });
-      const templateId = fetched.template.id;
-      const config2 = fetched.template.serializedConfig;
+      const access = { transport: this.transport, credential: workspaceCredential2 };
+      const { id: templateId, serializedConfig: config2 } = await readRailwayTemplate(access, templateCode);
       if (!templateId) {
         failures.push({ step, code: "template-config-unexpected", message: `template code "${templateCode}" returned no id to deploy` });
         return;
@@ -26960,14 +27122,15 @@ var RailwayInfraProvider = class {
       }
       const key = keys[0];
       const composedConfig = { ...config2, services: { [key]: { ...services[key], name: databaseName } } };
-      const deployed = await this.transport.graphql({
-        operation: "templateDeployV2",
-        credential: workspaceCredential2,
-        query: "mutation ($input: TemplateDeployV2Input!) { templateDeployV2(input: $input) { operationId workflowId } }",
-        variables: { input: { templateId, serializedConfig: composedConfig, projectId, environmentId, workspaceId: this.workspaceId } }
+      const deployed = await deployRailwayTemplate(access, {
+        templateId,
+        serializedConfig: composedConfig,
+        projectId,
+        environmentId,
+        workspaceId: this.workspaceId
       });
       this.deploymentsUsed += 1;
-      notes.push({ step, code: "database-provisioning-started", message: `template deploy accepted (operation ${deployed.templateDeployV2.operationId ?? "unreported"}); provisioning is asynchronous` });
+      notes.push({ step, code: "database-provisioning-started", message: `template deploy accepted (operation ${deployed.operationId ?? "unreported"}); provisioning is asynchronous` });
       const deadline = Date.now() + this.deployTimeoutMs;
       let created;
       for (; ; ) {
@@ -27022,8 +27185,8 @@ var RailwayInfraProvider = class {
     for (const service of environment.services) {
       for (const reference of service.references ?? []) {
         if (reference.database !== database.name) continue;
-        const target = serviceIds.get(`${envName}/${service.name}`);
-        if (!target) continue;
+        const target2 = serviceIds.get(`${envName}/${service.name}`);
+        if (!target2) continue;
         const output2 = reference.output ?? "DATABASE_URL";
         const sourceId = serviceIds.get(`${envName}/${database.name}`);
         const available = sourceId ? await this.configVariableNames(projectId, environmentId, sourceId) : [];
@@ -27043,7 +27206,7 @@ var RailwayInfraProvider = class {
           });
         }
         const expression = `\${{${databaseName}.${output2}}}`;
-        await this.upsertVariable(projectId, environmentId, target, reference.variable, expression, credential);
+        await this.upsertVariable(projectId, environmentId, target2, reference.variable, expression, credential);
         rewritten.push({ service: service.name, variable: reference.variable, expression });
       }
     }
@@ -27114,16 +27277,17 @@ var RailwayInfraProvider = class {
    * deleted inside the window. One retry with a short pause keeps the surface honest -- if both attempts
    * fail, the reason still lands in DeleteResult.failures rather than in an empty catch.
    */
-  async deleteServiceWithRetry(_projectId, environment, service, credential) {
+  async deleteServiceWithRetry(environment, service, credential) {
     let lastError;
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
-        await this.transport.graphql({
+        const result = await this.transport.graphql({
           operation: "serviceDelete",
           credential,
           query: "mutation ($environmentId: String!, $id: String!) { serviceDelete(environmentId: $environmentId, id: $id) }",
           variables: { environmentId: environment.id, id: service.id }
         });
+        if (result.serviceDelete !== true) throw new Error("Railway refused serviceDelete");
         return;
       } catch (error62) {
         lastError = error62;
@@ -27133,9 +27297,7 @@ var RailwayInfraProvider = class {
     throw lastError instanceof Error ? lastError : new Error("serviceDelete failed");
   }
   /**
-   * What still answers after the project delete. Null when the project itself is unreadable, which is a
-   * different fact from an empty set: unreadable means everything went with it, an empty set means we
-   * looked and found nothing, and a non-empty set is the case that deserves an orphan report.
+   * Find surviving resources when the project still exists. An unavailable inventory proves nothing.
    */
   async reachableResources(projectId, credential) {
     try {
@@ -27170,13 +27332,24 @@ var RailwayInfraProvider = class {
     return (data?.environment?.volumeInstances?.edges ?? []).map((e) => e.node).filter((n) => Boolean(n.serviceId && n.mountPath && n.volumeId)).map((n) => ({ volumeId: n.volumeId, volumeName: n.volume?.name ?? n.volumeId, serviceId: n.serviceId, mountPath: n.mountPath }));
   }
   async listVolumes(projectId, credential) {
-    const data = await this.transport.graphql({
-      operation: "project.volumes",
-      credential,
-      query: "query ($projectId: String!) { project(id: $projectId) { volumes(first: 50) { edges { node { id name } } } } }",
-      variables: { projectId }
-    });
-    return (data.project?.volumes?.edges ?? []).map((e) => ({ id: e.node.id, name: e.node.name ?? e.node.id }));
+    const volumes = [];
+    let after = null;
+    do {
+      const data = await this.transport.graphql({
+        operation: "project.volumes",
+        credential,
+        query: "query ($projectId: String!, $after: String) { project(id: $projectId) { volumes(first: 100, after: $after) { edges { node { id name } } pageInfo { hasNextPage endCursor } } } }",
+        variables: { projectId, after }
+      });
+      const page = data.project?.volumes;
+      if (!page) throw new Error("Railway project volume inventory is unavailable");
+      volumes.push(...page.edges.map(({ node: node2 }) => ({ id: node2.id, name: node2.name ?? node2.id })));
+      if (!page.pageInfo.hasNextPage) return volumes;
+      const cursor = page.pageInfo.endCursor;
+      if (!cursor || cursor === after) throw new Error("Incomplete Railway volume inventory");
+      after = cursor;
+    } while (after);
+    return volumes;
   }
   async buckets(projectId, credential) {
     try {
@@ -27224,16 +27397,16 @@ var RailwayInfraProvider = class {
           else if (!placed.has(known.id)) missing.push(`${kind} "${name}" is not placed in "${environment.name}"`);
         }
       }
-      for (const domain2 of environment.domains ?? []) {
-        const assigned = /\.up\.railway\.app$/.test(domain2.host);
+      for (const domain3 of environment.domains ?? []) {
+        const assigned = /\.up\.railway\.app$/.test(domain3.host);
         if (assigned) {
-          const target = projectServices.find((s) => s.name === (physical.get(domain2.service) ?? domain2.service));
-          const info = target ? placed.get(target.id) : void 0;
-          if (!info || (info.domainHosts ?? []).length === 0) missing.push(`no domain bound to "${domain2.service}" in "${environment.name}" (plan asserted the generated host "${domain2.host}")`);
+          const target2 = projectServices.find((s) => s.name === (physical.get(domain3.service) ?? domain3.service));
+          const info = target2 ? placed.get(target2.id) : void 0;
+          if (!info || (info.domainHosts ?? []).length === 0) missing.push(`no domain bound to "${domain3.service}" in "${environment.name}" (plan asserted the generated host "${domain3.host}")`);
           continue;
         }
-        const bound = [...placed.values()].some((info) => (info.domainHosts ?? []).includes(domain2.host));
-        if (!bound) missing.push(`domain "${domain2.host}" in "${environment.name}"`);
+        const bound = [...placed.values()].some((info) => (info.domainHosts ?? []).includes(domain3.host));
+        if (!bound) missing.push(`domain "${domain3.host}" in "${environment.name}"`);
       }
     }
     return { covered: missing.length === 0, missing };
@@ -27252,7 +27425,7 @@ var RailwayInfraProvider = class {
       // the whole call at validation time -- which is what E26 hit, and because this write happens at the
       // END of applyPlan, it meant the marker was never stored and every retry re-deployed everything.
       query: "mutation ($id: String!, $input: ProjectUpdateInput!) { projectUpdate(id: $id, input: $input) { id } }",
-      variables: { id: projectId, input: { description: `${MARKER}${planHash2}` } }
+      variables: { id: projectId, input: { description: this.projectDescription(planHash2) } }
     });
   }
 };
@@ -27396,7 +27569,7 @@ var InstanceSchema = external_exports.object({
   }).strict().optional(),
   state: InstanceStateSchema,
   /** The provider is a swappable capability (D1); the instance records which one it is on. */
-  provider: external_exports.enum(["railway", "fake"]).default("railway"),
+  provider: HostingProviderIdSchema.default("railway"),
   desiredPlanHash: external_exports.string().optional(),
   lastAppliedPlanHash: external_exports.string().optional(),
   createdAt: external_exports.string().min(1),
@@ -27570,6 +27743,44 @@ var InvitationSchema = external_exports.object({
   emailError: external_exports.string().max(300).optional()
 }).strict();
 
+// packages/contracts/src/installation-provider.ts
+var installationEnvironment = external_exports.enum(["staging", "production"]);
+var InstallationLaunchInputSchema = external_exports.object({
+  workspaceId: external_exports.string().min(1).max(128),
+  name: external_exports.string().regex(/^[a-z][a-z0-9-]{1,62}$/),
+  environments: external_exports.array(installationEnvironment).min(1).max(2).refine((values) => new Set(values).size === values.length).meta({ uniqueItems: true }),
+  // The provider supports variable interpolation in template values.
+  ownerEmail: external_exports.string().max(254).regex(/^[^\s${}"\\@]+@[^\s${}"\\@]+\.[^\s${}"\\@]+$/).meta({ format: "email" }),
+  verifier: external_exports.string().regex(/^[A-Za-z0-9+/]{86}==$/),
+  salt: external_exports.string().regex(/^[A-Za-z0-9+/]{22}==$/)
+}).strict();
+
+// packages/contracts/src/installation-journal.ts
+var installationEnvironment2 = InstallationLaunchInputSchema.shape.environments.element;
+var safeId = external_exports.string().min(1).max(128).regex(/^[A-Za-z0-9_/-]+$/);
+var readyEnvironment = external_exports.object({ name: installationEnvironment2, origin: external_exports.url({ protocol: /^https$/ }) }).strict();
+var InstallationJournalSchema = external_exports.object({
+  id: external_exports.uuid(),
+  teamId: safeId,
+  personId: safeId,
+  name: external_exports.string().regex(/^[a-z][a-z0-9-]{1,62}$/),
+  workspaceId: safeId,
+  provider: external_exports.string().min(1).max(64),
+  revision: external_exports.string().regex(/^[a-f0-9]{40}$/),
+  requested: external_exports.array(installationEnvironment2).min(1).max(2),
+  projectId: safeId.optional(),
+  submitted: external_exports.array(installationEnvironment2).max(2),
+  environments: external_exports.array(readyEnvironment).max(2),
+  events: external_exports.array(external_exports.object({
+    at: external_exports.iso.datetime(),
+    step: external_exports.string().min(1).max(120),
+    state: external_exports.enum(["WORKING", "READY", "FAILED"])
+  }).strict()).max(100),
+  state: external_exports.enum(["running", "failed", "ready"]),
+  version: external_exports.number().int().min(0),
+  leaseUntil: external_exports.iso.datetime()
+}).strict();
+
 // node_modules/.pnpm/pg@8.23.1/node_modules/pg/esm/index.mjs
 var import_lib = __toESM(require_lib2(), 1);
 var Client = import_lib.default.Client;
@@ -27652,6 +27863,78 @@ var StarterBrandChangeSchema = external_exports.object({
   value: external_exports.string().max(60).regex(/^[A-Za-z0-9][A-Za-z0-9 .,'()-]*$/)
 }).strict();
 
+// packages/contracts/src/hosting-providers.ts
+function hostingProviders(providers, requiredRange = `^${CONTRACT_VERSION}`) {
+  const registered = /* @__PURE__ */ new Map();
+  for (const implementation of providers) {
+    const info = CapabilityInfoSchema.parse(implementation.describe());
+    const id = HostingProviderIdSchema.parse(info.provider);
+    if (registered.has(id)) throw new Error(`${CONTRACT_NAME}: provider "${id}" is registered twice`);
+    if (!satisfiesRange(info.contract, requiredRange)) {
+      throw new Error(`${CONTRACT_NAME}: provider "${id}" at ${info.contract} does not satisfy required range "${requiredRange}"`);
+    }
+    for (const operation of info.operations) {
+      if (typeof implementation[operation] !== "function") {
+        throw new Error(`${CONTRACT_NAME}: provider "${id}" advertises "${operation}" without implementing it`);
+      }
+    }
+    registered.set(id, implementation);
+  }
+  return {
+    get: (id) => registered.get(id),
+    require(id) {
+      const provider = registered.get(id);
+      if (!provider) throw new Error(`${CONTRACT_NAME}: provider "${id}" is not configured`);
+      return provider;
+    }
+  };
+}
+
+// packages/contracts/src/customer-hosting-commands.ts
+var HostingTargetSchema = external_exports.object({
+  id: external_exports.string().min(1).max(128).regex(/^[a-zA-Z0-9_-]+$/),
+  name: external_exports.string().min(1).max(40).regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/),
+  teamId: external_exports.string().min(1).max(128),
+  provider: HostingProviderIdSchema
+}).strict();
+var empty = external_exports.object({}).strict().optional();
+var target = external_exports.object({ projectId: external_exports.string().min(1), deploymentId: external_exports.string().min(1) }).strict();
+var domain2 = target.extend({ hostname: external_exports.string().min(1).max(253) });
+var encoded = external_exports.string().regex(/^[a-zA-Z0-9+/=]+$/);
+var boundEnvironment = external_exports.object({
+  target: HostingTargetSchema,
+  environment: external_exports.string().min(1).max(64),
+  service: external_exports.string().min(1).max(64).optional()
+}).strict();
+var command = (action, body) => external_exports.object({ action: external_exports.literal(action), body }).strict();
+var CustomerHostingCommandSchema = external_exports.discriminatedUnion("action", [
+  command("report", empty),
+  command("setup", empty),
+  command("start", empty),
+  command("authorize", empty),
+  command("initialize", external_exports.object({ publicKey: encoded.min(500).max(1024) }).strict()),
+  command("unlock", external_exports.object({ recovery: encoded.min(500).max(640) }).strict()),
+  command("callback", external_exports.object({
+    code: external_exports.string().max(1024),
+    state: external_exports.string().max(1024),
+    issuer: external_exports.string().max(1024),
+    error: external_exports.string().max(1024)
+  }).strict()),
+  command("redeploy", target),
+  command("remove", HostingRemovalSchema),
+  command("marketplace-status", empty),
+  command("marketplace-enroll", external_exports.object({ handoff: external_exports.string().regex(/^[0-9a-f-]{36}:[A-Za-z0-9_-]{43}$/) }).strict()),
+  command("domains-list", target),
+  command("domain-attach", domain2),
+  command("domain-detach", domain2),
+  command("brand-read", target),
+  command("brand-apply", target.extend({ value: external_exports.string().max(60) })),
+  command("hosting-apply", external_exports.object({ target: HostingTargetSchema, plan: InfraPlanSchema }).strict()),
+  command("hosting-observe", HostingTargetSchema),
+  command("hosting-remove", external_exports.object({ target: HostingTargetSchema, options: HostingRemovalSchema }).strict()),
+  command("hosting-redeploy", boundEnvironment)
+]);
+
 // apps/managed-action/src/runner.ts
 var RELEASE = { version: process.env.PLATFOLIO_ACTION_VERSION ?? "0.0.0-dev", commitSha: process.env.PLATFOLIO_ACTION_SHA ?? "0".repeat(40), imageDigest: `sha256:${"0".repeat(64)}` };
 function readIntent(env) {
@@ -27677,7 +27960,7 @@ function readIntent(env) {
 async function runManagedAction(deps) {
   const intent = readIntent(deps.env);
   const startedAt = deps.now();
-  const missing = deps.env.RAILWAY_TOKEN ? [] : ["RAILWAY_TOKEN"];
+  const missing = deps.missingCredentials();
   if (missing.length > 0) {
     const refusal = attestationFromApply({
       intent,
@@ -27733,7 +28016,7 @@ async function runManagedAction(deps) {
     await deps.postAttestation(stale);
     return { status: stale.result, attestation: stale };
   }
-  const result = await deps.applyPlan(fetched.plan);
+  const result = await deps.applyPlan(fetched.plan, intent);
   const changed = result.services.filter((s) => s.status === "live").map((s) => `${s.environment ?? intent.environment}/${s.name}`);
   const attestation = attestationFromApply({
     intent,
@@ -27779,30 +28062,32 @@ var headers = {
 };
 await runManagedAction({
   env: process.env,
+  missingCredentials: () => ["RAILWAY_TOKEN", "RAILWAY_WORKSPACE_ID"].filter((name) => !process.env[name]),
   async fetchDispatch(intent) {
     const response = await fetch(`${url2}/api/v1/instances/${encodeURIComponent(intent.instanceId)}/dispatches/${encodeURIComponent(intent.dispatchId)}`, { headers });
     if (!response.ok) throw new Error(`plan fetch failed (${String(response.status)}); refusing to act on a plan we could not read`);
     const body = await response.json();
     return { plan: body.plan, planHash: String(body.planHash).replace(/^sha256:/, "") };
   },
-  async applyPlan(plan) {
+  async applyPlan(plan, intent) {
+    const credentials = new MintingRailwayCredentials({
+      workspaceCredential: { kind: "workspace", token: process.env.RAILWAY_TOKEN ?? "" },
+      transport: new HttpRailwayTransport({ requestTimeoutMs: 25e3 }),
+      tokenName: `platfolio-${intentName(process.env)}-${intent.dispatchId.slice(0, 8)}`
+    });
     const provider = new RailwayInfraProvider({
-      // The workspace-tier credential is what the provider's provisioning path requires today; narrowing to
-      // a per-environment project token is #135's remaining refactor, and this line is where that will change.
-      credentials: new MintingRailwayCredentials({
-        workspaceCredential: { kind: "workspace", token: process.env.RAILWAY_TOKEN ?? "" },
-        // The same transport the provider uses: environment-scoped project tokens are minted through it, so
-        // the workspace credential is never sent on the per-service calls the plan actually makes.
-        transport: new HttpRailwayTransport({ requestTimeoutMs: 25e3 }),
-        tokenName: `platfolio-${intentName(process.env)}`
-      }),
+      credentials,
       transport: new HttpRailwayTransport({ requestTimeoutMs: 6e4 }),
       workspaceId: process.env.RAILWAY_WORKSPACE_ID ?? "",
       deployBudget: Number(process.env.PLATFOLIO_DEPLOY_BUDGET ?? "12"),
       deployTimeoutMs: Number(process.env.PLATFOLIO_DEPLOY_TIMEOUT_MS ?? "600000"),
       pollIntervalMs: 1e4
     });
-    return await provider.applyPlan(plan);
+    try {
+      return await hostingProviders([provider]).require(plan.provider).applyPlan(plan);
+    } finally {
+      await credentials.revokeAll();
+    }
   },
   async postAttestation(attestation) {
     const response = await fetch(`${url2}/api/v1/attestations`, { method: "POST", headers, body: JSON.stringify(attestation) });

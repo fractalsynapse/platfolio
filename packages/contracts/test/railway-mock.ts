@@ -44,6 +44,8 @@ export interface MockOptions {
   renameDoesNothing?: boolean;
   /** Model a partial delete: projectDelete answers true but the project remains readable (#111). */
   keepProjectAfterDelete?: boolean;
+  refuseProjectDelete?: boolean;
+  workspaceReadFailsAfterDelete?: boolean;
   /** Fail the first N serviceDelete calls for template services, to test the retry. */
   templateDeleteFailures?: number;
 }
@@ -103,7 +105,7 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
   readonly takenDomains = new Set<string>();
   readonly domainCreates: string[] = [];
   /** Template deploys recorded so tests can assert the composed name and the grant used. */
-  volumes: { id: string; projectId: string; name: string; serviceId: string; environmentId: string; mountPath: string }[] = [];
+  volumes: { id: string; projectId: string; name: string; serviceId: string; environmentId: string; mountPath: string; pendingDeletion?: boolean }[] = [];
   /** How many template-created services are still hidden (diagnostics for tests). */
   hiddenServiceCount(): number { return this.hiddenServices.size; }
   /** Services hidden until read N times, so single-shot lookups fail as they do live (#77). */
@@ -165,6 +167,8 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
       // Not a whitelist entry: the constructor rebuilds options, and a flag left out here is silently
       // undefined -- the exact bug that once made a test vacuous. Any new option must be threaded through.
       keepProjectAfterDelete: options.keepProjectAfterDelete ?? false,
+      refuseProjectDelete: options.refuseProjectDelete ?? false,
+      workspaceReadFailsAfterDelete: options.workspaceReadFailsAfterDelete ?? false,
       templateDeleteFailures: options.templateDeleteFailures ?? 0,
       secretsPresent: options.secretsPresent ?? true,
       settleAfter: options.settleAfter ?? 1,
@@ -318,24 +322,27 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
 
     switch (operation) {
       case 'projects': {
+        if (this.options.workspaceReadFailsAfterDelete && this.operations.includes('projectDelete:workspace')) {
+          throw new Error('Railway workspace inventory timed out');
+        }
         const workspaceId = v.workspaceId as string;
         const nodes = [...this.projects.values()].filter((p) => p.workspaceId === workspaceId)
           .map((p) => ({ id: p.id, name: p.name, description: p.description }));
-        return { projects: { edges: nodes.map((node) => ({ node })) } } as T;
+        return { projects: { edges: nodes.map((node) => ({ node })), pageInfo: { hasNextPage: false, endCursor: null } } } as T;
       }
       case 'project': {
         const found = [...this.projects.values()].find((p) => p.id === (v.id as string));
         return { project: found ? { id: found.id, name: found.name, description: found.description } : null } as T;
       }
       case 'projectCreate': {
-        const input = v.input as { name: string; workspaceId: string; description?: string };
+        const input = v.input as { name: string; workspaceId: string; description?: string; defaultEnvironmentName?: string };
         if ([...this.projects.values()].some((p) => p.workspaceId === input.workspaceId && p.name === input.name)) {
           throw new Error('railway projectCreate: name already exists in workspace [BAD_USER_INPUT]');
         }
         const id = `proj-${this.sequence++}`;
         this.projects.set(id, { id, name: input.name, workspaceId: input.workspaceId, description: input.description ?? '' });
         const environmentId = `env-${this.sequence++}`;
-        this.environments.set(environmentId, { id: environmentId, projectId: id, name: 'production' });
+        this.environments.set(environmentId, { id: environmentId, projectId: id, name: input.defaultEnvironmentName ?? 'production' });
         return { projectCreate: { id } } as T;
       }
       case 'projectUpdate': {
@@ -345,11 +352,38 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
         return { projectUpdate: true } as T;
       }
       case 'projectDelete': {
-        // #111's orphan branch needs a partial delete to exist: a projectDelete that returns true while the
-        // project stays readable. Without it, everything unremoved lands in releasedWithProject and the
-        // provider could claim a clean teardown without the survivor case ever being exercised.
-        if (!this.options.keepProjectAfterDelete) this.projects.delete(v.id as string);
+        if (this.options.refuseProjectDelete) return { projectDelete: false } as T;
+        if (!this.options.keepProjectAfterDelete) {
+          const id = v.id as string;
+          this.projects.delete(id);
+          this.volumes = this.volumes.filter((volume) => volume.projectId !== id);
+          for (const [serviceId, service] of this.services) {
+            if (service.projectId === id) this.services.delete(serviceId);
+          }
+          for (const [environmentId, environment] of this.environments) {
+            if (environment.projectId !== id) continue;
+            this.environments.delete(environmentId);
+            for (const key of this.instances.keys()) {
+              if (key.startsWith(`${environmentId}:`)) this.instances.delete(key);
+            }
+          }
+        }
         return { projectDelete: true } as T;
+      }
+      case 'deploymentRemove': {
+        const instance = [...this.instances.values()].find(({ deploymentId }) => deploymentId === v.id);
+        if (!instance) return { deploymentRemove: false } as T;
+        instance.status = 'REMOVED';
+        return { deploymentRemove: true } as T;
+      }
+      case 'environment.removableDeployments': {
+        const edges = [...this.instances].filter(([key]) => key.startsWith(`${String(v.environmentId)}:`))
+          .map(([, instance]) => ({ node: {
+            source: { image: instance.image },
+            activeDeployments: [],
+            latestDeployment: instance.deploymentId ? { id: instance.deploymentId, status: instance.status } : null,
+          } }));
+        return { environment: { serviceInstances: { edges, pageInfo: { hasNextPage: false, endCursor: null } } } } as T;
       }
       case 'project.environments': {
         if (!this.projects.has(v.projectId as string)) throw new Error(`railway project.environments: Project not found [INTERNAL_SERVER_ERROR]`);
@@ -384,7 +418,7 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
       case 'project.volumes': {
         if (!this.projects.has(v.projectId as string)) throw new Error(`railway project.volumes: Project not found [INTERNAL_SERVER_ERROR]`);
         const projectId = v.projectId as string;
-        return { project: { volumes: { edges: this.volumes.filter((x) => x.projectId === projectId).map((node) => ({ node })) } } } as T;
+        return { project: { volumes: { edges: this.volumes.filter((x) => x.projectId === projectId).map((node) => ({ node })), pageInfo: { hasNextPage: false, endCursor: null } } } } as T;
       }
       case 'volumeCreate': {
         const input = v.input as { projectId: string; environmentId: string; serviceId: string, mountPath: string };
@@ -406,6 +440,12 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
         this.volumes.push({ id, projectId: input.projectId, name: volumeName, serviceId: input.serviceId, environmentId: input.environmentId, mountPath: input.mountPath });
         return { volumeCreate: { id, name: volumeName } } as T;
       }
+      case 'environment.retainedVolumes':
+        return { environment: { volumeInstances: {
+          edges: this.volumes.filter(({ environmentId }) => environmentId === v.environmentId)
+            .map(({ id, pendingDeletion }) => ({ node: { volumeId: id, isPendingDeletion: pendingDeletion ?? false } })),
+          pageInfo: { hasNextPage: false, endCursor: null },
+        } } } as T;
       case 'environment.volumeInstances': {
         // Scoped to the ENVIRONMENT, not to the project: `VolumeInstance.environmentId` is NON_NULL, so asking
         // what is mounted here must not answer with what is mounted somewhere else. The double used to filter

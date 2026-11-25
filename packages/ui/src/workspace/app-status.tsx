@@ -1,3 +1,4 @@
+import { OperationState } from './operation-state.tsx';
 import * as React from 'react';
 import type { SuccessOf } from '@platfolio/api-contract/generated/types';
 import { ageLabel, useClock } from '../components/freshness.ts';
@@ -23,11 +24,10 @@ export function AppStatus({ instanceId }: { readonly instanceId: string }) {
   const params = React.useMemo(() => ({ instanceId }), [instanceId]);
   const { state, reload } = useOperation('getHostedAppStatus', { params, key: `app-status-${instanceId}` });
   const clock = useClock();
-  if (state.status === 'pending') return <p role="status">Loading app status…</p>;
-  if (state.status === 'failed') return state.error.status === 404 ? <p>App checks begin once a hosted deployment has been verified.</p>
-    : <p role="status">Couldn’t read app status.{' '}
-      <button type="button" className="ui-workspace-trigger ui-hit-primary" onClick={reload}>Try again</button>
-    </p>;
+  if (state.status !== 'loaded') {
+    if (state.status === 'failed' && state.error.status === 404) return <p>App checks begin once a hosted deployment has been verified.</p>;
+    return <OperationState status={state.status} pending="Loading app status…" failed="Couldn’t read app status." retry={reload} />;
+  }
   const { checkedAt, updates } = state.data;
   return <>
     <section aria-label="Availability">

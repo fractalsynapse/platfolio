@@ -1,3 +1,4 @@
+import { WorkspaceAction } from './workspace-action.tsx';
 import * as React from 'react';
 
 interface WorkspaceMenuProps {
@@ -38,10 +39,10 @@ export function WorkspaceMenu({ label, trigger, children, align, hover, kind }: 
         button.current?.focus();
       }
     }}>
-    <button aria-label={label} aria-expanded={open} aria-controls={open ? id : undefined} className="ui-workspace-trigger ui-hit-primary" data-kind={kind} ref={button}
+    <WorkspaceAction aria-label={label} aria-expanded={open} aria-controls={open ? id : undefined} data-kind={kind} ref={button}
       type="button" onClick={() => { if (pinned.current) close(); else { pinned.current = true; setOpen(true); } }}>
       {trigger}
-    </button>
+    </WorkspaceAction>
     {open && <div id={id} className={align === 'end' ? 'ui-workspace-popover ui-workspace-popover-end' : 'ui-workspace-popover'}
       onClick={(event) => { if (event.target instanceof Element && event.target.closest('a, button')) close(); }}>
       {children}

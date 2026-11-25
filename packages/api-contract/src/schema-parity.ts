@@ -522,6 +522,8 @@ export interface UnmatchedDeclaration {
 }
 
 export const UNMATCHED_COMPONENTS: UnmatchedDeclaration[] = [
+  { component: 'HubInstallationJournal', reason: 'Public projection of the journal for Connections. The persistence record also holds internal checkpoints and is not exposed.' },
+  { component: 'HubInstallationLaunch', reason: 'Browser progress envelope projected from an ephemeral launch session. OpenAPI owns its public fields; authorization and bootstrap values are intentionally absent.' },
   { component: 'Slug', reason: 'The spec names the shared slug rule; in code it is `SLUG_PATTERN` plus a `.max(40).regex()` inline on each field (persistence.ts:54), never a StandardSchema export, so there is nothing to emit JSON Schema from. Naming it a component is the spec doing what the code does not: giving the rule one place to live.' },
   { component: 'TeamWithRole', reason: 'A response DTO that composes a `Team` with the caller\'s role. `TeamSchema` exists but is a different shape, and no code definition is named TeamWithRole, so there is no counterpart to compare -- recorded here rather than matched by fuzzy name similarity.' },
   { component: 'CurrentPerson', reason: 'Assembled per request from `PersonSchema` plus identity and membership rows (capabilities.ts); no single definition carries it, so the spec is the only description of it.' },

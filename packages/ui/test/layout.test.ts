@@ -206,15 +206,15 @@ test('a primitive renders a plain element: no inline width, no media fork, no be
   const el = Stack({ children: null });
   assert.equal(typeof el, 'object');
   const props = (el as { props: Record<string, unknown> }).props;
-  assert.equal(props.class, 'ui-stack');
+  assert.equal(props.className, 'ui-stack');
   assert.ok(!('style' in props), 'a primitive set an inline style');
   assert.ok(!Object.keys(props).some((k) => /mobile|desktop|tablet|compact|dense|width|breakpoint/i.test(k)),
     `a fork prop reached the DOM: ${Object.keys(props).join(', ')}`);
 });
 
 test('a caller-supplied class composes with the primitive class and cannot replace it', () => {
-  const props = (OverlaySheet({ class: 'instance-detail' }) as { props: { class: string } }).props;
-  assert.equal(props.class, 'ui-sheet instance-detail');
+  const props = (OverlaySheet({ class: 'instance-detail' }) as { props: { className: string } }).props;
+  assert.equal(props.className, 'ui-sheet instance-detail');
 });
 
 test('the five components are distinct objects, not one aliased five ways', () => {

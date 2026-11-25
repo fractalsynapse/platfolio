@@ -781,3 +781,22 @@ test('the double refuses a serviceUpdate with no sub-selection (the E26 class, e
     'a rename that tried to pass an environment field is rejected, because the field does not exist on ServiceUpdateInput',
   );
 });
+
+test('a bound staging launch uses the platform name and can add production without touching another project', async () => {
+  const mock = new RailwayMock();
+  const p = planWith((plan) => { plan.environments = plan.environments.filter(({ name }) => name === 'staging'); });
+  const bind = (instanceId: string) => new RailwayInfraProvider({
+    credentials: mock, transport: mock, workspaceId: 'ws-1', deployBudget: 20, deployTimeoutMs: 2_000, pollIntervalMs: 1,
+    project: { instanceId, name: 'starter-web' },
+  });
+  const provider = bind(p.instanceId);
+  assert.equal((await provider.applyPlan(p)).verified, true);
+  assert.deepEqual([...mock.projects.values()].map(({ name }) => name), ['starter-web']);
+  assert.deepEqual([...mock.environments.values()].map(({ name }) => name), ['staging']);
+  await assert.rejects(() => bind('another-instance').deleteInstance('another-instance', { data: 'wipe' }), /belongs to another instance/);
+  await assert.rejects(() => bind('another-instance').redeploy({ instanceId: 'another-instance', environment: 'staging' }), /belongs to another instance/);
+  const expanded = planWith((plan) => { plan.planHash = 'a'.repeat(64); });
+  assert.equal((await provider.applyPlan(expanded)).verified, true);
+  assert.deepEqual([...mock.environments.values()].map(({ name }) => name).sort(), ['production', 'staging']);
+  assert.equal(mock.projects.size, 1);
+});

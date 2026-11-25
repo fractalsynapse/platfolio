@@ -1,3 +1,5 @@
+import { WorkspaceField } from './workspace-field.tsx';
+import { WorkspaceAction } from './workspace-action.tsx';
 import * as React from 'react';
 import { ageLabel, useClock } from '../components/freshness.ts';
 import { useCommand, useOperation } from '../sdk/use-operation.ts';
@@ -31,7 +33,7 @@ export function MarketplaceConnection({ teamId }: { readonly teamId: string }) {
 
   if (connection.state.status === 'pending') return <p role="status">Checking the marketplace connection…</p>;
   if (connection.state.status === 'failed') return <p role="status">Couldn’t check the marketplace connection.{' '}
-    <button type="button" className="ui-workspace-trigger ui-hit-primary" onClick={connection.reload}>Try again</button>
+    <WorkspaceAction type="button" onClick={connection.reload}>Try again</WorkspaceAction>
   </p>;
   if (connection.state.status !== 'loaded') return null;
   const { state, release } = connection.state.data;
@@ -48,9 +50,10 @@ export function MarketplaceConnection({ teamId }: { readonly teamId: string }) {
     {state === 'unavailable' && <p>Check that the private worker can read its Marketplace entry in OpenBao and reach the marketplace.</p>}
     {release && <p>Saved release <strong>Starter Web {release.version}</strong></p>}
     {state === 'disconnected' && <form className="ui-workspace-form" onSubmit={(event) => void connect(event)}>
-      <label htmlFor="marketplace-code">Marketplace connection code</label>
-      <input id="marketplace-code" ref={input} type="password" required maxLength={80} autoComplete="off" spellCheck={false} disabled={pending} />
-      <div><button className="ui-workspace-primary ui-hit-primary" type="submit" disabled={pending}>{pending ? 'Connecting…' : 'Connect marketplace'}</button></div>
+      <WorkspaceField id="marketplace-code" label="Marketplace connection code">
+        <input id="marketplace-code" ref={input} type="password" required maxLength={80} autoComplete="off" spellCheck={false} disabled={pending} />
+      </WorkspaceField>
+      <div><WorkspaceAction variant="primary" type="submit" disabled={pending}>{pending ? 'Connecting…' : 'Connect marketplace'}</WorkspaceAction></div>
     </form>}
     {error && <p role="alert">{error}</p>}
   </section>;

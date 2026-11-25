@@ -1,3 +1,4 @@
+import { WorkspaceAction } from './workspace-action.tsx';
 import * as React from 'react';
 import type { ParamsOf } from '@platfolio/api-contract/generated/types';
 import { useCommand } from '../sdk/use-operation.ts';
@@ -25,8 +26,8 @@ export function StarterRedeploy({ params, progressPath }: {
   return <section aria-label="Deploy pinned release">
     <h2>Deploy pinned release</h2>
     <p>Rebuild this release in the existing staging project. The database and storage stay in place.</p>
-    <button className="ui-workspace-primary ui-hit-primary" type="button" disabled={pending}
-      onClick={() => void requestDeployment()}>{pending ? 'Requesting deployment…' : 'Deploy again'}</button>
+    <WorkspaceAction variant="primary" type="button" disabled={pending}
+      onClick={() => void requestDeployment()}>{pending ? 'Requesting deployment…' : 'Deploy again'}</WorkspaceAction>
     {feedback && <p role={feedback.error ? 'alert' : 'status'}>{feedback.message}{' '}
       <WorkspaceLink href={progressPath}>View setup progress</WorkspaceLink></p>}
   </section>;

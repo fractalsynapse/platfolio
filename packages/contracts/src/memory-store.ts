@@ -1,3 +1,4 @@
+import { InstallationJournalSchema, type InstallationJournal } from './installation-journal.ts';
 import { z } from 'zod';
 import type { Attestation } from './attestation.ts';
 import { AttestationRecordSchema, AuditEntrySchema, BindingRecordSchema, CapabilityOfferSchema, CapabilityShareSchema, IdentitySchema, PersonSchema, TeamMemberSchema, DispatchRecordSchema, InstanceEnvironmentStateSchema, InstanceSchema, InvitationSchema, ProviderConnectionSchema, RepoConnectionSchema, TeamSchema, newId,
@@ -38,6 +39,7 @@ export interface MemoryStoreOptions {
 
 export class MemoryStore implements Store {
   readonly driver = 'memory';
+  private readonly installationJournals = new Map<string, InstallationJournal>();
   private readonly marketplaceLinks = new Map<string, {
     teamId: string;
     disconnected: boolean;
@@ -72,6 +74,30 @@ export class MemoryStore implements Store {
 
   constructor(options: MemoryStoreOptions = {}) {
     this.clock = options.now ?? (() => new Date().toISOString());
+  }
+
+  async listInstallationJournals(teamId: string, personId: string) {
+    return [...this.installationJournals.values()].filter((row) => row.teamId === teamId && row.personId === personId).map(copy);
+  }
+
+  async getInstallationJournal(teamId: string, personId: string, id: string) {
+    const row = this.installationJournals.get(id);
+    return row?.teamId === teamId && row.personId === personId ? copy(row) : undefined;
+  }
+
+  async saveInstallationJournal(next: InstallationJournal): Promise<boolean> {
+    const result = InstallationJournalSchema.safeParse(next);
+    if (this.closed || !result.success) return false;
+    const current = this.installationJournals.get(next.id);
+    if (current) {
+      if (next.version !== current.version + 1 || current.teamId !== next.teamId || current.personId !== next.personId ||
+          current.provider !== next.provider || current.name !== next.name || current.workspaceId !== next.workspaceId) return false;
+    } else if (next.version !== 0 || !this.teams.has(next.teamId) || !this.persons.has(next.personId) ||
+        [...this.installationJournals.values()].some((row) => row.provider === next.provider && row.workspaceId === next.workspaceId && row.name === next.name)) {
+      return false;
+    }
+    this.installationJournals.set(next.id, result.data);
+    return true;
   }
 
   private refuse(label: string): StoreResult<never> {

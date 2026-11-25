@@ -208,21 +208,38 @@ test('a volume that outlived its service is re-attached, not duplicated', async 
   assert.equal(mock.volumes[0]!.mountPath, '/var/cache/app');
 });
 
-test('deleteInstance retains what the plan said to keep, and reports it as retained', async () => {
+test('keep stops deployments and preserves the same volume in a reachable project', async () => {
   const { mock, provider } = harness();
   await provider.applyPlan(withVolume(plan(), 'survive'));
-  assert.equal(mock.volumes.length, 1);
+  const volumeId = mock.volumes[0]?.id;
+  assert.ok(volumeId);
 
-  const deleted = await provider.deleteInstance(plan().instanceId, { retainMounts: ['/var/cache/app'] });
-  assert.equal(mock.volumes.length, 1, 'a retained volume is still there after teardown');
-  assert.deepEqual(deleted.retained, ['api-production-volume (mounted at /var/cache/app)'], 'the disk is named for the PHYSICAL service, which since D57 carries the environment suffix');
-  assert.ok(!deleted.removed.some((r) => r.startsWith('volume:')), 'and it is not claimed as removed');
+  const kept = await provider.deleteInstance(plan().instanceId, { data: 'keep' });
+  assert.equal(mock.projects.size, 1);
+  assert.deepEqual(mock.volumes.map(({ id }) => id), [volumeId]);
+  assert.deepEqual(kept.retained, ['api-production-volume']);
+  assert.deepEqual(kept.removed, []);
+  assert.equal(kept.failures, undefined);
+  assert.ok((await provider.readState(plan().instanceId)).services.every(({ status }) => status === 'removed'));
 
-  // Contrasting case with its own instance: omitting the option keeps today's behaviour. Retention must be a
-  // decision someone made, not a default that strands storage and bills quietly.
-  const plain = harness();
-  await plain.provider.applyPlan(withVolume(plan()));
-  const gone = await plain.provider.deleteInstance(plan().instanceId);
-  assert.equal(plain.mock.volumes.length, 0, 'not retained, so removed with the instance');
-  assert.ok(!('retained' in gone), 'no retained field when nothing was retained');
+  const resumed = await provider.applyPlan(withVolume(plan(), 'survive'));
+  assert.equal(resumed.verified, true);
+  assert.equal(resumed.noop, false);
+  assert.deepEqual(mock.volumes.map(({ id }) => id), [volumeId]);
+
+  const wiped = await provider.deleteInstance(plan().instanceId, { data: 'wipe' });
+  assert.equal(mock.projects.size, 0);
+  assert.equal(mock.volumes.length, 0);
+  assert.equal(wiped.retained, undefined);
+});
+
+
+test('keep refuses to report a volume that is already marked for deletion', async () => {
+  const { mock, provider } = harness();
+  await provider.applyPlan(withVolume(plan(), 'survive'));
+  mock.volumes[0]!.pendingDeletion = true;
+  const kept = await provider.deleteInstance(plan().instanceId, { data: 'keep' });
+  assert.equal(kept.retained, undefined);
+  assert.equal(kept.failures?.[0]?.code, 'retention-unverified');
+  assert.equal(mock.projects.size, 1);
 });

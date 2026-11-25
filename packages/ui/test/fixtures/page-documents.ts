@@ -1,3 +1,5 @@
+import { matchWorkspaceRoute, workspacePaths } from '../../src/workspace/routes.ts';
+import { workspacePageIds, type WorkspacePageId } from '../../src/workspace/workspace-pages.ts';
 import type { InstanceResponse, TeamWithRole } from '@platfolio/api-contract/generated/types';
 import type { Freshness } from '../../src/sdk/transport.ts';
 
@@ -80,7 +82,7 @@ export const SAMPLE_NOW = '2026-11-15T09:30:40.000Z';
 export const SAMPLE_PROPS: Readonly<Record<string, Record<string, unknown>>> = {
   'context.switcher': { teams: SAMPLE_TEAMS, instances: SAMPLE_INSTANCES },
   'launch.starter': { teamId: '01TEAMAAA' },
-  'workspace.content': {},
+  ...Object.fromEntries(workspacePageIds.map((id) => [id, {}])),
   'freshness.label': { freshness: SAMPLE_FRESHNESS, now: SAMPLE_NOW, describes: 'Instances' },
   'instance.detail': { instance: SAMPLE_INSTANCES[0], attestation: SAMPLE_ATTESTATION, freshness: SAMPLE_FRESHNESS, now: SAMPLE_NOW },
   'instance.list': { instances: SAMPLE_INSTANCES, teams: SAMPLE_TEAMS, observedAt: SAMPLE_FRESHNESS.observedAt, now: SAMPLE_NOW },
@@ -125,3 +127,40 @@ export const ACCEPTED_BUT_WRONG = [
   { label: 'a state the contract does not carry', page: { component: 'instance.state', props: { state: 'healthy', observedAt: SAMPLE_FRESHNESS.observedAt, now: SAMPLE_NOW } } },
   { label: 'an unknown attestation result', page: { component: 'instance.detail', props: { instance: SAMPLE_INSTANCES[0], attestation: { ...SAMPLE_ATTESTATION, result: 'sort-of' }, freshness: SAMPLE_FRESHNESS, now: SAMPLE_NOW } } },
 ] as const;
+
+export const workspaceFixtureRoutes = (() => {
+  const team = SAMPLE_TEAMS[0]!.name;
+  const app = SAMPLE_INSTANCES[0]!.name;
+  const environment = 'staging';
+  return {
+    'workspace.home': workspacePaths.home,
+    'workspace.create-team': workspacePaths.createTeam,
+    'workspace.invitations': workspacePaths.invitations,
+    'workspace.notifications': workspacePaths.notifications,
+    'workspace.account-profile': workspacePaths.account,
+    'workspace.account-emails': workspacePaths.accountEmails,
+    'workspace.account-password': workspacePaths.accountPassword,
+    'workspace.account-notifications': workspacePaths.accountNotifications,
+    'workspace.templates': workspacePaths.templates(team),
+    'workspace.team-launch': workspacePaths.launchForTeam(team),
+    'workspace.launch': workspacePaths.launch,
+    'workspace.team-members': workspacePaths.teamMembers(team),
+    'workspace.team-invitations': workspacePaths.teamInvitations(team),
+    'workspace.team-connections': workspacePaths.teamConnections(team),
+    'workspace.team': workspacePaths.team(team),
+    'workspace.team-activity': workspacePaths.teamActivity(team),
+    'workspace.instance': workspacePaths.instance(team, app),
+    'workspace.instance-status': workspacePaths.instanceStatus(team, app),
+    'workspace.instance-setup': workspacePaths.instanceSetup(team, app),
+    'workspace.environment-overview': workspacePaths.environment(team, app, environment),
+    'workspace.environment-deployments': workspacePaths.environment(team, app, environment, 'deployments'),
+    'workspace.environment-configuration': workspacePaths.environment(team, app, environment, 'configuration'),
+    'workspace.environment-domains': workspacePaths.environment(team, app, environment, 'domains'),
+    'workspace.unavailable': '/dashboard/unavailable',
+  } satisfies Record<WorkspacePageId, string>;
+})();
+
+export function workspaceFixtureRoute(id: string) {
+  const route = workspaceFixtureRoutes[id as WorkspacePageId];
+  return route ? matchWorkspaceRoute(route) : undefined;
+}

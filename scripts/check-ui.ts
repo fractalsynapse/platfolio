@@ -34,6 +34,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import ts from 'typescript';
 import { execFileSync } from 'node:child_process';
 import { LAYOUT_PRIMITIVE_SLOTS, LAYOUT_SLOTS, PRIMITIVES } from '../packages/ui/src/layout/primitives.ts';
 import { CONTENT_CLASSES, CONTENT_SLOTS, CONTENT_TABLE, type ContentPrimitive } from '../packages/ui/src/layout/content.ts';
@@ -662,6 +663,43 @@ const FORBIDDEN_EVENTS: readonly (readonly [RegExp, string])[] = [
   }
 }
 
+/* ------------------------------------------------------------------ component file ownership */
+
+{
+  const g = gate('component-files', 'one React component per file');
+  const sources = listSources(SRC, (rel) => rel.endsWith('.tsx'));
+  const problems: string[] = [];
+  for (const { rel, text } of sources) {
+    const source = ts.createSourceFile(rel, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+    const components: string[] = [];
+    function inspect(node: ts.Node): void {
+      if (ts.isFunctionDeclaration(node) && node.name && /^[A-Z]/.test(node.name.text) && node.body) {
+        components.push(node.name.text);
+      }
+      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && /^[A-Z]/.test(node.name.text) && node.initializer &&
+          (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer) ||
+            (ts.isCallExpression(node.initializer) && /(?:^|\.)(memo|forwardRef)$/.test(node.initializer.expression.getText(source))))) {
+        components.push(node.name.text);
+      }
+      if (ts.isCallExpression(node) && node.expression.getText(source) === 'defineComponent') {
+        const definition = node.arguments[0];
+        if (definition && ts.isObjectLiteralExpression(definition)) {
+          const render = definition.properties.find((property) => property.name?.getText(source) === 'render');
+          if (render && (ts.isMethodDeclaration(render) ||
+              (ts.isPropertyAssignment(render) && (ts.isArrowFunction(render.initializer) || ts.isFunctionExpression(render.initializer))))) {
+            components.push(`registered render at line ${source.getLineAndCharacterOfPosition(render.getStart(source)).line + 1}`);
+          }
+        }
+      }
+      ts.forEachChild(node, inspect);
+    }
+    inspect(source);
+    if (components.length > 1) problems.push(`${rel}: ${components.join(', ')} share a component file`);
+  }
+  if (problems.length) fail(g, ...problems);
+  else pass(g, `${sources.length} React source files checked`);
+}
+
 /* ------------------------------------------------------------------ rule 5's witness: no push fiction */
 
 {
@@ -793,7 +831,7 @@ const TYPE_ASSERTIONS: readonly TypeAssertion[] = [
 /**
  * The flags a fixture is compiled with. They are the UI project's flags, spelled out rather than inherited from
  * `packages/ui/tsconfig.json`, and the reason is measured: a fixture imports `packages/ui/src/index.ts`, which
- * imports the registry, which imports `components/instances.tsx`. Without `--jsx` the control fixtures failed with
+ * imports the registry, which imports the registered TSX components. Without `--jsx` the control fixtures failed with
  * TS6142 on a file they do not name, and a *control* that cannot compile makes its paired refusal meaningless --
  * the exact coin-flip defect 11 §3 prices. Keeping the flag list here and the flag list in the config in two
  * places is a real cost; `test/gates-falsify.test.ts` pays it back by asserting the control side of every pair.

@@ -1,3 +1,4 @@
+import { WorkspaceAction } from './workspace-action.tsx';
 import * as React from 'react';
 import type { ParamsOf } from '@platfolio/api-contract/generated/types';
 import { ageLabel, useClock } from '../components/freshness.ts';
@@ -39,7 +40,7 @@ export function HostedCustomDomains({ params, canManage }: {
     <h3>Custom hostnames</h3>
     {domains.state.status === 'pending' && <p role="status">Checking custom hostnames…</p>}
     {domains.state.status === 'failed' && <p role="status">Couldn’t check custom hostnames. Check that the app, Railway, and OpenBao are ready.</p>}
-    <button type="button" className="ui-workspace-trigger ui-hit-primary" disabled={pending} onClick={domains.reload}>Check DNS now</button>
+    <WorkspaceAction type="button" disabled={pending} onClick={domains.reload}>Check DNS now</WorkspaceAction>
     {domains.state.status === 'loaded' && <>
       <p className="ui-workspace-meta">{ageLabel(domains.state.freshness, clock().toISOString()).text}</p>
       {domains.state.data.map(({ host, dnsStatus, certificateStatus, records }) => <section key={host} aria-label={host}>
@@ -49,10 +50,10 @@ export function HostedCustomDomains({ params, canManage }: {
         <DomainDnsRecords records={records} />
         {canManage && (removing === host ? <div>
           <p>Remove {host} from this environment? The Railway address will still work.</p>
-          <button type="button" className="ui-hit-primary" disabled={pending} onClick={() => void save('detach', host)}>Remove hostname</button>{' '}
-          <button type="button" className="ui-workspace-trigger ui-hit-primary" disabled={pending} onClick={() => setRemoving('')}>Cancel</button>
-        </div> : <button type="button" className="ui-workspace-trigger ui-hit-primary" disabled={pending}
-          onClick={() => setRemoving(host)}>Remove</button>)}
+          <WorkspaceAction type="button" variant="plain" disabled={pending} onClick={() => void save('detach', host)}>Remove hostname</WorkspaceAction>{' '}
+          <WorkspaceAction type="button" disabled={pending} onClick={() => setRemoving('')}>Cancel</WorkspaceAction>
+        </div> : <WorkspaceAction type="button" disabled={pending}
+          onClick={() => setRemoving(host)}>Remove</WorkspaceAction>)}
       </section>)}
       {domains.state.data.length === 0 && (canManage ? <form onSubmit={(event) => {
         event.preventDefault();
@@ -60,7 +61,7 @@ export function HostedCustomDomains({ params, canManage }: {
       }}>
         <p><label>Hostname <input type="text" autoComplete="off" required maxLength={253} placeholder="staging.example.com"
           value={hostname} onChange={(event) => setHostname(event.currentTarget.value)} disabled={pending} /></label></p>
-        <button type="submit" className="ui-workspace-primary ui-hit-primary" disabled={pending}>{pending ? 'Adding hostname…' : 'Add hostname'}</button>
+        <WorkspaceAction type="submit" variant="primary" disabled={pending}>{pending ? 'Adding hostname…' : 'Add hostname'}</WorkspaceAction>
       </form> : <p>No custom hostname is attached.</p>)}
     </>}
     {problem && <p role="alert">{problem}</p>}

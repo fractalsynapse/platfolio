@@ -76,6 +76,8 @@ const NameSchema = z
   .min(1)
   .refine((v) => /^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$/i.test(v), { message: 'names use letters, digits, dot, underscore, hyphen' });
 
+export const HostingProviderIdSchema = z.string().max(64).regex(/^[a-z0-9]+(-[a-z0-9]+)*$/);
+
 export const SecretRefSchema = z.object({
   /** Secret name only. A value here is a validation error by construction. */
   name: NameSchema,
@@ -252,6 +254,12 @@ export const ApplyResultSchema = z.object({
   noop: z.boolean(),
 });
 
+export const KEEP_DATA_FEATURE = 'keep-data-on-removal';
+
+export const HostingRemovalSchema = z.object({ data: z.enum(['keep', 'wipe']) }).strict();
+export type DeleteOptions = z.infer<typeof HostingRemovalSchema>;
+export const HostingRemovalRequestSchema = HostingRemovalSchema.extend({ confirmation: z.string().optional() });
+
 export const DeleteResultSchema = z.object({
   instanceId: NameSchema,
   removed: z.array(z.string().min(1)),
@@ -268,7 +276,7 @@ export const DeleteResultSchema = z.object({
    */
   releasedWithProject: z.array(z.string().min(1)).optional(),
   /**
-   * Volumes deliberately left in place because the plan said `retention: 'survive'`. Listed separately from
+   * Volumes deliberately left in place after a keep-data request. The plan can specify `retention: 'survive'`. Listed separately from
    * `removed` and `orphans` because the third meaning is different again: "we kept this on purpose". They are
    * also not free -- an unattached volume bills -- so the answer has to be visible to whoever asks.
    */
@@ -310,6 +318,7 @@ export interface InfraProvider {
   applyPlan(plan: InfraPlan): Promise<ApplyResult>;
   readState(instanceId: string): Promise<StateSnapshot>;
   deleteInstance(instanceId: string): Promise<DeleteResult>;
+  deleteInstance(instanceId: string, options: DeleteOptions): Promise<DeleteResult>;
   /**
    * Deliver one secret value into the tenant's own provider environment (D53). The value is a pass-through:
    * it is written and forgotten, never stored by platfolio, never echoed back, never logged. This is D34's

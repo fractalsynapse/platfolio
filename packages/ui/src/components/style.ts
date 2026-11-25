@@ -95,9 +95,25 @@ export const COMPONENT_RULES = [
     why: 'Keep labels and fields together and limit the line length on wider screens.',
   },
   {
-    selector: '.ui-workspace-form input',
+    selector: '.ui-workspace-form input:not([type="checkbox"])',
     declarations: ['inline-size: 100%;', 'min-inline-size: 0;', 'min-block-size: var(--ui-target-primary);', 'padding: var(--ui-space-2) var(--ui-space-3);', 'border: 1px solid var(--ui-color-border);', 'border-radius: var(--ui-space-3);', 'background: var(--ui-color-bg);', 'color: var(--ui-color-text);', 'font: inherit;'],
     why: 'Use the same field surface as authentication and preserve the primary input target.',
+  },
+  {
+    selector: '.ui-workspace-form fieldset',
+    declarations: ['display: grid;', 'gap: var(--ui-space-1);', 'min-inline-size: 0;', 'margin: 0;', 'padding: var(--ui-space-2) var(--ui-space-3);',
+      'border: 1px solid var(--ui-color-border);', 'border-radius: var(--ui-space-3);'],
+    why: 'Group related choices on the same surface as other form fields.',
+  },
+  {
+    selector: '.ui-workspace-form fieldset label',
+    declarations: ['display: flex;', 'align-items: center;', 'gap: var(--ui-space-2);', 'min-block-size: var(--ui-target-primary);', 'cursor: pointer;'],
+    why: 'Make the whole checkbox label a comfortable target while keeping the control compact.',
+  },
+  {
+    selector: '.ui-workspace-form input[type="checkbox"]',
+    declarations: ['inline-size: 1rem;', 'block-size: 1rem;', 'margin: 0;', 'accent-color: var(--ui-color-accent);'],
+    why: 'Use the active theme colour and the same control size in every choice group.',
   },
   {
     selector: '.ui-workspace-form input:focus-visible',
@@ -402,26 +418,6 @@ export const COMPONENT_RULES = [
     selector: '.ui-workspace-segments a[aria-current="page"]',
     declarations: ['background: var(--ui-color-surface);', 'color: var(--ui-color-accent);', 'box-shadow: 0 1px 3px color-mix(in srgb, var(--ui-color-text) 12%, transparent);'],
     why: 'Show the selected environment or page without a colored underline.',
-  },
-  {
-    selector: '.ui-workspace-section-stack',
-    declarations: ['display: grid;', 'gap: 1rem;'],
-    why: 'Group vertically related cards on team and environment screens.',
-  },
-  {
-    selector: '.ui-workspace-columns',
-    declarations: ['display: flex;', 'flex-wrap: wrap;', 'align-items: flex-start;', 'gap: 1rem;'],
-    why: 'Show the primary panel and its context side by side when both fit, and stack them in reading order on phones.',
-  },
-  {
-    selector: '.ui-workspace-columns > :first-child',
-    declarations: ['flex: 1.65 1 min(100%, 35.5rem);', 'min-inline-size: 0;'],
-    why: 'Give the primary panel the larger share of a wide row.',
-  },
-  {
-    selector: '.ui-workspace-columns > :last-child',
-    declarations: ['flex: 1 1 min(100%, 21.5rem);', 'min-inline-size: 0;'],
-    why: 'Give the context panel a readable width at either layout.',
   },
   {
     selector: '.ui-workspace-panel',

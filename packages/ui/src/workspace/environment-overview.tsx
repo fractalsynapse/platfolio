@@ -1,6 +1,6 @@
 import * as React from 'react';
 import type { InstanceResponse } from '@platfolio/api-contract/generated/types';
-import { instanceState } from '../components/instances.tsx';
+import { instanceState } from '../components/instances.ts';
 import type { Freshness } from '../sdk/transport.ts';
 
 const StateLabel = instanceState.render;

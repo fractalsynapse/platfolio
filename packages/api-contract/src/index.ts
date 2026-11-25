@@ -146,6 +146,18 @@ export interface BodyCheck {
   errors: string[];
 }
 
+/** Validate a JSON request against the same OpenAPI document used by the generated client. */
+export function validateRequestBody(doc: SpecDocument, operationId: string, body: unknown): BodyCheck {
+  const operation = operationsOf(doc).find((item) => item.operationId === operationId);
+  if (!operation) return { ok: false, errors: ['Operation is missing from the specification'] };
+  const definition = doc.paths[operation.path][operation.method.toLowerCase()] as SpecDocument;
+  const request = deref(definition.requestBody, doc) as SpecDocument | undefined;
+  const schema = request && jsonSchemaFor(request);
+  if (schema === undefined) return { ok: false, errors: ['Operation does not declare a JSON request'] };
+  if (body === undefined && request?.required !== true) return { ok: true, errors: [] };
+  return validateAgainst(doc, schema, body);
+}
+
 /** Validate a response body against the schema the spec declares for this operation and status. */
 export function validateResponse(doc: SpecDocument, operationId: string, status: number, body: unknown): BodyCheck {
   const ops = operationsOf(doc);

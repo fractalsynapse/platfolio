@@ -3,7 +3,7 @@
  * packages/ui/src/components/style.ts and it is the only one.
  *
  * Source: packages/ui/src/components/style.ts
- * Input digest: sha256/c00d6c2ed591b2bd
+ * Input digest: sha256/c2737fae45b5a257
  *
  * Reproduce with `pnpm run ui:css`; `pnpm run ui:css:check` fails when this stops matching the module. The
  * numbers in here are not literals: they reference the custom properties in ../tokens.css, which is what makes
@@ -117,7 +117,7 @@
 }
 
 /* Use the same field surface as authentication and preserve the primary input target. */
-.ui-workspace-form input {
+.ui-workspace-form input:not([type="checkbox"]) {
   inline-size: 100%;
   min-inline-size: 0;
   min-block-size: var(--ui-target-primary);
@@ -127,6 +127,34 @@
   background: var(--ui-color-bg);
   color: var(--ui-color-text);
   font: inherit;
+}
+
+/* Group related choices on the same surface as other form fields. */
+.ui-workspace-form fieldset {
+  display: grid;
+  gap: var(--ui-space-1);
+  min-inline-size: 0;
+  margin: 0;
+  padding: var(--ui-space-2) var(--ui-space-3);
+  border: 1px solid var(--ui-color-border);
+  border-radius: var(--ui-space-3);
+}
+
+/* Make the whole checkbox label a comfortable target while keeping the control compact. */
+.ui-workspace-form fieldset label {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-2);
+  min-block-size: var(--ui-target-primary);
+  cursor: pointer;
+}
+
+/* Use the active theme colour and the same control size in every choice group. */
+.ui-workspace-form input[type="checkbox"] {
+  inline-size: 1rem;
+  block-size: 1rem;
+  margin: 0;
+  accent-color: var(--ui-color-accent);
 }
 
 /* Make keyboard focus visible on workspace fields. */
@@ -574,32 +602,6 @@
   background: var(--ui-color-surface);
   color: var(--ui-color-accent);
   box-shadow: 0 1px 3px color-mix(in srgb, var(--ui-color-text) 12%, transparent);
-}
-
-/* Group vertically related cards on team and environment screens. */
-.ui-workspace-section-stack {
-  display: grid;
-  gap: 1rem;
-}
-
-/* Show the primary panel and its context side by side when both fit, and stack them in reading order on phones. */
-.ui-workspace-columns {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  gap: 1rem;
-}
-
-/* Give the primary panel the larger share of a wide row. */
-.ui-workspace-columns > :first-child {
-  flex: 1.65 1 min(100%, 35.5rem);
-  min-inline-size: 0;
-}
-
-/* Give the context panel a readable width at either layout. */
-.ui-workspace-columns > :last-child {
-  flex: 1 1 min(100%, 21.5rem);
-  min-inline-size: 0;
 }
 
 /* Use the bordered card surface, spacing, and shadow from the mockup. */

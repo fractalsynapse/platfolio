@@ -17,7 +17,7 @@ function plan(mutate?: (p: InfraPlan) => void): InfraPlan {
 }
 
 /** The three states #111 exists to keep apart: removed by us, taken along, still reachable. */
-function harness(options: { buckets?: string[]; keepProjectAfterDelete?: boolean } = {}) {
+function harness(options: { buckets?: string[]; keepProjectAfterDelete?: boolean; refuseProjectDelete?: boolean; workspaceReadFailsAfterDelete?: boolean } = {}) {
   const mock = new RailwayMock(options);
   return { mock, provider: new RailwayInfraProvider({ credentials: mock, transport: mock, workspaceId: 'ws-1', deployBudget: 20, deployTimeoutMs: 4_000, pollIntervalMs: 1 }) };
 }
@@ -81,3 +81,18 @@ test('teardown deletes what was actually placed where, and claims nothing else (
   assert.equal(deleted.removed.includes('service:production/api-staging'), false, 'production never held staging’s service');
   assert.deepEqual(deleted.orphans, [], JSON.stringify(deleted.orphans));
 });
+
+for (const [options, code] of [
+  [{ refuseProjectDelete: true, keepProjectAfterDelete: true }, 'teardown-refused'],
+  [{ workspaceReadFailsAfterDelete: true }, 'teardown-unverified'],
+] as const) {
+  test(`wipe cannot report removal with ${code}`, async () => {
+    const { provider } = harness(options);
+    const p = plan();
+    await provider.applyPlan(p);
+    const deleted = await provider.deleteInstance(p.instanceId);
+    assert.deepEqual(deleted.removed, []);
+    assert.equal(deleted.releasedWithProject, undefined);
+    assert.ok(deleted.failures?.some((failure) => failure.code === code), JSON.stringify(deleted));
+  });
+}

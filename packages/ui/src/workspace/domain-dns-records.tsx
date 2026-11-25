@@ -1,6 +1,7 @@
+import * as React from 'react';
 import type { HostedCustomDomain } from '@platfolio/api-contract/generated/types';
 
-export function DomainDnsRecords({ records }: { readonly records: HostedCustomDomain['records'] }) {
+export function DomainDnsRecords({ records }: { readonly records: HostedCustomDomain['records'] }): React.ReactElement {
   if (records.length === 0) return <p>Railway hasn’t returned DNS instructions yet. Check again in a moment.</p>;
   return <ul className="ui-workspace-list" aria-label="DNS records">
     {records.map(({ host, fqdn, zone, type, value, current, status, purpose }) => <li key={`${type}.${fqdn}.${purpose}`}>

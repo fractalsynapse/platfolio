@@ -1,3 +1,4 @@
+import { WorkspaceAction } from '../workspace/workspace-action.tsx';
 import * as React from 'react';
 import type { SuccessOf } from '@platfolio/api-contract/generated/types';
 import { useCommand } from '../sdk/use-operation.ts';
@@ -87,7 +88,7 @@ export function StarterLaunchSetup({ teamId, setup, refresh }: { readonly teamId
       {setup.openBao !== 'ready' && setup.openBao !== 'unreachable' && <>
         {setup.openBao === 'uninitialized' && phase === 'key' && <>
           <p>Save the owner key first. It lets you retrieve your recovery file if you leave this page during setup.</p>
-          <button type="button" className="ui-workspace-primary ui-hit-primary" disabled={pending} onClick={() => void run(prepare)}>Create owner key</button>
+          <WorkspaceAction type="button" variant="primary" disabled={pending} onClick={() => void run(prepare)}>Create owner key</WorkspaceAction>
         </>}
         {phase === 'prepared' && <>
           {download && <p><a href={download} download="platfolio-owner-key.json">Download owner key</a></p>}
@@ -116,7 +117,7 @@ export function StarterLaunchSetup({ teamId, setup, refresh }: { readonly teamId
       {setup.openBao === 'ready' && setup.railway !== 'connected' && <>
         <p>Review the requested access in Railway. Your authorization is stored in your OpenBao.</p>
         {!setup.canWipeData && <p>In Railway, select only the Starter Web project.</p>}
-        <button type="button" className="ui-workspace-primary ui-hit-primary" disabled={pending} onClick={() => void run(beginConsent)}>Connect Railway</button>
+        <WorkspaceAction type="button" variant="primary" disabled={pending} onClick={() => void run(beginConsent)}>Connect Railway</WorkspaceAction>
       </>}
     </section>
     {problem && <p role="alert">{problem}</p>}
