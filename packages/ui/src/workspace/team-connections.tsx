@@ -3,6 +3,7 @@ import { ageLabel, useClock } from '../components/freshness.ts';
 import { StarterLaunchSetup } from '../components/starter-launch-setup.tsx';
 import { useOperation } from '../sdk/use-operation.ts';
 import { HubMarketplaceInstallations } from './hub-marketplace-installations.tsx';
+import { HubInstallationLaunch } from './hub-installation-launch.tsx';
 import { MarketplaceConnection } from './marketplace-connection.tsx';
 import { WorkspaceLink } from './workspace-link.tsx';
 import { workspacePaths } from './routes.ts';
@@ -11,10 +12,13 @@ export function TeamConnections({ teamId, teamName }: { readonly teamId: string;
   const params = React.useMemo(() => ({ teamId }), [teamId]);
   const setup = useOperation('getStarterLaunchSetup', { params, key: `starter-setup-${teamId}` });
   const clock = useClock();
-  return <section aria-label="Private installation connections">
+  return <section aria-label="Private installation connections" className="ui-workspace-section-stack">
     {setup.state.status === 'pending' && <p role="status">Checking installation connections…</p>}
     {setup.state.status === 'failed' && (setup.state.error.status === 404
-      ? <HubMarketplaceInstallations key={teamId} teamId={teamId} />
+      ? <>
+        <HubInstallationLaunch key={`offer-${teamId}`} teamId={teamId} />
+        <HubMarketplaceInstallations key={teamId} teamId={teamId} />
+      </>
       : <p role="status">Couldn’t check the installation connection.{' '}
         <button type="button" className="ui-workspace-trigger ui-hit-primary" onClick={setup.reload}>Try again</button>
       </p>)}

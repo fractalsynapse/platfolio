@@ -2,6 +2,30 @@ export function createInstallationSetup({ heading, escape, link }) {
   const demos = new Map();
 
   function page(team) {
+    if (new URLSearchParams(location.search).get("mode") === "hub") {
+      const privateConnections = `/dashboard/teams/${escape(team.slug)}/connections`;
+      return `${heading(team, "Connections")}
+        <div class="installation-setup">
+          <section class="panel" aria-label="Launch private Platfolio">
+            <h2>Launch private Platfolio</h2>
+            <p>Start a new Railway project named <strong>platfolio</strong>. Then sign in to your installation and open Connections to unlock secret storage.</p>
+            <dl class="facts">
+              <div><dt>What runs</dt><dd>Platfolio, Keycloak, OpenBao, and PostgreSQL</dd></div>
+              <div><dt>Hosting</dt><dd>Your Railway workspace. Railway charges for the resources you use.</dd></div>
+              <div><dt>Installer build</dt><dd>Demo</dd></div>
+            </dl>
+            <p>Sign in with your setup email or <code>owner</code>. Railway generates the first password in the sign-in service’s Variables tab.</p>
+            <div class="actions">${link(privateConnections, "Preview private setup", "button primary")}</div>
+            <p class="muted">The live installer opens Railway in a new tab.</p>
+          </section>
+          <section class="panel" aria-label="Marketplace connections">
+            <h2>Marketplace connections</h2>
+            <p>Create a one-time code for a private Platfolio to connect to your team’s marketplace.</p>
+            <button class="button primary" type="button" disabled>Create connection code</button>
+            <p>No marketplace connections yet.</p>
+          </section>
+        </div>`;
+    }
     const state = demos.get(team.slug) ?? { vault: "key", railway: false, marketplace: false };
     demos.set(team.slug, state);
     const panel = (title, status, content) => `<section class="panel">

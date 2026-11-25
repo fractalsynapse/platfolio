@@ -4,7 +4,7 @@
  * hand, because every line reproduces from the specification.
  *
  * Source: apps/control-plane/openapi.yaml (OpenAPI 3.1.0, info.version 0.1.0)
- * Input digest: sha256/028c0c9414ef09f5
+ * Input digest: sha256/108619db96fc0ee3
  *
  * Reproduce it with `pnpm run api:types`. `pnpm run api:types:check` fails when this file stops matching
  * what the committed spec produces, which is the only way a generated type deserves to be trusted.
@@ -425,6 +425,10 @@ export interface ApiParameters {
   getHostedStarterBrand: {
     instanceId: string;
     environment: string;
+  };
+  /** GET /api/v1/teams/{teamId}/marketplace/installation-offer */
+  getHubInstallationOffer: {
+    teamId: string;
   };
   /** GET /api/v1/instances/{instanceId} */
   getInstance: {
@@ -1018,6 +1022,16 @@ export interface ApiResponses {
     '404': Error;
     '409': Error;
     '503': Error;
+  };
+  /** GET /api/v1/teams/{teamId}/marketplace/installation-offer */
+  getHubInstallationOffer: {
+    '200': {
+      templateCode: string;
+      revision: string;
+    };
+    '401': Error;
+    '403': Error;
+    '404': Error;
   };
   /** GET /api/v1/instances/{instanceId} */
   getInstance: {
@@ -1692,6 +1706,8 @@ export const ENDPOINTS = {
   getHostedAppStatus: { method: 'get', path: '/api/v1/instances/{instanceId}/status' },
   /** GET /api/v1/instances/{instanceId}/environments/{environment}/configuration/starter-brand */
   getHostedStarterBrand: { method: 'get', path: '/api/v1/instances/{instanceId}/environments/{environment}/configuration/starter-brand' },
+  /** GET /api/v1/teams/{teamId}/marketplace/installation-offer */
+  getHubInstallationOffer: { method: 'get', path: '/api/v1/teams/{teamId}/marketplace/installation-offer' },
   /** GET /api/v1/instances/{instanceId} */
   getInstance: { method: 'get', path: '/api/v1/instances/{instanceId}' },
   /** GET /api/v1/instances/{instanceId}/environments/{environment} */

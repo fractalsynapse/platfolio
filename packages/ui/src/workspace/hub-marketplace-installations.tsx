@@ -2,6 +2,7 @@ import * as React from 'react';
 import type { MarketplaceInstallation } from '@platfolio/api-contract/generated/types';
 import { ageLabel, useClock } from '../components/freshness.ts';
 import { useCommand, useOperation } from '../sdk/use-operation.ts';
+import { WorkspacePanel } from './workspace-panel.tsx';
 
 const stateLabel: Record<MarketplaceInstallation['state'], string> = {
   pending: 'Waiting for connection',
@@ -73,8 +74,7 @@ export function HubMarketplaceInstallations({ teamId }: { readonly teamId: strin
   const codeState = state.data.find(({ installationId }) => installationId === code?.installationId)?.state;
   const showCode = code && Date.parse(code.expiresAt) > now.getTime() && (codeState === undefined || codeState === 'pending');
 
-  return <section aria-label="Marketplace installations">
-    <h2>Private installations</h2>
+  return <WorkspacePanel title="Marketplace connections">
     <p>Create a one-time code for a private Platfolio to connect to your team’s marketplace.</p>
     <p className="ui-workspace-meta">{ageLabel(state.freshness, now.toISOString()).text}</p>
     <button className="ui-hit-primary ui-workspace-primary" type="button" disabled={pending} onClick={() => void issueCode()}>
@@ -107,5 +107,5 @@ export function HubMarketplaceInstallations({ teamId }: { readonly teamId: strin
           </button>
         </div>)}
       </li>)}</ul>}
-  </section>;
+  </WorkspacePanel>;
 }

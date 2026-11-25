@@ -27,7 +27,7 @@ const realm = {
   ],
   roles: { client: { [API_CLIENT_ID]: [{ name: REQUIRED_SCOPE, clientRole: true }] } },
   clientScopeMappings: { [API_CLIENT_ID]: [{ client: WEB_CLIENT_ID, roles: [REQUIRED_SCOPE] }] },
-  users: [{ username: 'owner', firstName: 'Private', lastName: 'Owner', email: '${PLATFOLIO_INSTALL_OWNER_EMAIL}',
+  users: [{ id: '${PLATFOLIO_INSTALL_OWNER_SUBJECT}', username: 'owner', firstName: 'Private', lastName: 'Owner', email: '${PLATFOLIO_INSTALL_OWNER_EMAIL}',
     enabled: true, emailVerified: false, clientRoles: { [API_CLIENT_ID]: [REQUIRED_SCOPE] },
     credentials: [{ type: 'password', value: '${PLATFOLIO_INSTALL_OWNER_PASSWORD}', temporary: false }] }],
 };

@@ -543,6 +543,8 @@ export interface Store {
   verifyMarketplaceCredential(installationId: string, registryDigest: string): Promise<boolean>;
 
   createTeam(input: NewTeam): Promise<StoreResult<Team>>;
+  /** Create the installation workspace and its first owner together. A retry must preserve later membership changes. */
+  seedInstallationTeam(input: { id: string; name: string; personId: string }): Promise<StoreResult<Team>>;
   getTeam(id: string): Promise<StoreResult<Team>>;
   /** Oldest first: teams are a small, stable listing, not a feed. */
   listTeams(): Promise<Team[]>;

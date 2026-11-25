@@ -101,6 +101,31 @@ const expectErr = (result: { ok: boolean; value?: unknown } & Partial<StoreError
       : { status: 'fail', detail: 'marketplace ownership or revocation differed' };
   });
 
+  await add('installation workspace seeds once and preserves later ownership changes', async () => {
+    const store = await fresh();
+    const issuer = 'https://installation.example.test';
+    const subject = randomUUID();
+    const first = mustOk(await store.resolvePerson({ issuer, subject }), 'first owner').person;
+    const next = mustOk(await store.resolvePerson({ issuer, subject: randomUUID() }), 'next owner').person;
+    const input = { id: `team-${subject}`, name: tName('workspace'), personId: first.id };
+    const seeded = await Promise.all([store.seedInstallationTeam(input), store.seedInstallationTeam(input)]);
+    if (seeded.some((result) => !result.ok || result.value.id !== input.id)) {
+      throw new Error('Concurrent start did not establish the same workspace');
+    }
+    const owners = await store.listTeamMembers(input.id);
+    if (owners.length !== 1 || owners[0]?.personId !== first.id || owners[0]?.role !== 'owner') {
+      throw new Error('Workspace did not start with exactly one owner');
+    }
+    mustOk(await store.putTeamMember({ teamId: input.id, personId: next.id, role: 'owner' }), 'new owner');
+    mustOk(await store.changeTeamMember(input.id, next.id, first.id, null), 'remove first owner');
+    mustOk(await store.seedInstallationTeam(input), 'restart');
+    const foreign = await store.seedInstallationTeam({ ...input, id: `team-${randomUUID()}` });
+    if (foreign.ok || (await store.listTeamMembers(input.id)).some(({ personId }) => personId === first.id)) {
+      throw new Error('Install replay changed access or claimed a workspace with an occupied name');
+    }
+    return { status: 'pass', detail: 'Concurrent starts converge and later ownership survives restart' };
+  });
+
   await add('membership changes keep an acting owner and refuse a former owner', async () => {
     const { store, team } = await seed();
     const owner = mustOk(await store.resolvePerson({ issuer: 'https://membership.example.test', subject: randomUUID() }), 'owner').person;
