@@ -3,7 +3,7 @@
  * packages/ui/src/components/style.ts and it is the only one.
  *
  * Source: packages/ui/src/components/style.ts
- * Input digest: sha256/970b90afd2286cbe
+ * Input digest: sha256/63fabf2c6468141b
  *
  * Reproduce with `pnpm run ui:css`; `pnpm run ui:css:check` fails when this stops matching the module. The
  * numbers in here are not literals: they reference the custom properties in ../tokens.css, which is what makes
@@ -48,21 +48,64 @@
 
 /* Keep the starter details and action on one bordered card. */
 .ui-template-card {
-  max-inline-size: 32rem;
+  max-inline-size: 27rem;
   border: 1px solid var(--ui-color-border);
   border-radius: var(--ui-space-4);
+  background: var(--ui-color-surface);
+  box-shadow: var(--ui-panel-shadow);
   overflow: hidden;
 }
 
-/* Use the approved template gradient with a dark surface for readable headings. */
+/* Use the mockup’s template gradient and foreground. */
 .ui-template-card header {
-  padding: var(--ui-space-5);
-  background: linear-gradient(140deg, color-mix(in srgb, var(--ui-color-accent) 19%, var(--ui-color-surface)), var(--ui-color-surface));
+  padding: 0.9rem 1.1rem 1rem;
+  color: var(--ui-color-template-ink);
+  background: linear-gradient(125deg, var(--ui-color-template-web-start), var(--ui-color-template-web-end));
+}
+
+/* Keep the name directly under the type inside the colored header. */
+.ui-template-card header h2 {
+  margin: 0;
+  font-size: 1.22rem;
+  line-height: 1.22;
+}
+
+/* Keep the category and mode together above the template name. */
+.ui-template-card-type {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--ui-space-2);
+  margin: 0 0 0.55rem;
+  font-size: 0.75rem;
+  font-weight: 650;
+}
+
+/* Show publisher and pinned version immediately beneath the gradient. */
+.ui-template-card-meta {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--ui-space-2);
+  padding: 0.6rem 1.1rem;
+  border-block-end: 1px solid var(--ui-color-border);
+  background: var(--ui-color-context);
+  color: var(--ui-color-textMuted);
+  font-size: var(--ui-font-caption);
 }
 
 /* Group the source metadata and launch action below the card title. */
 .ui-template-card-body {
   padding: var(--ui-space-5);
+}
+
+/* Keep template details and setup actions in the footer. */
+.ui-template-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--ui-space-2);
+  padding: 0.75rem 1rem;
+  border-block-start: 1px solid var(--ui-color-border);
 }
 
 /* Keep labels and fields together and limit the line length on wider screens. */
@@ -384,22 +427,35 @@
   min-inline-size: 0;
 }
 
-/* Align the public landing page with the width of the workspace and header. */
+/* Use the mockup’s narrower public page measure. */
 .ui-public-main {
-  max-inline-size: var(--ui-workspace-width);
+  max-inline-size: 68rem;
   margin-inline: auto;
-  padding: 1.45rem 1rem 2.75rem;
+  padding: 1.25rem 1rem 2.75rem;
+}
+
+/* Place the public welcome and hosting steps inside the same panel. */
+.ui-welcome {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr));
+  align-items: center;
+  gap: 1.25rem;
+  padding: clamp(1.1rem, 4%, 3rem);
+  border: 1px solid var(--ui-color-border);
+  border-radius: 1.2rem;
+  background: linear-gradient(135deg, var(--ui-color-surface), var(--ui-color-accent-surface));
 }
 
 /* Keep the landing page heading and actions together in both layouts. */
 .ui-public-intro {
-  padding: 1.4rem 0;
+  min-inline-size: 0;
 }
 
 /* Match the mockup’s landing-page title. */
 .ui-public-intro h1 {
+  max-inline-size: 14ch;
   margin: 0;
-  font-size: clamp(2.05rem, 3.4cqi, 2.65rem);
+  font-size: 2.48rem;
   line-height: 1.12;
   letter-spacing: -0.042em;
 }
@@ -415,6 +471,23 @@
 .ui-hosting-steps {
   padding-inline-start: var(--ui-space-6);
   margin: 0;
+}
+
+/* Space the hosting steps for scanning. */
+.ui-hosting-steps li {
+  padding-block: 0.55rem;
+}
+
+/* Separate consecutive steps visually. */
+.ui-hosting-steps li + li {
+  border-block-start: 1px solid var(--ui-color-border);
+}
+
+/* Group each explanation with its step label. */
+.ui-hosting-steps li p {
+  margin: 0.2rem 0 0;
+  color: var(--ui-color-textMuted);
+  font-size: var(--ui-font-label);
 }
 
 /* Use the mockup’s page heading and weight throughout the workspace. */
@@ -465,6 +538,46 @@
   background: var(--ui-color-surface);
   border-block-end-color: var(--ui-color-accent);
   color: var(--ui-color-accent);
+}
+
+/* Keep environment targets beside their pages when the container has room. */
+.ui-environment-navigation {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem 1rem;
+  margin-block-end: var(--ui-space-4);
+}
+
+/* Share the mockup’s segmented navigation between account sections and environment controls. */
+.ui-workspace-segments {
+  display: flex;
+  flex-wrap: wrap;
+  inline-size: fit-content;
+  gap: var(--ui-space-1);
+  padding: var(--ui-space-1);
+  margin-block-end: var(--ui-space-3);
+  border: 1px solid var(--ui-color-border);
+  border-radius: var(--ui-space-3);
+  background: var(--ui-color-context);
+}
+
+/* Keep nearby tabs readable and easy to tap. */
+.ui-workspace-segments a {
+  display: inline-flex;
+  align-items: center;
+  min-block-size: var(--ui-target-primary);
+  padding-inline: 0.62rem;
+  border-radius: var(--ui-space-2);
+  color: var(--ui-color-text);
+  font-size: 0.87rem;
+  text-decoration: none;
+}
+
+/* Show the selected environment or page without a colored underline. */
+.ui-workspace-segments a[aria-current="page"] {
+  background: var(--ui-color-surface);
+  color: var(--ui-color-accent);
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--ui-color-text) 12%, transparent);
 }
 
 /* Group vertically related cards on team and environment screens. */

@@ -50,18 +50,44 @@ export const COMPONENT_RULES = [
   },
   {
     selector: '.ui-template-card',
-    declarations: ['max-inline-size: 32rem;', 'border: 1px solid var(--ui-color-border);', 'border-radius: var(--ui-space-4);', 'overflow: hidden;'],
+    declarations: ['max-inline-size: 27rem;', 'border: 1px solid var(--ui-color-border);', 'border-radius: var(--ui-space-4);',
+      'background: var(--ui-color-surface);', 'box-shadow: var(--ui-panel-shadow);', 'overflow: hidden;'],
     why: 'Keep the starter details and action on one bordered card.',
   },
   {
     selector: '.ui-template-card header',
-    declarations: ['padding: var(--ui-space-5);', 'background: linear-gradient(140deg, color-mix(in srgb, var(--ui-color-accent) 19%, var(--ui-color-surface)), var(--ui-color-surface));'],
-    why: 'Use the approved template gradient with a dark surface for readable headings.',
+    declarations: ['padding: 0.9rem 1.1rem 1rem;', 'color: var(--ui-color-template-ink);',
+      'background: linear-gradient(125deg, var(--ui-color-template-web-start), var(--ui-color-template-web-end));'],
+    why: 'Use the mockup’s template gradient and foreground.',
+  },
+  {
+    selector: '.ui-template-card header h2',
+    declarations: ['margin: 0;', 'font-size: 1.22rem;', 'line-height: 1.22;'],
+    why: 'Keep the name directly under the type inside the colored header.',
+  },
+  {
+    selector: '.ui-template-card-type',
+    declarations: ['display: flex;', 'justify-content: space-between;', 'gap: var(--ui-space-2);', 'margin: 0 0 0.55rem;',
+      'font-size: 0.75rem;', 'font-weight: 650;'],
+    why: 'Keep the category and mode together above the template name.',
+  },
+  {
+    selector: '.ui-template-card-meta',
+    declarations: ['display: flex;', 'justify-content: space-between;', 'flex-wrap: wrap;', 'gap: var(--ui-space-2);',
+      'padding: 0.6rem 1.1rem;', 'border-block-end: 1px solid var(--ui-color-border);',
+      'background: var(--ui-color-context);', 'color: var(--ui-color-textMuted);', 'font-size: var(--ui-font-caption);'],
+    why: 'Show publisher and pinned version immediately beneath the gradient.',
   },
   {
     selector: '.ui-template-card-body',
     declarations: ['padding: var(--ui-space-5);'],
     why: 'Group the source metadata and launch action below the card title.',
+  },
+  {
+    selector: '.ui-template-card-actions',
+    declarations: ['display: flex;', 'flex-wrap: wrap;', 'justify-content: space-between;', 'gap: var(--ui-space-2);',
+      'padding: 0.75rem 1rem;', 'border-block-start: 1px solid var(--ui-color-border);'],
+    why: 'Keep template details and setup actions in the footer.',
   },
   {
     selector: '.ui-workspace-form',
@@ -277,17 +303,24 @@ export const COMPONENT_RULES = [
   },
   {
     selector: '.ui-public-main',
-    declarations: ['max-inline-size: var(--ui-workspace-width);', 'margin-inline: auto;', 'padding: 1.45rem 1rem 2.75rem;'],
-    why: 'Align the public landing page with the width of the workspace and header.',
+    declarations: ['max-inline-size: 68rem;', 'margin-inline: auto;', 'padding: 1.25rem 1rem 2.75rem;'],
+    why: 'Use the mockup’s narrower public page measure.',
+  },
+  {
+    selector: '.ui-welcome',
+    declarations: ['display: grid;', 'grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr));',
+      'align-items: center;', 'gap: 1.25rem;', 'padding: clamp(1.1rem, 4%, 3rem);', 'border: 1px solid var(--ui-color-border);',
+      'border-radius: 1.2rem;', 'background: linear-gradient(135deg, var(--ui-color-surface), var(--ui-color-accent-surface));'],
+    why: 'Place the public welcome and hosting steps inside the same panel.',
   },
   {
     selector: '.ui-public-intro',
-    declarations: ['padding: 1.4rem 0;'],
+    declarations: ['min-inline-size: 0;'],
     why: 'Keep the landing page heading and actions together in both layouts.',
   },
   {
     selector: '.ui-public-intro h1',
-    declarations: ['margin: 0;', 'font-size: clamp(2.05rem, 3.4cqi, 2.65rem);', 'line-height: 1.12;', 'letter-spacing: -0.042em;'],
+    declarations: ['max-inline-size: 14ch;', 'margin: 0;', 'font-size: 2.48rem;', 'line-height: 1.12;', 'letter-spacing: -0.042em;'],
     why: 'Match the mockup’s landing-page title.',
   },
   {
@@ -299,6 +332,21 @@ export const COMPONENT_RULES = [
     selector: '.ui-hosting-steps',
     declarations: ['padding-inline-start: var(--ui-space-6);', 'margin: 0;'],
     why: 'Display the hosting steps as an ordered list within the card.',
+  },
+  {
+    selector: '.ui-hosting-steps li',
+    declarations: ['padding-block: 0.55rem;'],
+    why: 'Space the hosting steps for scanning.',
+  },
+  {
+    selector: '.ui-hosting-steps li + li',
+    declarations: ['border-block-start: 1px solid var(--ui-color-border);'],
+    why: 'Separate consecutive steps visually.',
+  },
+  {
+    selector: '.ui-hosting-steps li p',
+    declarations: ['margin: 0.2rem 0 0;', 'color: var(--ui-color-textMuted);', 'font-size: var(--ui-font-label);'],
+    why: 'Group each explanation with its step label.',
   },
   {
     selector: '.ui-workspace-main h1',
@@ -332,6 +380,29 @@ export const COMPONENT_RULES = [
     selector: '.ui-workspace-tabs a[aria-current="page"]',
     declarations: ['background: var(--ui-color-surface);', 'border-block-end-color: var(--ui-color-accent);', 'color: var(--ui-color-accent);'],
     why: 'Show the selected tab with the mockup’s underline.',
+  },
+  {
+    selector: '.ui-environment-navigation',
+    declarations: ['display: flex;', 'flex-wrap: wrap;', 'gap: 0.55rem 1rem;', 'margin-block-end: var(--ui-space-4);'],
+    why: 'Keep environment targets beside their pages when the container has room.',
+  },
+  {
+    selector: '.ui-workspace-segments',
+    declarations: ['display: flex;', 'flex-wrap: wrap;', 'inline-size: fit-content;', 'gap: var(--ui-space-1);',
+      'padding: var(--ui-space-1);', 'margin-block-end: var(--ui-space-3);', 'border: 1px solid var(--ui-color-border);',
+      'border-radius: var(--ui-space-3);', 'background: var(--ui-color-context);'],
+    why: 'Share the mockup’s segmented navigation between account sections and environment controls.',
+  },
+  {
+    selector: '.ui-workspace-segments a',
+    declarations: ['display: inline-flex;', 'align-items: center;', 'min-block-size: var(--ui-target-primary);', 'padding-inline: 0.62rem;',
+      'border-radius: var(--ui-space-2);', 'color: var(--ui-color-text);', 'font-size: 0.87rem;', 'text-decoration: none;'],
+    why: 'Keep nearby tabs readable and easy to tap.',
+  },
+  {
+    selector: '.ui-workspace-segments a[aria-current="page"]',
+    declarations: ['background: var(--ui-color-surface);', 'color: var(--ui-color-accent);', 'box-shadow: 0 1px 3px color-mix(in srgb, var(--ui-color-text) 12%, transparent);'],
+    why: 'Show the selected environment or page without a colored underline.',
   },
   {
     selector: '.ui-workspace-section-stack',

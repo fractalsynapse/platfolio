@@ -101,6 +101,7 @@ export const workspaceContent = defineComponent({
     'getStarterLaunchSetup', 'initializeStarterOpenBao', 'unlockStarterOpenBao', 'beginStarterRailwayAuthorization',
     'listTeamMembers', 'updateTeamMemberRole', 'removeTeamMember', 'listTeamActivity', 'getHostedAppStatus',
     'listMyNotifications', 'createNotificationRule', 'updateNotificationRule', 'deleteNotificationRule', 'redeployHostedStarter',
+    'getMyNotificationEmail', 'updateMyNotificationEmail',
     'listHostedCustomDomains', 'attachHostedCustomDomain', 'detachHostedCustomDomain', 'getHostedStarterBrand', 'updateHostedStarterBrand',
     'listMarketplaceInstallations', 'issueMarketplaceEnrollment', 'disconnectMarketplaceInstallation',
     'getPrivateMarketplaceConnection', 'enrollPrivateMarketplaceConnection'],

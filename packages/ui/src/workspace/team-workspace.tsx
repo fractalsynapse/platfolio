@@ -69,11 +69,17 @@ export function TeamWorkspace({ team, route }: { readonly team: TeamWithRole; re
 
   const environment = app.environments.find((item) => item.environment === route.environment);
   if (!environment) return <UnavailablePage />;
+  const title = environment.environment.charAt(0).toUpperCase() + environment.environment.slice(1);
   return <>
-    <Breadcrumbs items={[{ label: app.name, href: workspacePaths.instance(team.name, app.name) }]} />
-    <h1>{environment.environment.charAt(0).toUpperCase() + environment.environment.slice(1)}</h1>
+    <Breadcrumbs items={[{ label: app.name, href: workspacePaths.instance(team.name, app.name) },
+      ...(route.tab === 'overview' ? [] : [{ label: title, href: workspacePaths.environment(team.name, app.name, route.environment) }])]} />
+    <div className="ui-workspace-page-heading">
+      <h1>{title}</h1>
+      {environment.environment === 'staging' && <p>A separate place to test changes.</p>}
+      {environment.environment === 'production' && <p>The version people use.</p>}
+    </div>
     <TeamTabs team={team} />
     <EnvironmentWorkspace key={`${app.id}-${environment.environment}`} instanceId={app.id} canManage={team.role === 'owner'}
-      environment={environment} route={route} freshness={state.freshness} now={now} />
+      environment={environment} targets={app.environments.map(({ environment }) => environment)} route={route} freshness={state.freshness} now={now} />
   </>;
 }
