@@ -7,7 +7,7 @@ const resultText: Record<Deployment['result'], string> = {
 };
 
 export function EnvironmentDeployments({ deployments }: { readonly deployments: readonly Deployment[] }) {
-  return <ActivityFeed title="Deployment reports" empty="No deployment reports for this environment."
+  return <ActivityFeed title="Deployment history" empty="No deployment reports for this environment."
     entries={deployments.map(({ id, result, reportedAt, commit, problem }) => {
       const detail = [commit && `Commit ${commit.slice(0, 12)}`, problem && `Reported issue ${problem}`].filter(Boolean).join(' · ');
       return { id, title: resultText[result], at: reportedAt, ...(detail ? { detail } : {}) };

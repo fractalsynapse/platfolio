@@ -32,7 +32,7 @@ const {
 const origin = Astro.site ?? new URL(Astro.request.url).origin;
 ---
 <!doctype html>
-<html lang="en">
+<html lang="en" data-ui-scheme="light">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -43,25 +43,15 @@ const origin = Astro.site ?? new URL(Astro.request.url).origin;
   </head>
   <body>
     {workspace ? <slot /> : <>
-    <header class="site-header">
-      <a class="site-brand" href="/">platfolio</a>
-      <nav aria-label="Primary">
-        <a href="/dashboard">Dashboard</a>
-      </nav>
-    </header>
-    {/* The document column is a packages/ui primitive, not a rule in this app's stylesheet: `ui-prose` carries
-        the measure (--ui-measure-content), the block rhythm, and the container its children query (11 §2, rule 2,
-        #267 item 5). What site.css owns now is this shell's furniture -- header, footer, padding -- and no
-        breakpoint at all, which is the thing gate §D65 refuses in app CSS. */}
-    <main class="ui-prose">
-      <slot />
-    </main>
-    <footer class="site-footer">
-      <p>
-        platfolio runs on infrastructure its tenants own. The repository is
-        <a href="https://github.com/fractalsynapse/platfolio">fractalsynapse/platfolio</a>.
-      </p>
-    </footer>
+      <header class="ui-workspace-header">
+        <div class="ui-workspace-header-inner">
+          <a class="ui-workspace-wordmark ui-hit-primary" href="/"><span class="ui-workspace-mark" aria-hidden="true">P</span>Platfolio</a>
+          <a class="ui-workspace-secondary ui-hit-primary" href="/dashboard">Sign in</a>
+        </div>
+      </header>
+      <main class="ui-page ui-public-main">
+        <slot />
+      </main>
     </>}
   </body>
 </html>

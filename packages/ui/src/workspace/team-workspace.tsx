@@ -5,14 +5,15 @@ import { useOperation } from '../sdk/use-operation.ts';
 import { AppStatus } from './app-status.tsx';
 import { AppSetup } from './app-setup.tsx';
 import { AppList } from './app-list.tsx';
-import { Breadcrumbs, type Breadcrumb } from './breadcrumbs.tsx';
-import { EnvironmentList } from './environment-list.tsx';
+import { Breadcrumbs } from './breadcrumbs.tsx';
+import { InstanceOverview } from './instance-overview.tsx';
 import { EnvironmentWorkspace } from './environment-workspace.tsx';
 import { workspacePaths, type WorkspaceRoute } from './routes.ts';
 import { WorkspaceLink } from './workspace-link.tsx';
 import { TeamActivity } from './team-activity.tsx';
 import { TeamTabs } from './team-tabs.tsx';
 import { UnavailablePage } from './unavailable-page.tsx';
+import { WorkspacePanel } from './workspace-panel.tsx';
 
 const params = {};
 type TeamRoute = Extract<WorkspaceRoute, { kind: 'team' | 'team-activity' | 'instance' | 'instance-setup' | 'instance-status' | 'environment' }>;
@@ -32,13 +33,15 @@ export function TeamWorkspace({ team, route }: { readonly team: TeamWithRole; re
   if (route.kind === 'team') return <>
     <h1>Team workspace</h1>
     <TeamTabs team={team} current="apps" />
-    {team.role === 'owner' && <p className="ui-workspace-links">
-      <WorkspaceLink href={workspacePaths.templates(team.name)}>Create an app</WorkspaceLink>
-    </p>}
-    <section aria-labelledby="workspace-apps"><div className="ui-workspace-heading">
-      <h2 id="workspace-apps">Apps</h2><small className="ui-workspace-meta">{age}</small>
-    </div><AppList team={team.name} apps={apps} /></section>
-    <TeamActivity key={team.teamId} team={team} apps={apps} summary />
+    <div className="ui-workspace-columns">
+      <WorkspacePanel title="Apps">
+        <p className="ui-workspace-meta">{age}</p>
+        <AppList team={team.name} apps={apps} />
+        {team.role === 'owner' && apps.length === 0 && <WorkspaceLink
+          className="ui-workspace-primary ui-hit-primary" href={workspacePaths.templates(team.name)}>Choose a template</WorkspaceLink>}
+      </WorkspacePanel>
+      <div className="ui-workspace-section-stack"><TeamActivity key={team.teamId} team={team} apps={apps} summary /></div>
+    </div>
   </>;
   if (route.kind === 'team-activity') return <>
     <h1>Activity</h1>
@@ -48,38 +51,35 @@ export function TeamWorkspace({ team, route }: { readonly team: TeamWithRole; re
 
   const app = apps.find(({ name }) => name === route.instance);
   if (!app) return <UnavailablePage />;
-  const parent: Breadcrumb = { label: 'Team workspace', href: workspacePaths.team(team.name) };
-  if (route.kind === 'instance') return <>
-    <Breadcrumbs items={[parent, { label: app.name }]} />
-    <h1>{app.name}</h1>
-    {app.template === 'starter-web' && <p className="ui-workspace-links">
-      <WorkspaceLink href={workspacePaths.instanceStatus(team.name, app.name)}>Status</WorkspaceLink>
-      {team.role === 'owner' && <WorkspaceLink href={workspacePaths.instanceSetup(team.name, app.name)}>Manage app</WorkspaceLink>}
-    </p>}
-    <p className="ui-workspace-meta">{app.template}{app.templateRef && <> · <code>{app.templateRef.commitSha.slice(0, 12)}</code></>}</p>
-    <section aria-labelledby="app-environments"><div className="ui-workspace-heading">
-      <h2 id="app-environments">Environments</h2>{app.environments.length === 0 && <small className="ui-workspace-meta">{age}</small>}
-    </div><EnvironmentList team={team.name} app={app} freshness={state.freshness} now={now} /></section>
-  </>;
+  if (route.kind === 'instance') return <InstanceOverview team={team} app={app} freshness={state.freshness} now={now} />;
 
   if (route.kind === 'instance-status') return <>
-    <Breadcrumbs items={[parent, { label: app.name, href: workspacePaths.instance(team.name, app.name) }, { label: 'Status' }]} />
-    <h1>App status</h1>
+    <Breadcrumbs items={[{ label: app.name, href: workspacePaths.instance(team.name, app.name) }, { label: 'Status' }]} />
+    <h1>Status</h1>
+    <TeamTabs team={team} />
     <AppStatus key={app.id} instanceId={app.id} />
   </>;
 
   if (route.kind === 'instance-setup') return team.role === 'owner' ? <>
-    <Breadcrumbs items={[parent, { label: app.name, href: workspacePaths.instance(team.name, app.name) }, { label: 'Manage app' }]} />
+    <Breadcrumbs items={[{ label: app.name, href: workspacePaths.instance(team.name, app.name) }, { label: 'Manage app' }]} />
     <h1>Manage app</h1>
+    <TeamTabs team={team} />
     <AppSetup key={app.id} instanceId={app.id} teamId={team.teamId} />
   </> : <UnavailablePage />;
 
   const environment = app.environments.find((item) => item.environment === route.environment);
   if (!environment) return <UnavailablePage />;
+  const title = environment.environment.charAt(0).toUpperCase() + environment.environment.slice(1);
   return <>
-    <Breadcrumbs items={[parent, { label: app.name, href: workspacePaths.instance(team.name, app.name) }, { label: environment.environment }]} />
-    <h1>{environment.environment}</h1>
+    <Breadcrumbs items={[{ label: app.name, href: workspacePaths.instance(team.name, app.name) },
+      ...(route.tab === 'overview' ? [] : [{ label: title, href: workspacePaths.environment(team.name, app.name, route.environment) }])]} />
+    <div className="ui-workspace-page-heading">
+      <h1>{title}</h1>
+      {environment.environment === 'staging' && <p>A separate place to test changes.</p>}
+      {environment.environment === 'production' && <p>The version people use.</p>}
+    </div>
+    <TeamTabs team={team} />
     <EnvironmentWorkspace key={`${app.id}-${environment.environment}`} instanceId={app.id} canManage={team.role === 'owner'}
-      environment={environment} route={route} freshness={state.freshness} now={now} />
+      environment={environment} targets={app.environments.map(({ environment }) => environment)} route={route} freshness={state.freshness} now={now} />
   </>;
 }

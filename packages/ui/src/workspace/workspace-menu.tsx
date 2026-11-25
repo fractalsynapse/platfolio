@@ -6,10 +6,11 @@ interface WorkspaceMenuProps {
   readonly children: React.ReactNode;
   readonly align?: 'end';
   readonly hover?: boolean;
+  readonly kind?: 'wordmark' | 'selector' | 'avatar';
 }
 
 /** A disclosure contains ordinary links, so Tab works without a menu-role keyboard model. */
-export function WorkspaceMenu({ label, trigger, children, align, hover }: WorkspaceMenuProps) {
+export function WorkspaceMenu({ label, trigger, children, align, hover, kind }: WorkspaceMenuProps) {
   const id = React.useId();
   const [open, setOpen] = React.useState(false);
   const button = React.useRef<HTMLButtonElement>(null);
@@ -37,7 +38,7 @@ export function WorkspaceMenu({ label, trigger, children, align, hover }: Worksp
         button.current?.focus();
       }
     }}>
-    <button aria-label={label} aria-expanded={open} aria-controls={open ? id : undefined} className="ui-workspace-trigger ui-hit-primary" ref={button}
+    <button aria-label={label} aria-expanded={open} aria-controls={open ? id : undefined} className="ui-workspace-trigger ui-hit-primary" data-kind={kind} ref={button}
       type="button" onClick={() => { if (pinned.current) close(); else { pinned.current = true; setOpen(true); } }}>
       {trigger}
     </button>

@@ -83,7 +83,7 @@ test('the landing page emits no client JavaScript at all', () => {
   assert.ok(!html.includes('type="module"'));
   assert.ok(!html.includes('modulepreload'));
   assert.ok(html.includes('<style>') || /<link rel="stylesheet"/.test(html), 'the page must still be styled -- tokens travel in CSS, not JS');
-  assert.ok(html.includes('platfolio'), 'and it must still say who it is');
+  assert.match(html, /<title>Platfolio\b[^<]*<\/title>/, 'the HTML names the product in the browser title');
 });
 
 test('the dashboard hydrates exactly one island, and the callback exactly one', () => {

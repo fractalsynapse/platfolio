@@ -7,6 +7,7 @@ export const workspacePaths = {
   account: '/dashboard/account',
   accountEmails: '/dashboard/account/emails',
   accountPassword: '/dashboard/account/password',
+  accountNotifications: '/dashboard/account/notifications',
   invitations: '/dashboard/invitations',
   notifications: '/dashboard/notifications',
   launch: '/dashboard/launch',
@@ -26,7 +27,7 @@ export const workspacePaths = {
 
 export type WorkspaceRoute =
   | { kind: 'home' | 'create-team' | 'invitations' | 'notifications' | 'launch' | 'unavailable' }
-  | { kind: 'account'; tab: 'profile' | 'emails' | 'password' }
+  | { kind: 'account'; tab: 'profile' | 'emails' | 'password' | 'notifications' }
   | { kind: 'team'; team: string }
   | { kind: 'team-activity'; team: string }
   | { kind: 'team-members'; team: string }
@@ -58,6 +59,7 @@ export function matchWorkspaceRoute(path: string): WorkspaceRoute {
   if (pathname === workspacePaths.account) return { kind: 'account', tab: 'profile' };
   if (pathname === workspacePaths.accountEmails) return { kind: 'account', tab: 'emails' };
   if (pathname === workspacePaths.accountPassword) return { kind: 'account', tab: 'password' };
+  if (pathname === workspacePaths.accountNotifications) return { kind: 'account', tab: 'notifications' };
   if (pathname === workspacePaths.invitations) return { kind: 'invitations' };
   if (pathname === workspacePaths.notifications) return { kind: 'notifications' };
   if (pathname === workspacePaths.launch) return { kind: 'launch' };

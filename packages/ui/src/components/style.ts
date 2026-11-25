@@ -50,18 +50,44 @@ export const COMPONENT_RULES = [
   },
   {
     selector: '.ui-template-card',
-    declarations: ['max-inline-size: 32rem;', 'border: 1px solid var(--ui-color-border);', 'border-radius: var(--ui-space-4);', 'overflow: hidden;'],
+    declarations: ['max-inline-size: 27rem;', 'border: 1px solid var(--ui-color-border);', 'border-radius: var(--ui-space-4);',
+      'background: var(--ui-color-surface);', 'box-shadow: var(--ui-panel-shadow);', 'overflow: hidden;'],
     why: 'Keep the starter details and action on one bordered card.',
   },
   {
     selector: '.ui-template-card header',
-    declarations: ['padding: var(--ui-space-5);', 'background: linear-gradient(140deg, color-mix(in srgb, var(--ui-color-accent) 19%, var(--ui-color-surface)), var(--ui-color-surface));'],
-    why: 'Use the approved template gradient with a dark surface for readable headings.',
+    declarations: ['padding: 0.9rem 1.1rem 1rem;', 'color: var(--ui-color-template-ink);',
+      'background: linear-gradient(125deg, var(--ui-color-template-web-start), var(--ui-color-template-web-end));'],
+    why: 'Use the mockup’s template gradient and foreground.',
+  },
+  {
+    selector: '.ui-template-card header h2',
+    declarations: ['margin: 0;', 'font-size: 1.22rem;', 'line-height: 1.22;'],
+    why: 'Keep the name directly under the type inside the colored header.',
+  },
+  {
+    selector: '.ui-template-card-type',
+    declarations: ['display: flex;', 'justify-content: space-between;', 'gap: var(--ui-space-2);', 'margin: 0 0 0.55rem;',
+      'font-size: 0.75rem;', 'font-weight: 650;'],
+    why: 'Keep the category and mode together above the template name.',
+  },
+  {
+    selector: '.ui-template-card-meta',
+    declarations: ['display: flex;', 'justify-content: space-between;', 'flex-wrap: wrap;', 'gap: var(--ui-space-2);',
+      'padding: 0.6rem 1.1rem;', 'border-block-end: 1px solid var(--ui-color-border);',
+      'background: var(--ui-color-context);', 'color: var(--ui-color-textMuted);', 'font-size: var(--ui-font-caption);'],
+    why: 'Show publisher and pinned version immediately beneath the gradient.',
   },
   {
     selector: '.ui-template-card-body',
     declarations: ['padding: var(--ui-space-5);'],
     why: 'Group the source metadata and launch action below the card title.',
+  },
+  {
+    selector: '.ui-template-card-actions',
+    declarations: ['display: flex;', 'flex-wrap: wrap;', 'justify-content: space-between;', 'gap: var(--ui-space-2);',
+      'padding: 0.75rem 1rem;', 'border-block-start: 1px solid var(--ui-color-border);'],
+    why: 'Keep template details and setup actions in the footer.',
   },
   {
     selector: '.ui-workspace-form',
@@ -141,17 +167,24 @@ export const COMPONENT_RULES = [
   },
   {
     selector: '.ui-workspace-header',
-    declarations: [
-      'display: flex;', 'align-items: center;', 'justify-content: space-between;', 'gap: var(--ui-space-3);',
-      'padding: var(--ui-space-3) max(var(--ui-space-4), calc((100% - 68rem) / 2));',
-      'background: var(--ui-color-surface);', 'border-block-end: 1px solid var(--ui-color-border);',
-    ],
-    why: 'The logo and the two context controls share one bar at every width.',
+    declarations: ['background: var(--ui-color-surface);', 'border-block-end: 1px solid var(--ui-color-border);'],
+    why: 'Match the mockup’s white header across the workspace.',
+  },
+  {
+    selector: '.ui-workspace-header-inner',
+    declarations: ['display: flex;', 'align-items: center;', 'justify-content: space-between;', 'gap: 0.55rem;',
+      'min-block-size: 4rem;', 'max-inline-size: var(--ui-workspace-width);', 'margin-inline: auto;', 'padding: 0.4rem 1rem;'],
+    why: 'Place the wordmark and workspace controls on the same measured bar.',
   },
   {
     selector: '.ui-workspace-tools',
-    declarations: ['display: flex;', 'align-items: center;', 'gap: var(--ui-space-2);', 'min-inline-size: 0;'],
-    why: 'Keep switching teams and account actions beside one another.',
+    declarations: ['display: flex;', 'align-items: center;', 'justify-content: flex-end;', 'gap: 0.55rem;', 'min-inline-size: 0;', 'flex: 1 1 auto;'],
+    why: 'Keep the workspace selector beside the user icon.',
+  },
+  {
+    selector: '.ui-workspace-tools > .ui-workspace-menu:first-child',
+    declarations: ['flex: 0 1 14rem;'],
+    why: 'Let the workspace selector use the mockup’s full width on desktop and shrink on phones.',
   },
   {
     selector: '.ui-workspace-menu',
@@ -169,18 +202,49 @@ export const COMPONENT_RULES = [
     why: 'Give each workspace action a matching, readable control.',
   },
   {
+    selector: '.ui-workspace-trigger[data-kind="wordmark"], .ui-workspace-trigger[data-kind="avatar"]',
+    declarations: ['background: transparent;', 'border: 0;', 'padding: 0;', 'gap: 0.45rem;'],
+    why: 'The logo and avatar open menus without an extra button frame.',
+  },
+  {
+    selector: '.ui-workspace-trigger[data-kind="wordmark"], .ui-workspace-wordmark',
+    declarations: ['font-size: 1.07rem;', 'font-weight: 750;', 'white-space: nowrap;'],
+    why: 'Match the mockup wordmark.',
+  },
+  {
+    selector: '.ui-workspace-trigger[data-kind="selector"]',
+    declarations: ['inline-size: 100%;', 'justify-content: space-between;', 'padding-inline: 0.65rem;', 'font: inherit;',
+      'border-color: var(--ui-color-control-border);', 'border-radius: 0.5rem;'],
+    why: 'The selector uses the same appearance as the form controls in the mockup.',
+  },
+  {
+    selector: '.ui-workspace-trigger[data-kind="selector"] > span:last-child',
+    declarations: ['color: var(--ui-color-accent);'],
+    why: 'Use the same blue disclosure marker as the mockup.',
+  },
+  {
+    selector: '.ui-workspace-trigger[data-kind="avatar"]',
+    declarations: ['justify-content: center;', 'border-radius: 50%;'],
+    why: 'Retain the full hit target around the circular avatar.',
+  },
+  {
+    selector: '.ui-workspace-wordmark',
+    declarations: ['display: inline-flex;', 'align-items: center;', 'gap: 0.45rem;', 'color: inherit;', 'text-decoration: none;'],
+    why: 'Use the same wordmark on public and signed-in pages.',
+  },
+  {
     selector: '.ui-workspace-team-label',
-    declarations: ['max-inline-size: min(12rem, 32vw);', 'overflow: hidden;', 'text-overflow: ellipsis;', 'white-space: nowrap;'],
+    declarations: ['min-inline-size: 0;', 'overflow: hidden;', 'text-overflow: ellipsis;', 'white-space: nowrap;'],
     why: 'Long team names leave space for the account button and are shown in full in the selector.',
   },
   {
     selector: '.ui-workspace-mark',
-    declarations: ['display: grid;', 'place-items: center;', 'inline-size: 1.5em;', 'aspect-ratio: 1;', 'background: var(--ui-color-accent);', 'color: var(--ui-color-onAccent);', 'border-radius: var(--ui-space-2);'],
+    declarations: ['display: grid;', 'place-items: center;', 'inline-size: 2.15rem;', 'aspect-ratio: 1;', 'background: var(--ui-color-brand);', 'color: var(--ui-color-onAccent);', 'border-radius: 0.55rem;', 'font-weight: 750;'],
     why: 'Identify Platfolio with its own simple wordmark and accent.',
   },
   {
     selector: '.ui-workspace-avatar',
-    declarations: ['display: grid;', 'place-content: center;', 'justify-items: center;', 'gap: 0.1em;', 'inline-size: 1.5em;', 'aspect-ratio: 1;', 'margin-inline: auto;', 'border-radius: 50%;', 'background: var(--ui-color-border);', 'color: var(--ui-color-textMuted);'],
+    declarations: ['display: grid;', 'place-content: center;', 'justify-items: center;', 'gap: 0.1em;', 'inline-size: 2.15rem;', 'aspect-ratio: 1;', 'margin-inline: auto;', 'border-radius: 50%;', 'background: var(--ui-color-accent-surface);', 'color: var(--ui-color-accent);', 'font-size: 0.78rem;', 'font-weight: 750;'],
     why: 'Give the account menu a compact fallback avatar.',
   },
   {
@@ -199,7 +263,7 @@ export const COMPONENT_RULES = [
       'position: absolute;', 'z-index: 1;', 'inset-block-start: 100%;', 'inset-inline-start: 0;', 'inline-size: max-content;',
       'min-inline-size: 11rem;', 'max-inline-size: min(19rem, 75vw);', 'max-block-size: min(22rem, 65vh);', 'overflow: auto;',
       'padding: var(--ui-space-2);', 'background: var(--ui-color-surface);', 'border: 1px solid var(--ui-color-border);',
-      'border-radius: var(--ui-space-3);', 'font-size: var(--ui-font-label);',
+      'border-radius: 0.8rem;', 'font: inherit;', 'box-shadow: var(--ui-menu-shadow);',
     ],
     why: 'Use the control’s surface, border, and typography in its popup.',
   },
@@ -224,7 +288,7 @@ export const COMPONENT_RULES = [
   },
   {
     selector: '.ui-workspace-main',
-    declarations: ['inline-size: min(100%, 70rem);', 'margin-inline: auto;', 'padding: var(--ui-space-5) var(--ui-space-4) var(--ui-space-9);', 'outline: none;'],
+    declarations: ['inline-size: min(100%, var(--ui-workspace-width));', 'margin-inline: auto;', 'padding: 1.45rem 1rem 2.75rem;', 'outline: none;'],
     why: 'Give workspace pages a comfortable shared measure.',
   },
   {
@@ -236,6 +300,220 @@ export const COMPONENT_RULES = [
     selector: '.ui-workspace-crumbs li',
     declarations: ['display: inline-flex;', 'gap: var(--ui-space-2);', 'min-inline-size: 0;'],
     why: 'Keep separators with their labels.',
+  },
+  {
+    selector: '.ui-public-main',
+    declarations: ['max-inline-size: 68rem;', 'margin-inline: auto;', 'padding: 1.25rem 1rem 2.75rem;'],
+    why: 'Use the mockup’s narrower public page measure.',
+  },
+  {
+    selector: '.ui-welcome',
+    declarations: ['padding: clamp(1.1rem, 4%, 3rem);', 'border: 1px solid var(--ui-color-border);',
+      'border-radius: 1.2rem;', 'background: linear-gradient(135deg, var(--ui-color-surface), var(--ui-color-accent-surface));'],
+    why: 'Place the public welcome and hosting steps inside the same panel.',
+  },
+  {
+    selector: '.ui-public-intro',
+    declarations: ['min-inline-size: 0;'],
+    why: 'Keep the landing page heading and actions together in both layouts.',
+  },
+  {
+    selector: '.ui-public-intro h1',
+    declarations: ['max-inline-size: 14ch;', 'margin: 0;', 'font-size: 2.48rem;', 'line-height: 1.12;', 'letter-spacing: -0.042em;'],
+    why: 'Match the mockup’s landing-page title.',
+  },
+  {
+    selector: '.ui-public-intro p',
+    declarations: ['max-inline-size: 62ch;', 'color: var(--ui-color-textMuted);', 'margin-block: 0.45rem 1.35rem;'],
+    why: 'Preserve the line measure of the mockup’s introductory copy.',
+  },
+  {
+    selector: '.ui-hosting-steps',
+    declarations: ['padding-inline-start: var(--ui-space-6);', 'margin: 0;'],
+    why: 'Display the hosting steps as an ordered list within the card.',
+  },
+  {
+    selector: '.ui-hosting-steps li',
+    declarations: ['padding-block: 0.55rem;'],
+    why: 'Space the hosting steps for scanning.',
+  },
+  {
+    selector: '.ui-hosting-steps li + li',
+    declarations: ['border-block-start: 1px solid var(--ui-color-border);'],
+    why: 'Separate consecutive steps visually.',
+  },
+  {
+    selector: '.ui-hosting-steps li p',
+    declarations: ['margin: 0.2rem 0 0;', 'color: var(--ui-color-textMuted);', 'font-size: var(--ui-font-label);'],
+    why: 'Group each explanation with its step label.',
+  },
+  {
+    selector: '.ui-workspace-main h1',
+    declarations: ['margin: 0;', 'font-size: clamp(2.05rem, 3.4cqi, 2.65rem);', 'line-height: 1.12;', 'letter-spacing: -0.042em;', 'overflow-wrap: anywhere;'],
+    why: 'Use the mockup’s page heading and weight throughout the workspace.',
+  },
+  {
+    selector: '.ui-workspace-page-heading',
+    declarations: ['margin-block-end: 1.35rem;'],
+    why: 'Use the mockup page rhythm between the title and its navigation.',
+  },
+  {
+    selector: '.ui-workspace-page-heading p',
+    declarations: ['margin: 0.45rem 0 0;', 'color: var(--ui-color-textMuted);'],
+    why: 'Keep the short page description beside its title.',
+  },
+  {
+    selector: '.ui-workspace-tabs',
+    declarations: ['display: flex;', 'flex-wrap: wrap;', 'gap: 0.15rem 0.25rem;', 'margin-block: var(--ui-space-3) var(--ui-space-5);',
+      'border-block-end: 1px solid var(--ui-color-border);'],
+    why: 'Keep the mockup’s tabs visible on mobile by allowing them to wrap.',
+  },
+  {
+    selector: '.ui-workspace-tabs a',
+    declarations: ['display: inline-flex;', 'align-items: center;', 'min-block-size: var(--ui-target-primary);',
+      'padding-inline: 0.6rem;', 'border-block-end: 2px solid transparent;', 'border-radius: 0.4rem 0.4rem 0 0;',
+      'font-size: 0.86rem;', 'font-weight: 620;', 'color: var(--ui-color-text);', 'text-decoration: none;'],
+    why: 'Make navigation look and behave like the mockup tabs.',
+  },
+  {
+    selector: '.ui-workspace-tabs a[aria-current="page"]',
+    declarations: ['background: var(--ui-color-surface);', 'border-block-end-color: var(--ui-color-accent);', 'color: var(--ui-color-accent);'],
+    why: 'Show the selected tab with the mockup’s underline.',
+  },
+  {
+    selector: '.ui-environment-navigation',
+    declarations: ['display: flex;', 'flex-wrap: wrap;', 'gap: 0.55rem 1rem;', 'margin-block-end: var(--ui-space-4);'],
+    why: 'Keep environment targets beside their pages when the container has room.',
+  },
+  {
+    selector: '.ui-workspace-segments',
+    declarations: ['display: flex;', 'flex-wrap: wrap;', 'inline-size: fit-content;', 'gap: var(--ui-space-1);',
+      'padding: var(--ui-space-1);', 'margin-block-end: var(--ui-space-3);', 'border: 1px solid var(--ui-color-border);',
+      'border-radius: var(--ui-space-3);', 'background: var(--ui-color-context);'],
+    why: 'Share the mockup’s segmented navigation between account sections and environment controls.',
+  },
+  {
+    selector: '.ui-workspace-segments a',
+    declarations: ['display: inline-flex;', 'align-items: center;', 'min-block-size: var(--ui-target-primary);', 'padding-inline: 0.62rem;',
+      'border-radius: var(--ui-space-2);', 'color: var(--ui-color-text);', 'font-size: 0.87rem;', 'text-decoration: none;'],
+    why: 'Keep nearby tabs readable and easy to tap.',
+  },
+  {
+    selector: '.ui-workspace-segments a[aria-current="page"]',
+    declarations: ['background: var(--ui-color-surface);', 'color: var(--ui-color-accent);', 'box-shadow: 0 1px 3px color-mix(in srgb, var(--ui-color-text) 12%, transparent);'],
+    why: 'Show the selected environment or page without a colored underline.',
+  },
+  {
+    selector: '.ui-workspace-section-stack',
+    declarations: ['display: grid;', 'gap: 1rem;'],
+    why: 'Group vertically related cards on team and environment screens.',
+  },
+  {
+    selector: '.ui-workspace-columns',
+    declarations: ['display: flex;', 'flex-wrap: wrap;', 'align-items: flex-start;', 'gap: 1rem;'],
+    why: 'Show the primary panel and its context side by side when both fit, and stack them in reading order on phones.',
+  },
+  {
+    selector: '.ui-workspace-columns > :first-child',
+    declarations: ['flex: 1.65 1 min(100%, 35.5rem);', 'min-inline-size: 0;'],
+    why: 'Give the primary panel the larger share of a wide row.',
+  },
+  {
+    selector: '.ui-workspace-columns > :last-child',
+    declarations: ['flex: 1 1 min(100%, 21.5rem);', 'min-inline-size: 0;'],
+    why: 'Give the context panel a readable width at either layout.',
+  },
+  {
+    selector: '.ui-workspace-panel',
+    declarations: ['min-inline-size: 0;', 'padding: 1.13rem;', 'background: var(--ui-color-surface);',
+      'border: 1px solid var(--ui-color-border);', 'border-radius: 0.65rem;', 'box-shadow: var(--ui-panel-shadow);'],
+    why: 'Use the bordered card surface, spacing, and shadow from the mockup.',
+  },
+  {
+    selector: '.ui-workspace-panel[data-context]',
+    declarations: ['background: var(--ui-color-context);'],
+    why: 'Match the subtly tinted App details card.',
+  },
+  {
+    selector: '.ui-workspace-panel h2',
+    declarations: ['margin: 0 0 0.8rem;', 'font-size: 1.13rem;', 'line-height: 1.3;', 'letter-spacing: -0.018em;'],
+    why: 'Use the mockup’s card title typography.',
+  },
+  {
+    selector: '.ui-workspace-panel p',
+    declarations: ['margin: 0 0 0.8rem;', 'line-height: 1.55;'],
+    why: 'Keep the card text and its following controls grouped.',
+  },
+  {
+    selector: '.ui-workspace-secondary',
+    declarations: ['display: inline-flex;', 'align-items: center;', 'justify-content: center;', 'padding: 0.55rem 0.9rem;',
+      'border: 1px solid var(--ui-color-border);', 'border-radius: 0.6rem;', 'background: var(--ui-color-surface);',
+      'color: var(--ui-color-text);', 'text-decoration: none;', 'font-size: 0.91rem;', 'font-weight: 650;'],
+    why: 'Use the mockup’s bordered secondary actions.',
+  },
+  {
+    selector: '.ui-environment-list',
+    declarations: ['margin: 0;', 'padding: 0;', 'list-style: none;'],
+    why: 'Use dividers inside one panel instead of bordering each list.',
+  },
+  {
+    selector: '.ui-environment-list > li + li',
+    declarations: ['border-block-start: 1px solid var(--ui-color-border);'],
+    why: 'Separate the environment rows without nested card outlines.',
+  },
+  {
+    selector: '.ui-environment-summary',
+    declarations: ['display: grid;', 'grid-template-columns: auto minmax(0, 1fr) auto;', 'align-items: center;', 'gap: 0.65rem;',
+      'padding: 0.68rem 0.55rem;', 'border-radius: 0.6rem;', 'color: var(--ui-color-text);', 'text-decoration: none;'],
+    why: 'Keep the environment marker, summary and open indicator aligned on narrow screens.',
+  },
+  {
+    selector: '.ui-environment-summary:hover, .ui-workspace-tabs a:hover, .ui-workspace-secondary:hover',
+    declarations: ['background: var(--ui-color-accent-surface);'],
+    why: 'Use the mockup’s visible hover surface.',
+  },
+  {
+    selector: '.ui-environment-symbol',
+    declarations: ['display: grid;', 'place-items: center;', 'inline-size: 2.15rem;', 'aspect-ratio: 1;',
+      'border-radius: 0.55rem;', 'background: var(--ui-color-accent-surface);', 'color: var(--ui-color-accent);'],
+    why: 'Give each environment the compact visual landmark shown in the mockup.',
+  },
+  {
+    selector: '.ui-environment-shortcuts',
+    declarations: ['display: flex;', 'flex-wrap: wrap;', 'gap: 0.15rem 0.35rem;', 'padding: 0 0.35rem 0.45rem;'],
+    why: 'Keep environment capabilities directly accessible from the overview.',
+  },
+  {
+    selector: '.ui-environment-shortcuts a',
+    declarations: ['display: inline-flex;', 'align-items: center;', 'min-block-size: var(--ui-target-primary);', 'padding-inline: 0.45rem;',
+      'border-radius: 0.35rem;', 'font-size: 0.83rem;', 'font-weight: 650;', 'text-decoration: none;'],
+    why: 'Match the mockup shortcuts and keep their touch targets usable.',
+  },
+  {
+    selector: '.ui-environment-shortcuts a:hover',
+    declarations: ['background: var(--ui-color-accent-surface);', 'text-decoration: underline;'],
+    why: 'Show clear feedback on the environment actions.',
+  },
+  {
+    selector: '.ui-environment-summary small',
+    declarations: ['display: block;', 'color: var(--ui-color-textMuted);', 'font-size: 0.83rem;', 'overflow-wrap: anywhere;'],
+    why: 'Put observation time on the secondary line of the environment row.',
+  },
+  {
+    selector: '.ui-environment-summary .ui-state-word',
+    declarations: ['display: inline-block;', 'padding: 0.1rem 0.45rem;', 'border-radius: 1rem;', 'background: var(--ui-color-bg);',
+      'font-size: 0.73rem;', 'font-weight: 700;', 'text-transform: capitalize;'],
+    why: 'Use a readable compact status badge without hiding the state.',
+  },
+  {
+    selector: '.ui-environment-summary .ui-tone-ok .ui-state-word',
+    declarations: ['background: var(--ui-color-check-surface);', 'color: var(--ui-color-ok);'],
+    why: 'Use the mockup’s green status treatment when the environment is active.',
+  },
+  {
+    selector: '.ui-environment-summary .ui-age',
+    declarations: ['display: block;', 'font-size: 0.83rem;'],
+    why: 'Keep the server observation time on its own readable line.',
   },
   {
     selector: '.ui-workspace-heading',
@@ -299,7 +577,7 @@ export const COMPONENT_RULES = [
   },
   {
     selector: '.ui-workspace-primary',
-    declarations: ['padding-inline: var(--ui-space-5);', 'background: var(--ui-color-accent);', 'color: var(--ui-color-onAccent);', 'border: 0;', 'border-radius: var(--ui-space-3);', 'font: inherit;', 'cursor: pointer;'],
+    declarations: ['display: inline-flex;', 'align-items: center;', 'justify-content: center;', 'padding-inline: var(--ui-space-5);', 'text-decoration: none;', 'background: var(--ui-color-action);', 'color: var(--ui-color-onAccent);', 'border: 0;', 'border-radius: var(--ui-space-3);', 'font: inherit;', 'cursor: pointer;'],
     why: 'Use the strong accent for the next step.',
   },
   {
