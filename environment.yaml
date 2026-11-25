@@ -483,13 +483,13 @@ variables:
     secret: false
     environments: [staging]
     deployedTo: railway:variable
-    note: "Exact HTTPS callback registered for this customer installation."
+    note: "Exact HTTPS callback for this installation, registered by its private worker when no client ID is supplied."
   - name: PLATFOLIO_RAILWAY_OAUTH_CLIENT
     kind: value
     secret: false
     environments: [staging]
     deployedTo: railway:variable
-    note: "Railway public OAuth client ID for this installation."
+    note: "Optional Railway public OAuth client ID. Leave unset for customer-local dynamic registration."
   - name: PLATFOLIO_NOTIFICATION_DIRECTORY_CLIENT
     kind: value
     secret: false
@@ -509,7 +509,7 @@ variables:
     secret: true
     environments: [staging]
     deployedTo: railway:variable
-    note: "Local AppRole secret limited to the Railway and marketplace credential records."
+    note: "Local AppRole secret limited to this installation's Railway grant, Railway OAuth registration and marketplace credential records."
   - name: PLATFOLIO_OPENBAO_URL
     kind: value
     secret: false

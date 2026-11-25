@@ -39,7 +39,7 @@ function LaunchPanel({ teamId, teamName }: z.infer<typeof props>) {
     try {
       const result = action === 'start' ? await start({ params })
         : await remove({ params, body: { data: action, ...(action === 'wipe' ? { confirmation } : {}) } });
-      if (!result.ok) setProblem(result.error.status === 400 ? result.error.message : 'Platfolio could not accept that action. Try again.');
+      if (!result.ok) setProblem([400, 409].includes(result.error.status) ? result.error.message : 'Platfolio could not accept that action. Try again.');
       else { select(null); setConfirmation(''); }
     } finally {
       launch.reload();

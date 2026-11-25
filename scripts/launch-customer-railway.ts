@@ -22,11 +22,11 @@ async function ownerLaunchConfig(file: string) {
   if (!mode.isFile() || mode.mode & 0o077) throw new Error('Use a private file for the customer launch configuration');
   const config = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>;
   const { team, client, workerKey, openBaoSecret, appProject } = config;
-  if (typeof team !== 'string' || !team || typeof client !== 'string' || !client ||
+  if (typeof team !== 'string' || !team || (client !== undefined && (typeof client !== 'string' || !client)) ||
       typeof workerKey !== 'string' || !/^[a-zA-Z0-9_-]{43,128}$/.test(workerKey) ||
-      typeof openBaoSecret !== 'string' || !/^[a-zA-Z0-9_-]{43,128}$/.test(openBaoSecret) || openBaoSecret === workerKey) throw new Error('Provide the team ID, Railway OAuth client ID and two distinct installation credentials');
+      typeof openBaoSecret !== 'string' || !/^[a-zA-Z0-9_-]{43,128}$/.test(openBaoSecret) || openBaoSecret === workerKey) throw new Error('Provide the team ID and two distinct installation credentials. A Railway OAuth client ID is optional.');
   if (appProject !== undefined && (typeof appProject !== 'string' || !/^[a-f0-9-]{36}$/.test(appProject))) throw new Error('Use a valid app project ID');
-  return { team, client, workerKey, openBaoSecret, ...(appProject ? { appProject } : {}) };
+  return { team, workerKey, openBaoSecret, ...(client ? { client } : {}), ...(appProject ? { appProject } : {}) };
 }
 const launchConfig = values['launch-config-file'] ? await ownerLaunchConfig(values['launch-config-file']) : undefined;
 const stage = await customerRailway({ name: 'platfolio', kind: 'installation', ...(values.project ? { id: values.project } : {}), create: values.apply === true && !values['update-images'] });

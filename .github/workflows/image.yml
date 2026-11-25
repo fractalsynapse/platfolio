@@ -152,8 +152,8 @@ jobs:
             -e PLATFOLIO_LAUNCH_STATE_DIR=/launch-state -e PLATFOLIO_LAUNCH_TEAM=ci-team \
             -e PLATFOLIO_LAUNCH_WORKER_KEY="$(node -p 'require("node:crypto").randomBytes(32).toString("base64url")')" \
             -e PLATFOLIO_OPENBAO_WORKER_SECRET="$(node -p 'require("node:crypto").randomBytes(32).toString("base64url")')" \
-            -e PLATFOLIO_OPENBAO_URL=http://127.0.0.1:8200 -e PLATFOLIO_RAILWAY_OAUTH_CLIENT=ci-client \
-            -e PLATFOLIO_RAILWAY_OAUTH_CALLBACK=http://127.0.0.1:8080/api/v1/railway/callback \
+            -e PLATFOLIO_OPENBAO_URL=http://127.0.0.1:8200 \
+            -e PLATFOLIO_RAILWAY_OAUTH_CALLBACK=https://private-api.example.test/api/v1/railway/callback \
             -e RAILWAY_WORKSPACE_ID=ci-workspace -e HOST=127.0.0.1 platfolio-control-plane:build \
             sh -c "chown node:node /launch-state && exec su -s /bin/sh node -c 'node /app/scripts/customer-installation-worker.ts'"
           for attempt in $(seq 1 15); do

@@ -34,6 +34,7 @@ test('customer launch is owner scoped and passes only the intended fields to a p
     if (last?.action === 'redeploy') return Response.json({ state: 'running' });
     if (last?.action === 'marketplace-status') return Response.json({ state: 'disconnected' });
     if (last?.action === 'marketplace-enroll') return Response.json('enrolled');
+    if (last?.action === 'start') return Response.json({ error: 'marketplace-claim-required' }, { status: 409 });
     if (last?.action === 'domains-list') return Response.json({ outcome: 'listed', domains: [domain] });
     if (last?.action === 'domain-attach') return Response.json({ outcome: 'attached', domain });
     if (last?.action === 'domain-detach') return Response.json({ outcome: 'detached' });
@@ -77,6 +78,11 @@ test('customer launch is owner scoped and passes only the intended fields to a p
     assert.equal((await connect('owner', 'wrong-format')).status, 400);
     assert.equal((await connect('owner', handoff)).status, 204);
     assert.deepEqual(last, { action: 'marketplace-enroll', body: { handoff } });
+    const launch = await fetch(path, { method: 'POST', headers: headers('owner') });
+    assert.equal(launch.status, 409);
+    assert.deepEqual(await launch.json(), {
+      error: 'marketplace-claim-required', message: 'Go to Connections → Marketplace to claim Starter Web, then launch again.',
+    });
     const response = await fetch(api + '/railway/callback?state=' + 'a'.repeat(43) + '&code=local-test', { redirect: 'manual' });
     assert.equal(response.status, 303);
     assert.equal(response.headers.get('location'), siteOrigin + '/dashboard/launch?railway=retry');

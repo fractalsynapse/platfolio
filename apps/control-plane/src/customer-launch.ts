@@ -33,12 +33,12 @@ export function customerLaunch(config: CustomerLaunchConfig, request: typeof fet
       'marketplace-status' | 'marketplace-enroll' | 'domains-list' | 'domain-attach' | 'domain-detach' | 'brand-read' | 'brand-apply', body?: object) {
       try {
         const response = await request(config.workerUrl + '/launch', {
-          method: 'POST', redirect: 'error', signal: AbortSignal.timeout(action === 'unlock' || action === 'callback' ? 55000 : 15000),
+          method: 'POST', redirect: 'error', signal: AbortSignal.timeout(['initialize', 'unlock', 'callback'].includes(action) ? 55000 : 15000),
           headers: { authorization: 'Bearer ' + config.workerKey, 'content-type': 'application/json' },
           body: JSON.stringify({ action, body }),
         });
-        return response.ok ? { ok: true as const, body: await response.json() as unknown } : { ok: false as const };
-      } catch { return { ok: false as const }; }
+        return response.ok ? { ok: true as const, body: await response.json() as unknown } : { ok: false as const, status: response.status };
+      } catch { return { ok: false as const, status: undefined }; }
     },
   };
 }

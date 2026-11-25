@@ -90,5 +90,9 @@ export function customerMarketplaceConnection(hub: string | undefined, bao: Vaul
     }
   }
 
-  return { connection, enroll };
+  async function canLaunchStarter() {
+    return !hub || (await bao.readMarketplaceGrant()).grant?.claimed === true;
+  }
+
+  return { connection, enroll, canLaunchStarter };
 }

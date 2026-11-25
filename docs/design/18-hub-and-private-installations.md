@@ -347,14 +347,15 @@ reached OpenBao privately while the store was sealed and uninitialized.
 The customer launcher can run as a private worker in the installation project. Pass a
 CI candidate, the exact installation project ID, and a private `--launch-config-file`
 when applying `launch-customer-railway.ts`. Keep that file in the installation owner's
-credential store. It contains the local owner team's `team` ID, the public Railway OAuth
-`client` ID, and two independent random credentials named `workerKey` and
+credential store. It contains the local owner team's `team` ID and two independent
+random credentials named `workerKey` and
 `openBaoSecret`. The latter authorize the private API relay and the OpenBao worker role,
-respectively. The candidate's API image runs the worker under a separate entry point.
+respectively. An existing Railway public OAuth `client` ID is optional. The candidate's API
+image runs the worker under a separate entry point.
 A persistent worker volume keeps the launch journal and the encrypted recovery receipt.
 
-Register the installation API origin plus `/api/v1/railway/callback` as the exact
-Railway OAuth callback URI. Use a public PKCE client. For a dedicated workspace,
+The Railway OAuth callback is the installation API origin plus `/api/v1/railway/callback`.
+If supplying a client, register the exact callback on that public PKCE client. For a dedicated workspace,
 authorize workspace administration so the worker can create a separate app project.
 For an existing app, set `appProject` to the exact Starter Web Railway project ID
 and authorize only that project. The worker checks its workspace, name, role marker,
@@ -370,7 +371,14 @@ bootstrap credential. Keep the recovery file in the owner's credential store and
 it to unlock OpenBao after a restart. The owner can recover an administrative token
 from the shares through OpenBao's standard recovery procedure.
 
-After OpenBao is ready, the owner grants access in Railway. The worker exchanges the
+After OpenBao is ready, the owner grants access in Railway. If the installation has no
+configured client ID, its worker first registers a public OAuth client with Railway for
+the exact callback and stores its registration in the local vault at
+`customer-launch/data/railway-client`. Repeated attempts use that saved registration.
+The initial registration grants no access to a Railway project. The subsequent owner
+consent still selects the projects or workspace.
+
+The worker exchanges the
 one-use code with PKCE and stores the OAuth grant at one scoped OpenBao KV path.
 Railway may refresh the grant during later launches. The workspace page reads readiness
 and the deployment timeline through the owner-scoped API. The hub does not receive the
@@ -405,6 +413,9 @@ acquired. Retrying after an interrupted exchange uses the same saved credential.
 The browser gets connection state and release metadata. A hub owner can revoke the
 connection with the existing marketplace disconnect operation. The private worker
 keeps the acquired release metadata and local apps continue running.
+For a new install configured with a registry the worker checks for a saved claim before
+it deploys Starter Web. The check reads OpenBao and can succeed while the hub is offline.
+An existing deployment can also be restored without contacting the hub.
 
 New worker policies include the exact OpenBao path
 `customer-launch/data/marketplace`. For an installation initialized before this

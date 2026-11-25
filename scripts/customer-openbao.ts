@@ -5,12 +5,14 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 interface Recovery { shares: string[]; bootstrap: string }
 export interface RailwayGrant { access: string; refresh: string; expires: number }
+export interface RailwayOAuthClient { id: string; callback: string; managementUrl: string; managementToken: string }
 export interface MarketplaceGrant { hub: string; installationId: string; credential: string; claimed: boolean }
 type BaoState = 'unreachable' | 'uninitialized' | 'sealed' | 'setup-required' | 'ready';
 const policy = 'platfolio-launcher';
 const path = 'customer-launch/data/railway';
 const marketplacePath = 'customer-launch/data/marketplace';
-const workerPolicy = [path, marketplacePath].map((entry) =>
+const clientPath = 'customer-launch/data/railway-client';
+const workerPolicy = [path, marketplacePath, clientPath].map((entry) =>
   `path "${entry}" { capabilities = ["create", "read", "update"] }`).join('\n');
 const settings = { padding: constants.RSA_PKCS1_OAEP_PADDING, oaepHash: 'sha256' };
 
@@ -25,7 +27,8 @@ export function customerOpenBao(origin: string, secretId: string, directory: str
 
   async function request<T>(path: string, body?: object, credential?: string, method = body ? 'POST' : 'GET') {
     const init: RequestInit = {
-      method, redirect: 'error', signal: AbortSignal.timeout(8000),
+      // A fresh Raft store waits for leader election before returning the only copy of the recovery material.
+      method, redirect: 'error', signal: AbortSignal.timeout(path === 'sys/init' ? 30000 : 8000),
       headers: { ...(credential ? { 'x-vault-token': credential } : {}), ...(body ? { 'content-type': 'application/json' } : {}) },
       ...(body ? { body: JSON.stringify(body) } : {}),
     };
@@ -125,7 +128,7 @@ export function customerOpenBao(origin: string, secretId: string, directory: str
     return { version: stored.data.data.metadata.version, grant: stored.data.data.data };
   }
 
-  async function write(key: string, grant: RailwayGrant | MarketplaceGrant, version: number) {
+  async function write(key: string, grant: RailwayGrant | MarketplaceGrant | RailwayOAuthClient, version: number) {
     const token = await serviceToken();
     if (!token || !(await request(key, { options: { cas: version }, data: grant }, token)).ok) {
       throw new Error('OpenBao could not save the provider grant');
@@ -136,6 +139,8 @@ export function customerOpenBao(origin: string, secretId: string, directory: str
     publicKey, status, initialize, unlock,
     readGrant: () => read<RailwayGrant>(path),
     writeGrant: (grant: RailwayGrant, version: number) => write(path, grant, version),
+    readRailwayClient: () => read<RailwayOAuthClient>(clientPath),
+    writeRailwayClient: (client: RailwayOAuthClient, version: number) => write(clientPath, client, version),
     readMarketplaceGrant: () => read<MarketplaceGrant>(marketplacePath),
     writeMarketplaceGrant: (grant: MarketplaceGrant, version: number) => write(marketplacePath, grant, version),
   };
