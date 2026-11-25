@@ -107,13 +107,18 @@ export function installationLaunch(scopedRoute: typeof scoped, config?: { provid
           project: (id: string) => { session.progress.projectId = id; },
           environment: (name: Input['environments'][number], origin: string) => { session.progress.environments.push({ name, origin }); },
         };
-        void grant.launch({ workspaceId, name, environments, ownerEmail, verifier, salt }, observer).then(
-          () => finish(session, 'ready'),
-          () => {
-            event(session, session.progress.events.at(-1)?.step ?? 'Start launch', 'FAILED');
-            finish(session, 'failed');
-          },
-        );
+        const fail = () => {
+          const lastStep = session.progress.events.at(-1)?.step;
+          event(session, lastStep ?? 'Start launch', 'FAILED');
+          finish(session, 'failed');
+        };
+        void grant.launch({ workspaceId, name, environments, ownerEmail, verifier, salt }, observer).then(() => {
+          const reported = session.progress.environments;
+          const complete = session.progress.projectId && reported.length === environments.length &&
+            environments.every((name) => reported.some((item) => item.name === name));
+          if (complete) finish(session, 'ready');
+          else fail();
+        }, fail);
         return result('startHubInstallation', 202, session.progress);
       }),
       {

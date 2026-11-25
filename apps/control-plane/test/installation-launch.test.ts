@@ -11,6 +11,7 @@ test('a hub owner launches through the selected plugin without exposing the gran
   const permissions = { issuer: 'https://hosting.example.test', code: 'use-once' };
   let exchanges = 0;
   let executions = 0;
+  let skipProduction = false;
   let unblock!: () => void;
   const provisioned = new Promise<void>((resolve) => { unblock = resolve; });
   const input = {
@@ -34,6 +35,7 @@ test('a hub owner launches through the selected plugin without exposing the gran
             await provisioned;
             observer.project('project-id');
             observer.environment('staging', 'https://private.example.test');
+            if (!skipProduction) observer.environment('production', 'https://production.example.test');
             observer.step('Create project', 'READY');
           },
         };
@@ -96,6 +98,14 @@ test('a hub owner launches through the selected plugin without exposing the gran
     assert.ok(!result.includes(input.verifier) && !result.includes(input.salt) && !result.includes(input.ownerEmail));
     const audit = await call('/api/v1/teams/' + teamId + '/activity').then((response) => response.text());
     assert.ok(!audit.includes(input.verifier));
+    skipProduction = true;
+    const next = await call(route, 'POST');
+    const incomplete = route + '/' + (await next.json() as { id: string }).id;
+    assert.equal((await callback('fixture-state')).status, 303);
+    assert.equal((await call(incomplete, 'PUT', 'owner', input)).status, 202);
+    const partial = await call(incomplete).then((response) => response.text());
+    assert.match(partial, /"state":"failed"/);
+    assert.doesNotMatch(partial, /production.example.test/);
   } finally {
     unblock();
     await disposeKernel(app);
