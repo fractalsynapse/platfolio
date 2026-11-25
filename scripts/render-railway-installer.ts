@@ -6,6 +6,7 @@ import { openBaoConfig, openBaoData, openBaoImage, openBaoStart, workerData, wor
 import { resolveCheckoutCandidate } from './platform-candidate.ts';
 
 const databaseImage = 'postgres:17.11@sha256:ff87138949ad9a46f32ff23bd6852b52ce024a13dffe9b4087be98292cdd3b4f';
+const databaseVolume = '/var/lib/postgresql/data';
 const database = 'private-db-staging';
 const identity = 'private-identity-staging';
 const site = 'private-site-staging';
@@ -68,8 +69,9 @@ export async function renderRailwayInstaller(candidateFile: string, registryOrig
     sourceCommit: plan.sourceCommit,
     serializedConfig: { services: {
       [resourceId(database)]: service(database, databaseImage, variables({ POSTGRES_DB: 'platfolio', POSTGRES_USER: 'postgres', POSTGRES_PASSWORD: secret,
+        'PGDATA': databaseVolume + '/pgdata',
         PGHOST: privateHost(database), PGPORT: '5432', DATABASE_URL: 'postgresql://postgres:' + pass + '@' + privateHost(database) + ':5432/platfolio',
-      }), { volume: '/var/lib/postgresql/data' }),
+      }), { volume: databaseVolume }),
       [resourceId(identity)]: service(identity, plan.identity.image + '@' + plan.identity.digest, {
         ...variables({ ...plan.identity.env, ...fromManifest(plan.identity), PORT: String(plan.identity.port), KC_HOSTNAME: publicOrigin(identity),
           KC_HOSTNAME_STRICT: 'true', PLATFOLIO_SITE_ORIGIN: publicOrigin(site),

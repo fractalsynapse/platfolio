@@ -643,6 +643,12 @@ variables:
     environments: all
     deployedTo: ci:env
     note: "referenced by .github/workflows/development.yml, .github/workflows/integration.yml, compose.dev.yaml"
+  - name: PGDATA
+    kind: value
+    secret: false
+    environments: [staging, production]
+    deployedTo: railway:variable
+    note: "PostgreSQL uses a subdirectory of the Railway volume so initialization can leave the mount’s lost+found directory intact."
   - name: POSTGRES_PASSWORD
     kind: secret
     secret: true
