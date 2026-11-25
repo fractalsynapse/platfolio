@@ -266,17 +266,24 @@ const expectErr = (result: { ok: boolean; value?: unknown } & Partial<StoreError
       !await store.redeemMarketplaceEnrollment(id, 'first', 'credential', expiration) &&
       await store.issueMarketplaceEnrollment(owner.id, id, 'second', expiration) &&
       !await store.redeemMarketplaceEnrollment(id, 'first', 'credential', before);
+    const pending = await store.listMarketplaceInstallations(owner.id);
+    const outside = await store.listMarketplaceInstallations(peer.id);
     const redemptions = await Promise.all([
       store.redeemMarketplaceEnrollment(id, 'second', 'credential', before),
       store.redeemMarketplaceEnrollment(id, 'second', 'credential', before),
     ]);
+    const connected = await store.listMarketplaceInstallations(owner.id);
     const ended = redemptions.filter(Boolean).length === 1 &&
       await store.verifyMarketplaceCredential(id, 'credential') &&
       !await store.verifyMarketplaceCredential(randomUUID(), 'credential') &&
       !await store.issueMarketplaceEnrollment(owner.id, id, 'third', expiration) &&
       await store.disconnectMarketplaceInstallation(owner.id, id) &&
       !await store.verifyMarketplaceCredential(id, 'credential');
-    return valid && ended ? { status: 'pass', detail: 'expires, atomically spends, and revokes' }
+    const disconnected = await store.listMarketplaceInstallations(owner.id);
+    const observed = [pending, connected, disconnected].every((list, index) => list.length === 1 &&
+      list[0]?.installationId === id && list[0].state === ['pending', 'connected', 'disconnected'][index] &&
+      Object.keys(list[0]).length === 2) && outside.length === 0;
+    return valid && ended && observed ? { status: 'pass', detail: 'expires, atomically spends, and revokes' }
       : { status: 'fail', detail: 'marketplace enrollment or machine authorization differed' };
   });
 

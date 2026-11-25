@@ -5,6 +5,8 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+- Hub team owners can create one-time marketplace connection codes, see when their private installations enroll, and revoke marketplace access from Connections (#288).
+
 ## [0.6.0]
 
 Release baseline `0.5.0..4ceb67c`. The candidate includes the themed Keycloak image and the

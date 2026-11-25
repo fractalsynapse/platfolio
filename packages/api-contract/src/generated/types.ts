@@ -4,7 +4,7 @@
  * hand, because every line reproduces from the specification.
  *
  * Source: apps/control-plane/openapi.yaml (OpenAPI 3.1.0, info.version 0.1.0)
- * Input digest: sha256/ac68bc98ba9c2436
+ * Input digest: sha256/af77b9ad4ea8bdbf
  *
  * Reproduce it with `pnpm run api:types`. `pnpm run api:types:check` fails when this file stops matching
  * what the committed spec produces, which is the only way a generated type deserves to be trusted.
@@ -251,6 +251,11 @@ export interface Invitation {
   emailError?: string;
 }
 
+export interface MarketplaceInstallation {
+  installationId: string;
+  state: 'pending' | 'connected' | 'linked' | 'disconnected';
+}
+
 export interface NotificationRule {
   id: string;
   instanceId: string;
@@ -492,6 +497,10 @@ export interface ApiParameters {
   listInstances: Record<string, never>;
   /** GET /api/v1/teams/{teamId}/invitations */
   listInvitations: {
+    teamId: string;
+  };
+  /** GET /api/v1/teams/{teamId}/marketplace/installations */
+  listMarketplaceInstallations: {
     teamId: string;
   };
   /** GET /api/v1/me/invitations */
@@ -1208,6 +1217,13 @@ export interface ApiResponses {
     '403': Error;
     '404': Error;
   };
+  /** GET /api/v1/teams/{teamId}/marketplace/installations */
+  listMarketplaceInstallations: {
+    '200': MarketplaceInstallation[];
+    '401': Error;
+    '403': Error;
+    '404': Error;
+  };
   /** GET /api/v1/me/invitations */
   listMyInvitations: {
     '200': Invitation[];
@@ -1717,6 +1733,8 @@ export const ENDPOINTS = {
   listInstances: { method: 'get', path: '/api/v1/instances' },
   /** GET /api/v1/teams/{teamId}/invitations */
   listInvitations: { method: 'get', path: '/api/v1/teams/{teamId}/invitations' },
+  /** GET /api/v1/teams/{teamId}/marketplace/installations */
+  listMarketplaceInstallations: { method: 'get', path: '/api/v1/teams/{teamId}/marketplace/installations' },
   /** GET /api/v1/me/invitations */
   listMyInvitations: { method: 'get', path: '/api/v1/me/invitations' },
   /** GET /api/v1/me/notifications */

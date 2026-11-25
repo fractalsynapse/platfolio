@@ -130,6 +130,12 @@ export const NotificationRuleSchema = z.object({
 export type NotificationRule = z.infer<typeof NotificationRuleSchema>;
 export type NewNotificationRule = Omit<NotificationRule, 'id' | 'createdAt'> & { id?: string };
 
+export const MarketplaceInstallationSchema = z.object({
+  installationId: z.uuid(),
+  state: z.enum(['pending', 'connected', 'linked', 'disconnected']),
+}).strict();
+export type MarketplaceInstallation = z.infer<typeof MarketplaceInstallationSchema>;
+
 /** Repository facts. `actionRef` is the pinned commit -- the trust anchor is a SHA, never a tag (D30 law 3). */
 export const RepoConnectionSchema = z.object({
   instanceId: z.string().min(1),
@@ -529,6 +535,7 @@ export interface Store {
 
   /** First ownership wins. A tombstoned link requires a new installation ID to connect again. */
   connectMarketplaceInstallation(teamId: string, installationId: string): Promise<boolean>;
+  listMarketplaceInstallations(teamId: string): Promise<MarketplaceInstallation[]>;
   marketplaceInstallationConnected(teamId: string, installationId: string): Promise<boolean>;
   disconnectMarketplaceInstallation(teamId: string, installationId: string): Promise<boolean>;
   issueMarketplaceEnrollment(teamId: string, installationId: string, enrollmentDigest: string, expiresAt: string): Promise<boolean>;

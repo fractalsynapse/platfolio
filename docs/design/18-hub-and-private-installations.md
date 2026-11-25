@@ -393,9 +393,10 @@ to the public site requires an explicit production environment and a separate ow
 
 Set the installation worker's hub with the launcher's `--registry-origin` option.
 The worker accepts an HTTPS origin from the installation owner and refuses redirects.
-On the hub, a team owner issues a one-use code for an installation ID. Paste the ID
-and code together as `installation-id:enrollment-code` in the private team's
-**Connections** page. The code is valid for 15 minutes.
+On the hub, a team owner opens **Connections** and creates a one-use code. Paste it
+into **Connections → Marketplace** in the private Platfolio. The code is valid for
+15 minutes. The hub Connections page shows pending and connected installations,
+lets owners replace a pending code, and can disconnect an installation.
 
 The worker generates its registry credential, saves it to OpenBao with an exact
 version check, and exchanges the code and a SHA-256 verifier with the configured

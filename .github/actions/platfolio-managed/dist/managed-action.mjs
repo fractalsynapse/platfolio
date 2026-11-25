@@ -25068,7 +25068,7 @@ function date4(params) {
 }
 
 // packages/contracts/src/generated/contract-version.ts
-var CONTRACT_VERSION = "5.13.0";
+var CONTRACT_VERSION = "5.14.0";
 
 // packages/contracts/src/infra.ts
 var OPERATIONS = [
@@ -27417,6 +27417,10 @@ var NotificationRuleSchema = external_exports.object({
   enabled: external_exports.boolean(),
   createdAt: external_exports.iso.datetime(),
   environment: external_exports.string().min(1).max(60).optional()
+}).strict();
+var MarketplaceInstallationSchema = external_exports.object({
+  installationId: external_exports.uuid(),
+  state: external_exports.enum(["pending", "connected", "linked", "disconnected"])
 }).strict();
 var RepoConnectionSchema = external_exports.object({
   instanceId: external_exports.string().min(1),
