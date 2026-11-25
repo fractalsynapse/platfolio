@@ -49,6 +49,9 @@ Railway grant and rechecks the recorded project and deployment before writing.
 Railway supplies the DNS instructions and verification state. The generated Railway
 address stays available while DNS is pending. Removing the custom hostname leaves
 the service, deployment, storage and generated address in place.
+Railway's unscoped availability query refused the operator bearer session even
+though the session could read the staging service. This path submits the scoped
+attachment and verifies the resulting hostname on that service.
 
 ## The flow
 

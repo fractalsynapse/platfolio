@@ -33,9 +33,6 @@ test('custom domains use the verified app service and read back every change fro
               dnsRecords: [{ fqdn: domain, hostlabel: 'preview', zone: 'example.test', recordType: 'DNS_RECORD_TYPE_CNAME',
                 requiredValue: 'provider-host.up.railway.app', purpose: 'DNS_RECORD_PURPOSE_TRAFFIC_ROUTE' }],
             } }] : [] } }]) as T;
-        case 'starter custom domain availability':
-          assert.deepEqual(variables, { domain });
-          return { customDomainAvailable: { available: true } } as T;
         case 'attach starter custom domain':
           assert.deepEqual(variables, { input: { projectId: 'app-project', environmentId: 'staging-env', serviceId: 'web-id', domain, targetPort: 8080 } });
           attached = true;

@@ -188,12 +188,12 @@ export async function customerRailway(target: CustomerProjectTarget, progress?: 
     }
     if (existing) return { outcome: 'attached' as const, domain: readRailwayCustomDomain(existing) };
     if (domains.length > 0) return { outcome: 'conflict' as const };
-    const available = await call<{ customDomainAvailable: { available: boolean } }>('starter custom domain availability',
-      'query($domain:String!){customDomainAvailable(domain:$domain){available}}', { domain: host });
-    if (!available.customDomainAvailable.available) return { outcome: 'not-available' as const };
-    await call('attach starter custom domain', 'mutation($input:CustomDomainCreateInput!){customDomainCreate(input:$input){id domain}}',
-      { input: { ...scope, serviceId, domain: host, targetPort: 8080 } }).catch(() => undefined);
+    const accepted = await call<{ customDomainCreate: { domain: string } }>('attach starter custom domain',
+      'mutation($input:CustomDomainCreateInput!){customDomainCreate(input:$input){id domain}}',
+      { input: { ...scope, serviceId, domain: host, targetPort: 8080 } })
+      .then(({ customDomainCreate }) => customDomainCreate.domain === host, () => false);
     const attached = (await read()).find(({ domain }) => domain === host);
+    if (!attached && !accepted) return { outcome: 'not-available' as const };
     if (!attached) throw new Error('Railway did not confirm the requested domain');
     return { outcome: 'attached' as const, domain: readRailwayCustomDomain(attached) };
   }
