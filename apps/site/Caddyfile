@@ -13,6 +13,8 @@
 	}
 	header /config.js Cache-Control "no-store"
 	header /version.json Cache-Control "no-store"
+	@workspace path /dashboard/*
+	rewrite @workspace /dashboard/index.html
 	file_server {
 		disable_canonical_uris
 	}

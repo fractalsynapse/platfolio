@@ -47,10 +47,8 @@ services:
       # starts before traffic, so there is no race to lose. Replicas would use PLATFOLIO_DB_MIGRATE=false.
       PLATFOLIO_DB_MIGRATE: 'true'
       PLATFOLIO_RECONCILE_INTERVAL_MS: '60000'
-      # Email (D46). `none` until a relay is configured deliberately: the null transport refuses, reports
-      # honestly and leaves the routes mounted, which is safer than a half-configured sender that appears to work.
-      PLATFOLIO_EMAIL_DRIVER: none
-      PLATFOLIO_EMAIL_FROM: platfolio@platfolio.dev
+      # Operators configure a sender per installation. The API defaults to no delivery when the
+      # driver is absent. Leaving the sender and driver unset here preserves the provider configuration.
       PLATFOLIO_SMTP_STARTTLS: require
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/status').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
@@ -67,11 +65,7 @@ services:
       # Declared by NAME, never by value (D4). The validator refused the literal I first wrote -- a credential
       # appearing in an env assignment is exactly what this platform must not store or read -- so the hosting
       # layer supplies it at run time and platfolio only knows it exists.
-      # No SMTP secret is declared while PLATFOLIO_EMAIL_DRIVER is `none`. Declaring a credential the running
-      # config never reads is not caution, it is noise: the provider correctly refuses a plan whose declared
-      # secret has no value, so a phantom name would block the very deploy this file is meant to describe.
-      # Add the entry back the moment a relay is configured -- with `driver: smtp`, the provider will require
-      # the name to exist, and that is the point of declaring it rather than inlining a value (D4).
+      # SMTP is optional and its credential lives on the environment's API service when configured.
       secrets:
         # Names, never values (D4). The GitHub App's id, installation and signing key are what the two
         # repository operations need (#172's middle); they live as variables in the tenant's own Railway
@@ -102,6 +96,7 @@ services:
       # is not production's either. A value map is the honest place to say so.
       environmentValues:
         staging:
+          PLATFOLIO_MARKETPLACE_ENABLED: 'true'
           PLATFOLIO_IDENTITY_ISSUER: &staging-issuer https://auth.platfolio.dev/realms/platfolio-staging
           PLATFOLIO_IDENTITY_JWKS_URI: https://auth.platfolio.dev/realms/platfolio-staging/protocol/openid-connect/certs
           # The staging UI host is `preview.platfolio.dev`. Do not read that as the `preview` environment below
@@ -143,10 +138,10 @@ services:
           PLATFOLIO_IDENTITY_ISSUER: *staging-issuer
 
   identity:
-    # Upstream Keycloak, pinned by digest (D29/D30 law 3: a tag is a thing that moves). `ownership: external`
-    # is what the format calls a service we host but do not develop -- the same posture a tenant has toward
-    # their dependencies, which is the point of dogfooding.
-    image: keycloak/keycloak:26.8.2@sha256:c126f032d43b941ed7c5ccca7d6571596d8eab84d748afd7c86989e48ef07b8f
+    image: ghcr.io/fractalsynapse/platfolio-identity
+    build:
+      context: .
+      dockerfile: apps/identity/Dockerfile
     # Full path, not `start`: Railway's start command replaces the image command rather than being appended to
     # an entrypoint, so a bare `start` is "command not found" -- an instant exit with zero log lines, which is
     # how this failure looked like a mysterious deployment error for a whole debugging pass. #198's own lesson:
@@ -241,9 +236,7 @@ services:
         - { name: KC_BOOTSTRAP_ADMIN_PASSWORD, source: shared-variable }
       public: true
       domains: [auth.platfolio.dev]
-      ownership: external
-      # Upstream Keycloak: nothing is developed in this service, so production only -- the same posture
-      # the shared-identity template takes. A staging Keycloak nobody changes is a second bill and no signal.
+      # Shared identity host, with separate staging and production realms (D56).
       environments: [production]
 
   # One provider-managed Postgres for the whole deployment. `singleUser` semantics apply: Railway creates the
@@ -251,7 +244,7 @@ services:
 x-platfolio:
   metadata:
     name: platfolio-control-plane
-    version: 0.5.0
+    version: 0.6.0
     title: Platfolio Control Plane
     summary: The control plane hosting itself, so the hosting path is tested on software we own.
     # The same vocabulary the templates use (D51), because one set of rules now decides all four: platfolio

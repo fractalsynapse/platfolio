@@ -7,6 +7,7 @@ import {
 import {
   HttpRailwayTransport, type RailwayCredential, type RailwayCredentialSource, type RailwayTransport,
 } from './railway-transport.ts';
+import { readRailwayCustomDomain, type RailwayCustomDomain } from './railway-domains.ts';
 import { redactCredentialShaped } from './managed-action.ts';
 
 /**
@@ -1410,11 +1411,7 @@ export class RailwayInfraProvider implements InfraProvider {
       const deployment = node.latestDeployment as { status?: string } | null;
       const source = node.source as { image?: string } | null;
       const domains = node.domains as {
-        customDomains?: { id?: string; domain: string; syncStatus?: string | null; status?: {
-          verified?: boolean; certificateStatus?: string; verificationDnsHost?: string; verificationToken?: string;
-          dnsRecords?: { fqdn: string; hostlabel?: string | null; zone: string; recordType?: string | null;
-            requiredValue?: string | null; currentValue?: string | null; status?: string | null; purpose?: string | null }[] | null;
-        } | null }[];
+        customDomains?: RailwayCustomDomain[];
         serviceDomains?: { id?: string; domain: string; syncStatus?: string | null }[];
       } | null;
       out.set(serviceId, {
@@ -1452,48 +1449,11 @@ export class RailwayInfraProvider implements InfraProvider {
             states[d.domain] = { dnsStatus: active ? 'verified' : 'pending', certificateStatus: active ? 'issued' : 'pending' };
             if (d.id) ids[d.domain] = d.id;
           }
-          for (const d of domains?.customDomains ?? []) {
-          const raw = d.status?.dnsRecords ?? [];
-          // Every record below is copied out of the provider's response. Nothing here derives a value: the
-          // routing target is Railway's own host and cannot be computed from the service hostname.
-          const records: InstanceInfo['domainRecords'][string] = raw.filter((r) => r?.requiredValue).map((r) => ({
-            host: r.hostlabel || r.fqdn,
-            fqdn: r.fqdn,
-            zone: r.zone,
-            type: r.recordType?.endsWith('_CNAME') ? 'CNAME' as const
-              : r.recordType?.endsWith('_TXT') ? 'TXT' as const
-                : r.recordType?.endsWith('_A') ? 'A' as const : 'NS' as const,
-            value: r.requiredValue ?? '',
-            ...(r.currentValue ? { current: r.currentValue } : {}),
-            status: r.status?.endsWith('PROPAGATED') ? 'propagated' as const
-              : r.status?.endsWith('REQUIRES_UPDATE') ? 'requires-update' as const : 'unspecified' as const,
-            purpose: r.purpose?.endsWith('TRAFFIC_ROUTE') ? 'traffic' as const
-              : r.purpose?.endsWith('ACME_DNS01_CHALLENGE') ? 'challenge' as const : 'unspecified' as const,
-          }));
-          // The ownership TXT is disclosed as a host/token pair rather than inside dnsRecords, so it joins the
-          // same list: one renderable set of instructions beats two the UI must merge.
-          const vHost = d.status?.verificationDnsHost;
-          const vToken = d.status?.verificationToken;
-          if (vHost && vToken && !records.some((r) => r.purpose === 'ownership')) {
-            const zone = raw[0]?.zone ?? d.domain.split('.').slice(-2).join('.');
-            records.push({
-              host: vHost,
-              fqdn: vHost.includes('.') ? vHost : `${vHost}.${zone}`,
-              zone,
-              type: 'TXT',
-              value: vToken,
-              status: d.status?.verified ? 'propagated' as const : 'requires-update' as const,
-              purpose: 'ownership' as const,
-            });
-          }
-          if (records.length) recordsByHost[d.domain] = records;
-            const cert = d.status?.certificateStatus ?? '';
-            const failed = cert === 'CERTIFICATE_STATUS_TYPE_ISSUE_FAILED';
-            states[d.domain] = {
-              dnsStatus: d.status?.verified ? 'verified' : failed ? 'failed' : 'pending',
-              certificateStatus: cert === 'CERTIFICATE_STATUS_TYPE_VALID' ? 'issued' : failed ? 'failed' : 'pending',
-            };
-            if (d.id) ids[d.domain] = d.id;
+          for (const domain of domains?.customDomains ?? []) {
+            const { host, records, dnsStatus, certificateStatus } = readRailwayCustomDomain(domain);
+            if (records.length) recordsByHost[host] = records;
+            states[host] = { dnsStatus, certificateStatus };
+            if (domain.id) ids[host] = domain.id;
           }
           return { domainHosts: Object.keys(states), domainStates: states, domainIds: ids, domainRecords: recordsByHost };
         })(),

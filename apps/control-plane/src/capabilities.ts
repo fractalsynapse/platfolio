@@ -1,14 +1,23 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import {
-  AttestationSchema, checkBindingPolicy, CONTRACT_NAME, CONTRACT_VERSION, DispatchIntentSchema, InstanceSchema,
+  AttestationSchema, NotificationRuleSchema, StarterBrandChangeSchema, checkBindingPolicy, CONTRACT_NAME, CONTRACT_VERSION, DispatchIntentSchema, InstanceSchema,
   reasonOf, decide, checkInvitationAcceptance, bindingImpact, normaliseName, rollupState, type BindingRecord, type CapabilityOffer, type PolicyAction, type VerifiedClaims,
 } from '@platfolio/contracts';
 import { RepositoryReadError } from '@platfolio/contracts';
 import { ScmNotConfiguredError } from '@platfolio/kernel';
-import { buildPlan, parseCompose } from '@platfolio/manifest';
+import { buildPlan, FREE_STARTER_RELEASE, parseCompose, templateCatalogEntry } from '@platfolio/manifest';
 import type { ExtensionDescriptor, KernelContext, Request, Response_, RouteDefinition } from '@platfolio/kernel';
-import { ArtifactRecordSchema, secretWriteScope } from '@platfolio/contracts';
+import { ArtifactRecordSchema, InfraPlanSchema, secretWriteScope } from '@platfolio/contracts';
+import type { customerLaunch } from './customer-launch.ts';
+import { hostedStarterLink, hostedStarterObservation } from './hosted-starter.ts';
+import { checkHostedApp, hostedAppStatus } from './hosted-availability.ts';
+import { listNotificationMatches } from './notification-rules.ts';
+import type { NotificationDirectory } from './notification-directory.ts';
+import { notificationEmail } from './notification-email.ts';
+import type { StarterLaunch } from './starter-launch.ts';
 import { badRequest, bearerToken, notFound, send, unauthorized } from './respond.ts';
+import { accountProfile, type AccountIssuer } from './account-profile.ts';
+import { customHostname } from '../../../packages/contracts/src/railway-domains.ts';
 
 /**
  * The control plane's capabilities, expressed as plugins (D40: everything is a plugin).
@@ -26,10 +35,19 @@ export interface CapabilityDeps {
   /** Injected so the controller can be tested without waiting on a wall clock. */
   now?: () => Date;
   dispatchTtlMs?: number;
+  marketplaceEnabled?: boolean;
+  invitationOrigin?: string;
+  accountIssuer?: AccountIssuer;
+  notificationDirectory?: NotificationDirectory;
+  starterLaunch?: StarterLaunch;
+  customerLaunch?: ReturnType<typeof customerLaunch>;
 }
 
 const nowOf = (deps: CapabilityDeps): Date => (deps.now?.() ?? new Date());
 const REQUIRED_SCOPE = 'platfolio.user';
+const installationIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const registryCredentialPattern = /^[A-Za-z0-9_-]{43}$/;
+const digestCredential = (credential: string): string => createHash('sha256').update(credential).digest('hex');
 
 /** A request-time authorizer: the identity capability is read from the context, never captured at boot. */
 async function authorize(context: KernelContext, request: Request): Promise<{ ok: true; claims: VerifiedClaims } | { ok: false; response: Response_ }> {
@@ -347,6 +365,9 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
         // Recorded, not claimed done: provider teardown is a dispatch the action executes and attests (#196).
         // Reporting completed destruction the control plane has not performed is a lie with consequences -- a
         // tenant reads it as licence to reclaim their own compute.
+        if ((await scope.context.store.getHostedStarter(params.instanceId ?? '')).ok) {
+          return { status: 409, body: { error: 'conflict', message: 'Choose a storage policy in the app’s setup before removing it.' } };
+        }
         const moved = await scope.context.store.updateInstanceState(params.instanceId ?? '', 'deprovisioning');
         if (moved.ok === false) return { status: moved.code === 'not-found' ? 404 : 400, body: { error: moved.code, message: reasonOf(moved) } };
         await scope.context.store.appendAudit({ actorKind: 'user', actorRef: scope.personId, action: 'instance.destroy', target: moved.value.id, detail: { from: scope.role, state: 'deprovisioning' } });
@@ -419,6 +440,28 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
         // row went away mid-request, which is a 404 like any other missing record.
         if (found.ok === false) return notFound('instance', params.instanceId ?? '');
         return send('getInstance', 200, { ...found.value, environments: await scope.context.store.listInstanceEnvironments(found.value.id) });
+      }),
+      scoped('GET', '/api/v1/instances/{instanceId}/environments/{environment}', 'getInstanceEnvironment', 'instance.read', async (scope, _request, params) => {
+        const instanceId = params.instanceId ?? '';
+        const environment = params.environment ?? '';
+        const store = scope.context.store;
+        const [recorded, storedPlan] = await Promise.all([store.getInstanceEnvironment(instanceId, environment), store.getPlan(instanceId)]);
+        const parsed = storedPlan.ok ? InfraPlanSchema.safeParse(storedPlan.value.plan) : undefined;
+        const plan = parsed?.success ? parsed.data.environments.find(({ name }) => name === environment) : undefined;
+        if (!recorded.ok && !plan) return notFound('environment', environment);
+        const reports = await store.listEnvironmentAttestations(instanceId, environment, 25);
+        const hosting = environment === 'staging' ? await store.getHostedStarter(instanceId) : undefined;
+        return send('getInstanceEnvironment', 200, {
+          planned: plan !== undefined,
+          ...(hosting?.ok ? { hosting: hosting.value } : {}),
+          services: plan?.services.map(({ name, secrets }) => ({ name, secrets: secrets.map((secret) => secret.name) })) ?? [],
+          domains: plan?.domains.map(({ host, service }) => ({ host, service })) ?? [],
+          deployments: reports.map(({ dispatchId, result, finishedAt, release, errorCode }) => ({
+            id: dispatchId, result, reportedAt: finishedAt,
+            ...(release ? { commit: release.commitSha } : {}),
+            ...(errorCode && /^[a-z][a-z0-9-]{0,79}$/.test(errorCode) ? { problem: errorCode } : {}),
+          })),
+        });
       }),
       scoped('PUT', '/api/v1/instances/{instanceId}/plan', 'putPlan', 'instance.plan.write', async (scope, request, params) => {
         const parsed = bodyOf<{ plan?: unknown }>(request);
@@ -705,7 +748,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
             const status = recorded.code === 'conflict' && reasonOf(recorded).includes('already attested') ? 409 : 400;
             return { status, body: { error: recorded.code, message: reasonOf(recorded) } };
           }
-          await context.store.appendAudit({ actorKind: 'runner', actorRef: recorded.value.dispatchId, action: 'attestation.record', target: recorded.value.instanceId, detail: { result: recorded.value.result, resources: recorded.value.resources.length } });
+          await context.store.appendAudit({ actorKind: 'runner', actorRef: recorded.value.dispatchId, action: 'attestation.record', target: recorded.value.instanceId, detail: { result: recorded.value.result, environment: recorded.value.environment, resources: recorded.value.resources.length } });
           return send('postAttestation', 202, { accepted: true, dispatchId: recorded.value.dispatchId, result: recorded.value.result });
         },
       },
@@ -719,23 +762,27 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
   const audit: ExtensionDescriptor = {
     id: 'audit',
     requires: ['store', 'identity'],
-    routes: [{
+    routes: [
+      scoped('GET', '/api/v1/teams/{teamId}/activity', 'listTeamActivity', 'audit.read', async ({ context, teamId }) => {
+        const apps = await context.store.listInstances(teamId);
+        const targets = [teamId, ...apps.flatMap(({ id }) => [id, `instance/${id}`])];
+        // Invitation and member administration records stay in the owner view.
+        const activity = await context.store.recentAuditForTargets(targets, 100);
+        return send('listTeamActivity', 200, activity.filter(({ action }) => !action.startsWith('team.member.')));
+      }),
+      {
       method: 'GET', path: '/api/v1/audit', operationId: 'listAudit',
       handle: async (request, _params, context) => {
         const auth = await authorize(context, request);
         if (auth.ok === false) return auth.response;
         const limit = Number(request.query.get('limit') ?? 50);
-        if (!Number.isFinite(limit) || limit < 1 || limit > 200) return badRequest('limit must be between 1 and 200');
+        if (!Number.isInteger(limit) || limit < 1 || limit > 200) return badRequest('limit must be between 1 and 200');
         const resolved = await context.store.resolvePerson({ issuer: auth.claims.issuer, subject: auth.claims.subject });
           if (resolved.ok === false) return { status: 503, body: { error: 'principal-unresolved', message: reasonOf(resolved) } };
           const teams = await context.store.teamsForPerson(resolved.value.person.id);
-        const owned = new Set((await Promise.all(teams.map((teamId) => context.store.listInstances(teamId)))).flat().map((i) => i.id));
-        const rows = await context.store.recentAudit(200);
-        // Audit rows are addressed by instance id, or by the instance itself for dispatches. Anything not
-        // owned by one of the caller's teams is simply not in the answer -- including rows that mention
-        // resources that do not exist, which would otherwise be a way to probe for them.
-        const visible = rows.filter((row) => owned.has(row.target) || owned.has(row.target.replace(/^instance\//, '')));
-        return send('listAudit', 200, visible.slice(0, limit));
+        const apps = (await Promise.all(teams.map((teamId) => context.store.listInstances(teamId)))).flat();
+        const targets = apps.flatMap(({ id }) => [id, `instance/${id}`]);
+        return send('listAudit', 200, await context.store.recentAuditForTargets(targets, limit));
       },
     }],
   };
@@ -752,6 +799,14 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
         if (running) return;
         running = true;
         try {
+          const launch = deps.customerLaunch?.teamId ? await deps.customerLaunch.call('report') : undefined;
+          const observation = launch?.ok && deps.customerLaunch && hostedStarterObservation(deps.customerLaunch.teamId, launch.body);
+          if (observation) {
+            const stored = await context.store.recordHostedStarter(observation);
+            if (stored.ok && observation.state === 'live') {
+              await checkHostedApp(context.store, stored.value.id, observation, () => nowOf(deps));
+            }
+          }
           const instances = await context.store.listInstances();
           for (const instance of instances) {
             const latest = await context.store.latestAttestation(instance.id);
@@ -932,7 +987,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
           delivery = { sent: false, reason };
           await scope.context.store.setInvitationEmailResult(invitation.id, { error: reason });
         } else {
-          const link = 'the address your inviter gave you, then open the team page';
+          const link = deps.invitationOrigin ? new URL('/dashboard/invitations', deps.invitationOrigin).href : 'the Platfolio address your inviter gave you, then open Invitations';
           const result = await scope.context.email.send({
             to: [invitation.email],
             subject: `You have been invited to a platfolio team`,
@@ -977,8 +1032,14 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
             // match you" are different answers, and only one of them is actionable.
             return { status: 409, body: { error: 'conflict', message: 'your identity does not assert a verified email address, so there is nothing here to match an invitation against' } };
           }
-          const mine = await context.store.findInvitationsForEmail(email);
-          return send('listMyInvitations', 200, mine.filter((i) => i.state === 'pending'));
+          const now = nowOf(deps).getTime();
+          const mine = (await context.store.findInvitationsForEmail(email))
+            .filter(({ state, expiresAt }) => state === 'pending' && Date.parse(expiresAt) > now);
+          const named = await Promise.all(mine.map(async (invitation) => {
+            const team = await context.store.getTeam(invitation.teamId);
+            return team.ok ? { ...invitation, teamName: team.value.name } : invitation;
+          }));
+          return send('listMyInvitations', 200, named);
         },
       },
       {
@@ -1017,10 +1078,41 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
   // Teams (#195, D44). These are not team-scoped routes -- there is no team to scope to yet. Creation is
   // guarded by authentication plus the verified person, and the caller becomes the owner in the same
   // operation, because a team nobody owns cannot invite, share, or destroy anything and has no way out of that.
+  async function changeMember(scope: Scope, personId: string, role: 'owner' | 'member' | null): Promise<Response_> {
+    const changed = await scope.context.store.changeTeamMember(scope.teamId, scope.personId, personId, role);
+    if (!changed.ok) return {
+      status: changed.code === 'conflict' ? 409 : 404,
+      body: { error: changed.code, message: reasonOf(changed) },
+    };
+    await scope.context.store.appendAudit({
+      actorKind: 'user', actorRef: scope.personId, action: role === null ? 'team.member.remove' : 'team.member.role',
+      target: scope.teamId, detail: { personId, ...(role === null ? {} : { role }) },
+    });
+    return { status: 204, body: undefined };
+  }
+
   const teams: ExtensionDescriptor = {
     id: 'teams',
     requires: ['store', 'identity'],
     routes: [
+      scoped('GET', '/api/v1/teams/{teamId}/members', 'listTeamMembers', 'team.member.manage', async ({ context, teamId, personId }) => {
+        const [members, invitations] = await Promise.all([
+          context.store.listTeamMembers(teamId), context.store.listInvitations(teamId),
+        ]);
+        return send('listTeamMembers', 200, members.map((member) => {
+          const invite = invitations.find((record) => record.state === 'accepted' && record.acceptedBy === member.personId);
+          return { personId: member.personId, role: member.role, addedAt: member.addedAt,
+            self: member.personId === personId, ...(invite ? { invitedAddress: invite.email } : {}) };
+        }));
+      }),
+      scoped('PATCH', '/api/v1/teams/{teamId}/members/{personId}', 'updateTeamMemberRole', 'team.member.manage', async (scope, request, params) => {
+        const body = bodyOf<{ role?: unknown }>(request);
+        const role = body.ok ? body.value?.role : undefined;
+        if (role !== 'member' && role !== 'owner') return badRequest('Choose a team role');
+        return changeMember(scope, params.personId ?? '', role);
+      }),
+      scoped('DELETE', '/api/v1/teams/{teamId}/members/{personId}', 'removeTeamMember', 'team.member.manage',
+        (scope, _request, params) => changeMember(scope, params.personId ?? '', null)),
       {
         method: 'GET', path: '/api/v1/teams', operationId: 'listTeams',
         handle: async (request, _params, context) => {
@@ -1087,6 +1179,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
     requires: ['store', 'identity', 'infra'],
     routes: [
       scoped('PUT', '/api/v1/instances/{instanceId}/secrets/{name}', 'putSecret', 'instance.secret.write', async (scope, request, params) => {
+        if (deps.starterLaunch || deps.customerLaunch) return { status: 503, body: { error: 'secret-store-unavailable', message: 'Wait for your customer OpenBao connection before sending app secrets.' } };
         // Write-through: the value is handed to the provider and kept nowhere. There is no assignment to a
         // local variable that survives this function, no audit field that could carry it, and the success
         // response is 204 with no body -- an echo would be the leak.
@@ -1182,7 +1275,321 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
     ],
   };
 
-  return [core, instances, dispatches, audit, teams, bindings, invitations, secrets, controller];
+  const marketplacePath = '/api/v1/teams/{teamId}/marketplace/installations/{installationId}';
+  const registryPath = '/api/v1/marketplace/installations/{installationId}';
+  const claim = (installationId: string) => ({
+    ...FREE_STARTER_RELEASE, installationId, repo: templateCatalogEntry(FREE_STARTER_RELEASE.template).repo,
+  });
+  const marketplaceRoute = (method: string, path: string, operationId: string, handle: (scope: Scope, id: string) => Promise<Response_>) =>
+    scoped(method, path, operationId, 'marketplace.manage', async (scope, _request, params) => {
+      if (!deps.marketplaceEnabled) return notFound('marketplace installation', '');
+      const id = params.installationId ?? '';
+      if (!installationIdPattern.test(id)) return badRequest('installationId must be a lowercase UUID v4');
+      return handle(scope, id);
+    });
+  const registryRoute = (
+    path: string, operationId: string,
+    handle: (context: KernelContext, request: Request, id: string, credentialDigest: string) => Promise<Response_>,
+  ): RouteDefinition => ({
+    method: 'POST', path, operationId,
+    async handle(request, params, context) {
+      if (!deps.marketplaceEnabled) return notFound('marketplace installation', '');
+      const id = params.installationId ?? '';
+      if (!installationIdPattern.test(id)) return badRequest('installationId must be a lowercase UUID v4');
+      const credential = bearerToken(request.headers.authorization);
+      if (!credential || !registryCredentialPattern.test(credential)) return notFound('marketplace installation', '');
+      return handle(context, request, id, digestCredential(credential));
+    },
+  });
+  const marketplace: ExtensionDescriptor = {
+    id: 'marketplace',
+    requires: ['identity', 'store'],
+    routes: [
+      marketplaceRoute('PUT', marketplacePath, 'connectMarketplaceInstallation', async ({ context, teamId }, id) =>
+        await context.store.connectMarketplaceInstallation(teamId, id) ? { status: 204, body: undefined } : notFound('marketplace installation', '')),
+      marketplaceRoute('DELETE', marketplacePath, 'disconnectMarketplaceInstallation', async ({ context, teamId }, id) =>
+        await context.store.disconnectMarketplaceInstallation(teamId, id) ? { status: 204, body: undefined } : notFound('marketplace installation', '')),
+      marketplaceRoute('POST', `${marketplacePath}/claim`, 'claimFreeMarketplaceRelease', async ({ context, teamId, personId }, id) => {
+        if (!await context.store.marketplaceInstallationConnected(teamId, id)) return notFound('marketplace installation', '');
+        const release = FREE_STARTER_RELEASE;
+        await context.store.appendAudit({ actorKind: 'user', actorRef: personId, action: 'marketplace.claim', target: id,
+          detail: { teamId, template: release.template, commit: release.revision } });
+        return send('claimFreeMarketplaceRelease', 200, claim(id));
+      }),
+      marketplaceRoute('POST', `${marketplacePath}/enrollment`, 'issueMarketplaceEnrollment', async ({ context, teamId }, id) => {
+        const enrollmentCode = randomBytes(32).toString('base64url');
+        const expiresAt = new Date(nowOf(deps).getTime() + 15 * 60_000).toISOString();
+        if (!await context.store.issueMarketplaceEnrollment(teamId, id, digestCredential(enrollmentCode), expiresAt)) {
+          return notFound('marketplace installation', '');
+        }
+        return { ...send('issueMarketplaceEnrollment', 201, { enrollmentCode, expiresAt }), headers: { 'cache-control': 'no-store' } };
+      }),
+      registryRoute(`${registryPath}/enrollment`, 'redeemMarketplaceEnrollment', async (context, request, id, enrollmentDigest) => {
+        const body = bodyOf<{ registryDigest?: unknown }>(request);
+        const registryDigest = body.ok ? body.value?.registryDigest : undefined;
+        if (typeof registryDigest !== 'string' || !/^[a-f0-9]{64}$/.test(registryDigest) || registryDigest === enrollmentDigest) {
+          return badRequest('Supply the SHA-256 verifier for the installation credential');
+        }
+        return await context.store.redeemMarketplaceEnrollment(id, enrollmentDigest, registryDigest, nowOf(deps).toISOString())
+          ? { status: 204, body: undefined } : notFound('marketplace installation', '');
+      }),
+      registryRoute(`${registryPath}/claim`, 'claimEnrolledMarketplaceRelease', async (context, _request, id, registryDigest) => {
+        if (!await context.store.verifyMarketplaceCredential(id, registryDigest)) return notFound('marketplace installation', '');
+        return send('claimEnrolledMarketplaceRelease', 200, claim(id));
+      }),
+    ],
+  };
+
+  const customer = deps.customerLaunch;
+  const unavailable = () => ({ status: 503, body: { error: 'launcher-setup-unavailable', message: 'Check the customer worker, OpenBao and Railway connection, then try again.' } });
+  const relay = async (teamId: string, operation: string, action: Parameters<NonNullable<typeof customer>['call']>[0], body?: object) => {
+    if (!customer || customer.teamId !== teamId) return notFound('launch', 'starter');
+    const output = await customer.call(action, body);
+    if (!output.ok) return unavailable();
+    return action === 'unlock' ? { status: 204, body: null } : send(operation, 200, output.body);
+  };
+  const privateMarketplacePath = '/api/v1/teams/{teamId}/marketplace/connection';
+  const marketplaceUnavailable = () => ({
+    status: 503,
+    body: { error: 'marketplace-unavailable', message: 'Check that OpenBao is unlocked and the marketplace is reachable, then try again.' },
+  });
+  const privateMarketplace: ExtensionDescriptor = {
+    id: 'private-marketplace',
+    requires: ['identity', 'store'],
+    routes: [
+      scoped('GET', privateMarketplacePath, 'getPrivateMarketplaceConnection', 'marketplace.manage', async ({ teamId }) => {
+        if (!customer || customer.teamId !== teamId) return notFound('marketplace connection', '');
+        const result = await customer.call('marketplace-status');
+        return result.ok ? { ...send('getPrivateMarketplaceConnection', 200, result.body), headers: { 'cache-control': 'no-store' } }
+          : marketplaceUnavailable();
+      }),
+      scoped('POST', privateMarketplacePath, 'enrollPrivateMarketplaceConnection', 'marketplace.manage', async ({ teamId }, request) => {
+        if (!customer || customer.teamId !== teamId) return notFound('marketplace connection', '');
+        const body = bodyOf<{ handoff?: unknown }>(request);
+        const handoff = body.ok ? body.value?.handoff : undefined;
+        if (typeof handoff !== 'string' || !/^[0-9a-f-]{36}:[A-Za-z0-9_-]{43}$/.test(handoff)) return badRequest('Paste the complete marketplace connection code');
+        const result = await customer.call('marketplace-enroll', { handoff });
+        if (!result.ok || result.body === 'unavailable') return marketplaceUnavailable();
+        return result.body === 'enrolled' ? { status: 204, body: null } :
+          { status: 409, body: { error: 'marketplace-code-refused', message: 'Check the connection code and whether this installation is already connected.' } };
+      }),
+    ],
+  };
+  const domainPath = '/api/v1/instances/{instanceId}/environments/{environment}/custom-domains';
+  const domainConflict = (message: string) => ({ status: 409, body: { error: 'domain-conflict', message } });
+  async function hostedDomains({ context, teamId, personId }: Scope, params: Record<string, string>,
+    operation: 'listHostedCustomDomains' | 'attachHostedCustomDomain' | 'detachHostedCustomDomain'): Promise<Response_> {
+    const instanceId = params.instanceId ?? '';
+    if (!customer || customer.teamId !== teamId || params.environment !== 'staging') return notFound('hosted domains', instanceId);
+    const hosting = await context.store.getHostedStarter(instanceId);
+    if (!hosting.ok) return notFound('hosted domains', instanceId);
+    if (hosting.value.state !== 'live') return domainConflict('Restore the app before managing its public address.');
+    const action = operation === 'listHostedCustomDomains' ? 'domains-list' :
+      operation === 'attachHostedCustomDomain' ? 'domain-attach' : 'domain-detach';
+    const hostname = action === 'domains-list' ? undefined : customHostname(params.hostname ?? '');
+    if (action !== 'domains-list' && !hostname) return badRequest('Enter a hostname such as staging.example.com without https, a path, or a wildcard');
+    const result = await customer.call(action, {
+      projectId: hosting.value.projectId, deploymentId: hosting.value.deploymentId, ...(hostname ? { hostname } : {}),
+    });
+    if (!result.ok) return unavailable();
+    const body = result.body as { outcome?: string; domains?: unknown; domain?: unknown } | null;
+    if (body?.outcome === 'conflict') return domainConflict('Wait for the app or current update to finish. Remove any existing custom hostname before adding another.');
+    if (body?.outcome === 'not-available') return domainConflict('Railway could not reserve this hostname. Check that it belongs to a public DNS zone and is available.');
+    if (action === 'domains-list' && body?.outcome === 'listed') return send(operation, 200, body.domains);
+    if (action === 'domain-attach' && body?.outcome === 'attached') {
+      const response = send(operation, 200, body.domain);
+      if (response.status === 200) await context.store.appendAudit({ actorKind: 'user', actorRef: personId,
+        action: 'domain.attach', target: instanceId, detail: { hostname: hostname!, environment: 'staging' } });
+      return response;
+    }
+    if (action === 'domain-detach' && body?.outcome === 'detached') {
+      await context.store.appendAudit({ actorKind: 'user', actorRef: personId,
+        action: 'domain.detach', target: instanceId, detail: { hostname: hostname!, environment: 'staging' } });
+      return { status: 204, body: undefined };
+    }
+    return unavailable();
+  }
+  const launchPath = '/api/v1/teams/{teamId}/starter-launch';
+  const brandPath = '/api/v1/instances/{instanceId}/environments/{environment}/configuration/starter-brand';
+  async function hostedBrand({ context, teamId, personId }: Scope, request: Request, params: Record<string, string>,
+    operation: 'getHostedStarterBrand' | 'updateHostedStarterBrand'): Promise<Response_> {
+    const instanceId = params.instanceId ?? '';
+    if (!customer || customer.teamId !== teamId || params.environment !== 'staging') return notFound('hosted setting', instanceId);
+    const hosting = await context.store.getHostedStarter(instanceId);
+    if (!hosting.ok) return notFound('hosted setting', instanceId);
+    const conflict = () => ({ status: 409, body: { error: 'conflict', message: 'Finish the current setup or wait for the deployment to be recorded, then try again.' } });
+    if (hosting.value.state !== 'live') return conflict();
+    const target = { projectId: hosting.value.projectId, deploymentId: hosting.value.deploymentId };
+    const editing = operation === 'updateHostedStarterBrand';
+    const input = editing ? StarterBrandChangeSchema.safeParse(request.body) : undefined;
+    if (input && (request.bodyError || !input.success)) return badRequest('Use 1–60 characters, starting with a letter or number. Use plain letters, numbers, spaces or basic punctuation.');
+    const result = input?.success ? await customer.call('brand-apply', { ...target, value: input.data.value })
+      : await customer.call('brand-read', target);
+    if (!result.ok) return unavailable();
+    const body = result.body as { outcome?: string; configuration?: unknown } | null;
+    if (body?.outcome === 'conflict') return conflict();
+    if (!editing && body?.outcome === 'read') return { ...send(operation, 200, body.configuration), headers: { 'cache-control': 'no-store' } };
+    if (editing && body?.outcome === 'requested') {
+      await context.store.appendAudit({ actorKind: 'user', actorRef: personId, action: 'configuration.request', target: instanceId,
+        detail: { name: 'UI_BRAND', environment: 'staging' } });
+      return send(operation, 202, { state: 'requested' });
+    }
+    return unavailable();
+  }
+  const launcher: ExtensionDescriptor = {
+    id: 'starter-launch',
+    requires: ['identity', 'store'],
+    routes: [
+      scoped('GET', brandPath, 'getHostedStarterBrand', 'instance.read', (scope, request, params) =>
+        hostedBrand(scope, request, params, 'getHostedStarterBrand')),
+      scoped('PUT', brandPath, 'updateHostedStarterBrand', 'marketplace.manage', (scope, request, params) =>
+        hostedBrand(scope, request, params, 'updateHostedStarterBrand')),
+      scoped('GET', domainPath, 'listHostedCustomDomains', 'instance.read', (scope, _request, params) =>
+        hostedDomains(scope, params, 'listHostedCustomDomains')),
+      scoped('PUT', domainPath + '/{hostname}', 'attachHostedCustomDomain', 'marketplace.manage', (scope, _request, params) =>
+        hostedDomains(scope, params, 'attachHostedCustomDomain')),
+      scoped('DELETE', domainPath + '/{hostname}', 'detachHostedCustomDomain', 'marketplace.manage', (scope, _request, params) =>
+        hostedDomains(scope, params, 'detachHostedCustomDomain')),
+      scoped('POST', '/api/v1/instances/{instanceId}/environments/{environment}/deployments', 'redeployHostedStarter', 'marketplace.manage', async ({ teamId, context }, _request, params) => {
+        const instanceId = params.instanceId ?? '';
+        if (!customer || customer.teamId !== teamId || params.environment !== 'staging') return notFound('hosted deployment', instanceId);
+        const hosting = await context.store.getHostedStarter(instanceId);
+        if (!hosting.ok) return notFound('hosted deployment', instanceId);
+        if (hosting.value.state !== 'live') {
+          return { status: 409, body: { error: 'conflict', message: 'Restore this app before requesting another deployment.' } };
+        }
+        const current = await customer.call('report');
+        if (!current.ok) return unavailable();
+        const observed = current.body as { state?: unknown; projectId?: unknown; deploymentId?: unknown } | null;
+        if (!observed || !['ready', 'running'].includes(String(observed.state)) || observed.projectId !== hosting.value.projectId ||
+            observed.deploymentId !== hosting.value.deploymentId) {
+          return { status: 409, body: { error: 'conflict', message: 'Finish the current setup or refresh the app before trying again.' } };
+        }
+        const requested = await customer.call('redeploy', { projectId: hosting.value.projectId, deploymentId: hosting.value.deploymentId });
+        if (!requested.ok) return unavailable();
+        return send('redeployHostedStarter', 202, { state: 'requested' });
+      }),
+      scoped('GET', launchPath, 'getStarterLaunch', 'marketplace.manage', async ({ teamId, context }) => {
+        if (deps.starterLaunch?.teamId === teamId) return send('getStarterLaunch', 200, await deps.starterLaunch.read());
+        if (!customer || customer.teamId !== teamId) return notFound('launch', 'starter');
+        const report = await customer.call('report');
+        if (!report.ok) return unavailable();
+        const link = await hostedStarterLink(context.store, teamId, report.body);
+        return send('getStarterLaunch', 200, { ...(report.body as object), ...link });
+      }),
+      scoped('POST', launchPath, 'startStarterLaunch', 'marketplace.manage', async ({ teamId }) =>
+        deps.starterLaunch?.teamId === teamId
+          ? send('startStarterLaunch', 200, await deps.starterLaunch.start()) : relay(teamId, 'startStarterLaunch', 'start')),
+      scoped('POST', launchPath + '/remove', 'removeStarterLaunch', 'marketplace.manage', async ({ teamId, context }, request) => {
+        if (deps.starterLaunch?.teamId !== teamId && customer?.teamId !== teamId) return notFound('launch', 'starter');
+        const body = bodyOf<{ data: 'keep' | 'wipe'; confirmation?: string }>(request);
+        if (!body.ok || !body.value || !['keep', 'wipe'].includes(body.value.data)) return badRequest('Select keep data or wipe data');
+        if (body.value.data === 'wipe' && body.value.confirmation !== 'starter-web') return badRequest('Type starter-web to confirm deletion of its data');
+        const instance = (await context.store.listInstances(teamId)).find(({ name }) => name === FREE_STARTER_RELEASE.template);
+        const hosting = instance && await context.store.getHostedStarter(instance.id);
+        if (instance && hosting?.ok) {
+          const consumers = await context.store.listConsumers(instance.id);
+          if (consumers.length) return { status: 409, body: { error: 'conflict', message: `Removing this app would strand: ${bindingImpact(consumers).join('; ')}` } };
+        }
+        return deps.starterLaunch?.teamId === teamId
+          ? send('removeStarterLaunch', 200, await deps.starterLaunch.remove(body.value.data))
+          : relay(teamId, 'removeStarterLaunch', 'remove', { data: body.value.data });
+      }),
+      scoped('GET', launchPath + '/setup', 'getStarterLaunchSetup', 'marketplace.manage',
+        async ({ teamId }) => relay(teamId, 'getStarterLaunchSetup', 'setup')),
+      scoped('POST', launchPath + '/openbao', 'initializeStarterOpenBao', 'marketplace.manage', async ({ teamId }, request) => {
+        const body = bodyOf<{ publicKey?: unknown }>(request);
+        const key = body.ok ? body.value?.publicKey : undefined;
+        if (typeof key !== 'string' || !/^[a-zA-Z0-9+/=]{500,1024}$/.test(key)) return badRequest('Choose an owner recovery key file');
+        return relay(teamId, 'initializeStarterOpenBao', 'initialize', { publicKey: key });
+      }),
+      scoped('POST', launchPath + '/openbao/unlock', 'unlockStarterOpenBao', 'marketplace.manage', async ({ teamId }, request) => {
+        const body = bodyOf<{ recovery?: unknown }>(request);
+        const recovery = body.ok ? body.value?.recovery : undefined;
+        if (typeof recovery !== 'string' || !/^[a-zA-Z0-9+/=]{500,640}$/.test(recovery)) return badRequest('Choose the OpenBao recovery file');
+        return relay(teamId, 'unlockStarterOpenBao', 'unlock', { recovery });
+      }),
+      scoped('POST', launchPath + '/railway', 'beginStarterRailwayAuthorization', 'marketplace.manage',
+        async ({ teamId }) => relay(teamId, 'beginStarterRailwayAuthorization', 'authorize')),
+      {
+        method: 'GET', path: '/api/v1/railway/callback', operationId: 'completeStarterRailwayAuthorization',
+        async handle(request) {
+          if (!customer) return notFound('launch', 'starter');
+          const values = ['code', 'state', 'iss', 'error'].map((key) => request.query.get(key) ?? '');
+          if (values.some((value) => value.length > 1024) || !/^[a-zA-Z0-9_-]{43}$/.test(values[1]!)) return notFound('launch', 'starter');
+          const [code, state, issuer, error] = values;
+          const result = await customer.call('callback', { code, state, issuer, error });
+          const location = new URL(customer.returnTo);
+          location.searchParams.set('railway', result.ok && result.body === true ? 'connected' : 'retry');
+          return { status: 303, body: null, headers: { location: location.href, 'referrer-policy': 'no-referrer' } };
+        },
+      },
+    ],
+  };
+
+  const deliveryRuleSchema = NotificationRuleSchema.pick({ event: true, enabled: true, environment: true });
+  async function saveNotification(scope: Scope, request: Request, params: Record<string, string>, operation: 'createNotificationRule' | 'updateNotificationRule') {
+    const input = deliveryRuleSchema.safeParse(request.body);
+    if (request.bodyError || !input.success) return badRequest('Choose an app event and environment');
+    const result = await scope.context.store.saveNotificationRule(scope.personId, {
+      ...input.data, instanceId: params.instanceId ?? '', ...(params.ruleId ? { id: params.ruleId } : {}),
+    });
+    if (!result.ok) return { status: result.code === 'conflict' ? 409 : 404, body: { error: result.code, message: reasonOf(result) } };
+    return send(operation, operation === 'updateNotificationRule' ? 200 : 201, result.value);
+  }
+  const rulePath = '/api/v1/instances/{instanceId}/notification-rules';
+  const notifications: ExtensionDescriptor = {
+    id: 'notifications',
+    requires: ['store', 'identity'],
+    routes: [
+      {
+        method: 'GET', path: '/api/v1/me/notifications', operationId: 'listMyNotifications',
+        async handle(request, _params, context) {
+          const auth = await authorize(context, request);
+          if (!auth.ok) return auth.response;
+          const resolved = await context.store.resolvePerson({ issuer: auth.claims.issuer, subject: auth.claims.subject });
+          if (!resolved.ok) return { status: 503, body: { error: 'principal-unresolved', message: reasonOf(resolved) } };
+          return send('listMyNotifications', 200, await listNotificationMatches(context.store, resolved.value.person.id));
+        },
+      },
+      scoped('POST', rulePath, 'createNotificationRule', 'instance.read',
+        (scope, request, params) => saveNotification(scope, request, params, 'createNotificationRule')),
+      scoped('PUT', rulePath + '/{ruleId}', 'updateNotificationRule', 'instance.read',
+        (scope, request, params) => saveNotification(scope, request, params, 'updateNotificationRule')),
+      scoped('DELETE', rulePath + '/{ruleId}', 'deleteNotificationRule', 'instance.read', async ({ context, personId }, _request, params) =>
+        await context.store.removeNotificationRule(personId, params.instanceId ?? '', params.ruleId ?? '')
+          ? { status: 204, body: undefined } : notFound('notification rule', params.ruleId ?? '')),
+    ],
+  };
+
+  const availability: ExtensionDescriptor = {
+    id: 'app-availability',
+    requires: ['store', 'identity'],
+    routes: [
+      scoped('GET', '/api/v1/instances/{instanceId}/status', 'getHostedAppStatus', 'instance.read', async ({ context }, _request, params) => {
+        const status = await hostedAppStatus(context.store, params.instanceId ?? '');
+        return status ? send('getHostedAppStatus', 200, status) : notFound('app checks', params.instanceId ?? '');
+      }),
+    ],
+  };
+
+  const catalog: ExtensionDescriptor = {
+    id: 'template-catalog',
+    requires: ['identity'],
+    routes: [{
+      method: 'GET', path: '/api/v1/templates', operationId: 'listInstallableTemplates',
+      async handle(request, _params, context) {
+        const auth = await authorize(context, request);
+        if (!auth.ok) return auth.response;
+        const release = FREE_STARTER_RELEASE;
+        return send('listInstallableTemplates', 200, [{ ...release, repo: templateCatalogEntry(release.template).repo }]);
+      },
+    }],
+  };
+
+  return [core, instances, dispatches, audit, teams, bindings, invitations, secrets, controller, marketplace, privateMarketplace, launcher, catalog, availability, notifications,
+    notificationEmail(authorize, now, deps.notificationDirectory, deps.invitationOrigin),
+    accountProfile(authorize, deps.accountIssuer)];
 }
 
 export type { VerifiedClaims };

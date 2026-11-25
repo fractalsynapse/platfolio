@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { AttestationSchema, type Attestation } from './attestation.ts';
 import { RepoConnectionSchema, reasonOf, type DispatchRecord, type Store, type StoreError, type StoreResult } from './persistence.ts';
 import { checkBindingPolicy } from './binding-policy.ts';
@@ -82,12 +83,201 @@ const expectErr = (result: { ok: boolean; value?: unknown } & Partial<StoreError
     return { store, team: team.value, instance: instance.value };
   };
 
+  await add('marketplace links preserve team scope and remain revoked on connect replay', async () => {
+    const store = await fresh();
+    const owner = mustOk(await store.createTeam({ name: tName('marketplace-owner') }), 'owner');
+    const peer = mustOk(await store.createTeam({ name: tName('marketplace-peer') }), 'peer');
+    const id = randomUUID();
+    const valid = await store.connectMarketplaceInstallation(owner.id, id) &&
+      await store.connectMarketplaceInstallation(owner.id, id) &&
+      await store.marketplaceInstallationConnected(owner.id, id) &&
+      !await store.connectMarketplaceInstallation(peer.id, id) &&
+      !await store.marketplaceInstallationConnected(peer.id, id) &&
+      !await store.disconnectMarketplaceInstallation(peer.id, id) &&
+      await store.disconnectMarketplaceInstallation(owner.id, id) &&
+      !await store.connectMarketplaceInstallation(owner.id, id) &&
+      !await store.marketplaceInstallationConnected(owner.id, id);
+    return valid ? { status: 'pass', detail: 'owner scoped, disconnected, replay refused' }
+      : { status: 'fail', detail: 'marketplace ownership or revocation differed' };
+  });
+
+  await add('membership changes keep an acting owner and refuse a former owner', async () => {
+    const { store, team } = await seed();
+    const owner = mustOk(await store.resolvePerson({ issuer: 'https://membership.example.test', subject: randomUUID() }), 'owner').person;
+    const member = mustOk(await store.resolvePerson({ issuer: 'https://membership.example.test', subject: randomUUID() }), 'member').person;
+    mustOk(await store.putTeamMember({ teamId: team.id, personId: owner.id, role: 'owner' }), 'owner member');
+    mustOk(await store.putTeamMember({ teamId: team.id, personId: member.id, role: 'member' }), 'new member');
+    if ((await store.changeTeamMember(team.id, owner.id, owner.id, null)).ok ||
+        (await store.changeTeamMember(team.id, member.id, owner.id, 'member')).ok) throw new Error('Non-owner or self removal was accepted');
+    mustOk(await store.changeTeamMember(team.id, owner.id, member.id, 'owner'), 'promote');
+    const decisions = await Promise.all([
+      store.changeTeamMember(team.id, owner.id, member.id, 'member'),
+      store.changeTeamMember(team.id, member.id, owner.id, 'member'),
+    ]);
+    const roster = await store.listTeamMembers(team.id);
+    const survivor = roster.find(({ role }) => role === 'owner');
+    const removed = roster.find(({ role }) => role === 'member');
+    if (decisions.filter(({ ok }) => ok).length !== 1 || !survivor || !removed) throw new Error('Concurrent demotion lost the remaining owner');
+    mustOk(await store.changeTeamMember(team.id, survivor.personId, removed.personId, null), 'remove');
+    if ((await store.teamsForPerson(removed.personId)).includes(team.id)) throw new Error('Removed member kept access');
+    return { status: 'pass', detail: 'owner checked at write, concurrent demotion leaves an owner, access revoked on removal' };
+  });
+
+  await add('verified hosted starter updates are ordered, team-scoped and durable', async () => {
+    const { store, team, instance: unrelated } = await seed();
+    const peer = mustOk(await store.createTeam({ name: tName('starter-peer') }), 'peer team');
+    const registration = {
+      teamId: team.id, name: 'starter-web', template: 'starter-web',
+      templateRef: { repo: 'platfolio-fixtures/starter-web', commitSha: 'e'.repeat(40) },
+      state: 'live' as const, projectId: randomUUID(), deploymentId: randomUUID(),
+      origin: 'https://starter.up.railway.app', observedAt: '2026-11-24T00:00:00.000Z',
+    };
+    const [first, replay] = (await Promise.all([
+      store.recordHostedStarter(registration), store.recordHostedStarter(registration),
+    ])).map((result) => mustOk(result, 'register'));
+    if (!first || first.id !== replay?.id) throw new Error('The same deployment acquired multiple instances');
+    if ((await store.recordHostedStarter({ ...registration, teamId: peer.id })).ok ||
+        (await store.recordHostedStarter({ ...registration, name: unrelated.name })).ok ||
+        (await store.listInstances(peer.id)).length) throw new Error('Registration adopted a different app or team');
+    const idle = mustOk(await store.recordHostedStarter({ ...registration, state: 'paused', observedAt: '2026-11-24T00:00:01.000Z' }), 'keep');
+    await store.recordHostedStarter(registration);
+    const paused = mustOk(await store.getInstanceEnvironment(first.id, 'staging'), 'staging state');
+    if (idle.state !== 'paused' || paused.state !== 'paused' || (await store.getInstanceEnvironment(first.id, 'production')).ok) {
+      throw new Error('A stale report or extra environment changed the result');
+    }
+    const restored = mustOk(await store.recordHostedStarter({
+      ...registration, deploymentId: randomUUID(), observedAt: '2026-11-24T00:00:02.000Z',
+    }), 'restore');
+    const hosting = mustOk(await store.getHostedStarter(first.id), 'read hosting');
+    if (restored.id !== first.id || restored.state !== 'live' || hosting.deploymentId === registration.deploymentId) {
+      throw new Error('Restore lost the instance or its new deployment');
+    }
+    const activity = await store.recentAuditForTargets([first.id], 3);
+    if (activity.map(({ action }) => action).join(',') !== 'hosting.verified,hosting.paused,hosting.verified') {
+      throw new Error('Verified transitions did not appear once each in the app audit');
+    }
+    return { status: 'pass', detail: 'one app, isolated scope, ordered retain and restore' };
+  });
+
+  await add('hosted availability records confirmed outages and ignores stale deployments', async () => {
+    const { store, team } = await seed();
+    const deploymentId = randomUUID();
+    const app = mustOk(await store.recordHostedStarter({
+      teamId: team.id, name: 'starter-web', template: 'starter-web',
+      templateRef: { repo: 'platfolio-fixtures/starter-web', commitSha: 'e'.repeat(40) },
+      state: 'live', projectId: randomUUID(), deploymentId, origin: 'https://starter.up.railway.app',
+      observedAt: '2026-11-24T00:00:00.000Z',
+    }), 'registered app');
+    const check = (at: number, passing: boolean, deployment = deploymentId) => store.recordHostedAppCheck({
+      instanceId: app.id, deploymentId: deployment, passing,
+      checkedAt: new Date(Date.UTC(2026, 10, 24, 0, 0, at)).toISOString(),
+    });
+    await check(2, false);
+    if ((await store.getHostedAppCheck(app.id))?.state !== 'checking') throw new Error('A single miss became an outage');
+    await check(1, false);
+    await check(3, false, randomUUID());
+    if ((await store.getHostedAppCheck(app.id))?.state !== 'checking') throw new Error('A stale or unrelated check changed status');
+    await check(4, false);
+    if ((await store.getHostedAppCheck(app.id))?.state !== 'down') throw new Error('Repeated failures did not appear');
+    await check(5, false);
+    await check(6, true);
+    const updates = await store.recentAuditForTargets([app.id], 10);
+    const transitions = updates.map(({ action }) => action).filter((action) => action.startsWith('availability.'));
+    if ((await store.getHostedAppCheck(app.id))?.state !== 'up' || transitions.join(',') !== 'availability.up,availability.down') {
+      throw new Error('Recovery or outage history was duplicated or missing');
+    }
+    return { status: 'pass', detail: 'two misses confirm an outage, valid recovery appears once' };
+  });
+
+  await add('notification rules are unique to the person, app, environment and event', async () => {
+    const { store, team, instance } = await seed();
+    const owner = mustOk(await store.resolvePerson({ issuer: 'https://rules.example.test', subject: randomUUID() }), 'owner').person;
+    const member = mustOk(await store.resolvePerson({ issuer: 'https://rules.example.test', subject: randomUUID() }), 'member').person;
+    mustOk(await store.putTeamMember({ teamId: team.id, personId: owner.id, role: 'owner' }), 'owner member');
+    mustOk(await store.putTeamMember({ teamId: team.id, personId: member.id, role: 'member' }), 'member');
+    const input = { instanceId: instance.id, event: 'app-outage' as const, enabled: true };
+    const rule = mustOk(await store.saveNotificationRule(member.id, input), 'save');
+    if ((await store.saveNotificationRule(member.id, input)).ok ||
+        (await store.saveNotificationRule(owner.id, { ...input, id: rule.id, enabled: false })).ok ||
+        (await store.saveNotificationRule(member.id, { ...input, environment: 'unknown' })).ok) throw new Error('Invalid rule accepted');
+    mustOk(await store.setInstanceEnvironment({ instanceId: instance.id, environment: 'staging', state: 'live' }), 'staging environment');
+    const exact = mustOk(await store.saveNotificationRule(member.id, { ...input, environment: 'staging' }), 'environment rule');
+    if (!await store.removeNotificationRule(member.id, instance.id, exact.id) || (await store.listNotificationRules(owner.id)).length) {
+      throw new Error('Rule deletion or isolation failed');
+    }
+    mustOk(await store.changeTeamMember(team.id, owner.id, member.id, null), 'revoke member');
+    if ((await store.listNotificationRules(member.id)).length) throw new Error('Rule survived revoked team access');
+    return { status: 'pass', detail: 'scoped uniqueness, rule ownership, and recheck after membership removal' };
+  });
+
+  await add('notification email leases deduplicate overlapping rules and respect revoked membership', async () => {
+    const { store, team, instance } = await seed();
+    const issuer = 'https://notification-delivery.example.test';
+    const subject = randomUUID();
+    const owner = mustOk(await store.resolvePerson({ issuer, subject: randomUUID() }), 'owner').person;
+    const person = mustOk(await store.resolvePerson({ issuer, subject }), 'recipient').person;
+    mustOk(await store.putTeamMember({ teamId: team.id, personId: owner.id, role: 'owner' }), 'owner membership');
+    mustOk(await store.putTeamMember({ teamId: team.id, personId: person.id, role: 'member' }), 'recipient membership');
+    mustOk(await store.setInstanceEnvironment({ instanceId: instance.id, environment: 'staging', state: 'live' }), 'staging');
+    const rule = { instanceId: instance.id, event: 'secret-updated' as const, enabled: true };
+    mustOk(await store.saveNotificationRule(person.id, rule), 'all environments');
+    mustOk(await store.saveNotificationRule(person.id, { ...rule, environment: 'staging' }), 'one environment');
+    const enabledAt = new Date().toISOString();
+    if (!await store.setNotificationEmailPreference(person.id, { issuer, subject, enabledAt })) throw new Error('Opt-in was refused');
+    const at = new Date(Date.now() + 1_500).toISOString();
+    const audit = { actorKind: 'user' as const, actorRef: owner.id, action: 'secret.deliver', target: instance.id,
+      detail: { environment: 'staging', name: 'sample-secret' }, at };
+    const update = mustOk(await store.appendAudit(audit), 'event');
+    const switchedOff = await store.leaseNotificationEmails('https://different.example.test', at);
+    if (switchedOff.length) throw new Error('A directory could lease a person from a different issuer');
+    const leases = (await Promise.all([store.leaseNotificationEmails(issuer, at), store.leaseNotificationEmails(issuer, at)])).flat();
+    if (leases.length !== 1) throw new Error('Expected exactly one lease for two overlapping rules and two workers');
+    const delivery = leases[0]!;
+    if (delivery.auditId !== update.id || delivery.preference.subject !== subject || delivery.environment !== 'staging' ||
+        JSON.stringify(delivery).includes('sample-secret')) throw new Error('Incorrect email projection');
+    await store.settleNotificationEmail(delivery, at);
+    const retry = await store.leaseNotificationEmails(issuer, at);
+    if (retry.length !== 1 || retry[0]?.attempts !== 2) throw new Error('A due retry could not be leased');
+    await store.settleNotificationEmail(retry[0]!, null);
+    mustOk(await store.appendAudit(audit), 'next event');
+    mustOk(await store.changeTeamMember(team.id, owner.id, person.id, null), 'remove recipient');
+    if ((await store.leaseNotificationEmails(issuer, at)).length !== 0) throw new Error('A former member received a lease');
+    return { status: 'pass', detail: 'isolated, bounded, deduplicated delivery with no secret naming or stale team membership' };
+  });
+
   await add('describe: names the driver and its readiness', async () => {
     const store = await fresh();
     const info = store.describe();
     return info.driver.length > 0 && typeof info.schemaReady === 'boolean'
       ? { status: 'pass', detail: `${info.driver}, schemaReady=${String(info.schemaReady)}` }
       : { status: 'fail', detail: `unhelpful describe(): ${JSON.stringify(info)}` };
+  });
+
+  await add('marketplace enrollment expires, is spent once, and revokes its registry credential', async () => {
+    const store = await fresh();
+    const owner = mustOk(await store.createTeam({ name: tName('enrollment-owner') }), 'owner');
+    const peer = mustOk(await store.createTeam({ name: tName('enrollment-peer') }), 'peer');
+    const id = randomUUID();
+    const expiration = '2099-01-02T00:00:00Z';
+    const before = '2099-01-01T00:00:00Z';
+    const valid = await store.issueMarketplaceEnrollment(owner.id, id, 'first', expiration) &&
+      !await store.connectMarketplaceInstallation(owner.id, id) &&
+      !await store.issueMarketplaceEnrollment(peer.id, id, 'wrong-team', expiration) &&
+      !await store.redeemMarketplaceEnrollment(id, 'first', 'credential', expiration) &&
+      await store.issueMarketplaceEnrollment(owner.id, id, 'second', expiration) &&
+      !await store.redeemMarketplaceEnrollment(id, 'first', 'credential', before);
+    const redemptions = await Promise.all([
+      store.redeemMarketplaceEnrollment(id, 'second', 'credential', before),
+      store.redeemMarketplaceEnrollment(id, 'second', 'credential', before),
+    ]);
+    const ended = redemptions.filter(Boolean).length === 1 &&
+      await store.verifyMarketplaceCredential(id, 'credential') &&
+      !await store.verifyMarketplaceCredential(randomUUID(), 'credential') &&
+      !await store.issueMarketplaceEnrollment(owner.id, id, 'third', expiration) &&
+      await store.disconnectMarketplaceInstallation(owner.id, id) &&
+      !await store.verifyMarketplaceCredential(id, 'credential');
+    return valid && ended ? { status: 'pass', detail: 'expires, atomically spends, and revokes' }
+      : { status: 'fail', detail: 'marketplace enrollment or machine authorization differed' };
   });
 
   await add('team and instance round-trip, ids assigned by the store', async () => {
@@ -507,9 +697,9 @@ const expectErr = (result: { ok: boolean; value?: unknown } & Partial<StoreError
     const a = await store.createInstance({ teamId: t.value.id, name: 'a', template: 'starter-web' });
     const b = await store.createInstance({ teamId: t.value.id, name: 'b', template: 'starter-web' });
     if (!a.ok || !b.ok) return { status: 'fail', detail: 'instances failed' };
-    const mk = async (instanceId: string, id: string, finished: string) => {
+    const mk = async (instanceId: string, id: string, finished: string, environment = 'production') => {
       const d = await store.createDispatch({
-        instanceId, nonce, planHash, action: 'apply', environment: 'production',
+        instanceId, nonce, planHash, action: 'apply', environment,
         // Expires far in the future: the case is about ordering, and a January 2026 dispatch would be
         // correctly refused as expired -- which is the mistake this fixture originally made.
         issuedAt: finished, expiresAt: '2999-01-01T00:00:00.000Z', plan: {}, id,
@@ -524,6 +714,11 @@ const expectErr = (result: { ok: boolean; value?: unknown } & Partial<StoreError
     const latest = await store.latestAttestation(a.value.id);
     if (!latest.ok) return { status: 'fail', detail: JSON.stringify(latest) };
     if (latest.value.dispatchId !== 'disp-new') return { status: 'fail', detail: `expected disp-new (latest by finishedAt), got ${latest.value.dispatchId}` };
+    await mk(a.value.id, 'disp-staging', '2026-09-01T00:00:00.000Z', 'staging');
+    const production = await store.listEnvironmentAttestations(a.value.id, 'production', 1);
+    if (production.length !== 1 || production[0]?.dispatchId !== 'disp-new') {
+      return { status: 'fail', detail: 'environment selection must occur before sorting and limiting' };
+    }
     const wrong = await store.latestAttestation('inst-nobody');
     return wrong.ok ? { status: 'fail', detail: 'an unknown instance returned an attestation -- cross-instance leak' } : { status: 'pass', detail: 'ordered by finishedAt, isolated by instance' };
   });

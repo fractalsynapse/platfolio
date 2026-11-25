@@ -122,13 +122,15 @@ test('the transport the context hands over routes from the generated table, not 
   assert.ok(entries.length > 0, 'the generated table is empty, which would make "it is the generated one" a claim about nothing');
   assert.deepEqual(
     [...new Set(entries.map((entry) => entry.method))].sort(),
-    ['delete', 'get', 'post', 'put'],
+    ['delete', 'get', 'patch', 'post', 'put'],
     'the method vocabulary changed shape -- re-read the generated table before this island ships, because the transport builds requests from these values',
   );
   // List the operational routes explicitly so each unversioned path is reviewed against the OpenAPI spec.
   const unversioned = [...new Set(entries.map((entry) => entry.path).filter((p) => !p.startsWith('/api/v1/')))].sort();
   assert.deepEqual(unversioned, ['/healthz', '/readyz', '/status', '/version'], 'the generated table must expose the operational routes declared in OpenAPI');
   assert.equal(table.listInstances?.path, '/api/v1/instances', 'the operation the dashboard screen declares must be routable from this table');
+
+  assert.equal(table.updateTeamMemberRole.method, 'patch', 'the team role change must route through the generated PATCH operation');
 
   const push = entries.map((entry) => entry.path).filter((p) => /events|stream|subscribe|socket/i.test(p));
   assert.deepEqual(push, [], `the contract now names a push channel (${push.join(', ')}): re-read 11 §4 before this shell ships, because running on poll is the spec's current state and not a preference (D64)`);

@@ -25,6 +25,8 @@
  */
 @import '@platfolio/ui/tokens.css';
 @import '@platfolio/ui/content.css';
+@import '@platfolio/ui/layout.css';
+@import '@platfolio/ui/components.css';
 
 *,
 *::before,

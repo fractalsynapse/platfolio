@@ -25,6 +25,7 @@ export async function verifyHostedCandidate(
   const environment = plan.environments.find((entry) => entry.name === environmentName);
   const api = environment?.services.find((service) => service.name === 'api');
   const site = environment?.services.find((service) => service.name === 'site');
+  const identity = environment?.services.find((service) => service.name === 'identity');
   if (!environment || !api || !site) throw new Error(`Candidate must plan api and site in ${environmentName}`);
 
   const config = Object.fromEntries(site.env.map((value) => [value.name, value.literal]));
@@ -42,7 +43,7 @@ export async function verifyHostedCandidate(
   if (!realmPath?.[1]) throw new Error('The site issuer must point at a Keycloak realm');
 
   const state = await provider.readState(plan.instanceId);
-  for (const service of [api, site]) {
+  for (const service of identity ? [api, site, identity] : [api, site]) {
     const name = physicalServiceName(service.name, environmentName);
     const observed = state.services.find((entry) => entry.environment === environmentName && entry.name === name);
     if (observed?.status !== 'live' || observed.image !== `${service.image}@${service.digest}`) {

@@ -97,6 +97,11 @@ export const TEMPLATE_CATALOG: readonly TemplateCatalogEntry[] = [
   },
 ];
 
+/** The first free marketplace listing, pinned to a reviewed release of the existing public template. */
+export const FREE_STARTER_RELEASE = {
+  template: 'starter-web', version: '0.1.0', revision: 'f2a095711f98696a98ed1711a87ed288ef034bf4', priceMinor: 0,
+} as const;
+
 /** Every repository the catalog names. `check-project.ts` compares this against what the tree is allowed to name. */
 export const TEMPLATE_REPOSITORIES: readonly string[] = TEMPLATE_CATALOG.map((t) => t.repo);
 

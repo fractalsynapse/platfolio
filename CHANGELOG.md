@@ -5,6 +5,42 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+## [0.6.0]
+
+Release baseline `0.5.0..4ceb67c`. The candidate includes the themed Keycloak image and the
+React workspace. The shared public Keycloak host keeps separate staging and production realms.
+
+- Starter Web staging owners can update the public header label from Configuration. Platfolio confirms the value on the running app and keeps its existing Railway project and database (#288).
+- Starter Web staging owners can attach or detach a custom hostname and get DNS records and certificate status from Railway (#288).
+- Operators can opt in to email for their notification rules using their installation's verified primary account address (#288).
+- Private owners can connect to the marketplace from their workspace and acquire the pinned starter using a registry credential held in their OpenBao (#288).
+- Owners can rebuild the pinned Starter Web release from Deployments while retaining its Railway project and database (#288).
+- Added personal in-app notification rules for failed deployments, outages, and environment secret updates, scoped to current team memberships (#288).
+- Added private availability checks and an outage timeline for hosted Starter Web. Planned stops remain visible separately from outages (#288).
+- Show verified deployments and hosting activity in each team workspace, with links to deployment evidence and app management (#288).
+- Added team tabs for the owner roster and private installation connections and added management links to hosted Starter Web. Owners can update teammate roles or remove members (#288).
+- Verified Starter Web launches appear in the team workspace. The staging environment records the Railway project, deployment, and verified storage lifecycle state (#288).
+- Added private browser launch setup for Starter Web with owner-encrypted OpenBao recovery, Railway OAuth, and a persistent customer worker (#288).
+
+- Added environment tabs for deployment reports, configuration presence, and planned domains. The workspace only shows name and presence for app secrets (#288).
+- Added the Platfolio Account page for username and display-name edits, sign-in email status, and access to the themed password change flow (#288).
+- Added the pinned free Starter Web template picker and a launch route scoped to the active team (#288).
+- Authorize private installations with a one-use hub enrollment code and let them claim the pinned Starter Web release with a revocable registry credential stored in their own OpenBao (#288).
+- Create teams and manage or accept invitations from the workspace. Team owners can distinguish active invitations from history and see whether email was sent (#288).
+
+- Added a Platfolio theme for Keycloak authentication and included the themed identity image in release candidates.
+
+- Added the React team workspace with direct app and environment links, a shared team selector and navigation, and return to the original workspace page after Keycloak sign-in.
+
+- Added a browser launch pilot for the pinned Starter Web release with progress and a downloadable troubleshooting report.
+- Placed private Platfolio and hosted apps in separate Railway projects. App removal has explicit options to retain storage for restore or schedule storage deletion.
+- Fixed browser sign-in to preserve the in-memory session through the Keycloak callback.
+
+The private Railway launcher is a Starter Web pilot. First-time hosted provisioning, hosted
+marketplace enrollment with the private vault, general app settings, and public status publishing
+remain under [#288](https://github.com/fractalsynapse/platfolio/issues/288). The provider contract
+advances from `5.1.0` to `5.13.0` with additive changes.
+
 ## [0.5.0]
 
 Release baseline: `0.4.0..36442bc`. The hosted API and site at that baseline passed the live Railway

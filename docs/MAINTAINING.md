@@ -101,6 +101,29 @@ and could only reach `production`. When staging was created those three App cred
 the plan check correctly reported `secret-unavailable` for both environments -- the honest failure that produced
 `--deliver-secrets`. Retiring the raw-GraphQL blocks is #213.
 
+## Staging mail relay
+
+Configure SMTP on the staging API service in Railway. Set `PLATFOLIO_EMAIL_DRIVER=smtp`,
+`PLATFOLIO_EMAIL_FROM`, `PLATFOLIO_SMTP_HOST`, `PLATFOLIO_SMTP_PORT`,
+`PLATFOLIO_SMTP_USER`, and `PLATFOLIO_SMTP_PASSWORD`. Use STARTTLS on port 587 with the
+default `PLATFOLIO_SMTP_STARTTLS=require`. Keep the credential in the service's runtime
+variables and the operator's credential store. The planner leaves these optional values
+on the service when applying a candidate. A fresh installation without an SMTP selection
+starts with email delivery disabled.
+
+Keycloak has its own SMTP settings on the realm. Apply these to the isolated staging realm
+and verify mail delivery before enabling self-service registration and password recovery.
+Use a disposable address you can read when verifying the links and confirm that the team
+invitation delivery receipt appears in Platfolio.
+
+To enable notification emails, create a confidential Keycloak service client in that
+installation's operator realm. Add the built-in optional client scope `kc-admin-api`
+and grant the realm-management `view-users` role. Disable full scope and user sign-in
+flows. Give the service account no administrative write roles.
+Set `PLATFOLIO_NOTIFICATION_DIRECTORY_CLIENT` and `PLATFOLIO_NOTIFICATION_DIRECTORY_SECRET`
+on the API service alongside the relay configuration. The directory client is local to
+that realm. It confirms the active account's primary address before each send.
+
 ## Two realms, one Keycloak (D56)
 
 platfolio's production and staging control planes share the hosted identity service -- one container, one
@@ -163,7 +186,7 @@ One thing, one home (and the DNS/origin state both realms carry is recorded ther
 
 For a first-party release candidate, use the `release-candidate-<attempt>` artifact from a successful
 **Image** workflow run. It records the full source commit, run and attempt, and the registry digest of each
-image the run published. Hosted candidates contain both `api` and `site`. The commit tag accompanies the
+image the run published. Hosted candidates now contain `api`, `site`, and the themed `identity` image. The commit tag accompanies the
 digest because Railway requires `image:tag@digest`.
 Check out that commit with a clean tracked tree, then run
 `pnpm run platform:plan --candidate=/path/to/release-candidate.json`. The planner reads the recorded image

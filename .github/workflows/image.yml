@@ -87,6 +87,23 @@ jobs:
           test "$(curl --silent --output /dev/null --write-out '%{http_code}' "$origin/callback?state=smoke")" = 200
           curl --fail --silent "$origin/config.js" | grep -F 'window.__PLATFOLIO_SITE_CONFIG__'
 
+      - name: Build and smoke-test the identity image
+        id: identity
+        run: |
+          IDENTITY_IMAGE=$(docker compose config --format json | jq -er '.services.identity.image')
+          docker compose build identity
+          docker run -d --rm --name identity-smoke --publish 127.0.0.1::8080 "$IDENTITY_IMAGE" start-dev
+          trap 'docker stop identity-smoke >/dev/null' EXIT
+          address=$(docker port identity-smoke 8080/tcp)
+          curl --fail --silent --retry 30 --retry-delay 2 --retry-all-errors --max-time 5 "http://$address/realms/master" >/dev/null
+          docker cp identity-smoke:/opt/keycloak/themes/platfolio/login/resources/css/tokens.css identity-tokens.css
+          cmp packages/ui/src/tokens.css identity-tokens.css
+          docker cp identity-smoke:/opt/keycloak/themes/platfolio/login/resources/css/components.css identity-components.css
+          cmp packages/ui/src/components/components.css identity-components.css
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' -H 'Accept: text/html' "http://$address/realms/master/account/")" = 404
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' -H 'Accept: application/json' "http://$address/realms/master/account/")" = 401
+          echo "image=$IDENTITY_IMAGE" >> "$GITHUB_OUTPUT"
+
       # The image answers its own healthcheck during the run, so a green job means the container serves --
       # not merely that it assembled. This is the difference the project keeps insisting on.
       - name: Fail-closed check (no identity config, the container must refuse to start)
@@ -126,6 +143,28 @@ jobs:
           docker stop cp-smoke
           kill $JWKS_PID 2>/dev/null || true
 
+      - name: Smoke test the private installation worker
+        run: |
+          set -e
+          cleanup() { docker rm -f launch-worker-smoke >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          docker run -d --name launch-worker-smoke --user 0 --tmpfs /launch-state \
+            -e PLATFOLIO_LAUNCH_STATE_DIR=/launch-state -e PLATFOLIO_LAUNCH_TEAM=ci-team \
+            -e PLATFOLIO_LAUNCH_WORKER_KEY="$(node -p 'require("node:crypto").randomBytes(32).toString("base64url")')" \
+            -e PLATFOLIO_OPENBAO_WORKER_SECRET="$(node -p 'require("node:crypto").randomBytes(32).toString("base64url")')" \
+            -e PLATFOLIO_OPENBAO_URL=http://127.0.0.1:8200 -e PLATFOLIO_RAILWAY_OAUTH_CLIENT=ci-client \
+            -e PLATFOLIO_RAILWAY_OAUTH_CALLBACK=http://127.0.0.1:8080/api/v1/railway/callback \
+            -e RAILWAY_WORKSPACE_ID=ci-workspace -e HOST=127.0.0.1 platfolio-control-plane:build \
+            sh -c "chown node:node /launch-state && exec su -s /bin/sh node -c 'node /app/scripts/customer-installation-worker.ts'"
+          for attempt in $(seq 1 15); do
+            if docker exec launch-worker-smoke node -e "fetch('http://127.0.0.1:8080/status').then(async r=>process.exit(r.ok && (await r.json()).status==='ok'?0:1)).catch(()=>process.exit(1))"; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs launch-worker-smoke
+          exit 1
+
       # Only pushes publish. A pull request gets a build and a smoke test, never a registry write.
       - name: Publish
         id: publish
@@ -135,6 +174,7 @@ jobs:
           REGISTRY: ghcr.io
           CR_PAT: ${{ secrets.GITHUB_TOKEN }}
           SITE_IMAGE: ${{ steps.site.outputs.image }}
+          IDENTITY_IMAGE: ${{ steps.identity.outputs.image }}
         run: |
           echo "$CR_PAT" | docker login "$REGISTRY" -u "$GITHUB_ACTOR" --password-stdin >/dev/null
           COMMIT_TAG="sha-$GITHUB_SHA"
@@ -156,6 +196,7 @@ jobs:
           echo '## Published images' >> "$GITHUB_STEP_SUMMARY"
           publish api platfolio-control-plane:build "$REGISTRY/$IMAGE_NAME"
           publish site "$SITE_IMAGE" "$SITE_IMAGE"
+          publish identity "$IDENTITY_IMAGE" "$IDENTITY_IMAGE"
 
       - name: Record the release candidate
         if: github.event_name == 'push'
@@ -164,10 +205,13 @@ jobs:
           API_DIGEST: ${{ steps.publish.outputs.api_digest }}
           SITE_IMAGE: ${{ steps.publish.outputs.site_image }}
           SITE_DIGEST: ${{ steps.publish.outputs.site_digest }}
+          IDENTITY_IMAGE: ${{ steps.publish.outputs.identity_image }}
+          IDENTITY_DIGEST: ${{ steps.publish.outputs.identity_digest }}
         run: |
           jq -n --arg sourceCommit "$GITHUB_SHA" --arg runId "$GITHUB_RUN_ID" --arg runAttempt "$GITHUB_RUN_ATTEMPT" \
             --arg apiImage "$API_IMAGE" --arg apiDigest "$API_DIGEST" --arg siteImage "$SITE_IMAGE" --arg siteDigest "$SITE_DIGEST" \
-            '{schemaVersion: 1, $sourceCommit, $runId, $runAttempt, images: {api: {image: $apiImage, digest: $apiDigest}, site: {image: $siteImage, digest: $siteDigest} } }' \
+            --arg identityImage "$IDENTITY_IMAGE" --arg identityDigest "$IDENTITY_DIGEST" \
+            '{schemaVersion: 1, $sourceCommit, $runId, $runAttempt, images: {api: {image: $apiImage, digest: $apiDigest}, site: {image: $siteImage, digest: $siteDigest}, identity: {image: $identityImage, digest: $identityDigest} } }' \
             > release-candidate.json
       - name: Upload the release candidate
         if: github.event_name == 'push'

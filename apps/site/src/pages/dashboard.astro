@@ -28,10 +28,6 @@ import { publicConfigOf, resolveSiteConfig } from '../lib/site-config.ts';
 
 const config = resolveSiteConfig(process.env);
 ---
-<Page title="Instances — platfolio" scriptSrc="/config.js">
-  <h1>Instances</h1>
-  <p class="lede">
-    Every instance this team can see, at the age the control plane last answered for it.
-  </p>
+<Page title="Workspace — Platfolio" scriptSrc="/config.js" workspace>
   <DashboardIsland client:only="react" config={publicConfigOf(config)} />
 </Page>

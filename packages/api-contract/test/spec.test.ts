@@ -25,9 +25,11 @@ test('the shipped spec is internally true', () => {
   assert.equal(new Set(ops.map((o) => o.operationId)).size, ops.length, 'operationIds are unique');
   // The public half declares itself explicitly rather than by omission -- that is what the security check is for.
   const publicOps = ops.filter((o) => Array.isArray(o.security) && o.security.length === 0).map((o) => o.operationId).sort();
-  assert.deepEqual(publicOps, ['getHealth', 'getReady', 'getStatus', 'getVersion'], 'only operational probes and build identity are unauthenticated');
+  assert.deepEqual(publicOps, ['completeStarterRailwayAuthorization', 'getHealth', 'getReady', 'getStatus', 'getVersion'], 'only operational probes, build identity and the verified OAuth callback are unauthenticated');
+  const installationOperations = new Set(['redeemMarketplaceEnrollment', 'claimEnrolledMarketplaceRelease']);
   for (const guarded of ops.filter((o) => !publicOps.includes(o.operationId))) {
-    assert.ok(guarded.security !== 'undeclared' && guarded.security.includes('bearerJwt'), `${guarded.operationId} must declare bearerJwt`);
+    const scheme = installationOperations.has(guarded.operationId) ? 'marketplaceCredential' : 'bearerJwt';
+    assert.deepEqual(guarded.security, [scheme], `${guarded.operationId} must declare exactly ${scheme}`);
   }
   // Every operation declares at least one 4xx or states it is bodiless, so no path can only ever succeed.
   const keys = declaredResponseKeys(spec);

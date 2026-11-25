@@ -79,6 +79,8 @@ export const SAMPLE_NOW = '2026-11-15T09:30:40.000Z';
 /** One valid props object per registered id, keyed by the id so a missing entry is visible as a missing key. */
 export const SAMPLE_PROPS: Readonly<Record<string, Record<string, unknown>>> = {
   'context.switcher': { teams: SAMPLE_TEAMS, instances: SAMPLE_INSTANCES },
+  'launch.starter': { teamId: '01TEAMAAA' },
+  'workspace.content': {},
   'freshness.label': { freshness: SAMPLE_FRESHNESS, now: SAMPLE_NOW, describes: 'Instances' },
   'instance.detail': { instance: SAMPLE_INSTANCES[0], attestation: SAMPLE_ATTESTATION, freshness: SAMPLE_FRESHNESS, now: SAMPLE_NOW },
   'instance.list': { instances: SAMPLE_INSTANCES, teams: SAMPLE_TEAMS, observedAt: SAMPLE_FRESHNESS.observedAt, now: SAMPLE_NOW },

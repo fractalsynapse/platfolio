@@ -1,11 +1,15 @@
 import { z } from 'zod';
 import type { Attestation } from './attestation.ts';
 import { AttestationRecordSchema, AuditEntrySchema, BindingRecordSchema, CapabilityOfferSchema, CapabilityShareSchema, IdentitySchema, PersonSchema, TeamMemberSchema, DispatchRecordSchema, InstanceEnvironmentStateSchema, InstanceSchema, InvitationSchema, ProviderConnectionSchema, RepoConnectionSchema, TeamSchema, newId,
+  HostedStarterSchema, NotificationRuleSchema, rollupState, type NewNotificationRule, type NotificationRule, type HostedStarter, type NewHostedStarter, type HostedAppCheck,
   ArtifactRecordSchema,
-  type ArtifactRecord, type AttestationRecord, type AuditEntry, type BindingRecord, type CapabilityOffer, type CapabilityShare, type NewBinding, type NewCapabilityOffer, type NewCapabilityShare, type DispatchRecord, type Instance, type InstanceEnvironmentState, type Invitation, type NewInvitation, type ProviderConnection, type RepoConnection, type Store, type StoreError, type NewInstance, type StoreResult, type Team, type TeamMember, type Identity, type Person } from './persistence.ts';
+  type ArtifactRecord, type AttestationRecord, type AuditEntry, type BindingRecord, type CapabilityOffer, type CapabilityShare, type NewBinding, type NewCapabilityOffer, type NewCapabilityShare, type DispatchRecord, type Instance, type InstanceEnvironmentState, type Invitation, type NewInvitation, type ProviderConnection, type RepoConnection, type Store, type StoreError, type NewInstance, type StoreResult, type Team, type TeamMember, type TeamRole, type Identity, type Person } from './persistence.ts';
 import { reasonOf } from './persistence.ts';
 import { normaliseEmail, normaliseName } from './persistence.ts';
 import { checkAttestationPolicy } from './dispatch-policy.ts';
+import { nextAppCheck } from './hosted-availability.ts';
+import { notificationEventFor } from './notification-events.ts';
+import type { NotificationEmailDelivery, NotificationEmailPreference } from './persistence.ts';
 import { CONTRACT_VERSION } from './generated/contract-version.ts';
 
 /**
@@ -34,7 +38,18 @@ export interface MemoryStoreOptions {
 
 export class MemoryStore implements Store {
   readonly driver = 'memory';
+  private readonly marketplaceLinks = new Map<string, {
+    teamId: string;
+    disconnected: boolean;
+    enrollment?: { digest: string; expiresAt: string };
+    registryDigest?: string;
+  }>();
   private readonly teams = new Map<string, Team>();
+  private readonly notificationRules = new Map<string, { personId: string; rule: NotificationRule; activeSince: string }>();
+  private readonly notificationEmail = new Map<string, NotificationEmailPreference>();
+  private readonly notificationDeliveries = new Map<string, { leaseId: string; attempts: number; dueAt: string | null }>();
+  private readonly hostedChecks = new Map<string, HostedAppCheck>();
+  private readonly hostedStarters = new Map<string, HostedStarter>();
   private readonly instances = new Map<string, Instance>();
   private readonly repos = new Map<string, RepoConnection>();
   private readonly providers = new Map<string, ProviderConnection>();
@@ -72,6 +87,50 @@ export class MemoryStore implements Store {
     // A closed store says so. Reporting healthy after close() is how a pool pretends to work while every
     // query fails.
     return !this.closed;
+  }
+
+  async connectMarketplaceInstallation(teamId: string, installationId: string): Promise<boolean> {
+    if (this.closed || !this.teams.has(teamId)) return false;
+    const found = this.marketplaceLinks.get(installationId);
+    if (found) return found.teamId === teamId && !found.disconnected && !found.enrollment;
+    this.marketplaceLinks.set(installationId, { teamId, disconnected: false });
+    return true;
+  }
+
+  async marketplaceInstallationConnected(teamId: string, installationId: string): Promise<boolean> {
+    const found = this.marketplaceLinks.get(installationId);
+    return !this.closed && found?.teamId === teamId && !found.disconnected && !found.enrollment;
+  }
+
+  async disconnectMarketplaceInstallation(teamId: string, installationId: string): Promise<boolean> {
+    const found = this.marketplaceLinks.get(installationId);
+    if (this.closed || found?.teamId !== teamId) return false;
+    found.disconnected = true;
+    delete found.enrollment;
+    delete found.registryDigest;
+    return true;
+  }
+
+  async issueMarketplaceEnrollment(teamId: string, installationId: string, digest: string, expiresAt: string): Promise<boolean> {
+    if (this.closed || !this.teams.has(teamId)) return false;
+    const found = this.marketplaceLinks.get(installationId);
+    if (found && (found.teamId !== teamId || found.disconnected || !found.enrollment)) return false;
+    this.marketplaceLinks.set(installationId, { teamId, disconnected: false, enrollment: { digest, expiresAt } });
+    return true;
+  }
+
+  async redeemMarketplaceEnrollment(installationId: string, enrollmentDigest: string, registryDigest: string, now: string): Promise<boolean> {
+    const found = this.marketplaceLinks.get(installationId);
+    if (this.closed || !found?.enrollment || found.disconnected || found.enrollment.digest !== enrollmentDigest ||
+        Date.parse(found.enrollment.expiresAt) <= Date.parse(now)) return false;
+    delete found.enrollment;
+    found.registryDigest = registryDigest;
+    return true;
+  }
+
+  async verifyMarketplaceCredential(installationId: string, registryDigest: string): Promise<boolean> {
+    const found = this.marketplaceLinks.get(installationId);
+    return !this.closed && !!found && !found.disconnected && found.registryDigest === registryDigest;
   }
 
   async createTeam(input: { name: string }) {
@@ -114,6 +173,69 @@ export class MemoryStore implements Store {
     this.instances.set(admitted.value.id, admitted.value);
     return ok(admitted.value);
   }
+  async recordHostedStarter(input: NewHostedStarter): Promise<StoreResult<Instance>> {
+    if (this.closed) return this.refuse('recordHostedStarter');
+    if (!this.teams.has(input.teamId)) return err({ code: 'not-found', what: 'team', id: input.teamId });
+    const existing = [...this.instances.values()].find(({ teamId, name }) => teamId === input.teamId && name === input.name);
+    const current = existing && this.hostedStarters.get(existing.id);
+    if (input.state !== 'live' && !current) return err({ code: 'not-found', what: 'hosted starter', id: input.name });
+    const replacement = input.state === 'live' && current?.state === 'removed';
+    if (existing && (!current || (!replacement && current.projectId !== input.projectId) || existing.template !== input.template ||
+        existing.templateRef?.commitSha !== input.templateRef.commitSha || existing.templateRef.repo !== input.templateRef.repo)) {
+      return err({ code: 'conflict', reason: 'This name already belongs to a different instance' });
+    }
+    if ([...this.hostedStarters.values()].some((item) => item.projectId === input.projectId && item.instanceId !== existing?.id)) {
+      return err({ code: 'conflict', reason: 'This project is already managed' });
+    }
+    if (existing && current && Date.parse(current.observedAt) >= Date.parse(input.observedAt)) {
+      return ok(copy(existing));
+    }
+
+    const id = existing?.id ?? newId('inst');
+    const staging = { instanceId: id, environment: 'staging', state: input.state, updatedAt: input.observedAt };
+    const environments = [...this.envStates.values()].filter((row) => row.instanceId === id && row.environment !== 'staging');
+    const instance = admit(InstanceSchema, {
+      ...existing, id, teamId: input.teamId, name: input.name, template: input.template, templateRef: input.templateRef,
+      state: rollupState([...environments, staging]), provider: 'railway', createdAt: existing?.createdAt ?? this.clock(), updatedAt: this.clock(),
+    }, 'instance');
+    if (!instance.accepted) return err({ code: 'conflict', reason: instance.reason });
+    const observation = admit(HostedStarterSchema, {
+      instanceId: id, projectId: input.projectId, state: input.state, observedAt: input.observedAt,
+      deploymentId: input.state === 'live' ? input.deploymentId : current?.deploymentId,
+      origin: input.state === 'live' ? input.origin : current?.origin,
+    }, 'hosted starter');
+    if (!observation.accepted) return err({ code: 'conflict', reason: observation.reason });
+
+    this.instances.set(instance.value.id, instance.value);
+    this.hostedStarters.set(instance.value.id, observation.value);
+    this.envStates.set(`${id}\u0000staging`, staging);
+    await this.appendAudit({ actorKind: 'controller', actorRef: 'private-launch-worker', action: input.state === 'live' ? 'hosting.verified' : `hosting.${input.state}`,
+      target: id, at: input.observedAt, detail: { environment: 'staging', deploymentId: observation.value.deploymentId } });
+    return ok(copy(instance.value));
+  }
+
+  async getHostedStarter(instanceId: string): Promise<StoreResult<HostedStarter>> {
+    const found = this.hostedStarters.get(instanceId);
+    return found ? ok(copy(found)) : err({ code: 'not-found', what: 'hosted starter', id: instanceId });
+  }
+
+  async recordHostedAppCheck(input: Parameters<Store['recordHostedAppCheck']>[0]): Promise<void> {
+    const hosting = this.hostedStarters.get(input.instanceId);
+    if (this.closed || hosting?.state !== 'live' || hosting.deploymentId !== input.deploymentId) return;
+    const next = nextAppCheck(this.hostedChecks.get(input.instanceId), input);
+    if (!next) return;
+    this.hostedChecks.set(input.instanceId, next.check);
+    if (next.changed) await this.appendAudit({
+      actorKind: 'controller', actorRef: 'private-app-check', action: `availability.${next.changed}`,
+      target: input.instanceId, at: input.checkedAt, detail: { environment: 'staging' },
+    });
+  }
+
+  async getHostedAppCheck(instanceId: string): Promise<HostedAppCheck | undefined> {
+    const check = this.hostedChecks.get(instanceId);
+    return check && copy(check);
+  }
+
   async getInstance(id: string) {
     const found = this.instances.get(id);
     return found ? ok(copy(found)) : err({ code: 'not-found', what: 'instance', id });
@@ -193,8 +315,14 @@ export class MemoryStore implements Store {
     return ok(admitted.value);
   }
   async unlinkIdentity(issuer: string, subject: string) {
-    const existed = this.identities.delete(`${issuer}\u0000${subject}`);
+    const key = `${issuer}\u0000${subject}`;
+    const personId = this.identities.get(key)?.personId;
+    const existed = this.identities.delete(key);
     if (!existed) return err({ code: 'not-found', what: 'identity', id: `${issuer}/${subject}` });
+    if (personId) {
+      const preference = this.notificationEmail.get(personId);
+      if (preference?.issuer === issuer && preference.subject === subject) this.notificationEmail.delete(personId);
+    }
     return ok({ removed: true });
   }
   async listIdentities(personId: string) {
@@ -222,6 +350,24 @@ export class MemoryStore implements Store {
   async listTeamMembers(teamId: string) {
     return [...this.members.values()].filter((m) => m.teamId === teamId).map(copy);
   }
+
+  async changeTeamMember(teamId: string, actorId: string, personId: string, role: TeamRole | null): Promise<StoreResult<TeamMember>> {
+    if (this.closed) return this.refuse('changeTeamMember');
+    const owner = this.members.get(`${teamId}\u0000${actorId}`);
+    if (owner?.role !== 'owner') return err({ code: 'not-found', what: 'ownership', id: teamId });
+    if (actorId === personId) return err({ code: 'conflict', reason: 'Another owner must change your membership' });
+    const key = `${teamId}\u0000${personId}`;
+    const member = this.members.get(key);
+    if (!member) return err({ code: 'not-found', what: 'team membership', id: personId });
+    if (role === null) {
+      this.members.delete(key);
+      return ok(copy(member));
+    }
+    const updated = { ...member, role };
+    this.members.set(key, updated);
+    return ok(copy(updated));
+  }
+
   async teamsForPerson(personId: string) {
     return [...this.members.values()].filter((m) => m.personId === personId).map((m) => m.teamId);
   }
@@ -362,9 +508,7 @@ export class MemoryStore implements Store {
     // direction. The double has no transaction; the database does, and the shared suite asserts the outcome.
     const memberKey = `${accepted.teamId}\u0000${personId}`;
     const existing = this.members.get(memberKey);
-    const member: TeamMember = existing
-      ? { ...existing, role: accepted.role }
-      : { teamId: accepted.teamId, personId, role: accepted.role, addedAt: now };
+    const member: TeamMember = existing ?? { teamId: accepted.teamId, personId, role: accepted.role, addedAt: now };
     this.members.set(memberKey, member);
     this.invitations.set(invitationId, accepted);
     return ok({ invitation: copy(accepted), member: copy(member) });
@@ -519,6 +663,11 @@ export class MemoryStore implements Store {
   async listAttestations(instanceId: string, limit = 50) {
     return [...this.attestations.values()].filter((a) => a.instanceId === instanceId).slice(-limit).reverse().map(copy);
   }
+  async listEnvironmentAttestations(instanceId: string, environment: string, limit = 50) {
+    const mine = [...this.attestations.values()].filter((report) => report.instanceId === instanceId && report.environment === environment);
+    return mine.sort((a, b) => Date.parse(b.finishedAt) - Date.parse(a.finishedAt) ||
+      Date.parse(b.receivedAt) - Date.parse(a.receivedAt) || b.dispatchId.localeCompare(a.dispatchId)).slice(0, limit).map(copy);
+  }
 
   async appendAudit(entry: Omit<AuditEntry, 'id' | 'at'> & { at?: string }) {
     if (this.closed) return this.refuse('appendAudit');
@@ -531,12 +680,109 @@ export class MemoryStore implements Store {
   async recentAudit(limit = 50) {
     return this.auditLog.slice(-limit).reverse().map(copy);
   }
+  async recentAuditForTargets(targets: readonly string[], limit: number) {
+    const scoped = new Set(targets);
+    return limit > 0 ? this.auditLog.filter(({ target }) => scoped.has(target)).slice(-limit).reverse().map(copy) : [];
+  }
+
+  async saveNotificationRule(personId: string, input: NewNotificationRule): Promise<StoreResult<NotificationRule>> {
+    if (this.closed) return this.refuse('saveNotificationRule');
+    const app = this.instances.get(input.instanceId);
+    if (!app || !this.members.has(`${app.teamId}\u0000${personId}`)) return err({ code: 'not-found', what: 'app', id: input.instanceId });
+    if (input.environment && !this.envStates.has(`${app.id}\u0000${input.environment}`)) {
+      return err({ code: 'not-found', what: 'environment', id: input.environment });
+    }
+    const existing = input.id ? this.notificationRules.get(input.id) : undefined;
+    if (input.id && (existing?.personId !== personId || existing.rule.instanceId !== app.id)) {
+      return err({ code: 'not-found', what: 'notification rule', id: input.id });
+    }
+    const result = admit(NotificationRuleSchema, { ...input, id: input.id ?? newId('rule'), createdAt: existing?.rule.createdAt ?? this.clock() }, 'notification rule');
+    if (!result.accepted) return err({ code: 'conflict', reason: result.reason });
+    const { value } = result;
+    if ([...this.notificationRules.values()].some((item) => item.personId === personId && item.rule.id !== value.id &&
+        item.rule.instanceId === app.id && item.rule.event === value.event && item.rule.environment === value.environment)) {
+      return err({ code: 'conflict', reason: 'This event already has a rule for that environment' });
+    }
+    this.notificationRules.set(value.id, { personId, rule: value, activeSince: this.clock() });
+    return ok(copy(value));
+  }
+
+  async listNotificationRules(personId: string): Promise<NotificationRule[]> {
+    const teams = new Set(await this.teamsForPerson(personId));
+    return [...this.notificationRules.values()]
+      .filter((row) => row.personId === personId && teams.has(this.instances.get(row.rule.instanceId)?.teamId ?? ''))
+      .map(({ rule }) => copy(rule));
+  }
+
+  async removeNotificationRule(personId: string, instanceId: string, id: string): Promise<boolean> {
+    const current = this.notificationRules.get(id);
+    return current?.personId === personId && current.rule.instanceId === instanceId && this.notificationRules.delete(id);
+  }
+
+  async getNotificationEmailPreference(personId: string) {
+    const preference = this.notificationEmail.get(personId);
+    if (preference && this.identities.get(`${preference.issuer}\u0000${preference.subject}`)?.personId === personId) return copy(preference);
+  }
+
+  async setNotificationEmailPreference(personId: string, preference: Omit<NotificationEmailPreference, 'personId'> | null) {
+    if (this.closed) return false;
+    if (!preference) {
+      this.notificationEmail.delete(personId);
+      return true;
+    }
+    if (this.identities.get(`${preference.issuer}\u0000${preference.subject}`)?.personId !== personId) return false;
+    const previous = this.notificationEmail.get(personId);
+    if (previous?.issuer !== preference.issuer || previous?.subject !== preference.subject) {
+      this.notificationEmail.set(personId, { ...preference, personId });
+    }
+    return true;
+  }
+
+  async leaseNotificationEmails(issuer: string, now: string): Promise<NotificationEmailDelivery[]> {
+    const nowMs = Date.parse(now);
+    const rows: NotificationEmailDelivery[] = [];
+    for (const audit of this.auditLog) {
+      const event = notificationEventFor(audit);
+      const app = this.instances.get(audit.target);
+      const at = Date.parse(audit.at);
+      if (!event || !app || at > nowMs || at < nowMs - 86_400_000) continue;
+      const environment = typeof audit.detail.environment === 'string' ? audit.detail.environment : undefined;
+      for (const { personId, rule, activeSince } of this.notificationRules.values()) {
+        if (rows.length === 5) return rows;
+        if (!rule.enabled || rule.instanceId !== app.id || event !== rule.event || at < Date.parse(activeSince) ||
+            (rule.environment !== undefined && rule.environment !== environment)) continue;
+        const preference = this.notificationEmail.get(personId);
+        const member = this.members.get(`${app.teamId}\u0000${personId}`);
+        if (!preference || preference.issuer !== issuer || !member || at < Date.parse(member.addedAt) ||
+            at < Date.parse(preference.enabledAt) || this.identities.get(`${issuer}\u0000${preference.subject}`)?.personId !== personId) continue;
+        const key = `${personId}\u0000${audit.id}`;
+        const previous = this.notificationDeliveries.get(key);
+        if (previous && (!previous.dueAt || Date.parse(previous.dueAt) > nowMs || previous.attempts >= 4)) continue;
+        const leaseId = newId('lease');
+        const attempts = (previous?.attempts ?? 0) + 1;
+        this.notificationDeliveries.set(key, { leaseId, attempts, dueAt: new Date(nowMs + 180_000).toISOString() });
+        rows.push({ auditId: audit.id, leaseId, attempts, preference: copy(preference), teamId: app.teamId, instanceId: app.id, event,
+          ...(environment ? { environment } : {}), at: audit.at });
+      }
+    }
+    return rows;
+  }
+
+  async settleNotificationEmail(delivery: Pick<NotificationEmailDelivery, 'auditId' | 'leaseId' | 'preference'>, retryAt: string | null) {
+    const current = this.notificationDeliveries.get(`${delivery.preference.personId}\u0000${delivery.auditId}`);
+    if (current?.leaseId === delivery.leaseId) current.dueAt = retryAt;
+  }
 
   async close(): Promise<void> {
     this.closed = true;
     this.teams.clear();
     this.plans.clear();
     this.envStates.clear();
+    this.hostedStarters.clear();
+    this.hostedChecks.clear();
+    this.notificationRules.clear();
+    this.notificationEmail.clear();
+    this.notificationDeliveries.clear();
     this.invitations.clear();
     this.members.clear();
     this.persons.clear();

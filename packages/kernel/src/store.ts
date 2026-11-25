@@ -59,6 +59,12 @@ export class StoreService extends Service<z.infer<typeof StoreConfigSchema>> {
 
   // Pass-through surface. Kept as methods rather than exposing the inner store so the capability can add
   // instrumentation (timing, audit) later without every call site changing.
+  connectMarketplaceInstallation(...args: Parameters<Store['connectMarketplaceInstallation']>) { return this.inner.connectMarketplaceInstallation(...args); }
+  marketplaceInstallationConnected(...args: Parameters<Store['marketplaceInstallationConnected']>) { return this.inner.marketplaceInstallationConnected(...args); }
+  disconnectMarketplaceInstallation(...args: Parameters<Store['disconnectMarketplaceInstallation']>) { return this.inner.disconnectMarketplaceInstallation(...args); }
+  issueMarketplaceEnrollment(...args: Parameters<Store['issueMarketplaceEnrollment']>) { return this.inner.issueMarketplaceEnrollment(...args); }
+  redeemMarketplaceEnrollment(...args: Parameters<Store['redeemMarketplaceEnrollment']>) { return this.inner.redeemMarketplaceEnrollment(...args); }
+  verifyMarketplaceCredential(...args: Parameters<Store['verifyMarketplaceCredential']>) { return this.inner.verifyMarketplaceCredential(...args); }
   createTeam(input: { name: string }) { return this.inner.createTeam(input); }
   getTeam(id: string) { return this.inner.getTeam(id); }
   listTeams() { return this.inner.listTeams(); }
@@ -75,6 +81,7 @@ export class StoreService extends Service<z.infer<typeof StoreConfigSchema>> {
   putTeamMember(...args: Parameters<Store['putTeamMember']>) { return this.inner.putTeamMember(...args); }
   getTeamMember(...args: Parameters<Store['getTeamMember']>) { return this.inner.getTeamMember(...args); }
   listTeamMembers(...args: Parameters<Store['listTeamMembers']>) { return this.inner.listTeamMembers(...args); }
+  changeTeamMember(...args: Parameters<Store['changeTeamMember']>) { return this.inner.changeTeamMember(...args); }
   teamsForPerson(...args: Parameters<Store['teamsForPerson']>) { return this.inner.teamsForPerson(...args); }
   resolvePerson(...args: Parameters<Store['resolvePerson']>) { return this.inner.resolvePerson(...args); }
   getPerson(...args: Parameters<Store['getPerson']>) { return this.inner.getPerson(...args); }
@@ -116,8 +123,21 @@ export class StoreService extends Service<z.infer<typeof StoreConfigSchema>> {
   getAttestation(dispatchId: string) { return this.inner.getAttestation(dispatchId); }
   latestAttestation(instanceId: string) { return this.inner.latestAttestation(instanceId); }
   listAttestations(instanceId: string, limit?: number) { return this.inner.listAttestations(instanceId, limit); }
+  recordHostedStarter(...args: Parameters<Store['recordHostedStarter']>) { return this.inner.recordHostedStarter(...args); }
+  getHostedStarter(...args: Parameters<Store['getHostedStarter']>) { return this.inner.getHostedStarter(...args); }
+  recordHostedAppCheck(...args: Parameters<Store['recordHostedAppCheck']>) { return this.inner.recordHostedAppCheck(...args); }
+  getHostedAppCheck(...args: Parameters<Store['getHostedAppCheck']>) { return this.inner.getHostedAppCheck(...args); }
+  listEnvironmentAttestations(...args: Parameters<Store['listEnvironmentAttestations']>) { return this.inner.listEnvironmentAttestations(...args); }
   appendAudit(entry: Parameters<Store['appendAudit']>[0]) { return this.inner.appendAudit(entry); }
   recentAudit(limit?: number) { return this.inner.recentAudit(limit); }
+  recentAuditForTargets(...args: Parameters<Store['recentAuditForTargets']>) { return this.inner.recentAuditForTargets(...args); }
+  saveNotificationRule(...args: Parameters<Store['saveNotificationRule']>) { return this.inner.saveNotificationRule(...args); }
+  listNotificationRules(...args: Parameters<Store['listNotificationRules']>) { return this.inner.listNotificationRules(...args); }
+  removeNotificationRule(...args: Parameters<Store['removeNotificationRule']>) { return this.inner.removeNotificationRule(...args); }
+  getNotificationEmailPreference(...args: Parameters<Store['getNotificationEmailPreference']>) { return this.inner.getNotificationEmailPreference(...args); }
+  setNotificationEmailPreference(...args: Parameters<Store['setNotificationEmailPreference']>) { return this.inner.setNotificationEmailPreference(...args); }
+  leaseNotificationEmails(...args: Parameters<Store['leaseNotificationEmails']>) { return this.inner.leaseNotificationEmails(...args); }
+  settleNotificationEmail(...args: Parameters<Store['settleNotificationEmail']>) { return this.inner.settleNotificationEmail(...args); }
   close() { return this.inner.close(); }
 
   /** Errors are values, but a store that cannot be reached is a condition worth logging where it happens. */

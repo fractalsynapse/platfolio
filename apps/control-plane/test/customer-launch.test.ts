@@ -1,0 +1,152 @@
+import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import { test } from 'node:test';
+import { createIdentityFixture, defaultIdentityConfig, signToken } from '@platfolio/contracts';
+import { createKernel, disposeKernel } from '@platfolio/kernel';
+import { buildCapabilities } from '../src/capabilities.ts';
+import { customerLaunch, customerLaunchConfig } from '../src/customer-launch.ts';
+
+test('customer launch is owner scoped and passes only the intended fields to a private worker', async () => {
+  const identity = createIdentityFixture();
+  const headers = (subject: string) => ({
+    authorization: 'Bearer ' + signToken(identity, { scope: 'platfolio.user', subject }),
+    'content-type': 'application/json',
+  });
+  const worker = 'http://installation-worker.railway.internal:8080';
+  const siteOrigin = 'https://private.example.test';
+  const workerKey = 'test-fixture-worker-key-for-owner-access';
+  let teamId = '';
+  let last: { action: string; body?: unknown } | undefined;
+  const ids = { projectId: randomUUID(), deploymentId: randomUUID() };
+  let workerReport: object | false = false;
+  let brandOutcome = 'requested';
+  const domain = { host: 'preview.example.test', dnsStatus: 'pending', certificateStatus: 'pending', records: [] };
+  const config = {
+    get teamId() { return teamId; },
+    siteOrigin, workerKey, workerUrl: worker,
+  };
+  const request: typeof fetch = async (url, init) => {
+    assert.equal(url, worker + '/launch');
+    assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer ' + workerKey);
+    assert.equal(init?.redirect, 'error');
+    last = JSON.parse(String(init?.body)) as typeof last;
+    if (last?.action === 'report') return Response.json(workerReport);
+    if (last?.action === 'redeploy') return Response.json({ state: 'running' });
+    if (last?.action === 'marketplace-status') return Response.json({ state: 'disconnected' });
+    if (last?.action === 'marketplace-enroll') return Response.json('enrolled');
+    if (last?.action === 'domains-list') return Response.json({ outcome: 'listed', domains: [domain] });
+    if (last?.action === 'domain-attach') return Response.json({ outcome: 'attached', domain });
+    if (last?.action === 'domain-detach') return Response.json({ outcome: 'detached' });
+    if (last?.action === 'brand-read') return Response.json({ outcome: 'read', configuration: { value: 'Starter', state: 'ready' } });
+    if (last?.action === 'brand-apply') return Response.json({ outcome: brandOutcome });
+    return Response.json(last?.action === 'setup' ? { openBao: 'sealed', railway: 'connect', workerKey: 'public' } : false);
+  };
+  const kernel = await createKernel({
+    identity: defaultIdentityConfig(identity), identityKeys: [identity.jwk], provider: 'fake', custody: 'strict',
+    server: { port: 0 }, store: { driver: 'memory' }, requiredServices: ['identity', 'server', 'store', 'extensions'],
+    extensions: buildCapabilities({
+      build: { version: null, commit: 'a'.repeat(40), buildTime: '2026-11-24T00:00:00Z' },
+      customerLaunch: {
+        ...customerLaunch(config, request),
+        get teamId() { return teamId; },
+      },
+    }),
+  });
+  try {
+    const api = `http://127.0.0.1:${kernel.server.address.port}/api/v1`;
+    const created = await fetch(api + '/teams', { method: 'POST', headers: headers('owner'), body: JSON.stringify({ name: 'launch-team' }) });
+    assert.equal(created.status, 201);
+    teamId = (await created.json() as { teamId: string }).teamId;
+    const path = api + '/teams/' + teamId + '/starter-launch';
+    assert.equal((await fetch(path + '/setup')).status, 401);
+    assert.equal((await fetch(path + '/setup', { headers: headers('other') })).status, 404);
+    assert.equal(last, undefined);
+    const setup = await fetch(path + '/setup', { headers: headers('owner') });
+    assert.equal(setup.status, 200);
+    assert.deepEqual(await setup.json(), { openBao: 'sealed', railway: 'connect', workerKey: 'public' });
+    const marketplace = api + '/teams/' + teamId + '/marketplace/connection';
+    assert.equal((await fetch(marketplace, { headers: headers('other') })).status, 404);
+    const connection = await fetch(marketplace, { headers: headers('owner') });
+    assert.equal(connection.headers.get('cache-control'), 'no-store');
+    assert.deepEqual(await connection.json(), { state: 'disconnected' });
+    const handoff = randomUUID() + ':' + 'c'.repeat(43);
+    const connect = (actor: string, input: string) => fetch(marketplace, {
+      method: 'POST', headers: headers(actor), body: JSON.stringify({ handoff: input }),
+    });
+    assert.equal((await connect('other', handoff)).status, 404);
+    assert.equal((await connect('owner', 'wrong-format')).status, 400);
+    assert.equal((await connect('owner', handoff)).status, 204);
+    assert.deepEqual(last, { action: 'marketplace-enroll', body: { handoff } });
+    const response = await fetch(api + '/railway/callback?state=' + 'a'.repeat(43) + '&code=local-test', { redirect: 'manual' });
+    assert.equal(response.status, 303);
+    assert.equal(response.headers.get('location'), siteOrigin + '/dashboard/launch?railway=retry');
+    assert.equal(response.headers.get('referrer-policy'), 'no-referrer');
+
+    const managed = await kernel.store.recordHostedStarter({
+      ...ids, teamId, name: 'starter-web', template: 'starter-web', state: 'live',
+      templateRef: { repo: 'platfolio-fixtures/starter-web', commitSha: 'b'.repeat(40) },
+      origin: 'https://starter.up.railway.app', observedAt: '2026-11-24T00:00:00.000Z',
+    });
+    assert.ok(managed.ok);
+    const member = await kernel.store.resolvePerson({ issuer: identity.issuer, subject: 'member' });
+    assert.ok(member.ok);
+    assert.ok((await kernel.store.putTeamMember({ teamId, personId: member.value.person.id, role: 'member' })).ok);
+    const domains = (environment: string) => api + '/instances/' + managed.value.id + '/environments/' + environment + '/custom-domains';
+    const read = (actor: string) => fetch(domains('staging'), { headers: headers(actor) });
+    const change = (hostname: string, actor: string, method = 'PUT', environment = 'staging') =>
+      fetch(domains(environment) + '/' + encodeURIComponent(hostname), { method, headers: headers(actor) });
+    assert.equal((await read('other')).status, 404);
+    assert.deepEqual(await (await read('member')).json(), [domain]);
+    assert.equal((await change(domain.host, 'member')).status, 403);
+    assert.equal((await change(domain.host, 'owner', 'PUT', 'production')).status, 404);
+    assert.equal((await change('https://invalid.example.test', 'owner')).status, 400);
+    assert.equal((await change('auto.up.railway.app', 'owner', 'DELETE')).status, 400);
+    assert.equal((await change(domain.host.toUpperCase(), 'owner')).status, 200);
+    assert.deepEqual(last, { action: 'domain-attach', body: { ...ids, hostname: domain.host } });
+    assert.equal((await change(domain.host, 'owner', 'DELETE')).status, 204);
+    assert.deepEqual(last, { action: 'domain-detach', body: { ...ids, hostname: domain.host } });
+    const brand = (environment: string) => api + '/instances/' + managed.value.id + '/environments/' + environment + '/configuration/starter-brand';
+    const readBrand = (actor: string) => fetch(brand('staging'), { headers: headers(actor) });
+    const changeBrand = (body: object, actor = 'owner', environment = 'staging') =>
+      fetch(brand(environment), { method: 'PUT', headers: headers(actor), body: JSON.stringify(body) });
+    assert.equal((await readBrand('other')).status, 404);
+    assert.deepEqual(await (await readBrand('member')).json(), { value: 'Starter', state: 'ready' });
+    assert.deepEqual(last, { action: 'brand-read', body: ids });
+    assert.equal((await changeBrand({ value: 'Team app' }, 'member')).status, 403);
+    assert.equal((await changeBrand({ value: 'Team app' }, 'owner', 'production')).status, 404);
+    assert.equal((await changeBrand({ value: 'Hello <world>' })).status, 400);
+    assert.equal((await changeBrand({ value: 'Hello\n' })).status, 400);
+    assert.equal((await changeBrand({ value: 'Team app', key: 'DATABASE_URL' })).status, 400);
+    assert.deepEqual(last, { action: 'brand-read', body: ids });
+    const brandChanged = await changeBrand({ value: 'Team app' });
+    assert.equal(brandChanged.status, 202);
+    assert.deepEqual(await brandChanged.json(), { state: 'requested' });
+    assert.deepEqual(last, { action: 'brand-apply', body: { ...ids, value: 'Team app' } });
+    const audit = await kernel.store.recentAuditForTargets([managed.value.id], 15);
+    assert.deepEqual(audit.find(({ action }) => action === 'configuration.request')?.detail, { name: 'UI_BRAND', environment: 'staging' });
+    brandOutcome = 'conflict';
+    assert.equal((await changeBrand({ value: 'Another label' })).status, 409);
+    const operation = (environment: string) => api + '/instances/' + managed.value.id + '/environments/' + environment + '/deployments';
+    const deploy = (environment: string, actor = 'owner') => fetch(operation(environment), { method: 'POST', headers: headers(actor) });
+    assert.equal((await deploy('staging', 'other')).status, 404);
+    assert.equal((await deploy('production')).status, 404);
+    workerReport = { ...ids, state: 'removing' };
+    assert.equal((await deploy('staging')).status, 409);
+    workerReport = { ...ids, state: 'ready' };
+    const deployed = await deploy('staging');
+    assert.equal(deployed.status, 202);
+    assert.deepEqual(await deployed.json(), { state: 'requested' });
+    assert.deepEqual(last, { action: 'redeploy', body: ids });
+  } finally { await disposeKernel(kernel); }
+});
+
+test('a hub or an external worker origin cannot configure customer launch', () => {
+  assert.equal(customerLaunchConfig({}, []), undefined);
+  const env = {
+    PLATFOLIO_LAUNCH_WORKER_URL: 'https://public.example.test',
+    PLATFOLIO_LAUNCH_WORKER_KEY: 'x'.repeat(43),
+    PLATFOLIO_LAUNCH_TEAM: 'local-team',
+  };
+  assert.throws(() => customerLaunchConfig(env, ['https://private.example.test']), /private network/);
+  assert.throws(() => customerLaunchConfig({ ...env, PLATFOLIO_LAUNCH_WORKER_URL: 'http://worker.railway.internal', PLATFOLIO_MARKETPLACE_ENABLED: 'true' }, ['https://private.example.test']));
+});

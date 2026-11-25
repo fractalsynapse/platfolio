@@ -4,7 +4,7 @@
  * hand, because every line reproduces from the specification.
  *
  * Source: apps/control-plane/openapi.yaml (OpenAPI 3.1.0, info.version 0.1.0)
- * Input digest: sha256/b2140e880ea02f18
+ * Input digest: sha256/ac68bc98ba9c2436
  *
  * Reproduce it with `pnpm run api:types`. `pnpm run api:types:check` fails when this file stops matching
  * what the committed spec produces, which is the only way a generated type deserves to be trusted.
@@ -155,6 +155,31 @@ export interface Health {
   livenessToken: string;
 }
 
+export interface HostedCustomDomain {
+  host: string;
+  dnsStatus: 'pending' | 'verified' | 'failed';
+  certificateStatus: 'pending' | 'issued' | 'failed';
+  records: Array<{
+    host: string;
+    fqdn: string;
+    zone: string;
+    type: 'A' | 'CNAME' | 'TXT' | 'NS';
+    value: string;
+    current?: string;
+    status: 'requires-update' | 'propagated' | 'unspecified';
+    purpose: 'traffic' | 'ownership' | 'challenge' | 'unspecified';
+  }>;
+}
+
+export interface HostedStarter {
+  instanceId: string;
+  projectId: string;
+  deploymentId: string;
+  state: 'live' | 'paused' | 'removed';
+  origin: string;
+  observedAt: string;
+}
+
 export interface Instance {
   id: string;
   teamId: string;
@@ -210,6 +235,7 @@ export interface InstanceResponse {
 export interface Invitation {
   id: string;
   teamId: string;
+  teamName?: string;
   /** Normalised (trimmed and case-folded) on write. */
   email: string;
   role: 'owner' | 'member';
@@ -223,6 +249,15 @@ export interface Invitation {
   /** The transport's receipt, so delivery is a fact about the row (D46). */
   emailReceipt?: string;
   emailError?: string;
+}
+
+export interface NotificationRule {
+  id: string;
+  instanceId: string;
+  event: 'deployment-failed' | 'app-outage' | 'secret-updated';
+  enabled: boolean;
+  createdAt: string;
+  environment?: string;
 }
 
 export interface ReadinessCheck {
@@ -240,6 +275,10 @@ export interface Ready {
 
 /** Repository-style slug. Lowercase alphanumerics with interior hyphens -- it is a URL segment and a CLI argument (D45). */
 export type Slug = string;
+
+export interface StarterBrandChange {
+  value: string;
+}
 
 export interface TeamWithRole {
   teamId: string;
@@ -286,10 +325,41 @@ export interface ApiParameters {
   acceptInvitation: {
     invitationId: string;
   };
+  /** PUT /api/v1/instances/{instanceId}/environments/{environment}/custom-domains/{hostname} */
+  attachHostedCustomDomain: {
+    instanceId: string;
+    environment: string;
+    hostname: string;
+  };
+  /** POST /api/v1/teams/{teamId}/starter-launch/railway */
+  beginStarterRailwayAuthorization: {
+    teamId: string;
+  };
   /** PUT /api/v1/instances/{instanceId}/bindings/{capability} */
   bindCapability: {
     instanceId: string;
     capability: string;
+  };
+  /** POST /api/v1/marketplace/installations/{installationId}/claim */
+  claimEnrolledMarketplaceRelease: {
+    installationId: string;
+  };
+  /** POST /api/v1/teams/{teamId}/marketplace/installations/{installationId}/claim */
+  claimFreeMarketplaceRelease: {
+    teamId: string;
+    installationId: string;
+  };
+  /** GET /api/v1/railway/callback */
+  completeStarterRailwayAuthorization: {
+    state?: string;
+    code?: string;
+    iss?: string;
+    error?: string;
+  };
+  /** PUT /api/v1/teams/{teamId}/marketplace/installations/{installationId} */
+  connectMarketplaceInstallation: {
+    teamId: string;
+    installationId: string;
   };
   /** POST /api/v1/instances/{instanceId}/dispatches */
   createDispatch: {
@@ -301,12 +371,38 @@ export interface ApiParameters {
   createInvitation: {
     teamId: string;
   };
+  /** POST /api/v1/instances/{instanceId}/notification-rules */
+  createNotificationRule: {
+    instanceId: string;
+  };
   /** POST /api/v1/teams */
   createTeam: Record<string, never>;
+  /** DELETE /api/v1/instances/{instanceId}/notification-rules/{ruleId} */
+  deleteNotificationRule: {
+    instanceId: string;
+    ruleId: string;
+  };
   /** DELETE /api/v1/instances/{instanceId} */
   destroyInstance: {
     instanceId: string;
   };
+  /** DELETE /api/v1/instances/{instanceId}/environments/{environment}/custom-domains/{hostname} */
+  detachHostedCustomDomain: {
+    instanceId: string;
+    environment: string;
+    hostname: string;
+  };
+  /** DELETE /api/v1/teams/{teamId}/marketplace/installations/{installationId} */
+  disconnectMarketplaceInstallation: {
+    teamId: string;
+    installationId: string;
+  };
+  /** POST /api/v1/teams/{teamId}/marketplace/connection */
+  enrollPrivateMarketplaceConnection: {
+    teamId: string;
+  };
+  /** GET /api/v1/me/profile */
+  getAccountProfile: Record<string, never>;
   /** GET /api/v1/me */
   getCurrentPerson: Record<string, never>;
   /** GET /api/v1/instances/{instanceId}/dispatches/{dispatchId} */
@@ -316,22 +412,59 @@ export interface ApiParameters {
   };
   /** GET /healthz */
   getHealth: Record<string, never>;
+  /** GET /api/v1/instances/{instanceId}/status */
+  getHostedAppStatus: {
+    instanceId: string;
+  };
+  /** GET /api/v1/instances/{instanceId}/environments/{environment}/configuration/starter-brand */
+  getHostedStarterBrand: {
+    instanceId: string;
+    environment: string;
+  };
   /** GET /api/v1/instances/{instanceId} */
   getInstance: {
     instanceId: string;
+  };
+  /** GET /api/v1/instances/{instanceId}/environments/{environment} */
+  getInstanceEnvironment: {
+    instanceId: string;
+    environment: string;
   };
   /** GET /api/v1/instances/{instanceId}/latest-attestation */
   getLatestAttestation: {
     instanceId: string;
   };
+  /** GET /api/v1/me/notification-email */
+  getMyNotificationEmail: Record<string, never>;
+  /** GET /api/v1/teams/{teamId}/marketplace/connection */
+  getPrivateMarketplaceConnection: {
+    teamId: string;
+  };
   /** GET /readyz */
   getReady: Record<string, never>;
+  /** GET /api/v1/teams/{teamId}/starter-launch */
+  getStarterLaunch: {
+    teamId: string;
+  };
+  /** GET /api/v1/teams/{teamId}/starter-launch/setup */
+  getStarterLaunchSetup: {
+    teamId: string;
+  };
   /** GET /status */
   getStatus: Record<string, never>;
   /** GET /version */
   getVersion: Record<string, never>;
   /** GET /api/v1/whoami */
   getWhoami: Record<string, never>;
+  /** POST /api/v1/teams/{teamId}/starter-launch/openbao */
+  initializeStarterOpenBao: {
+    teamId: string;
+  };
+  /** POST /api/v1/teams/{teamId}/marketplace/installations/{installationId}/enrollment */
+  issueMarketplaceEnrollment: {
+    teamId: string;
+    installationId: string;
+  };
   /** GET /api/v1/audit */
   listAudit: {
     limit?: number;
@@ -348,6 +481,13 @@ export interface ApiParameters {
   listConsumers: {
     instanceId: string;
   };
+  /** GET /api/v1/instances/{instanceId}/environments/{environment}/custom-domains */
+  listHostedCustomDomains: {
+    instanceId: string;
+    environment: string;
+  };
+  /** GET /api/v1/templates */
+  listInstallableTemplates: Record<string, never>;
   /** GET /api/v1/instances */
   listInstances: Record<string, never>;
   /** GET /api/v1/teams/{teamId}/invitations */
@@ -356,11 +496,21 @@ export interface ApiParameters {
   };
   /** GET /api/v1/me/invitations */
   listMyInvitations: Record<string, never>;
+  /** GET /api/v1/me/notifications */
+  listMyNotifications: Record<string, never>;
   /** GET /api/v1/instances/{instanceId}/secrets */
   listSecretPresence: {
     instanceId: string;
     environment: string;
     service: string;
+  };
+  /** GET /api/v1/teams/{teamId}/activity */
+  listTeamActivity: {
+    teamId: string;
+  };
+  /** GET /api/v1/teams/{teamId}/members */
+  listTeamMembers: {
+    teamId: string;
   };
   /** GET /api/v1/teams */
   listTeams: Record<string, never>;
@@ -379,6 +529,15 @@ export interface ApiParameters {
     instanceId: string;
     name: string;
   };
+  /** POST /api/v1/marketplace/installations/{installationId}/enrollment */
+  redeemMarketplaceEnrollment: {
+    installationId: string;
+  };
+  /** POST /api/v1/instances/{instanceId}/environments/{environment}/deployments */
+  redeployHostedStarter: {
+    instanceId: string;
+    environment: string;
+  };
   /** POST /api/v1/instances/{instanceId}/redeploy */
   redeployInstance: {
     instanceId: string;
@@ -386,6 +545,15 @@ export interface ApiParameters {
   /** POST /api/v1/instances/{instanceId}/plan/from-repository */
   registerPlanFromRepository: {
     instanceId: string;
+  };
+  /** POST /api/v1/teams/{teamId}/starter-launch/remove */
+  removeStarterLaunch: {
+    teamId: string;
+  };
+  /** DELETE /api/v1/teams/{teamId}/members/{personId} */
+  removeTeamMember: {
+    teamId: string;
+    personId: string;
   };
   /** POST /api/v1/instances/{instanceId}/artifacts */
   reportArtifact: {
@@ -407,6 +575,10 @@ export interface ApiParameters {
     instanceId: string;
     capability: string;
   };
+  /** POST /api/v1/teams/{teamId}/starter-launch */
+  startStarterLaunch: {
+    teamId: string;
+  };
   /** POST /api/v1/instances/{instanceId}/dispatches/{dispatchId}/trigger */
   triggerDispatch: {
     instanceId: string;
@@ -416,6 +588,29 @@ export interface ApiParameters {
   unbindCapability: {
     instanceId: string;
     capability: string;
+  };
+  /** POST /api/v1/teams/{teamId}/starter-launch/openbao/unlock */
+  unlockStarterOpenBao: {
+    teamId: string;
+  };
+  /** PUT /api/v1/me/profile */
+  updateAccountProfile: Record<string, never>;
+  /** PUT /api/v1/instances/{instanceId}/environments/{environment}/configuration/starter-brand */
+  updateHostedStarterBrand: {
+    instanceId: string;
+    environment: string;
+  };
+  /** PUT /api/v1/me/notification-email */
+  updateMyNotificationEmail: Record<string, never>;
+  /** PUT /api/v1/instances/{instanceId}/notification-rules/{ruleId} */
+  updateNotificationRule: {
+    instanceId: string;
+    ruleId: string;
+  };
+  /** PATCH /api/v1/teams/{teamId}/members/{personId} */
+  updateTeamMemberRole: {
+    teamId: string;
+    personId: string;
   };
 }
 
@@ -458,9 +653,23 @@ export interface ApiRequestBodies {
     role?: 'owner' | 'member';
     ttlDays?: number;
   };
+  /** POST /api/v1/instances/{instanceId}/notification-rules */
+  createNotificationRule: {
+    event: 'deployment-failed' | 'app-outage' | 'secret-updated';
+    enabled: boolean;
+    environment?: string;
+  };
   /** POST /api/v1/teams */
   createTeam: {
     name: Slug;
+  };
+  /** POST /api/v1/teams/{teamId}/marketplace/connection */
+  enrollPrivateMarketplaceConnection: {
+    handoff: string;
+  };
+  /** POST /api/v1/teams/{teamId}/starter-launch/openbao */
+  initializeStarterOpenBao: {
+    publicKey: string;
   };
   /** POST /api/v1/attestations */
   postAttestation: Attestation;
@@ -487,6 +696,10 @@ export interface ApiRequestBodies {
     /** What the write does to the RUNNING service. The default, `suppress`, writes the variable and leaves the container alone -- the behaviour every delivery had before this field existed, and still the default, because a platform that cannot read a value back (D4) must not silently restart things on a write that changed nothing. `auto` sends the write without Railway's `skipDeploys` suppression and lets the provider's own comparison decide. Measured 2026-11-15 in docs/research/: a changed value started a new deployment on its own; an identical value started nothing. So the restart is triggered by the party that holds the value, and platfolio never stores, reads, or hashes one -- which is the tradeoff this design accepts in exchange for keeping D4 intact. */
     refresh?: 'suppress' | 'auto';
   };
+  /** POST /api/v1/marketplace/installations/{installationId}/enrollment */
+  redeemMarketplaceEnrollment: {
+    registryDigest: string;
+  };
   /** POST /api/v1/instances/{instanceId}/redeploy */
   redeployInstance: {
     environment: 'production' | 'staging' | 'preview';
@@ -498,6 +711,11 @@ export interface ApiRequestBodies {
     path?: string;
     /** The pinned production overlay. Default `compose.prod.yaml`. Absent is allowed only when every service in `path` already carries a digest; otherwise the refusal says which service is unpinned. */
     overlayPath?: string;
+  };
+  /** POST /api/v1/teams/{teamId}/starter-launch/remove */
+  removeStarterLaunch: {
+    data: 'keep' | 'wipe';
+    confirmation?: string;
   };
   /** POST /api/v1/instances/{instanceId}/artifacts */
   reportArtifact: {
@@ -523,6 +741,31 @@ export interface ApiRequestBodies {
     /** Workflow file name. Default `platfolio-managed.yml`. */
     workflow?: string;
   };
+  /** POST /api/v1/teams/{teamId}/starter-launch/openbao/unlock */
+  unlockStarterOpenBao: {
+    recovery: string;
+  };
+  /** PUT /api/v1/me/profile */
+  updateAccountProfile: {
+    username: string;
+    displayName: string;
+  };
+  /** PUT /api/v1/instances/{instanceId}/environments/{environment}/configuration/starter-brand */
+  updateHostedStarterBrand: StarterBrandChange;
+  /** PUT /api/v1/me/notification-email */
+  updateMyNotificationEmail: {
+    enabled: boolean;
+  };
+  /** PUT /api/v1/instances/{instanceId}/notification-rules/{ruleId} */
+  updateNotificationRule: {
+    event: 'deployment-failed' | 'app-outage' | 'secret-updated';
+    enabled: boolean;
+    environment?: string;
+  };
+  /** PATCH /api/v1/teams/{teamId}/members/{personId} */
+  updateTeamMemberRole: {
+    role: 'owner' | 'member';
+  };
 }
 
 /**
@@ -544,11 +787,72 @@ export interface ApiResponses {
     '404': Error;
     '409': Error;
   };
+  /** PUT /api/v1/instances/{instanceId}/environments/{environment}/custom-domains/{hostname} */
+  attachHostedCustomDomain: {
+    '200': HostedCustomDomain;
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '409': Error;
+    '503': Error;
+  };
+  /** POST /api/v1/teams/{teamId}/starter-launch/railway */
+  beginStarterRailwayAuthorization: {
+    '200': {
+      authorizationUrl: string;
+    };
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '503': Error;
+  };
   /** PUT /api/v1/instances/{instanceId}/bindings/{capability} */
   bindCapability: {
     '200': BindingRecord;
     '400': Error;
     '401': Error;
+    '404': Error;
+  };
+  /** POST /api/v1/marketplace/installations/{installationId}/claim */
+  claimEnrolledMarketplaceRelease: {
+    '200': {
+      installationId: string;
+      template: 'starter-web';
+      repo: string;
+      version: string;
+      revision: string;
+      priceMinor: 0;
+    };
+    '400': Error;
+    '404': Error;
+  };
+  /** POST /api/v1/teams/{teamId}/marketplace/installations/{installationId}/claim */
+  claimFreeMarketplaceRelease: {
+    '200': {
+      installationId: string;
+      template: 'starter-web';
+      repo: string;
+      version: string;
+      revision: string;
+      priceMinor: 0;
+    };
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+  };
+  /** GET /api/v1/railway/callback */
+  completeStarterRailwayAuthorization: {
+    '303': void;
+    '404': Error;
+  };
+  /** PUT /api/v1/teams/{teamId}/marketplace/installations/{installationId} */
+  connectMarketplaceInstallation: {
+    '204': void;
+    '400': Error;
+    '401': Error;
+    '403': Error;
     '404': Error;
   };
   /** POST /api/v1/instances/{instanceId}/dispatches */
@@ -582,12 +886,28 @@ export interface ApiResponses {
     '404': Error;
     '409': Error;
   };
+  /** POST /api/v1/instances/{instanceId}/notification-rules */
+  createNotificationRule: {
+    '201': NotificationRule;
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '409': Error;
+  };
   /** POST /api/v1/teams */
   createTeam: {
     '201': TeamWithRole;
     '400': Error;
     '401': Error;
     '409': Error;
+  };
+  /** DELETE /api/v1/instances/{instanceId}/notification-rules/{ruleId} */
+  deleteNotificationRule: {
+    '204': void;
+    '401': Error;
+    '403': Error;
+    '404': Error;
   };
   /** DELETE /api/v1/instances/{instanceId} */
   destroyInstance: {
@@ -600,6 +920,46 @@ export interface ApiResponses {
     '403': Error;
     '404': Error;
     '409': Error;
+  };
+  /** DELETE /api/v1/instances/{instanceId}/environments/{environment}/custom-domains/{hostname} */
+  detachHostedCustomDomain: {
+    '204': void;
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '409': Error;
+    '503': Error;
+  };
+  /** DELETE /api/v1/teams/{teamId}/marketplace/installations/{installationId} */
+  disconnectMarketplaceInstallation: {
+    '204': void;
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+  };
+  /** POST /api/v1/teams/{teamId}/marketplace/connection */
+  enrollPrivateMarketplaceConnection: {
+    '204': void;
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '409': Error;
+    '503': Error;
+  };
+  /** GET /api/v1/me/profile */
+  getAccountProfile: {
+    '200': {
+      username: string;
+      displayName: string;
+      email: string;
+      emailVerified: boolean;
+    };
+    '401': Error;
+    '403': Error;
+    '503': Error;
   };
   /** GET /api/v1/me */
   getCurrentPerson: {
@@ -622,9 +982,61 @@ export interface ApiResponses {
   getHealth: {
     '200': Health;
   };
+  /** GET /api/v1/instances/{instanceId}/status */
+  getHostedAppStatus: {
+    '200': {
+      environment: 'staging';
+      state: 'checking' | 'up' | 'down' | 'paused' | 'removed';
+      checkedAt?: string;
+      updates: Array<{
+        id: string;
+        at: string;
+        state: 'down' | 'up' | 'paused' | 'removed';
+      }>;
+    };
+    '401': Error;
+    '403': Error;
+    '404': Error;
+  };
+  /** GET /api/v1/instances/{instanceId}/environments/{environment}/configuration/starter-brand */
+  getHostedStarterBrand: {
+    '200': {
+      value: (string | null);
+      state: 'ready' | 'deploying' | 'failed';
+    };
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '409': Error;
+    '503': Error;
+  };
   /** GET /api/v1/instances/{instanceId} */
   getInstance: {
     '200': InstanceResponse;
+    '401': Error;
+    '404': Error;
+  };
+  /** GET /api/v1/instances/{instanceId}/environments/{environment} */
+  getInstanceEnvironment: {
+    '200': {
+      planned: boolean;
+      hosting?: HostedStarter;
+      services: Array<{
+        name: string;
+        secrets: string[];
+      }>;
+      domains: Array<{
+        host: string;
+        service: string;
+      }>;
+      deployments: Array<{
+        id: string;
+        result: 'ok' | 'partial' | 'failed' | 'noop';
+        reportedAt: string;
+        commit?: string;
+        problem?: string;
+      }>;
+    };
     '401': Error;
     '404': Error;
   };
@@ -634,10 +1046,73 @@ export interface ApiResponses {
     '401': Error;
     '404': Error;
   };
+  /** GET /api/v1/me/notification-email */
+  getMyNotificationEmail: {
+    '200': {
+      available: boolean;
+      enabled: boolean;
+    };
+    '401': Error;
+    '403': Error;
+    '503': Error;
+  };
+  /** GET /api/v1/teams/{teamId}/marketplace/connection */
+  getPrivateMarketplaceConnection: {
+    '200': {
+      state: 'unconfigured' | 'openbao-required' | 'disconnected' | 'connected' | 'unavailable';
+      release?: {
+        template: string;
+        version: string;
+        revision: string;
+      };
+    };
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '503': Error;
+  };
   /** GET /readyz */
   getReady: {
     '200': Ready;
     '503': Ready;
+  };
+  /** GET /api/v1/teams/{teamId}/starter-launch */
+  getStarterLaunch: {
+    '200': {
+      state: 'idle' | 'running' | 'ready' | 'failed' | 'removing' | 'kept' | 'wiped';
+      template: string;
+      revision: string;
+      registration?: 'pending' | 'recorded' | 'conflict';
+      instanceName?: string;
+      projectId?: string;
+      deploymentId?: string;
+      origin?: string;
+      retainedVolumes: string[];
+      events: Array<{
+        at: string;
+        step: string;
+        state: string;
+        resourceId?: string;
+        detail?: string;
+      }>;
+    };
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '503': Error;
+  };
+  /** GET /api/v1/teams/{teamId}/starter-launch/setup */
+  getStarterLaunchSetup: {
+    '200': {
+      openBao: 'unreachable' | 'uninitialized' | 'sealed' | 'setup-required' | 'ready';
+      railway: 'connect' | 'connected';
+      workerKey: string;
+      canWipeData?: boolean;
+    };
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '503': Error;
   };
   /** GET /status */
   getStatus: {
@@ -654,6 +1129,28 @@ export interface ApiResponses {
     '200': Whoami;
     '401': Error;
     '403': Error;
+  };
+  /** POST /api/v1/teams/{teamId}/starter-launch/openbao */
+  initializeStarterOpenBao: {
+    '200': {
+      recovery: string;
+    };
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '503': Error;
+  };
+  /** POST /api/v1/teams/{teamId}/marketplace/installations/{installationId}/enrollment */
+  issueMarketplaceEnrollment: {
+    '201': {
+      enrollmentCode: string;
+      expiresAt: string;
+    };
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '404': Error;
   };
   /** GET /api/v1/audit */
   listAudit: {
@@ -678,6 +1175,27 @@ export interface ApiResponses {
     '401': Error;
     '404': Error;
   };
+  /** GET /api/v1/instances/{instanceId}/environments/{environment}/custom-domains */
+  listHostedCustomDomains: {
+    '200': HostedCustomDomain[];
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '409': Error;
+    '503': Error;
+  };
+  /** GET /api/v1/templates */
+  listInstallableTemplates: {
+    '200': Array<{
+      template: string;
+      repo: string;
+      version: string;
+      revision: string;
+      priceMinor: 0;
+    }>;
+    '401': Error;
+    '403': Error;
+  };
   /** GET /api/v1/instances */
   listInstances: {
     '200': InstanceResponse[];
@@ -696,6 +1214,21 @@ export interface ApiResponses {
     '401': Error;
     '409': Error;
   };
+  /** GET /api/v1/me/notifications */
+  listMyNotifications: {
+    '200': {
+      rules: NotificationRule[];
+      updates: Array<{
+        id: string;
+        instanceId: string;
+        event: 'deployment-failed' | 'app-outage' | 'secret-updated';
+        at: string;
+        environment?: string;
+      }>;
+    };
+    '401': Error;
+    '403': Error;
+  };
   /** GET /api/v1/instances/{instanceId}/secrets */
   listSecretPresence: {
     '200': {
@@ -712,6 +1245,26 @@ export interface ApiResponses {
     '403': Error;
     '404': Error;
     '501': Error;
+  };
+  /** GET /api/v1/teams/{teamId}/activity */
+  listTeamActivity: {
+    '200': AuditEntry[];
+    '401': Error;
+    '403': Error;
+    '404': Error;
+  };
+  /** GET /api/v1/teams/{teamId}/members */
+  listTeamMembers: {
+    '200': Array<{
+      personId: string;
+      role: 'owner' | 'member';
+      addedAt: string;
+      self: boolean;
+      invitedAddress?: string;
+    }>;
+    '401': Error;
+    '403': Error;
+    '404': Error;
   };
   /** GET /api/v1/teams */
   listTeams: {
@@ -759,6 +1312,24 @@ export interface ApiResponses {
     '404': Error;
     '501': Error;
     '502': Error;
+    '503': Error;
+  };
+  /** POST /api/v1/marketplace/installations/{installationId}/enrollment */
+  redeemMarketplaceEnrollment: {
+    '204': void;
+    '400': Error;
+    '404': Error;
+  };
+  /** POST /api/v1/instances/{instanceId}/environments/{environment}/deployments */
+  redeployHostedStarter: {
+    '202': {
+      state: 'requested';
+    };
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '409': Error;
+    '503': Error;
   };
   /** POST /api/v1/instances/{instanceId}/redeploy */
   redeployInstance: {
@@ -820,6 +1391,42 @@ export interface ApiResponses {
     '404': Error;
     '503': Error;
   };
+  /** POST /api/v1/teams/{teamId}/starter-launch/remove */
+  removeStarterLaunch: {
+    '200': {
+      state: 'idle' | 'running' | 'ready' | 'failed' | 'removing' | 'kept' | 'wiped';
+      template: string;
+      revision: string;
+      registration?: 'pending' | 'recorded' | 'conflict';
+      instanceName?: string;
+      projectId?: string;
+      deploymentId?: string;
+      origin?: string;
+      retainedVolumes: string[];
+      events: Array<{
+        at: string;
+        step: string;
+        state: string;
+        resourceId?: string;
+        detail?: string;
+      }>;
+    };
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '409': Error;
+    '503': Error;
+  };
+  /** DELETE /api/v1/teams/{teamId}/members/{personId} */
+  removeTeamMember: {
+    '204': void;
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '409': Error;
+  };
   /** POST /api/v1/instances/{instanceId}/artifacts */
   reportArtifact: {
     '201': {
@@ -859,6 +1466,31 @@ export interface ApiResponses {
     '403': Error;
     '404': Error;
   };
+  /** POST /api/v1/teams/{teamId}/starter-launch */
+  startStarterLaunch: {
+    '200': {
+      state: 'idle' | 'running' | 'ready' | 'failed' | 'removing' | 'kept' | 'wiped';
+      template: string;
+      revision: string;
+      registration?: 'pending' | 'recorded' | 'conflict';
+      instanceName?: string;
+      projectId?: string;
+      deploymentId?: string;
+      origin?: string;
+      retainedVolumes: string[];
+      events: Array<{
+        at: string;
+        step: string;
+        state: string;
+        resourceId?: string;
+        detail?: string;
+      }>;
+    };
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '503': Error;
+  };
   /** POST /api/v1/instances/{instanceId}/dispatches/{dispatchId}/trigger */
   triggerDispatch: {
     '202': {
@@ -881,6 +1513,69 @@ export interface ApiResponses {
     '204': void;
     '401': Error;
     '404': Error;
+  };
+  /** POST /api/v1/teams/{teamId}/starter-launch/openbao/unlock */
+  unlockStarterOpenBao: {
+    '204': void;
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '503': Error;
+  };
+  /** PUT /api/v1/me/profile */
+  updateAccountProfile: {
+    '200': {
+      username: string;
+      displayName: string;
+      email: string;
+      emailVerified: boolean;
+    };
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '503': Error;
+  };
+  /** PUT /api/v1/instances/{instanceId}/environments/{environment}/configuration/starter-brand */
+  updateHostedStarterBrand: {
+    '202': {
+      state: 'requested';
+    };
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '409': Error;
+    '503': Error;
+  };
+  /** PUT /api/v1/me/notification-email */
+  updateMyNotificationEmail: {
+    '200': {
+      available: boolean;
+      enabled: boolean;
+    };
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '503': Error;
+  };
+  /** PUT /api/v1/instances/{instanceId}/notification-rules/{ruleId} */
+  updateNotificationRule: {
+    '200': NotificationRule;
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '409': Error;
+  };
+  /** PATCH /api/v1/teams/{teamId}/members/{personId} */
+  updateTeamMemberRole: {
+    '204': void;
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '409': Error;
   };
 }
 
@@ -934,36 +1629,78 @@ export interface Endpoint {
 export const ENDPOINTS = {
   /** POST /api/v1/me/invitations/{invitationId}/accept */
   acceptInvitation: { method: 'post', path: '/api/v1/me/invitations/{invitationId}/accept' },
+  /** PUT /api/v1/instances/{instanceId}/environments/{environment}/custom-domains/{hostname} */
+  attachHostedCustomDomain: { method: 'put', path: '/api/v1/instances/{instanceId}/environments/{environment}/custom-domains/{hostname}' },
+  /** POST /api/v1/teams/{teamId}/starter-launch/railway */
+  beginStarterRailwayAuthorization: { method: 'post', path: '/api/v1/teams/{teamId}/starter-launch/railway' },
   /** PUT /api/v1/instances/{instanceId}/bindings/{capability} */
   bindCapability: { method: 'put', path: '/api/v1/instances/{instanceId}/bindings/{capability}' },
+  /** POST /api/v1/marketplace/installations/{installationId}/claim */
+  claimEnrolledMarketplaceRelease: { method: 'post', path: '/api/v1/marketplace/installations/{installationId}/claim' },
+  /** POST /api/v1/teams/{teamId}/marketplace/installations/{installationId}/claim */
+  claimFreeMarketplaceRelease: { method: 'post', path: '/api/v1/teams/{teamId}/marketplace/installations/{installationId}/claim' },
+  /** GET /api/v1/railway/callback */
+  completeStarterRailwayAuthorization: { method: 'get', path: '/api/v1/railway/callback' },
+  /** PUT /api/v1/teams/{teamId}/marketplace/installations/{installationId} */
+  connectMarketplaceInstallation: { method: 'put', path: '/api/v1/teams/{teamId}/marketplace/installations/{installationId}' },
   /** POST /api/v1/instances/{instanceId}/dispatches */
   createDispatch: { method: 'post', path: '/api/v1/instances/{instanceId}/dispatches' },
   /** POST /api/v1/instances */
   createInstance: { method: 'post', path: '/api/v1/instances' },
   /** POST /api/v1/teams/{teamId}/invitations */
   createInvitation: { method: 'post', path: '/api/v1/teams/{teamId}/invitations' },
+  /** POST /api/v1/instances/{instanceId}/notification-rules */
+  createNotificationRule: { method: 'post', path: '/api/v1/instances/{instanceId}/notification-rules' },
   /** POST /api/v1/teams */
   createTeam: { method: 'post', path: '/api/v1/teams' },
+  /** DELETE /api/v1/instances/{instanceId}/notification-rules/{ruleId} */
+  deleteNotificationRule: { method: 'delete', path: '/api/v1/instances/{instanceId}/notification-rules/{ruleId}' },
   /** DELETE /api/v1/instances/{instanceId} */
   destroyInstance: { method: 'delete', path: '/api/v1/instances/{instanceId}' },
+  /** DELETE /api/v1/instances/{instanceId}/environments/{environment}/custom-domains/{hostname} */
+  detachHostedCustomDomain: { method: 'delete', path: '/api/v1/instances/{instanceId}/environments/{environment}/custom-domains/{hostname}' },
+  /** DELETE /api/v1/teams/{teamId}/marketplace/installations/{installationId} */
+  disconnectMarketplaceInstallation: { method: 'delete', path: '/api/v1/teams/{teamId}/marketplace/installations/{installationId}' },
+  /** POST /api/v1/teams/{teamId}/marketplace/connection */
+  enrollPrivateMarketplaceConnection: { method: 'post', path: '/api/v1/teams/{teamId}/marketplace/connection' },
+  /** GET /api/v1/me/profile */
+  getAccountProfile: { method: 'get', path: '/api/v1/me/profile' },
   /** GET /api/v1/me */
   getCurrentPerson: { method: 'get', path: '/api/v1/me' },
   /** GET /api/v1/instances/{instanceId}/dispatches/{dispatchId} */
   getDispatchPlan: { method: 'get', path: '/api/v1/instances/{instanceId}/dispatches/{dispatchId}' },
   /** GET /healthz */
   getHealth: { method: 'get', path: '/healthz' },
+  /** GET /api/v1/instances/{instanceId}/status */
+  getHostedAppStatus: { method: 'get', path: '/api/v1/instances/{instanceId}/status' },
+  /** GET /api/v1/instances/{instanceId}/environments/{environment}/configuration/starter-brand */
+  getHostedStarterBrand: { method: 'get', path: '/api/v1/instances/{instanceId}/environments/{environment}/configuration/starter-brand' },
   /** GET /api/v1/instances/{instanceId} */
   getInstance: { method: 'get', path: '/api/v1/instances/{instanceId}' },
+  /** GET /api/v1/instances/{instanceId}/environments/{environment} */
+  getInstanceEnvironment: { method: 'get', path: '/api/v1/instances/{instanceId}/environments/{environment}' },
   /** GET /api/v1/instances/{instanceId}/latest-attestation */
   getLatestAttestation: { method: 'get', path: '/api/v1/instances/{instanceId}/latest-attestation' },
+  /** GET /api/v1/me/notification-email */
+  getMyNotificationEmail: { method: 'get', path: '/api/v1/me/notification-email' },
+  /** GET /api/v1/teams/{teamId}/marketplace/connection */
+  getPrivateMarketplaceConnection: { method: 'get', path: '/api/v1/teams/{teamId}/marketplace/connection' },
   /** GET /readyz */
   getReady: { method: 'get', path: '/readyz' },
+  /** GET /api/v1/teams/{teamId}/starter-launch */
+  getStarterLaunch: { method: 'get', path: '/api/v1/teams/{teamId}/starter-launch' },
+  /** GET /api/v1/teams/{teamId}/starter-launch/setup */
+  getStarterLaunchSetup: { method: 'get', path: '/api/v1/teams/{teamId}/starter-launch/setup' },
   /** GET /status */
   getStatus: { method: 'get', path: '/status' },
   /** GET /version */
   getVersion: { method: 'get', path: '/version' },
   /** GET /api/v1/whoami */
   getWhoami: { method: 'get', path: '/api/v1/whoami' },
+  /** POST /api/v1/teams/{teamId}/starter-launch/openbao */
+  initializeStarterOpenBao: { method: 'post', path: '/api/v1/teams/{teamId}/starter-launch/openbao' },
+  /** POST /api/v1/teams/{teamId}/marketplace/installations/{installationId}/enrollment */
+  issueMarketplaceEnrollment: { method: 'post', path: '/api/v1/teams/{teamId}/marketplace/installations/{installationId}/enrollment' },
   /** GET /api/v1/audit */
   listAudit: { method: 'get', path: '/api/v1/audit' },
   /** GET /api/v1/capabilities */
@@ -972,14 +1709,24 @@ export const ENDPOINTS = {
   listBindings: { method: 'get', path: '/api/v1/instances/{instanceId}/bindings' },
   /** GET /api/v1/instances/{instanceId}/consumers */
   listConsumers: { method: 'get', path: '/api/v1/instances/{instanceId}/consumers' },
+  /** GET /api/v1/instances/{instanceId}/environments/{environment}/custom-domains */
+  listHostedCustomDomains: { method: 'get', path: '/api/v1/instances/{instanceId}/environments/{environment}/custom-domains' },
+  /** GET /api/v1/templates */
+  listInstallableTemplates: { method: 'get', path: '/api/v1/templates' },
   /** GET /api/v1/instances */
   listInstances: { method: 'get', path: '/api/v1/instances' },
   /** GET /api/v1/teams/{teamId}/invitations */
   listInvitations: { method: 'get', path: '/api/v1/teams/{teamId}/invitations' },
   /** GET /api/v1/me/invitations */
   listMyInvitations: { method: 'get', path: '/api/v1/me/invitations' },
+  /** GET /api/v1/me/notifications */
+  listMyNotifications: { method: 'get', path: '/api/v1/me/notifications' },
   /** GET /api/v1/instances/{instanceId}/secrets */
   listSecretPresence: { method: 'get', path: '/api/v1/instances/{instanceId}/secrets' },
+  /** GET /api/v1/teams/{teamId}/activity */
+  listTeamActivity: { method: 'get', path: '/api/v1/teams/{teamId}/activity' },
+  /** GET /api/v1/teams/{teamId}/members */
+  listTeamMembers: { method: 'get', path: '/api/v1/teams/{teamId}/members' },
   /** GET /api/v1/teams */
   listTeams: { method: 'get', path: '/api/v1/teams' },
   /** POST /api/v1/attestations */
@@ -990,10 +1737,18 @@ export const ENDPOINTS = {
   putPlan: { method: 'put', path: '/api/v1/instances/{instanceId}/plan' },
   /** PUT /api/v1/instances/{instanceId}/secrets/{name} */
   putSecret: { method: 'put', path: '/api/v1/instances/{instanceId}/secrets/{name}' },
+  /** POST /api/v1/marketplace/installations/{installationId}/enrollment */
+  redeemMarketplaceEnrollment: { method: 'post', path: '/api/v1/marketplace/installations/{installationId}/enrollment' },
+  /** POST /api/v1/instances/{instanceId}/environments/{environment}/deployments */
+  redeployHostedStarter: { method: 'post', path: '/api/v1/instances/{instanceId}/environments/{environment}/deployments' },
   /** POST /api/v1/instances/{instanceId}/redeploy */
   redeployInstance: { method: 'post', path: '/api/v1/instances/{instanceId}/redeploy' },
   /** POST /api/v1/instances/{instanceId}/plan/from-repository */
   registerPlanFromRepository: { method: 'post', path: '/api/v1/instances/{instanceId}/plan/from-repository' },
+  /** POST /api/v1/teams/{teamId}/starter-launch/remove */
+  removeStarterLaunch: { method: 'post', path: '/api/v1/teams/{teamId}/starter-launch/remove' },
+  /** DELETE /api/v1/teams/{teamId}/members/{personId} */
+  removeTeamMember: { method: 'delete', path: '/api/v1/teams/{teamId}/members/{personId}' },
   /** POST /api/v1/instances/{instanceId}/artifacts */
   reportArtifact: { method: 'post', path: '/api/v1/instances/{instanceId}/artifacts' },
   /** DELETE /api/v1/instances/{instanceId}/capability/{capability}/shares/{toTeamId} */
@@ -1002,10 +1757,24 @@ export const ENDPOINTS = {
   revokeInvitation: { method: 'delete', path: '/api/v1/teams/{teamId}/invitations/{invitationId}' },
   /** PUT /api/v1/instances/{instanceId}/capability/{capability}/shares */
   shareCapability: { method: 'put', path: '/api/v1/instances/{instanceId}/capability/{capability}/shares' },
+  /** POST /api/v1/teams/{teamId}/starter-launch */
+  startStarterLaunch: { method: 'post', path: '/api/v1/teams/{teamId}/starter-launch' },
   /** POST /api/v1/instances/{instanceId}/dispatches/{dispatchId}/trigger */
   triggerDispatch: { method: 'post', path: '/api/v1/instances/{instanceId}/dispatches/{dispatchId}/trigger' },
   /** DELETE /api/v1/instances/{instanceId}/bindings/{capability} */
   unbindCapability: { method: 'delete', path: '/api/v1/instances/{instanceId}/bindings/{capability}' },
+  /** POST /api/v1/teams/{teamId}/starter-launch/openbao/unlock */
+  unlockStarterOpenBao: { method: 'post', path: '/api/v1/teams/{teamId}/starter-launch/openbao/unlock' },
+  /** PUT /api/v1/me/profile */
+  updateAccountProfile: { method: 'put', path: '/api/v1/me/profile' },
+  /** PUT /api/v1/instances/{instanceId}/environments/{environment}/configuration/starter-brand */
+  updateHostedStarterBrand: { method: 'put', path: '/api/v1/instances/{instanceId}/environments/{environment}/configuration/starter-brand' },
+  /** PUT /api/v1/me/notification-email */
+  updateMyNotificationEmail: { method: 'put', path: '/api/v1/me/notification-email' },
+  /** PUT /api/v1/instances/{instanceId}/notification-rules/{ruleId} */
+  updateNotificationRule: { method: 'put', path: '/api/v1/instances/{instanceId}/notification-rules/{ruleId}' },
+  /** PATCH /api/v1/teams/{teamId}/members/{personId} */
+  updateTeamMemberRole: { method: 'patch', path: '/api/v1/teams/{teamId}/members/{personId}' },
 } as const satisfies Record<OperationId, Endpoint>;
 
 /**

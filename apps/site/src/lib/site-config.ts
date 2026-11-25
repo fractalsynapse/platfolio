@@ -11,7 +11,7 @@
 // reason above, and it is dependency-free by construction: `browser-auth-policy.ts` imports nothing, which is the
 // property that makes it the only part of the package a Node-startup script may read. `packages/ui/tsconfig.json`
 // already reaches across by path for the same kind of reason (`../../scripts/check-ui.ts`).
-import { REQUIRED_SCOPE, WEB_CLIENT_ID } from '../../../../packages/ui/src/web/browser-auth-policy.ts';
+import { LOGIN_SCOPES, WEB_CLIENT_ID } from '../../../../packages/ui/src/web/browser-auth-policy.ts';
 
 /**
  * The site's configuration, read from the environment it was built or started in (D47, D58).
@@ -164,7 +164,7 @@ export function resolveSiteConfig(env: Readonly<Record<string, string | undefine
     // The policy's constant is the default; a deploy that renamed the realm client names it here, in the
     // environment, rather than editing this file (which would be a second copy of the client's identity).
     clientId: env[SITE_VARIABLES.clientId]?.trim() || WEB_CLIENT_ID,
-    scope: REQUIRED_SCOPE,
+    scope: LOGIN_SCOPES,
   };
 }
 

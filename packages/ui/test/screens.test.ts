@@ -3,7 +3,7 @@ import * as React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { test } from 'node:test';
 import { capabilityParityProblems, reachableOperations, screenPlacements, screenSlots } from '../src/screens/screen.ts';
-import { INSTANCE_LIST_SCREEN } from '../src/screens/instance-list.tsx';
+import { INSTANCE_LIST_SCREEN, SCREENS } from '../src/screens/index.ts';
 import { PRIMITIVES, LAYOUT_SLOTS, floorSlotsReachableFrom } from '../src/layout/index.ts';
 import { componentById, registeredComponentIds } from '../src/registry.ts';
 import { SdkContext } from '../src/sdk/use-operation.ts';
@@ -113,12 +113,15 @@ test('floor projection is data on the primitive, not a rule the test agrees with
 });
 
 test('every registered component is reachable from a screen, or the registry has an entry nothing renders', () => {
-  const placed = new Set(screenPlacements(INSTANCE_LIST_SCREEN).map((placement) => placement.component));
+  const placed = new Set(SCREENS.flatMap(screenPlacements).map((placement) => placement.component));
   // `instance.row` and `instance.state` are rendered *by* the list rather than placed by the document, so the
   // claim is about reachability through the registry plus the components a placed component calls.
   const reachable = new Set(placed);
   for (const id of placed) {
-    const html = renderToStaticMarkup(React.createElement(SignalsProvider, { bus: contextualBus() }, React.createElement(componentById(id).render, propsForComponent(id))));
+    const markup = React.createElement(SignalsProvider, { bus: contextualBus() }, React.createElement(componentById(id).render, propsForComponent(id)));
+    const transport: Transport = { kind: 'poll', async call() { throw new Error('Static render requested data'); } };
+    const auth: AuthSource = { async token() { throw new Error('Static render requested a token'); } };
+    const html = renderToStaticMarkup(React.createElement(SdkContext.Provider, { value: { transport, auth, now: () => new Date(SAMPLE_NOW) } }, markup));
     for (const other of registeredComponentIds()) {
       if (html.includes(classOf(other))) reachable.add(other);
     }
@@ -148,6 +151,8 @@ function propsForComponent(id: string): Record<string, unknown> {
     case 'instance.state': return { state: 'degraded', observedAt: SAMPLE_FRESHNESS.observedAt, now: SAMPLE_NOW };
     case 'freshness.label': return { freshness: SAMPLE_FRESHNESS, now: SAMPLE_NOW, describes: 'Instances' };
     case 'context.switcher': return { teams: SAMPLE_TEAMS, instances: SAMPLE_INSTANCES };
+    case 'workspace.content': return {};
+    case 'launch.starter': return { teamId: SAMPLE_TEAMS[0]?.teamId };
     default: throw new TypeError(`screens.test.ts has no props for ${id}`);
   }
 }

@@ -32,13 +32,13 @@ import { createHash, randomBytes } from 'node:crypto';
  * without moving a caller's address cannot quietly leave two spellings behind.
  */
 import {
-  API_CLIENT_ID, CALLBACK_PATH, HANDOFF_KEYS, HANDOFF_STORAGE, LOGOUT_CLEAR, PKCE_METHOD, RECOMMENDED_STORE,
+  API_CLIENT_ID, CALLBACK_PATH, HANDOFF_KEYS, HANDOFF_STORAGE, LOGIN_SCOPES, LOGOUT_CLEAR, PKCE_METHOD, RECOMMENDED_STORE,
   REQUIRED_SCOPE, TOKEN_STORAGE, WEB_CLIENT_ID, endSessionUrl, isPkceVerifier, isTokenShapedName, refreshAt,
   refreshSkewSeconds, type HandoffField, type PkcePair, type StorageLocation, type TokenKind,
 } from '../packages/ui/src/web/browser-auth-policy.ts';
 
 export {
-  API_CLIENT_ID, CALLBACK_PATH, HANDOFF_KEYS, HANDOFF_STORAGE, LOGOUT_CLEAR, PKCE_METHOD, RECOMMENDED_STORE,
+  API_CLIENT_ID, CALLBACK_PATH, HANDOFF_KEYS, HANDOFF_STORAGE, LOGIN_SCOPES, LOGOUT_CLEAR, PKCE_METHOD, RECOMMENDED_STORE,
   REQUIRED_SCOPE, TOKEN_STORAGE, WEB_CLIENT_ID, endSessionUrl, isPkceVerifier, isTokenShapedName, refreshAt,
   refreshSkewSeconds, type HandoffField, type PkcePair, type StorageLocation, type TokenKind,
 };
@@ -330,4 +330,6 @@ export const AUDIT_DETAIL_KEYS_ALLOWLIST = [
   'template', 'teamId', 'from', 'state', 'planHash', 'repo', 'commit', 'files', 'service', 'image', 'digest',
   'dispatchId', 'action', 'environment', 'ref', 'workflow', 'result', 'resources', 'to', 'environmentState',
   'capability', 'toTeamId', 'providerInstanceId', 'email', 'role', 'sent', 'personId', 'reason', 'name',
+  // A normalized public hostname. The DNS verification value stays out of the audit row.
+  'hostname',
 ] as const;

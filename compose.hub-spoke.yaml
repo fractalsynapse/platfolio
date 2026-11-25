@@ -1,0 +1,58 @@
+# Local-only D71 proof. Use compose.yaml and compose.dev.yaml before this overlay.
+services:
+  main:
+    ports: !reset []
+  mailpit:
+    ports: !reset []
+  api:
+    image: platfolio-control-plane:hub-spoke-proof
+    working_dir: !reset null
+    command: !reset null
+    volumes: !reset []
+    ports: !override ['127.0.0.1:${PROOF_API_PORT:?}:8080']
+    environment:
+      PLATFOLIO_COMMIT: !reset null
+      PLATFOLIO_BUILD_TIME: !reset null
+      PLATFOLIO_GIT_TOKEN: !reset null
+      PLATFOLIO_MARKETPLACE_ENABLED: ${PROOF_MARKETPLACE_ENABLED:-false}
+      PLATFOLIO_IDENTITY_ISSUER: http://${PROOF_HOST:?}:${PROOF_IDENTITY_PORT:?}/realms/platfolio
+      PLATFOLIO_ALLOWED_ORIGINS: http://${PROOF_HOST:?}:${PROOF_SITE_PORT:?}
+  site:
+    image: platfolio-site:hub-spoke-proof
+    build: !reset null
+    ports: !override ['127.0.0.1:${PROOF_SITE_PORT:?}:4321']
+    environment:
+      PLATFOLIO_SITE_ORIGIN: http://${PROOF_HOST:?}:${PROOF_SITE_PORT:?}
+      PLATFOLIO_URL: http://${PROOF_HOST:?}:${PROOF_API_PORT:?}
+      PLATFOLIO_IDENTITY_ISSUER: http://${PROOF_HOST:?}:${PROOF_IDENTITY_PORT:?}/realms/platfolio
+  identity:
+    ports: !override ['127.0.0.1:${PROOF_IDENTITY_PORT:?}:8080']
+    environment:
+      KC_HOSTNAME: http://${PROOF_HOST:?}:${PROOF_IDENTITY_PORT:?}
+  openbao:
+    image: quay.io/openbao/openbao:2.7.0@sha256:71156a1c6623a5fa3f5e61b0c6a8ead0faf0df29a778339188443551995d1315
+    command: ['server']
+    ports: ['127.0.0.1:${PROOF_BAO_PORT:?}:8200']
+    configs:
+      - source: proof-bao
+        target: /openbao/config/proof.hcl
+    volumes:
+      - proof-bao-data:/openbao/file
+
+configs:
+  proof-bao:
+    content: |
+      disable_mlock = true
+      api_addr = "http://openbao:8200"
+      cluster_addr = "http://openbao:8201"
+      storage "raft" {
+        path = "/openbao/file"
+        node_id = "local"
+      }
+      listener "tcp" {
+        address = "0.0.0.0:8200"
+        tls_disable = true
+      }
+
+volumes:
+  proof-bao-data:

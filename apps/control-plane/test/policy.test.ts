@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createKernel, disposeKernel } from '@platfolio/kernel';
+import type { StarterLaunch, StarterRemoval } from '../src/starter-launch.ts';
 import { buildCapabilities, OPERATION_ACTIONS } from '../src/capabilities.ts';
 import { createIdentityFixture, defaultIdentityConfig, POLICY, reasonOf, signToken, uncoveredActions, type StoreResult, type PolicyAction } from '@platfolio/contracts';
 
@@ -12,11 +13,11 @@ function must<T>(result: StoreResult<T>, label: string): T {
   throw new Error(`${label} refused: ${reasonOf(result)}`);
 }
 
-async function start() {
+async function start(starterLaunch?: StarterLaunch) {
   const ctx = await createKernel({
     provider: 'fake', custody: 'strict', identity: defaultIdentityConfig(fixture), identityKeys: [fixture.jwk],
     store: { driver: 'memory' }, server: { port: 0 },
-    extensions: buildCapabilities({ build: { version: '1', commit: 'a'.repeat(40), buildTime: '2026-11-11T00:00:00.000Z' } }),
+    extensions: buildCapabilities({ build: { version: '1', commit: 'a'.repeat(40), buildTime: '2026-11-11T00:00:00.000Z' }, ...(starterLaunch ? { starterLaunch } : {}) }),
     requiredServices: ['identity', 'server', 'store', 'extensions'],
   });
   const call = async (p: string, init: RequestInit = {}, subject = 'owner-subject') => {
@@ -55,7 +56,7 @@ test('every scoped route declares an action, and every action is exercised somew
   // `instance.destroy` was exempted while the route did not exist (#178 asserted the DECISION early on
   // purpose). It is routed now (#196), so the exemption is gone -- leaving it in would let a future route
   // silently skip being covered, which is the failure this assertion exists to catch.
-  const notRouted = uncoveredActions(covered).filter((a) => !['team.member.manage'].includes(a));
+  const notRouted = uncoveredActions(covered);
   assert.deepEqual(notRouted, [], `actions in the table with no route yet: ${JSON.stringify(notRouted)}`);
 });
 
@@ -100,4 +101,84 @@ test('the destructive verb is owner-only at the policy layer before the route ex
   assert.equal(POLICY['instance.destroy'], 'owner');
   assert.equal(POLICY['capability.share'], 'owner');
   assert.equal(POLICY['team.invite'], 'owner');
+});
+
+
+test('the customer launch confines removal to its owner and requires a separate wipe confirmation', async () => {
+  let teamId = '';
+  const selections: StarterRemoval[] = [];
+  const report = { state: 'idle', template: 'starter-web', revision: 'pinned', events: [], retainedVolumes: [] } as const;
+  const read = () => ({ ...report, events: [], retainedVolumes: [] });
+  const app = await start({ get teamId() { return teamId; }, read, start: read, remove(data) { selections.push(data); return read(); } });
+  try {
+    const { team, instance } = await app.seed('launch-role-lab');
+    teamId = team.id;
+    const path = `/api/v1/teams/${team.id}/starter-launch/remove`;
+    const wipe = { method: 'POST', body: JSON.stringify({ data: 'wipe', confirmation: 'starter-web' }) };
+    assert.equal((await app.call(path, wipe, 'outsider')).status, 404);
+    assert.equal((await app.call(path, wipe, 'member-subject')).status, 403);
+    assert.equal((await app.call(path, { method: 'POST', body: JSON.stringify({ data: 'wipe' }) })).status, 400);
+    assert.deepEqual(selections, []);
+    assert.equal((await app.call(path, { method: 'POST', body: JSON.stringify({ data: 'keep' }) })).status, 200);
+    assert.deepEqual(selections, ['keep']);
+    assert.equal((await app.call(path, wipe)).status, 200);
+    assert.deepEqual(selections, ['keep', 'wipe']);
+    const denied = await app.call(`/api/v1/instances/${instance.id}/secrets/APP_SECRET`, {
+      method: 'PUT', body: JSON.stringify({ service: 'web', environment: 'staging', value: 'must-never-pass' }),
+    });
+    assert.equal(denied.status, 503);
+    assert.equal(denied.body?.error, 'secret-store-unavailable');
+    assert.doesNotMatch(denied.text, /must-never-pass/);
+  } finally {
+    await disposeKernel(app.ctx);
+  }
+});
+
+test('team activity filters scope before limiting and omits membership administration', async () => {
+  const app = await start();
+  try {
+    const { team, instance } = await app.seed('activity-team');
+    const peer = must(await app.ctx.store.createTeam({ name: 'peer-activity-team' }), 'peer team');
+    const peerApp = must(await app.ctx.store.createInstance({ teamId: peer.id, name: 'peer-app', template: 'starter-web' }), 'peer app');
+    const record = (target: string, action: string) => app.ctx.store.appendAudit({
+      actorKind: 'controller', actorRef: 'evidence', action, target, detail: {},
+    });
+    must(await record(instance.id, 'hosting.verified'), 'own deployment');
+    must(await record(team.id, 'team.member.role'), 'private member change');
+    for (let index = 0; index < 110; index++) must(await record(peerApp.id, 'hosting.verified'), 'peer deployment');
+    const visible = await app.call(`/api/v1/teams/${team.id}/activity`, {}, 'member-subject');
+    assert.equal(visible.status, 200);
+    assert.deepEqual(JSON.parse(visible.text).map((event: { target: string; action: string }) => [event.target, event.action]),
+      [[instance.id, 'hosting.verified']]);
+    assert.equal((await app.call(`/api/v1/teams/${peer.id}/activity`, {}, 'member-subject')).status, 404);
+  } finally { await disposeKernel(app.ctx); }
+});
+
+
+test('notification rules belong to their creator and show only matching events', async () => {
+  const app = await start();
+  try {
+    const { instance } = await app.seed('notifications-team');
+    must(await app.ctx.store.setInstanceEnvironment({ instanceId: instance.id, environment: 'staging', state: 'live' }), 'staging environment');
+    const path = `/api/v1/instances/${instance.id}/notification-rules`;
+    const body = JSON.stringify({ environment: 'staging', event: 'app-outage', enabled: true });
+    const created = await app.call(path, { method: 'POST', body }, 'member-subject');
+    assert.equal(created.status, 201);
+    const location = `${path}/${String(created.body?.id)}`;
+    assert.equal((await app.call(location, { method: 'PUT', body }, 'owner-subject')).status, 404);
+    assert.equal((await app.call(path, { method: 'POST', body }, 'member-subject')).status, 409);
+    const audit = (action: string, environment: string) => app.ctx.store.appendAudit({
+      actorKind: 'controller', actorRef: 'proof', target: instance.id, action,
+      at: '2099-01-01T00:00:00.000Z', detail: { environment, name: 'HIDDEN_VALUE_SHAPED_TEST_LABEL' },
+    });
+    must(await audit('availability.down', 'production'), 'different environment');
+    must(await audit('secret.deliver', 'staging'), 'different event');
+    must(await audit('availability.down', 'staging'), 'matching event');
+    const mine = await app.call('/api/v1/me/notifications', {}, 'member-subject');
+    assert.equal(mine.status, 200);
+    assert.equal(Array.isArray(mine.body?.updates) && mine.body.updates.length, 1);
+    assert.doesNotMatch(mine.text, /HIDDEN_VALUE_SHAPED_TEST_LABEL/);
+    assert.equal((await app.call('/api/v1/me/notifications')).text, '{"rules":[],"updates":[]}');
+    assert.equal((await app.call(location, { method: 'DELETE' }, 'member-subject')).status, 204);
+  } finally { await disposeKernel(app.ctx); }
 });

@@ -196,6 +196,193 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthenticated'
 
+  /api/v1/me/notifications:
+    get:
+      operationId: listMyNotifications
+      summary: Read your rules and recent matching events for current memberships
+      security: [{ bearerJwt: [] }]
+      responses:
+        '200':
+          description: Saved rules and recent matching events visible in the workspace.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [rules, updates]
+                properties:
+                  rules: { type: array, items: { $ref: '#/components/schemas/NotificationRule' } }
+                  updates:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [id, instanceId, event, at]
+                      properties:
+                        id: { type: string }
+                        instanceId: { type: string }
+                        event: { type: string, enum: [deployment-failed, app-outage, secret-updated] }
+                        at: { type: string, format: date-time }
+                        environment: { type: string }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/me/notification-email:
+    get:
+      operationId: getMyNotificationEmail
+      summary: Read your email delivery preference
+      security: [{ bearerJwt: [] }]
+      responses:
+        '200': &notification-email-preference
+          description: The availability and state of email delivery for this account.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [available, enabled]
+                properties:
+                  available: { type: boolean }
+                  enabled: { type: boolean }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': &notification-email-unavailable
+          description: The installation could not read or update your email preference.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    put:
+      operationId: updateMyNotificationEmail
+      summary: Receive matching notifications at your verified primary address
+      security: [{ bearerJwt: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [enabled]
+              properties:
+                enabled: { type: boolean }
+      responses:
+        '200': *notification-email-preference
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': *notification-email-unavailable
+  /api/v1/instances/{instanceId}/notification-rules:
+    parameters:
+      - { name: instanceId, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: createNotificationRule
+      summary: Follow an app event for all environments or one selected environment
+      security: [{ bearerJwt: [] }]
+      requestBody: &notification-rule-body
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [event, enabled]
+              properties:
+                event: { type: string, enum: [deployment-failed, app-outage, secret-updated] }
+                enabled: { type: boolean }
+                environment: { type: string, minLength: 1, maxLength: 60 }
+      responses:
+        '201': &notification-rule-saved
+          description: Rule saved for the signed-in person.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NotificationRule' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': &notification-rule-conflict
+          description: A rule already follows this event and scope.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+  /api/v1/instances/{instanceId}/notification-rules/{ruleId}:
+    parameters:
+      - { name: instanceId, in: path, required: true, schema: { type: string } }
+      - { name: ruleId, in: path, required: true, schema: { type: string } }
+    put:
+      operationId: updateNotificationRule
+      summary: Update or pause one of your own rules on this app
+      security: [{ bearerJwt: [] }]
+      requestBody: *notification-rule-body
+      responses:
+        '200': *notification-rule-saved
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': *notification-rule-conflict
+    delete:
+      operationId: deleteNotificationRule
+      summary: Remove one of your own rules on this app
+      security: [{ bearerJwt: [] }]
+      responses:
+        '204': { description: The rule has been removed. }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/me/profile:
+    get:
+      operationId: getAccountProfile
+      summary: Read the signed-in operator's account profile
+      security: [{ bearerJwt: [] }]
+      responses:
+        '200': &account-profile
+          description: Profile fields read from the operator identity provider.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [username, displayName, email, emailVerified]
+                properties:
+                  username: { type: string }
+                  displayName: { type: string }
+                  email: { type: string }
+                  emailVerified: { type: boolean }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503':
+          description: The issuer's user-scoped account API is unavailable.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    put:
+      operationId: updateAccountProfile
+      summary: Change the signed-in operator's username and display name
+      description: The operation uses the caller's own account permission. Email ownership and password changes are separate identity operations.
+      security: [{ bearerJwt: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [username, displayName]
+              properties:
+                username: { type: string, minLength: 3, maxLength: 255 }
+                displayName: { type: string, minLength: 1, maxLength: 100 }
+      responses:
+        '200': *account-profile
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503':
+          description: The issuer's user-scoped account API is unavailable.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
   /api/v1/teams/{teamId}/invitations:
     parameters:
       - { name: teamId, in: path, required: true, schema: { type: string, minLength: 1 } }
@@ -318,7 +505,7 @@ paths:
         - bearerJwt: []
       responses:
         '200':
-          description: Pending invitations for this verified address, across every team.
+          description: Pending, unexpired invitations for this verified address, with the team name for display before joining.
           content:
             application/json:
               schema: { type: array, items: { $ref: '#/components/schemas/Invitation' } }
@@ -374,6 +561,93 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/templates:
+    get:
+      operationId: listInstallableTemplates
+      summary: List pinned free templates supported by the current installer
+      security: [{ bearerJwt: [] }]
+      responses:
+        '200':
+          description: Installable public templates and their pinned source coordinates.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: false
+                  required: [template, repo, version, revision, priceMinor]
+                  properties:
+                    template: { type: string }
+                    repo: { type: string }
+                    version: { type: string }
+                    revision: { type: string, pattern: '^[a-f0-9]{40}$' }
+                    priceMinor: { type: integer, enum: [0] }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/teams/{teamId}/members:
+    parameters:
+      - { name: teamId, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: listTeamMembers
+      summary: List memberships for the team's owner
+      security: [{ bearerJwt: [] }]
+      responses:
+        '200':
+          description: Team memberships, with an optional label from this team's accepted invitations.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: false
+                  required: [personId, role, addedAt, self]
+                  properties:
+                    personId: { type: string, minLength: 1 }
+                    role: { type: string, enum: [owner, member] }
+                    addedAt: { type: string, format: date-time }
+                    self: { type: boolean }
+                    invitedAddress: { type: string, minLength: 3, maxLength: 320 }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/teams/{teamId}/members/{personId}:
+    parameters:
+      - { name: teamId, in: path, required: true, schema: { type: string } }
+      - { name: personId, in: path, required: true, schema: { type: string } }
+    patch:
+      operationId: updateTeamMemberRole
+      summary: Change another member's role
+      security: [{ bearerJwt: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [role]
+              properties:
+                role: { type: string, enum: [owner, member] }
+      responses: &membership-change-responses
+        '204': { description: The membership change was applied. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: The owner tried to change their own membership.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    delete:
+      operationId: removeTeamMember
+      summary: Remove another member from this team
+      security: [{ bearerJwt: [] }]
+      responses: *membership-change-responses
 
   /api/v1/teams:
     get:
@@ -590,6 +864,215 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/instances/{instanceId}/environments/{environment}/configuration/starter-brand:
+    parameters:
+      - { name: instanceId, in: path, required: true, schema: { type: string } }
+      - { name: environment, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getHostedStarterBrand
+      summary: Read the public header label from the verified Starter Web staging app
+      security: [{ bearerJwt: [] }]
+      responses:
+        '200':
+          description: The observed public label, if available, and the current state of the app setup.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [value, state]
+                properties:
+                  value: { type: [string, 'null'], maxLength: 60 }
+                  state: { type: string, enum: [ready, deploying, failed] }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': &starter-brand-conflict
+          description: Finish the current setup or wait for the current deployment to be recorded.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '503': &starter-brand-unavailable
+          description: The private worker, vault, or provider connection is unavailable.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    put:
+      operationId: updateHostedStarterBrand
+      summary: Deploy a public header label to the existing Starter Web staging app
+      security: [{ bearerJwt: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StarterBrandChange' }
+      responses:
+        '202':
+          description: The private worker accepted the setting for deployment.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [state]
+                properties:
+                  state: { type: string, enum: [requested] }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': *starter-brand-conflict
+        '503': *starter-brand-unavailable
+
+  /api/v1/instances/{instanceId}/environments/{environment}/custom-domains:
+    parameters:
+      - { name: instanceId, in: path, required: true, schema: { type: string } }
+      - { name: environment, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: listHostedCustomDomains
+      summary: Read custom domains and DNS instructions from the approved hosting project
+      security: [{ bearerJwt: [] }]
+      responses:
+        '200':
+          description: The current custom domains for the verified web service.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/HostedCustomDomain' } }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': &hosted-domain-conflict
+          description: The app or hostname is unavailable for this change.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '503': &hosted-domain-unavailable
+          description: The worker, vault, or hosting provider is temporarily unavailable.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/instances/{instanceId}/environments/{environment}/custom-domains/{hostname}:
+    parameters:
+      - { name: instanceId, in: path, required: true, schema: { type: string } }
+      - { name: environment, in: path, required: true, schema: { type: string } }
+      - { name: hostname, in: path, required: true, schema: { type: string, minLength: 3, maxLength: 253 } }
+    put:
+      operationId: attachHostedCustomDomain
+      summary: Attach a custom hostname to the approved web service
+      security: [{ bearerJwt: [] }]
+      responses:
+        '200':
+          description: The attached domain as read back from the provider.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HostedCustomDomain' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': *hosted-domain-conflict
+        '503': *hosted-domain-unavailable
+    delete:
+      operationId: detachHostedCustomDomain
+      summary: Remove a custom hostname from the approved web service
+      security: [{ bearerJwt: [] }]
+      responses:
+        '204': { description: The provider no longer reports the custom domain on this service. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': *hosted-domain-conflict
+        '503': *hosted-domain-unavailable
+
+  /api/v1/instances/{instanceId}/environments/{environment}/deployments:
+    parameters:
+      - { name: instanceId, in: path, required: true, schema: { type: string } }
+      - { name: environment, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: redeployHostedStarter
+      summary: Rebuild the verified pinned Starter Web release in its existing staging project
+      security: [{ bearerJwt: [] }]
+      responses:
+        '202':
+          description: The private worker accepted the requested deployment.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [state]
+                properties:
+                  state: { type: string, enum: [requested] }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: The app is stopped or another setup step is in progress.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '503':
+          description: The private worker, OpenBao, or Railway is unavailable.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/instances/{instanceId}/environments/{environment}:
+    parameters:
+      - { name: instanceId, in: path, required: true, schema: { type: string, minLength: 1 } }
+      - { name: environment, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 60 } }
+    get:
+      operationId: getInstanceEnvironment
+      summary: Read the environment's planned services, domains, and deployment reports
+      description: Secret names are included. Values and private credential material are excluded. A planned domain is not a report of public availability.
+      security: [{ bearerJwt: [] }]
+      responses:
+        '200':
+          description: Planned resources and recent reports scoped to this environment.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [planned, services, domains, deployments]
+                properties:
+                  planned: { type: boolean }
+                  hosting: { $ref: '#/components/schemas/HostedStarter' }
+                  services:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [name, secrets]
+                      properties:
+                        name: { type: string }
+                        secrets: { type: array, items: { type: string } }
+                  domains:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [host, service]
+                      properties:
+                        host: { type: string }
+                        service: { type: string }
+                  deployments:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [id, result, reportedAt]
+                      properties:
+                        id: { type: string }
+                        result: { type: string, enum: [ok, partial, failed, noop] }
+                        reportedAt: { type: string, format: date-time }
+                        commit: { type: string }
+                        problem: { type: string }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
 
   /api/v1/instances/{instanceId}/plan:
     parameters:
@@ -1118,6 +1601,11 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+        '503':
+          description: OpenBao is not ready in the customer launcher.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
   /api/v1/instances/{instanceId}/dispatches:
     parameters:
       - name: instanceId
@@ -1283,6 +1771,59 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/instances/{instanceId}/status:
+    parameters:
+      - { name: instanceId, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getHostedAppStatus
+      summary: Read the latest availability and outage updates for a hosted app
+      security: [{ bearerJwt: [] }]
+      responses:
+        '200':
+          description: Private availability checks and changes recorded for the app.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [environment, state, updates]
+                properties:
+                  environment: { type: string, enum: [staging] }
+                  state: { type: string, enum: [checking, up, down, paused, removed] }
+                  checkedAt: { type: string, format: date-time }
+                  updates:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [id, at, state]
+                      properties:
+                        id: { type: string }
+                        at: { type: string, format: date-time }
+                        state: { type: string, enum: [down, up, paused, removed] }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/teams/{teamId}/activity:
+    parameters:
+      - { name: teamId, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: listTeamActivity
+      summary: Read recent operations for one team and its apps
+      security: [{ bearerJwt: [] }]
+      responses:
+        '200':
+          description: The most recent 100 recorded operations in this team.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/AuditEntry' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
 
   /api/v1/audit:
     get:
@@ -1710,8 +2251,404 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
 
 
+  /api/v1/teams/{teamId}/marketplace/installations/{installationId}:
+    parameters:
+      - { name: teamId, in: path, required: true, schema: { type: string } }
+      - { name: installationId, in: path, required: true, schema: { type: string, format: uuid } }
+    put:
+      operationId: connectMarketplaceInstallation
+      summary: Link a customer installation to this team
+      description: A team owner approves a link. A disconnected installation ID cannot be reactivated.
+      security: [{ bearerJwt: [] }]
+      responses:
+        '204': { description: The installation is linked. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      operationId: disconnectMarketplaceInstallation
+      summary: Disconnect an installation from marketplace access
+      description: Existing deployments and acquired releases remain with the customer.
+      security: [{ bearerJwt: [] }]
+      responses:
+        '204': { description: The installation is disconnected. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/teams/{teamId}/marketplace/installations/{installationId}/claim:
+    parameters:
+      - { name: teamId, in: path, required: true, schema: { type: string } }
+      - { name: installationId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: claimFreeMarketplaceRelease
+      summary: Claim the pinned free starter release for a linked installation
+      security: [{ bearerJwt: [] }]
+      responses:
+        '200': &marketplace-claim-response
+          description: A receipt containing the immutable template source coordinates.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [installationId, template, repo, version, revision, priceMinor]
+                properties:
+                  installationId: { type: string, format: uuid }
+                  template: { type: string, enum: [starter-web] }
+                  repo: { type: string }
+                  version: { type: string }
+                  revision: { type: string, pattern: '^[a-f0-9]{40}$' }
+                  priceMinor: { type: integer, enum: [0] }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/teams/{teamId}/marketplace/installations/{installationId}/enrollment:
+    parameters:
+      - { name: teamId, in: path, required: true, schema: { type: string } }
+      - { name: installationId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: issueMarketplaceEnrollment
+      summary: Authorize a private installation to enroll with the hub
+      description: The team owner receives an expiring code once. Issuing again replaces a pending code. An enrolled or disconnected ID cannot be issued another code.
+      security: [{ bearerJwt: [] }]
+      responses:
+        '201':
+          description: A code to present to the hub enrollment endpoint before it expires.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [enrollmentCode, expiresAt]
+                properties:
+                  enrollmentCode: { type: string, pattern: '^[A-Za-z0-9_-]{43}$' }
+                  expiresAt: { type: string, format: date-time }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/marketplace/installations/{installationId}/enrollment:
+    parameters:
+      - { name: installationId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: redeemMarketplaceEnrollment
+      summary: Redeem a one-use hub enrollment code
+      description: The installation generates and keeps its own random credential. It sends only its SHA-256 verifier when redeeming. An expired, replaced, redeemed, or disconnected code cannot authorize an installation.
+      security: [{ marketplaceCredential: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [registryDigest]
+              properties:
+                registryDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+      responses:
+        '204': { description: The installation is enrolled and may use its credential for registry requests. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/marketplace/installations/{installationId}/claim:
+    parameters:
+      - { name: installationId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: claimEnrolledMarketplaceRelease
+      summary: Claim the pinned free starter from the private installation
+      description: This credential authorizes registry claims for one installation. It cannot act as a team member or authorize deployment or provider operations.
+      security: [{ marketplaceCredential: [] }]
+      responses:
+        '200': *marketplace-claim-response
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/teams/{teamId}/marketplace/connection:
+    parameters:
+      - { name: teamId, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getPrivateMarketplaceConnection
+      summary: Check the private installation's marketplace connection
+      security: [{ bearerJwt: [] }]
+      responses:
+        '200':
+          description: Connection state and any pinned release acquired by this installation.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [state]
+                properties:
+                  state: { type: string, enum: [unconfigured, openbao-required, disconnected, connected, unavailable] }
+                  release:
+                    type: object
+                    additionalProperties: false
+                    required: [template, version, revision]
+                    properties:
+                      template: { type: string }
+                      version: { type: string }
+                      revision: { type: string, pattern: '^[0-9a-f]{40}$' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503':
+          description: The private installation worker is unavailable.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    post:
+      operationId: enrollPrivateMarketplaceConnection
+      summary: Exchange a one-use hub handoff and acquire the pinned free release
+      security: [{ bearerJwt: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [handoff]
+              properties:
+                handoff: { type: string, pattern: '^[0-9a-f-]{36}:[A-Za-z0-9_-]{43}$' }
+      responses:
+        '204': { description: The worker verified the connection and saved the release. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: The handoff was refused or there is already a connected installation.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '503':
+          description: The worker, OpenBao or the marketplace could not complete enrollment.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/teams/{teamId}/starter-launch/setup:
+    parameters:
+      - { name: teamId, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getStarterLaunchSetup
+      summary: Read the customer worker and OpenBao readiness
+      security: [{ bearerJwt: [] }]
+      responses:
+        '200':
+          description: Current readiness and the worker public encryption key.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [openBao, railway, workerKey]
+                properties:
+                  openBao: { type: string, enum: [unreachable, uninitialized, sealed, setup-required, ready] }
+                  railway: { type: string, enum: [connect, connected] }
+                  workerKey: { type: string }
+                  canWipeData: { type: boolean }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': &launch-unavailable
+          description: The installation worker or a provider prerequisite is unavailable.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+  /api/v1/teams/{teamId}/starter-launch/openbao:
+    parameters:
+      - { name: teamId, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: initializeStarterOpenBao
+      summary: Initialize OpenBao and encrypt the recovery file for the owner
+      security: [{ bearerJwt: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [publicKey]
+              properties:
+                publicKey: { type: string, maxLength: 1024 }
+      responses:
+        '200':
+          description: An encrypted recovery file. Only the owner can decrypt it.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [recovery]
+                properties:
+                  recovery: { type: string }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': *launch-unavailable
+  /api/v1/teams/{teamId}/starter-launch/openbao/unlock:
+    parameters:
+      - { name: teamId, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: unlockStarterOpenBao
+      summary: Unlock OpenBao with recovery material encrypted to the customer worker
+      security: [{ bearerJwt: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [recovery]
+              properties:
+                recovery: { type: string, maxLength: 640 }
+      responses:
+        '204': { description: The worker proved it can access its scoped secret path. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': *launch-unavailable
+  /api/v1/teams/{teamId}/starter-launch/railway:
+    parameters:
+      - { name: teamId, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: beginStarterRailwayAuthorization
+      summary: Start Railway authorization in the customer's installation
+      security: [{ bearerJwt: [] }]
+      responses:
+        '200':
+          description: The one-use Railway authorization URL.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [authorizationUrl]
+                properties:
+                  authorizationUrl: { type: string, format: uri }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': *launch-unavailable
+  /api/v1/railway/callback:
+    get:
+      operationId: completeStarterRailwayAuthorization
+      summary: Complete the one-use Railway authorization and return to Platfolio
+      description: The worker binds the provider response to the owner-initiated state and PKCE verifier.
+      security: []
+      parameters:
+        - { name: state, in: query, schema: { type: string } }
+        - { name: code, in: query, schema: { type: string } }
+        - { name: iss, in: query, schema: { type: string } }
+        - { name: error, in: query, schema: { type: string } }
+      responses:
+        '303':
+          description: Continue in the originating Platfolio installation.
+          headers:
+            location: { schema: { type: string, format: uri } }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/teams/{teamId}/starter-launch:
+    parameters:
+      - { name: teamId, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getStarterLaunch
+      summary: Read the deployment timeline and troubleshooting evidence
+      security: [{ bearerJwt: [] }]
+      responses:
+        '200': &starter-launch-response
+          description: The current launch state and safe operation history.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [state, events, template, revision, retainedVolumes]
+                properties:
+                  state: { type: string, enum: [idle, running, ready, failed, removing, kept, wiped] }
+                  template: { type: string }
+                  revision: { type: string }
+                  registration: { type: string, enum: [pending, recorded, conflict] }
+                  instanceName: { type: string }
+                  projectId: { type: string }
+                  deploymentId: { type: string }
+                  origin: { type: string, format: uri }
+                  retainedVolumes: { type: array, items: { type: string } }
+                  events:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [at, step, state]
+                      properties:
+                        at: { type: string, format: date-time }
+                        step: { type: string }
+                        state: { type: string }
+                        resourceId: { type: string }
+                        detail: { type: string }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': *launch-unavailable
+    post:
+      operationId: startStarterLaunch
+      summary: Launch or resume the free starter using the connected customer runner
+      security: [{ bearerJwt: [] }]
+      responses:
+        '200': *starter-launch-response
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': *launch-unavailable
+  /api/v1/teams/{teamId}/starter-launch/remove:
+    parameters:
+      - { name: teamId, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: removeStarterLaunch
+      summary: Remove this starter using the explicitly selected storage policy
+      security: [{ bearerJwt: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [data]
+              properties:
+                data: { type: string, enum: [keep, wipe] }
+                confirmation: { type: string }
+      responses:
+        '200': *starter-launch-response
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: The app supplies a service used by another instance.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '503': *launch-unavailable
+
+
 components:
   securitySchemes:
+    marketplaceCredential:
+      type: http
+      scheme: bearer
+      description: A short-lived enrollment code or a private installation's registry credential, depending on the operation.
     bearerJwt:
       type: http
       scheme: bearer
@@ -1761,6 +2698,74 @@ components:
           example: 'Bearer realm="platfolio", error="invalid_token"'
 
   schemas:
+    StarterBrandChange:
+      # GENERATED by scripts/gen-api-spec.ts from StarterBrandChangeSchema (packages/contracts). Do not hand-edit: pnpm run spec:check fails on a difference, and the prose lives in packages/api-contract/src/spec-annotations.ts.
+      type: object
+      required: [value]
+      properties:
+        value: { type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9 .,''()-]*$', maxLength: 60 }
+      additionalProperties: false
+    HostedCustomDomain:
+      # GENERATED by scripts/gen-api-spec.ts from HostedCustomDomainSchema (packages/contracts). Do not hand-edit: pnpm run spec:check fails on a difference, and the prose lives in packages/api-contract/src/spec-annotations.ts.
+      type: object
+      required: [host, dnsStatus, certificateStatus, records]
+      properties:
+        host: { type: string, minLength: 1 }
+        dnsStatus: { type: string, enum: [pending, verified, failed] }
+        certificateStatus: { type: string, enum: [pending, issued, failed] }
+        records:
+          type: array
+          items:
+            type: object
+            required: [host, fqdn, zone, type, value, status, purpose]
+            properties:
+              host: { type: string, minLength: 1 }
+              fqdn: { type: string, minLength: 1 }
+              zone: { type: string, minLength: 1 }
+              type: { type: string, enum: [A, CNAME, TXT, NS] }
+              value: { type: string, minLength: 1 }
+              current: { type: string }
+              status: { type: string, enum: [requires-update, propagated, unspecified] }
+              purpose: { type: string, enum: [traffic, ownership, challenge, unspecified] }
+            additionalProperties: false
+      additionalProperties: false
+
+    NotificationRule:
+      # GENERATED by scripts/gen-api-spec.ts from NotificationRuleSchema (packages/contracts). Do not hand-edit: pnpm run spec:check fails on a difference, and the prose lives in packages/api-contract/src/spec-annotations.ts.
+      type: object
+      required: [id, instanceId, event, enabled, createdAt]
+      properties:
+        id: { type: string, minLength: 1 }
+        instanceId: { type: string, minLength: 1 }
+        event: { type: string, enum: [deployment-failed, app-outage, secret-updated] }
+        enabled: { type: boolean }
+        createdAt:
+          type: string
+          format: date-time
+          pattern: '^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z))$'
+        environment: { type: string, minLength: 1, maxLength: 60 }
+      additionalProperties: false
+    HostedStarter:
+      # GENERATED by scripts/gen-api-spec.ts from HostedStarterSchema (packages/contracts). Do not hand-edit: pnpm run spec:check fails on a difference, and the prose lives in packages/api-contract/src/spec-annotations.ts.
+      type: object
+      required: [instanceId, projectId, deploymentId, state, origin, observedAt]
+      properties:
+        instanceId: { type: string, minLength: 1 }
+        projectId:
+          type: string
+          format: uuid
+          pattern: '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$'
+        deploymentId:
+          type: string
+          format: uuid
+          pattern: '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$'
+        state: { type: string, enum: [live, paused, removed] }
+        origin: { type: string, format: uri, maxLength: 240 }
+        observedAt:
+          type: string
+          format: date-time
+          pattern: '^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z))$'
+      additionalProperties: false
     Slug:
       type: string
       minLength: 1
@@ -1784,6 +2789,7 @@ components:
       properties:
         id: { type: string, minLength: 1 }
         teamId: { type: string, minLength: 1 }
+        teamName: { type: string, minLength: 1 }
         email: { type: string, description: 'Normalised (trimmed and case-folded) on write.', minLength: 3, maxLength: 320 }
         role: { type: string, enum: [owner, member] }
         state: { type: string, enum: [pending, accepted, revoked, expired], default: pending }

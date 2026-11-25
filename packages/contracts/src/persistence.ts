@@ -96,6 +96,40 @@ export const InstanceSchema = z.object({
 }).strict();
 export type Instance = z.infer<typeof InstanceSchema>;
 
+/** A verified source-build deployment. It has no workflow nonce or provider credential. */
+export const HostedStarterSchema = z.object({
+  instanceId: z.string().min(1),
+  projectId: z.uuid(),
+  deploymentId: z.uuid(),
+  state: z.enum(['live', 'paused', 'removed']),
+  origin: z.url({ protocol: /^https$/ }).max(240),
+  observedAt: z.iso.datetime(),
+}).strict();
+export type HostedStarter = z.infer<typeof HostedStarterSchema>;
+export type NewHostedStarter = Pick<HostedStarter, 'projectId' | 'observedAt'> &
+  Pick<Instance, 'teamId' | 'name' | 'template'> & { templateRef: NonNullable<Instance['templateRef']> } &
+  ({ state: 'live' } & Pick<HostedStarter, 'deploymentId' | 'origin'> | { state: 'paused' | 'removed' });
+
+
+export interface HostedAppCheck {
+  instanceId: string;
+  deploymentId: string;
+  state: 'checking' | 'up' | 'down';
+  failures: number;
+  checkedAt: string;
+}
+
+export const NotificationRuleSchema = z.object({
+  id: z.string().min(1),
+  instanceId: z.string().min(1),
+  event: z.enum(['deployment-failed', 'app-outage', 'secret-updated']),
+  enabled: z.boolean(),
+  createdAt: z.iso.datetime(),
+  environment: z.string().min(1).max(60).optional(),
+}).strict();
+export type NotificationRule = z.infer<typeof NotificationRuleSchema>;
+export type NewNotificationRule = Omit<NotificationRule, 'id' | 'createdAt'> & { id?: string };
+
 /** Repository facts. `actionRef` is the pinned commit -- the trust anchor is a SHA, never a tag (D30 law 3). */
 export const RepoConnectionSchema = z.object({
   instanceId: z.string().min(1),
@@ -371,6 +405,8 @@ export function rollupState(rows: readonly InstanceEnvironmentState[], productio
 export const InvitationSchema = z.object({
   id: z.string().min(1),
   teamId: z.string().min(1),
+  /** Included when an invitee looks up an invitation before they can read the team. */
+  teamName: z.string().min(1).optional(),
   /** The address as the inviter typed it, matched only against an IdP assertion later. Lower-cased on write. */
   email: z.string().min(3).max(320),
   role: TeamRoleSchema,
@@ -467,10 +503,37 @@ export interface NewInstance { teamId: string; name: string; template: string; t
  * (memory today, another database or an embedded store later) must be able to satisfy it without being the
  * first implementation wearing a different name.
  */
+export interface NotificationEmailPreference {
+  personId: string;
+  issuer: string;
+  subject: string;
+  enabledAt: string;
+}
+
+export interface NotificationEmailDelivery {
+  auditId: string;
+  leaseId: string;
+  attempts: number;
+  preference: NotificationEmailPreference;
+  teamId: string;
+  instanceId: string;
+  event: NotificationRule['event'];
+  environment?: string;
+  at: string;
+}
+
 export interface Store {
   readonly driver: string;
   describe(): { driver: string; contract: string; schemaReady: boolean };
   ping(): Promise<boolean>;
+
+  /** First ownership wins. A tombstoned link requires a new installation ID to connect again. */
+  connectMarketplaceInstallation(teamId: string, installationId: string): Promise<boolean>;
+  marketplaceInstallationConnected(teamId: string, installationId: string): Promise<boolean>;
+  disconnectMarketplaceInstallation(teamId: string, installationId: string): Promise<boolean>;
+  issueMarketplaceEnrollment(teamId: string, installationId: string, enrollmentDigest: string, expiresAt: string): Promise<boolean>;
+  redeemMarketplaceEnrollment(installationId: string, enrollmentDigest: string, registryDigest: string, now: string): Promise<boolean>;
+  verifyMarketplaceCredential(installationId: string, registryDigest: string): Promise<boolean>;
 
   createTeam(input: NewTeam): Promise<StoreResult<Team>>;
   getTeam(id: string): Promise<StoreResult<Team>>;
@@ -479,6 +542,11 @@ export interface Store {
 
   createInstance(input: NewInstance): Promise<StoreResult<Instance>>;
   getInstance(id: string): Promise<StoreResult<Instance>>;
+  /** Atomically register verified staging evidence. Never adopt a pre-existing instance or another team's project. */
+  recordHostedStarter(input: NewHostedStarter): Promise<StoreResult<Instance>>;
+  getHostedStarter(instanceId: string): Promise<StoreResult<HostedStarter>>;
+  recordHostedAppCheck(input: Pick<HostedAppCheck, 'instanceId' | 'deploymentId' | 'checkedAt'> & { passing: boolean }): Promise<void>;
+  getHostedAppCheck(instanceId: string): Promise<HostedAppCheck | undefined>;
   /** Oldest first, so a tenant's platforms keep the order they were created in. */
   listInstances(teamId?: string): Promise<Instance[]>;
   updateInstanceState(id: string, state: InstanceState, patch?: { desiredPlanHash?: string; lastAppliedPlanHash?: string }): Promise<StoreResult<Instance>>;
@@ -576,6 +644,8 @@ export interface Store {
   putTeamMember(member: Omit<TeamMember, 'addedAt'> & { addedAt?: string }): Promise<StoreResult<TeamMember>>;
   getTeamMember(teamId: string, personId: string): Promise<StoreResult<TeamMember>>;
   listTeamMembers(teamId: string): Promise<TeamMember[]>;
+  /** Recheck the acting owner atomically with the change. An owner changes only other memberships. */
+  changeTeamMember(teamId: string, actorId: string, personId: string, role: TeamRole | null): Promise<StoreResult<TeamMember>>;
   /**
    * The authorization question, asked once: which teams may this person act for? An empty array means
    * authenticated and belonging to nothing -- a valid state, not an error, and the reason this returns a list
@@ -596,6 +666,7 @@ export interface Store {
   latestAttestation(instanceId: string): Promise<StoreResult<AttestationRecord>>;
   /** Newest first (see `recentAudit`). */
   listAttestations(instanceId: string, limit?: number): Promise<AttestationRecord[]>;
+  listEnvironmentAttestations(instanceId: string, environment: string, limit?: number): Promise<AttestationRecord[]>;
 
   /** StoreResult, not a bare entry: an audit write that throws would abort the controller loop it is trying
    *  to record, so a failed record must be a value the caller can decide about. */
@@ -608,6 +679,15 @@ export interface Store {
    * what happens when two things are equally recent.
    */
   recentAudit(limit?: number): Promise<AuditEntry[]>;
+  /** Filter by authorized targets before limiting the result. */
+  recentAuditForTargets(targets: readonly string[], limit: number): Promise<AuditEntry[]>;
+  saveNotificationRule(personId: string, input: NewNotificationRule): Promise<StoreResult<NotificationRule>>;
+  listNotificationRules(personId: string): Promise<NotificationRule[]>;
+  removeNotificationRule(personId: string, instanceId: string, id: string): Promise<boolean>;
+  getNotificationEmailPreference(personId: string): Promise<NotificationEmailPreference | undefined>;
+  setNotificationEmailPreference(personId: string, preference: Omit<NotificationEmailPreference, 'personId'> | null): Promise<boolean>;
+  leaseNotificationEmails(issuer: string, now: string): Promise<NotificationEmailDelivery[]>;
+  settleNotificationEmail(delivery: Pick<NotificationEmailDelivery, 'auditId' | 'leaseId' | 'preference'>, retryAt: string | null): Promise<void>;
 
   close(): Promise<void>;
 }

@@ -145,3 +145,9 @@ export {
   type StorageLocation,
   type TokenKind,
 } from './web/browser-auth-policy.ts';
+
+export { StarterLaunchScreen } from './screens/starter-launch.tsx';
+
+export { Workspace } from './workspace/workspace.tsx';
+export { workspacePaths, workspaceReturnPath } from './workspace/routes.ts';
+export { WorkspaceEntry } from './workspace/workspace-entry.tsx';

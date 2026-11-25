@@ -1,7 +1,7 @@
 {
   "name": "platfolio",
   "private": true,
-  "version": "0.5.0",
+  "version": "0.6.0",
   "type": "module",
   "description": "platfolio control plane. Design phase: this manifest exists to make repository tooling and CI gates reproducible, not to publish a package.",
   "packageManager": "pnpm@12.4.2",
@@ -38,6 +38,7 @@
     "app:check": "tsx scripts/github-app-check.ts",
     "install:pr": "tsx scripts/open-install-pr.ts",
     "action:bundle": "tsx scripts/bundle-action.ts",
+    "identity:theme": "tsx scripts/configure-auth-theme.ts",
     "identity:seed": "tsx scripts/seed-identity.ts",
     "identity:smoke": "tsx scripts/smoke-identity.ts",
     "identity:pkce:smoke": "tsx scripts/smoke-browser-auth.ts",

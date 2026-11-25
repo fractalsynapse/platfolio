@@ -279,6 +279,8 @@ export function parseCompose(texts: string | string[], options: ComposeOptions =
       ...(typeof svcX.ownership === 'string' ? { ownership: svcX.ownership } : {}),
       domains: Array.isArray(svcX.domains) ? svcX.domains : [],
       dependsOn: Array.isArray(svc.depends_on) ? svc.depends_on.map(String) : Object.keys(isRec(svc.depends_on) ? svc.depends_on as Rec : {}),
+      ...(isRec(svc.depends_on) ? { dependencyConditions: Object.fromEntries(Object.entries(svc.depends_on).map(([dependency, value]) =>
+        [dependency, isRec(value) ? value.condition ?? 'service_started' : 'service_started'])) } : {}),
       public: svcX.public === true,
     };
     for (const vol of asArr(svc.volumes)) {

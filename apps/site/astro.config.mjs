@@ -50,5 +50,9 @@ export default defineConfig({
   // D47: a deploy's address, not a source constant. Unset means the site has no absolute origin, and
   // `apps/site/src/lib/site-config.ts` reports that as a configuration failure instead of inventing one.
   site: process.env['PLATFOLIO_SITE_ORIGIN'],
+  // Keep the issuer request apart from page code so the built artifact can enforce the shell's network boundary.
+  vite: { build: { rollupOptions: { output: { manualChunks(id) {
+    return id.endsWith('/src/lib/browser-capabilities.ts') ? 'browser-capabilities' : undefined;
+  } } } } },
   integrations: [react()],
 });

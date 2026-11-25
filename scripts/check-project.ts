@@ -237,7 +237,7 @@ const GENERATED_HOST = /\b[a-z0-9]+-[a-z0-9]+-[0-9a-f]{6,}\.up\.railway\.app\b|\
  * a history that flatters the present.
  */
 const REAL_PROJECTS = new Set(['platfolio', 'platfolio-starter-web', 'platfolio-starter-worker', 'platfolio-shared-identity']);
-const PUBLISHED_IMAGES = new Set(['platfolio-control-plane', 'platfolio-site', 'platfolio-status-api']);
+const PUBLISHED_IMAGES = new Set(['platfolio-control-plane', 'platfolio-site', 'platfolio-identity', 'platfolio-status-api']);
 const EXECUTABLE_PATH = /^(apps|packages|scripts|db|\.github)\//;
 const ORG_REF = /fractalsynapse\/([A-Za-z0-9._-]+)/g;
 

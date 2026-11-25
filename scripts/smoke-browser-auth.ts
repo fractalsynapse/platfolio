@@ -111,7 +111,7 @@
  * ============================================================================
  */
 import { parseArgs } from 'node:util';
-import { API_CLIENT_ID, LOOPBACK_UI_ORIGIN, PKCE_CHALLENGE_ATTRIBUTE, PKCE_METHOD, REQUIRED_SCOPE, WEB_CLIENT_ID, browserClientMappers, codeChallenge, createPkcePair, endSessionUrl, isPkceVerifier, refreshSkewSeconds } from './browser-auth.ts';
+import { API_CLIENT_ID, LOGIN_SCOPES, LOOPBACK_UI_ORIGIN, PKCE_CHALLENGE_ATTRIBUTE, PKCE_METHOD, REQUIRED_SCOPE, WEB_CLIENT_ID, browserClientMappers, codeChallenge, createPkcePair, endSessionUrl, isPkceVerifier, refreshSkewSeconds } from './browser-auth.ts';
 
 const { values: flags } = parseArgs({
   options: {
@@ -242,7 +242,7 @@ async function authorize(opts: {
   u.searchParams.set('client_id', WEB_CLIENT);
   u.searchParams.set('redirect_uri', opts.redirectOverride ?? redirectUri);
   u.searchParams.set('response_type', 'code');
-  u.searchParams.set('scope', opts.scope ?? 'openid profile email');
+  u.searchParams.set('scope', opts.scope ?? LOGIN_SCOPES);
   u.searchParams.set('state', state);
   u.searchParams.set('nonce', `n-${Math.random().toString(36).slice(2, 10)}`);
   const challenge = opts.challengeOverride ?? (opts.omitChallenge ? undefined : await challengeFor(verifier));
@@ -382,7 +382,8 @@ const audList = Array.isArray(atClaims.aud) ? (atClaims.aud as string[]) : [Stri
 // second, stricter contract the API does not enforce and the UI could never rely on.
 check('the audience set includes the control plane while azp stays the browser client', audList.includes(API_CLIENT) && atClaims.azp === WEB_CLIENT,
   `aud=${JSON.stringify(atClaims.aud)} azp=${String(atClaims.azp)} -- the API can tell a person's session from a machine's grant`);
-check('the scope claim is exactly the one role, not the whole realm', JSON.stringify(atClaims.scope) === JSON.stringify([REQUIRED_SCOPE]), `scope=${JSON.stringify(atClaims.scope)}`);
+const scopes = typeof atClaims.scope === 'string' ? atClaims.scope.split(' ').filter(Boolean) : atClaims.scope;
+check('the scope claim is exactly the one role, not the whole realm', JSON.stringify(scopes) === JSON.stringify([REQUIRED_SCOPE]), `scope=${JSON.stringify(atClaims.scope)}`);
 check('the ID token is addressed to the browser client, not to the API', idClaims.aud === WEB_CLIENT, `id_token aud=${String(idClaims.aud ?? '(absent)')}`);
 check('sub agrees between ID token and access token', typeof idClaims.sub === 'string' && idClaims.sub === atClaims.sub, `sub=${String(atClaims.sub)}`);
 check('a refresh token came back too', refresh0.length > 40, shape(refresh0));
@@ -618,7 +619,7 @@ section('F. cross-realm: a browser token from another realm is refused here');
       pu.searchParams.set('client_id', WEB_CLIENT);
       pu.searchParams.set('redirect_uri', redirectUri);
       pu.searchParams.set('response_type', 'code');
-      pu.searchParams.set('scope', 'openid profile email');
+      pu.searchParams.set('scope', LOGIN_SCOPES);
       pu.searchParams.set('state', 'peer');
       pu.searchParams.set('code_challenge', await challengeFor(pv));
       pu.searchParams.set('code_challenge_method', 'S256');

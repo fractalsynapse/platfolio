@@ -216,8 +216,11 @@ test('nothing in the generated file is a placeholder', () => {
   assert.deepEqual(placeholders, []);
   const dangling = lines.filter((line) => /:\s*(\|\s*)*;$/.test(line));
   assert.deepEqual(dangling, []);
-  // Every emitted union is either a literal list or a primitive list; nothing widened to `string`.
-  assert.ok(!/ {2}state: string;/.test(output), 'the instance state union must not collapse to string');
+  // Instance state is a closed union. The launch report also carries open-ended provider states.
+  for (const name of ['Instance', 'InstanceResponse']) {
+    const definition = new RegExp(`export interface ${name} \{([\\s\\S]*?)\\n\}`).exec(output)?.[1] ?? '';
+    assert.match(definition, /^ {2}state: 'pending' \| /m, `${name} state must remain a literal union`);
+  }
   assert.ok(!/ {2}role: string;/.test(output), 'the role union must not collapse to string');
 });
 

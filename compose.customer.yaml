@@ -1,0 +1,12 @@
+# Additional readiness requirements for a self-contained customer installation.
+services:
+  api:
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+    depends_on:
+      identity:
+        condition: service_healthy
+  site:
+    depends_on:
+      api:
+        condition: service_healthy

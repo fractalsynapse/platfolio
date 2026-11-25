@@ -3,7 +3,10 @@ import { EndpointKeySource, IdentityConfigSchema, redactCredentialShaped } from 
 import { ROUTE_MANIFEST } from './routes.ts';
 import { buildCapabilities } from './capabilities.ts';
 import { describeAllowedOriginsConfig, parseAllowedOrigins, type CorsBootConfig } from './cors.ts';
+import type { StarterLaunch } from './starter-launch.ts';
+import { customerLaunch, customerLaunchConfig, type CustomerLaunchConfig } from './customer-launch.ts';
 import { isReleaseTag } from './release-tag.ts';
+import { keycloakNotificationDirectory } from './notification-directory.ts';
 
 export { ROUTE_MANIFEST };
 export { ALLOWED_ORIGINS_ENV, describeAllowedOriginsConfig, parseAllowedOrigins, type CorsBootConfig } from './cors.ts';
@@ -11,6 +14,9 @@ export { ALLOWED_ORIGINS_ENV, describeAllowedOriginsConfig, parseAllowedOrigins,
 export interface BootConfig {
   issuer: string;
   audience: string;
+  marketplaceEnabled?: boolean;
+  starterLaunch?: StarterLaunch;
+  customerLaunch?: CustomerLaunchConfig;
   jwksUri?: string;
   host: string;
   port: number;
@@ -24,6 +30,7 @@ export interface BootConfig {
   /** Absent unless PLATFOLIO_EMAIL_DRIVER names one. There is no default: an unconfigured control plane has
    *  no sender at all, rather than one that mails people under an identity no operator chose. */
   email?: import('@platfolio/kernel').EmailConfigInput;
+  notificationDirectory?: { client: string; secret: string };
   /**
    * Source control (D22, git driver per D50). Absent means the kernel's `none` driver: the repository
    * operations answer 503 `source-control-not-configured` rather than inventing a plan.
@@ -42,6 +49,12 @@ export function configFromEnv(env: NodeJS.ProcessEnv): BootConfig {
   // variables by scanning configuration for that shape, and a name that only ever appears as a constant is a
   // name the registry cannot see. The constant and this spelling are kept identical by the test that uses both.
   const allowedOrigins = parseAllowedOrigins(env.PLATFOLIO_ALLOWED_ORIGINS);
+  const launcher = customerLaunchConfig(env, allowedOrigins);
+  const notificationClient = env.PLATFOLIO_NOTIFICATION_DIRECTORY_CLIENT;
+  const notificationSecret = env.PLATFOLIO_NOTIFICATION_DIRECTORY_SECRET;
+  if ((notificationClient || notificationSecret) && !(notificationClient && notificationSecret)) {
+    throw new Error('The notification directory requires both its service client ID and secret');
+  }
   const releaseTag = env.PLATFOLIO_RELEASE_TAG || null;
   if (releaseTag !== null && !isReleaseTag(releaseTag)) {
     throw new Error('control-plane cannot start: PLATFOLIO_RELEASE_TAG must be a bare SemVer tag');
@@ -49,6 +62,9 @@ export function configFromEnv(env: NodeJS.ProcessEnv): BootConfig {
   return {
     issuer: env.PLATFOLIO_IDENTITY_ISSUER as string,
     audience: env.PLATFOLIO_IDENTITY_AUDIENCE as string,
+    marketplaceEnabled: env.PLATFOLIO_MARKETPLACE_ENABLED === 'true',
+    ...(launcher ? { customerLaunch: launcher } : {}),
+    ...(notificationClient && notificationSecret ? { notificationDirectory: { client: notificationClient, secret: notificationSecret } } : {}),
     ...(env.PLATFOLIO_IDENTITY_JWKS_URI ? { jwksUri: env.PLATFOLIO_IDENTITY_JWKS_URI } : {}),
     host: env.HOST ?? '0.0.0.0',
     port: Number(env.PORT ?? 8080),
@@ -198,7 +214,16 @@ export async function boot(config: BootConfig, fetchImpl: typeof fetch = fetch) 
     // that exists only in the operator's head. An empty list is passed through rather than dropped, so "no list"
     // has one spelling all the way down to the transport.
     server: { host: config.host, port: config.port, cors: { allowedOrigins: [...config.cors?.allowedOrigins ?? []] } },
-    extensions: buildCapabilities({ build: config.build }),
+    extensions: buildCapabilities({
+      build: config.build,
+      marketplaceEnabled: config.marketplaceEnabled ?? false,
+      accountIssuer: { issuer: config.issuer, request: fetchImpl },
+      ...(config.notificationDirectory ? { notificationDirectory: keycloakNotificationDirectory(config.issuer,
+        config.notificationDirectory.client, config.notificationDirectory.secret, fetchImpl) } : {}),
+      ...(config.cors?.allowedOrigins.length === 1 ? { invitationOrigin: config.cors.allowedOrigins[0]! } : {}),
+      ...(config.starterLaunch ? { starterLaunch: config.starterLaunch } : {}),
+      ...(config.customerLaunch ? { customerLaunch: customerLaunch(config.customerLaunch, fetchImpl) } : {}),
+    }),
     requiredServices: ['identity', 'server', 'store', 'extensions'],
   });
   ctx.identity.attachKeySource(new EndpointKeySource(identity, fetchImpl, config.jwksUri));

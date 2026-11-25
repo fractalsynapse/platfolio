@@ -92,6 +92,8 @@ export {
   type StoreResult,
   type Team,
 } from './persistence.ts';
+export type { NotificationEmailDelivery, NotificationEmailPreference } from './persistence.ts';
+export { notificationEventFor } from './notification-events.ts';
 export { checkAttestationPolicy, type PolicyVerdict } from './dispatch-policy.ts';
 export { MemoryStore, type MemoryStoreOptions } from './memory-store.ts';
 export { PostgresStore, type PostgresStoreOptions } from './postgres-store.ts';
@@ -151,3 +153,10 @@ export { MailpitEmailTransport, type MailpitOptions } from './mailpit-email.ts';
 export { NullEmailTransport } from './email.ts';
 export { MemoryEmailTransport, type MemoryEmailOptions } from './memory-email.ts';
 export { SmtpEmailTransport, type SmtpOptions } from './smtp-email.ts';
+
+export type { HostedAppCheck } from './persistence.ts';
+export { HostedStarterSchema, type HostedStarter, type NewHostedStarter } from './persistence.ts';
+export { StarterBrandChangeSchema } from './starter-brand.ts';
+export { HostedCustomDomainSchema, type HostedCustomDomain } from './infra.ts';
+
+export { NotificationRuleSchema, type NotificationRule, type NewNotificationRule } from './persistence.ts';

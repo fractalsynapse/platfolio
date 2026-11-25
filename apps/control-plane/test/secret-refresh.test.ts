@@ -106,6 +106,10 @@ test('a delivery with refresh:"auto" is accepted and records the outcome as a wo
     // not a digest of it.
     const serialised = JSON.stringify(detail);
     assert.ok(!serialised.includes('a-real-session-key-value'), `the audit row leaked the delivered credential: ${serialised.slice(0, 160)}`);
+    const details = await app.call(`/api/v1/instances/${app.instance.id}/environments/production`, app.asUser());
+    assert.equal(details.status, 200);
+    assert.deepEqual(details.body, { planned: true, services: [{ name: 'api', secrets: ['APP_SESSION_KEY'] }], domains: [], deployments: [] });
+    assert.equal((await app.call(`/api/v1/instances/${app.instance.id}/environments/staging`, app.asUser())).status, 404);
   } finally {
     await disposeKernel(app.ctx);
   }

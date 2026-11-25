@@ -35,6 +35,7 @@ export interface IntermediateService {
   domains: string[];
   environmentDomains?: Record<string, string[]> | undefined;
   dependsOn: string[];
+  dependencyConditions?: Record<string, string>;
   environments: string[];
   entries: EnvEntry[];
 }
@@ -87,6 +88,7 @@ export function toIntermediate(m: Manifest): Intermediate {
       ...(svc.environmentDomains && Object.keys(svc.environmentDomains).length > 0
         ? { environmentDomains: svc.environmentDomains } : {}),
       dependsOn: [...svc.dependsOn].sort(),
+      ...(svc.dependencyConditions ? { dependencyConditions: svc.dependencyConditions } : {}),
       environments: serviceEnvironments(svc, enabled),
       entries: entriesFor(name, svc),
     })), (s) => s.name),
@@ -133,7 +135,10 @@ export function renderCompose(m: Manifest): Rendered {
     L.push(`    expose: ["${s.port}"]`);
     const mounts = i.volumes.filter((v) => v.service === s.name);
     if (mounts.length) { L.push('    volumes:'); for (const v of mounts) L.push(`      - ${v.name}:${v.mountPath}`); }
-    if (s.dependsOn.length) L.push(`    depends_on: [${s.dependsOn.map((d) => `"${d}"`).join(', ')}]`);
+    if (s.dependsOn.length && s.dependencyConditions) {
+      L.push('    depends_on:');
+      for (const dependency of s.dependsOn) L.push(`      ${dependency}:`, `        condition: ${s.dependencyConditions[dependency] ?? 'service_started'}`);
+    } else if (s.dependsOn.length) L.push(`    depends_on: [${s.dependsOn.map((d) => `"${d}"`).join(', ')}]`);
   }
   if (i.database) {
     L.push(`  ${i.database.name}:`, '    image: "postgres:16-alpine"', '    environment:', '      POSTGRES_PASSWORD: "postgres"', `      POSTGRES_DB: "${i.database.name.replace(/-/g, '_')}"`, '    volumes:', `      - ${i.database.name}-data:/var/lib/postgresql/data`);

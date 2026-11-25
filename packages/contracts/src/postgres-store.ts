@@ -1,13 +1,17 @@
 import { z } from 'zod';
-import { Pool } from 'pg';
+import { Pool, type PoolClient } from 'pg';
 import {
+  HostedStarterSchema, NotificationRuleSchema, rollupState, type NewNotificationRule, type NotificationRule, type HostedStarter, type NewHostedStarter, type HostedAppCheck,
   ArtifactRecordSchema, AttestationRecordSchema, AuditEntrySchema, BindingRecordSchema, CapabilityOfferSchema, CapabilityShareSchema, DispatchRecordSchema, IdentitySchema, PersonSchema, TeamMemberSchema, InstanceEnvironmentStateSchema, InstanceSchema, InvitationSchema, ProviderConnectionSchema, RepoConnectionSchema, TeamSchema, newId,
-  type ArtifactRecord, type AttestationRecord, type AuditEntry, type BindingRecord, type CapabilityOffer, type NewBinding, type NewCapabilityOffer, type NewCapabilityShare, type DispatchRecord, type Instance, type InstanceEnvironmentState, type Invitation, type NewInvitation, type ProviderConnection, type RepoConnection, type Store, type StoreError, type NewInstance, type StoreResult, type Team, type Person, type TeamMember,
+  type ArtifactRecord, type AttestationRecord, type AuditEntry, type BindingRecord, type CapabilityOffer, type NewBinding, type NewCapabilityOffer, type NewCapabilityShare, type DispatchRecord, type Instance, type InstanceEnvironmentState, type Invitation, type NewInvitation, type ProviderConnection, type RepoConnection, type Store, type StoreError, type NewInstance, type StoreResult, type Team, type Person, type TeamMember, type TeamRole,
 } from './persistence.ts';
 import { reasonOf } from './persistence.ts';
 import { normaliseEmail, normaliseName } from './persistence.ts';
 import { checkAttestationPolicy } from './dispatch-policy.ts';
 import type { Attestation } from './attestation.ts';
+import { nextAppCheck } from './hosted-availability.ts';
+import { notificationEvents } from './notification-events.ts';
+import type { NotificationEmailDelivery, NotificationEmailPreference } from './persistence.ts';
 import { CONTRACT_VERSION } from './generated/contract-version.ts';
 
 /**
@@ -115,6 +119,65 @@ export class PostgresStore implements Store {
     }
   }
 
+  async connectMarketplaceInstallation(teamId: string, installationId: string): Promise<boolean> {
+    const table = this.q('marketplace_links');
+    const result = await this.pool.query(
+      `INSERT INTO ${table} AS link (installation_id, team_id)
+       SELECT $1, id FROM ${this.q('teams')} WHERE id = $2
+       ON CONFLICT (installation_id) DO UPDATE SET team_id = link.team_id
+       WHERE link.team_id = EXCLUDED.team_id AND NOT link.disconnected AND link.enrollment_digest IS NULL
+       RETURNING installation_id`, [installationId, teamId],
+    );
+    return result.rowCount === 1;
+  }
+
+  async marketplaceInstallationConnected(teamId: string, installationId: string): Promise<boolean> {
+    const result = await this.pool.query(
+      `SELECT installation_id FROM ${this.q('marketplace_links')}
+       WHERE installation_id = $1 AND team_id = $2 AND NOT disconnected AND enrollment_digest IS NULL`, [installationId, teamId],
+    );
+    return result.rowCount === 1;
+  }
+
+  async disconnectMarketplaceInstallation(teamId: string, installationId: string): Promise<boolean> {
+    const result = await this.pool.query(
+      `UPDATE ${this.q('marketplace_links')}
+       SET disconnected = TRUE, enrollment_digest = NULL, enrollment_expires_at = NULL, registry_digest = NULL
+       WHERE installation_id = $1 AND team_id = $2`, [installationId, teamId],
+    );
+    return result.rowCount === 1;
+  }
+
+  async issueMarketplaceEnrollment(teamId: string, installationId: string, digest: string, expiresAt: string): Promise<boolean> {
+    const result = await this.pool.query(
+      `INSERT INTO ${this.q('marketplace_links')} AS link (installation_id, team_id, enrollment_digest, enrollment_expires_at)
+       SELECT $1, id, $3, $4::timestamptz FROM ${this.q('teams')} WHERE id = $2
+       ON CONFLICT (installation_id) DO UPDATE
+       SET enrollment_digest = EXCLUDED.enrollment_digest, enrollment_expires_at = EXCLUDED.enrollment_expires_at
+       WHERE link.team_id = EXCLUDED.team_id AND NOT link.disconnected AND link.enrollment_digest IS NOT NULL
+       RETURNING installation_id`, [installationId, teamId, digest, expiresAt],
+    );
+    return result.rowCount === 1;
+  }
+
+  async redeemMarketplaceEnrollment(installationId: string, enrollmentDigest: string, registryDigest: string, now: string): Promise<boolean> {
+    const result = await this.pool.query(
+      `UPDATE ${this.q('marketplace_links')}
+       SET enrollment_digest = NULL, enrollment_expires_at = NULL, registry_digest = $3
+       WHERE installation_id = $1 AND enrollment_digest = $2 AND enrollment_expires_at > $4 AND NOT disconnected`,
+      [installationId, enrollmentDigest, registryDigest, now],
+    );
+    return result.rowCount === 1;
+  }
+
+  async verifyMarketplaceCredential(installationId: string, registryDigest: string): Promise<boolean> {
+    const result = await this.pool.query(
+      `SELECT installation_id FROM ${this.q('marketplace_links')}
+       WHERE installation_id = $1 AND registry_digest = $2 AND NOT disconnected`, [installationId, registryDigest],
+    );
+    return result.rowCount === 1;
+  }
+
   async createTeam(input: { name: string }) {
     const name = normaliseName(input.name);
     const admitted = admit(TeamSchema, { id: newId('team'), name, createdAt: new Date().toISOString() }, 'team');
@@ -172,6 +235,143 @@ export class PostgresStore implements Store {
       throw error;
     }
     return ok(i);
+  }
+
+  async recordHostedStarter(input: NewHostedStarter): Promise<StoreResult<Instance>> {
+    const client = await this.pool.connect();
+    let committed = false;
+    try {
+      await client.query('BEGIN');
+      // All registrations for one team take the same lock. The project uniqueness constraint handles peer teams.
+      const team = await client.query(`SELECT id FROM ${this.q('teams')} WHERE id = $1 FOR UPDATE`, [input.teamId]);
+      if (!team.rowCount) return err({ code: 'not-found', what: 'team', id: input.teamId });
+      const existing = (await client.query(`SELECT * FROM ${this.q('instances')} WHERE team_id = $1 AND name = $2 FOR UPDATE`, [input.teamId, input.name])).rows[0] as Row | undefined;
+      const instanceId = existing ? String(existing.id) : newId('inst');
+      const current = existing
+        ? (await client.query(`SELECT * FROM ${this.q('hosted_starters')} WHERE instance_id = $1`, [instanceId])).rows[0] as Row | undefined
+        : undefined;
+      if (input.state !== 'live' && !current) return err({ code: 'not-found', what: 'hosted starter', id: input.name });
+      const replacement = input.state === 'live' && current?.state === 'removed';
+      if (existing && (!current || (!replacement && current.project_id !== input.projectId) || existing.template !== input.template ||
+          existing.template_commit !== input.templateRef.commitSha || existing.template_repo !== input.templateRef.repo)) {
+        return err({ code: 'conflict', reason: 'This name already belongs to a different instance' });
+      }
+      if (existing && current && Date.parse(iso(current.observed_at)) >= Date.parse(input.observedAt)) {
+        return this.asInstance(existing);
+      }
+
+      const now = new Date().toISOString();
+      const otherEnvironments = (await client.query(
+        `SELECT environment, state, updated_at FROM ${this.q('instance_environments')} WHERE instance_id = $1 AND environment <> 'staging'`,
+        [instanceId],
+      )).rows.map((row) => InstanceEnvironmentStateSchema.parse({
+        instanceId, environment: row.environment, state: row.state, updatedAt: iso(row.updated_at),
+      }));
+      const state = rollupState([...otherEnvironments, { instanceId, environment: 'staging', state: input.state, updatedAt: input.observedAt }]);
+      const instance = admit(InstanceSchema, {
+        id: instanceId, teamId: input.teamId, name: input.name, template: input.template, templateRef: input.templateRef,
+        state, provider: 'railway', createdAt: existing ? iso(existing.created_at) : now, updatedAt: now,
+      }, 'instance');
+      if (!instance.accepted) return err({ code: 'conflict', reason: instance.reason });
+      const observation = admit(HostedStarterSchema, {
+        instanceId, projectId: input.projectId, state: input.state, observedAt: input.observedAt,
+        deploymentId: input.state === 'live' ? input.deploymentId : current?.deployment_id,
+        origin: input.state === 'live' ? input.origin : current?.origin,
+      }, 'hosted starter');
+      if (!observation.accepted) return err({ code: 'conflict', reason: observation.reason });
+      if (existing) {
+        await client.query(`UPDATE ${this.q('instances')} SET state = $2, updated_at = $3 WHERE id = $1`, [instanceId, state, now]);
+      } else {
+        await client.query(
+          `INSERT INTO ${this.q('instances')} (id, team_id, name, template, template_repo, template_commit, state, provider, created_at, updated_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,'railway',$8,$8)`,
+          [instanceId, input.teamId, input.name, input.template, input.templateRef.repo, input.templateRef.commitSha, state, now],
+        );
+      }
+      await client.query(
+        `INSERT INTO ${this.q('hosted_starters')} (instance_id, project_id, deployment_id, origin, state, observed_at)
+         VALUES ($1,$2,$3,$4,$5,$6)
+         ON CONFLICT (instance_id) DO UPDATE SET project_id = EXCLUDED.project_id, deployment_id = EXCLUDED.deployment_id,
+           origin = EXCLUDED.origin, state = EXCLUDED.state, observed_at = EXCLUDED.observed_at`,
+        [instanceId, input.projectId, observation.value.deploymentId, observation.value.origin, input.state, input.observedAt],
+      );
+      await client.query(
+        `INSERT INTO ${this.q('instance_environments')} (instance_id, environment, state, updated_at)
+         VALUES ($1,'staging',$2,$3)
+         ON CONFLICT (instance_id, environment) DO UPDATE SET state = EXCLUDED.state, updated_at = EXCLUDED.updated_at`,
+        [instanceId, input.state, input.observedAt],
+      );
+      const audit = await this.appendAuditRecord(client, {
+        actorKind: 'controller', actorRef: 'private-launch-worker', action: input.state === 'live' ? 'hosting.verified' : `hosting.${input.state}`,
+        target: instanceId, at: input.observedAt, detail: { environment: 'staging', deploymentId: observation.value.deploymentId },
+      });
+      if (!audit.ok) return audit;
+      await client.query('COMMIT');
+      committed = true;
+      return ok(instance.value);
+    } catch (error) {
+      if ((error as { code?: string }).code === '23505') return err({ code: 'conflict', reason: 'An instance already manages this project or name' });
+      throw error;
+    } finally {
+      try { if (!committed) await client.query('ROLLBACK'); }
+      finally { client.release(); }
+    }
+  }
+
+  async getHostedStarter(instanceId: string): Promise<StoreResult<HostedStarter>> {
+    const row = (await this.pool.query(`SELECT * FROM ${this.q('hosted_starters')} WHERE instance_id = $1`, [instanceId])).rows[0] as Row | undefined;
+    if (!row) return err({ code: 'not-found', what: 'hosted starter', id: instanceId });
+    const parsed = admit(HostedStarterSchema, {
+      instanceId, projectId: row.project_id, deploymentId: row.deployment_id, origin: row.origin, state: row.state, observedAt: iso(row.observed_at),
+    }, 'hosted starter row');
+    return parsed.accepted ? ok(parsed.value) : err({ code: 'conflict', reason: parsed.reason });
+  }
+
+  async recordHostedAppCheck(input: Parameters<Store['recordHostedAppCheck']>[0]): Promise<void> {
+    const client = await this.pool.connect();
+    let committed = false;
+    try {
+      await client.query('BEGIN');
+      // Use the same lock order as starter registration when a restore overlaps a health check.
+      await client.query(`SELECT id FROM ${this.q('instances')} WHERE id = $1 FOR UPDATE`, [input.instanceId]);
+      const [hosting] = (await client.query(`SELECT deployment_id, state FROM ${this.q('hosted_starters')} WHERE instance_id = $1`, [input.instanceId])).rows;
+      if (hosting?.state !== 'live' || hosting.deployment_id !== input.deploymentId) return;
+      const [row] = (await client.query(`SELECT * FROM ${this.q('hosted_app_checks')} WHERE instance_id = $1`, [input.instanceId])).rows;
+      const next = nextAppCheck(this.asHostedAppCheck(row), input);
+      if (!next) return;
+      const { check, changed } = next;
+      await client.query(
+        `INSERT INTO ${this.q('hosted_app_checks')} (instance_id, deployment_id, state, failures, checked_at)
+         VALUES ($1,$2,$3,$4,$5) ON CONFLICT (instance_id) DO UPDATE SET deployment_id = EXCLUDED.deployment_id,
+           state = EXCLUDED.state, failures = EXCLUDED.failures, checked_at = EXCLUDED.checked_at`,
+        [check.instanceId, check.deploymentId, check.state, check.failures, check.checkedAt],
+      );
+      if (changed) {
+        const audit = await this.appendAuditRecord(client, {
+          actorKind: 'controller', actorRef: 'private-app-check', action: `availability.${changed}`,
+          target: input.instanceId, at: check.checkedAt, detail: { environment: 'staging' },
+        });
+        if (!audit.ok) throw new Error('Could not record the verified app availability transition');
+      }
+      await client.query('COMMIT');
+      committed = true;
+    } finally {
+      try { if (!committed) await client.query('ROLLBACK'); }
+      finally { client.release(); }
+    }
+  }
+
+  async getHostedAppCheck(instanceId: string): Promise<HostedAppCheck | undefined> {
+    const [row] = (await this.pool.query(`SELECT * FROM ${this.q('hosted_app_checks')} WHERE instance_id = $1`, [instanceId])).rows;
+    return this.asHostedAppCheck(row);
+  }
+
+  private asHostedAppCheck(row: Row | undefined): HostedAppCheck | undefined {
+    if (!row || (row.state !== 'checking' && row.state !== 'up' && row.state !== 'down')) return;
+    return {
+      instanceId: String(row.instance_id), deploymentId: String(row.deployment_id), state: row.state,
+      failures: Number(row.failures), checkedAt: iso(row.checked_at),
+    };
   }
 
   async getInstance(id: string) {
@@ -584,9 +784,9 @@ export class PostgresStore implements Store {
       const invitation = this.asInvitation(updated);
       if (!invitation.ok) { await client.query('ROLLBACK'); return invitation; }
       const memberRows = (await client.query(
-        `INSERT INTO ${this.q('team_members')} (team_id, person_id, role, added_at)
+        `INSERT INTO ${this.q('team_members')} AS membership (team_id, person_id, role, added_at)
          VALUES ($1,$2,$3,now())
-         ON CONFLICT (team_id, person_id) DO UPDATE SET role = EXCLUDED.role
+         ON CONFLICT (team_id, person_id) DO UPDATE SET role = membership.role
          RETURNING *`, [updated.team_id, personId, updated.role])).rows as Row[];
       const member = memberRows[0];
       if (!member) { await client.query('ROLLBACK'); return err({ code: 'conflict', reason: 'membership write returned nothing' }); }
@@ -708,6 +908,33 @@ export class PostgresStore implements Store {
       const admitted = admit(TeamMemberSchema, { teamId: r.team_id, personId: r.person_id, role: r.role, addedAt: iso(r.added_at) }, 'team member row');
       return admitted.accepted ? ok(admitted.value) : err({ code: 'conflict', reason: admitted.reason });
     }));
+  }
+
+
+  async changeTeamMember(teamId: string, actorId: string, personId: string, role: TeamRole | null): Promise<StoreResult<TeamMember>> {
+    const client = await this.pool.connect();
+    let committed = false;
+    try {
+      await client.query('BEGIN');
+      await client.query(`SELECT id FROM ${this.q('teams')} WHERE id = $1 FOR UPDATE`, [teamId]);
+      const owner = await client.query(
+        `SELECT 1 FROM ${this.q('team_members')} WHERE team_id = $1 AND person_id = $2 AND role = 'owner'`, [teamId, actorId],
+      );
+      if (!owner.rowCount) return err({ code: 'not-found', what: 'ownership', id: teamId });
+      if (actorId === personId) return err({ code: 'conflict', reason: 'Another owner must change your membership' });
+      const result = role === null
+        ? await client.query(`DELETE FROM ${this.q('team_members')} WHERE team_id = $1 AND person_id = $2 RETURNING *`, [teamId, personId])
+        : await client.query(`UPDATE ${this.q('team_members')} SET role = $3 WHERE team_id = $1 AND person_id = $2 RETURNING *`, [teamId, personId, role]);
+      const row = result.rows[0];
+      if (!row) return err({ code: 'not-found', what: 'team membership', id: personId });
+      const member = TeamMemberSchema.parse({ teamId, personId, role: row.role, addedAt: iso(row.added_at) });
+      await client.query('COMMIT');
+      committed = true;
+      return ok(member);
+    } finally {
+      try { if (!committed) await client.query('ROLLBACK'); }
+      finally { client.release(); }
+    }
   }
 
   async teamsForPerson(personId: string) {
@@ -881,15 +1108,30 @@ export class PostgresStore implements Store {
   }
 
   async listAttestations(instanceId: string, limit = 50) {
-    const rows = (await this.pool.query(`SELECT * FROM ${this.q('attestations')} WHERE instance_id = $1 ORDER BY finished_at DESC, received_at DESC, dispatch_id DESC LIMIT $2`, [instanceId, limit])).rows as Row[];
+    return this.readAttestations(instanceId, limit);
+  }
+
+  async listEnvironmentAttestations(instanceId: string, environment: string, limit = 50) {
+    return this.readAttestations(instanceId, limit, environment);
+  }
+
+  private async readAttestations(instanceId: string, limit: number, environment?: string): Promise<AttestationRecord[]> {
+    const rows = (await this.pool.query(
+      `SELECT * FROM ${this.q('attestations')} WHERE instance_id = $1 AND ($3::text IS NULL OR environment = $3)
+       ORDER BY finished_at DESC, received_at DESC, dispatch_id DESC LIMIT $2`, [instanceId, limit, environment ?? null],
+    )).rows as Row[];
     return values(rows.map((r) => this.asAttestation(r)));
   }
 
   async appendAudit(entry: Omit<AuditEntry, 'id' | 'at'> & { at?: string }) {
+    return this.appendAuditRecord(this.pool, entry);
+  }
+
+  private async appendAuditRecord(client: Pool | PoolClient, entry: Omit<AuditEntry, 'id' | 'at'> & { at?: string }) {
     const admitted = admit(AuditEntrySchema, { ...entry, id: newId('aud'), at: entry.at ?? new Date().toISOString() }, 'audit entry');
     if (!admitted.accepted) return err({ code: 'conflict', reason: admitted.reason });
     const e = admitted.value;
-    await this.pool.query(
+    await client.query(
       `INSERT INTO ${this.q('audit_log')} (id, at, actor_kind, actor_ref, action, target, detail) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb)`,
       [e.id, e.at, e.actorKind, e.actorRef, e.action, e.target, JSON.stringify(e.detail)]);
     return ok(e);
@@ -897,11 +1139,154 @@ export class PostgresStore implements Store {
 
   /** Ordered by the insertion counter, not by `at`: three rows sharing one statement timestamp made `at DESC` a coin flip, which CI caught and my laptop did not. */
   async recentAudit(limit = 50) {
-    const rows = (await this.pool.query(`SELECT * FROM ${this.q('audit_log')} ORDER BY seq DESC LIMIT $1`, [limit])).rows as Row[];
+    return this.readAudit(limit);
+  }
+
+  async recentAuditForTargets(targets: readonly string[], limit: number) {
+    return this.readAudit(limit, targets);
+  }
+
+  private async readAudit(limit: number, targets?: readonly string[]) {
+    const rows = (await this.pool.query(
+      `SELECT * FROM ${this.q('audit_log')} WHERE ($2::text[] IS NULL OR target = ANY($2)) ORDER BY seq DESC LIMIT $1`,
+      [limit, targets ?? null],
+    )).rows as Row[];
     return rows.map((r) => {
       const admitted = admit(AuditEntrySchema, { id: r.id, at: iso(r.at), actorKind: r.actor_kind, actorRef: r.actor_ref, action: r.action, target: r.target, detail: r.detail }, 'audit row');
       return admitted.accepted ? admitted.value : undefined;
     }).filter((x): x is AuditEntry => x !== undefined);
+  }
+
+  async saveNotificationRule(personId: string, input: NewNotificationRule): Promise<StoreResult<NotificationRule>> {
+    const candidate = admit(NotificationRuleSchema, {
+      ...input, id: input.id ?? newId('rule'), createdAt: new Date().toISOString(),
+    }, 'notification rule');
+    if (!candidate.accepted) return err({ code: 'conflict', reason: candidate.reason });
+    const { id, instanceId, event, enabled, environment } = candidate.value;
+    const allowed = `SELECT 1 FROM ${this.q('instances')} AS app
+      JOIN ${this.q('team_members')} AS member ON member.team_id = app.team_id AND member.person_id = $2
+      WHERE app.id = $3 AND ($4::text IS NULL OR EXISTS (
+        SELECT 1 FROM ${this.q('instance_environments')} WHERE instance_id = app.id AND environment = $4
+      ))`;
+    try {
+      const values = [id, personId, instanceId, environment ?? null, event, enabled];
+      const result = input.id
+        ? await this.pool.query(
+          `UPDATE ${this.q('notification_rules')} SET environment = $4, event = $5, enabled = $6, active_since = now()
+           WHERE id = $1 AND person_id = $2 AND instance_id = $3 AND EXISTS (${allowed}) RETURNING *`, values,
+        )
+        : await this.pool.query(
+          `INSERT INTO ${this.q('notification_rules')} (id, person_id, instance_id, environment, event, enabled)
+           SELECT $1, $2, $3, $4, $5, $6 WHERE EXISTS (${allowed}) RETURNING *`, values,
+        );
+      const row = result.rows[0];
+      return row ? this.asNotificationRule(row) : err({ code: 'not-found', what: 'app, environment, or notification rule', id: input.id ?? instanceId });
+    } catch (error) {
+      if ((error as { code?: string }).code === '23505') return err({ code: 'conflict', reason: 'This event already has a rule for that environment' });
+      throw error;
+    }
+  }
+
+  async listNotificationRules(personId: string): Promise<NotificationRule[]> {
+    const result = await this.pool.query(
+      `SELECT rule.* FROM ${this.q('notification_rules')} AS rule
+       JOIN ${this.q('instances')} AS app ON app.id = rule.instance_id
+       JOIN ${this.q('team_members')} AS member ON member.team_id = app.team_id AND member.person_id = rule.person_id
+       WHERE rule.person_id = $1 ORDER BY rule.created_at, rule.id`, [personId],
+    );
+    return values(result.rows.map((row) => this.asNotificationRule(row)));
+  }
+
+  async removeNotificationRule(personId: string, instanceId: string, id: string): Promise<boolean> {
+    const result = await this.pool.query(
+      `DELETE FROM ${this.q('notification_rules')} WHERE id = $1 AND person_id = $2 AND instance_id = $3`, [id, personId, instanceId],
+    );
+    return result.rowCount === 1;
+  }
+
+  async getNotificationEmailPreference(personId: string): Promise<NotificationEmailPreference | undefined> {
+    const { rows } = await this.pool.query(
+      `SELECT * FROM ${this.q('notification_email_preferences')} WHERE person_id = $1`, [personId],
+    );
+    const row = rows[0];
+    if (row) return { personId, issuer: String(row.issuer), subject: String(row.subject), enabledAt: iso(row.enabled_at) };
+  }
+
+  async setNotificationEmailPreference(personId: string, preference: Omit<NotificationEmailPreference, 'personId'> | null) {
+    if (!preference) {
+      await this.pool.query(`DELETE FROM ${this.q('notification_email_preferences')} WHERE person_id = $1`, [personId]);
+      return true;
+    }
+    const result = await this.pool.query(
+      `INSERT INTO ${this.q('notification_email_preferences')} AS previous (person_id, issuer, subject, enabled_at)
+       SELECT person_id, issuer, subject, $4::timestamptz FROM ${this.q('identities')}
+       WHERE person_id = $1 AND issuer = $2 AND subject = $3
+       ON CONFLICT (person_id) DO UPDATE SET issuer = excluded.issuer, subject = excluded.subject, enabled_at =
+         CASE WHEN previous.issuer = excluded.issuer AND previous.subject = excluded.subject
+         THEN previous.enabled_at ELSE excluded.enabled_at END`,
+      [personId, preference.issuer, preference.subject, preference.enabledAt],
+    );
+    return result.rowCount === 1;
+  }
+
+  async leaseNotificationEmails(issuer: string, now: string): Promise<NotificationEmailDelivery[]> {
+    const leaseId = newId('lease');
+    const { rows } = await this.pool.query(
+      `WITH matches AS (
+         SELECT DISTINCT ON (audit.seq, preference.person_id)
+           audit.id AS audit_id, audit.at, audit.detail->>'environment' AS environment,
+           preference.person_id, preference.subject, preference.enabled_at,
+           app.id AS instance_id, app.team_id, rule.event
+         FROM ${this.q('notification_email_preferences')} AS preference
+         JOIN ${this.q('notification_rules')} AS rule ON rule.person_id = preference.person_id AND rule.enabled
+         JOIN ${this.q('instances')} AS app ON app.id = rule.instance_id
+         JOIN ${this.q('team_members')} AS member ON member.team_id = app.team_id AND member.person_id = preference.person_id
+         JOIN ${this.q('audit_log')} AS audit ON audit.target = app.id
+         JOIN jsonb_to_recordset($4::jsonb) AS event(action text, event text, result text)
+           ON event.action = audit.action AND event.event = rule.event
+           AND (event.result IS NULL OR event.result = audit.detail->>'result')
+         LEFT JOIN ${this.q('notification_email_deliveries')} AS delivery
+           ON delivery.person_id = preference.person_id AND delivery.audit_id = audit.id
+         WHERE preference.issuer = $1
+           AND (rule.environment IS NULL OR rule.environment = audit.detail->>'environment')
+           AND audit.at BETWEEN GREATEST(preference.enabled_at, rule.active_since, member.added_at, $2::timestamptz - interval '24 hours') AND $2
+           AND (delivery.attempts IS NULL OR (delivery.attempts < 4 AND delivery.due_at <= $2))
+         ORDER BY audit.seq, preference.person_id
+         LIMIT 5
+       ), leased AS (
+         INSERT INTO ${this.q('notification_email_deliveries')} AS previous (person_id, audit_id, lease_id, attempts, due_at)
+         SELECT person_id, audit_id, $3, 1, $2::timestamptz + interval '3 minutes' FROM matches
+         ON CONFLICT (person_id, audit_id) DO UPDATE SET lease_id = excluded.lease_id,
+           attempts = previous.attempts + 1, due_at = excluded.due_at
+         WHERE previous.due_at <= $2 AND previous.attempts < 4
+         RETURNING person_id, audit_id, attempts
+       )
+       SELECT matches.*, leased.attempts FROM matches JOIN leased USING (person_id, audit_id)`,
+      [issuer, now, leaseId, JSON.stringify(notificationEvents)],
+    );
+    return rows.map((row) => ({
+      auditId: String(row.audit_id), leaseId, attempts: Number(row.attempts),
+      preference: { personId: String(row.person_id), issuer, subject: String(row.subject), enabledAt: iso(row.enabled_at) },
+      instanceId: String(row.instance_id), teamId: String(row.team_id),
+      event: row.event as NotificationRule['event'], at: iso(row.at),
+      ...(typeof row.environment === 'string' ? { environment: row.environment } : {}),
+    }));
+  }
+
+  async settleNotificationEmail(delivery: Pick<NotificationEmailDelivery, 'auditId' | 'leaseId' | 'preference'>, retryAt: string | null) {
+    await this.pool.query(
+      `UPDATE ${this.q('notification_email_deliveries')} SET due_at = $4
+       WHERE person_id = $1 AND audit_id = $2 AND lease_id = $3`,
+      [delivery.preference.personId, delivery.auditId, delivery.leaseId, retryAt],
+    );
+  }
+
+  private asNotificationRule(row: Row): StoreResult<NotificationRule> {
+    const rule = admit(NotificationRuleSchema, {
+      id: row.id, instanceId: row.instance_id, event: row.event, enabled: row.enabled, createdAt: iso(row.created_at),
+      ...(row.environment === null ? {} : { environment: row.environment }),
+    }, 'notification rule row');
+    return rule.accepted ? ok(rule.value) : err({ code: 'conflict', reason: rule.reason });
   }
 
   async close(): Promise<void> {

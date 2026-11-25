@@ -3,7 +3,7 @@
  * packages/ui/src/components/style.ts and it is the only one.
  *
  * Source: packages/ui/src/components/style.ts
- * Input digest: sha256/ced385431d801437
+ * Input digest: sha256/bf4e8a94ce52d236
  *
  * Reproduce with `pnpm run ui:css`; `pnpm run ui:css:check` fails when this stops matching the module. The
  * numbers in here are not literals: they reference the custom properties in ../tokens.css, which is what makes
@@ -11,6 +11,59 @@
  * appears in this file -- a threshold belongs to a layout primitive's `@container` rule, and gate §9.3 audits
  * both sheets for the difference.
  */
+
+/* Place related workspace actions together at each supported width. */
+.ui-workspace-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ui-space-4);
+}
+
+/* Keep the starter details and action on one bordered card. */
+.ui-template-card {
+  max-inline-size: 32rem;
+  border: 1px solid var(--ui-color-border);
+  border-radius: var(--ui-space-4);
+  overflow: hidden;
+}
+
+/* Use the approved template gradient with a dark surface for readable headings. */
+.ui-template-card header {
+  padding: var(--ui-space-5);
+  background: linear-gradient(140deg, color-mix(in srgb, var(--ui-color-accent) 19%, var(--ui-color-surface)), var(--ui-color-surface));
+}
+
+/* Group the source metadata and launch action below the card title. */
+.ui-template-card-body {
+  padding: var(--ui-space-5);
+}
+
+/* Keep labels and fields together and limit the line length on wider screens. */
+.ui-workspace-form {
+  display: grid;
+  gap: var(--ui-space-3);
+  max-inline-size: 28rem;
+  margin-block: var(--ui-space-4);
+}
+
+/* Use the same field surface as authentication and preserve the primary input target. */
+.ui-workspace-form input {
+  inline-size: 100%;
+  min-inline-size: 0;
+  min-block-size: var(--ui-target-primary);
+  padding: var(--ui-space-2) var(--ui-space-3);
+  border: 1px solid var(--ui-color-border);
+  border-radius: var(--ui-space-3);
+  background: var(--ui-color-bg);
+  color: var(--ui-color-text);
+  font: inherit;
+}
+
+/* Make keyboard focus visible on workspace fields. */
+.ui-workspace-form input:focus-visible {
+  outline: 2px solid var(--ui-color-accent);
+  outline-offset: 2px;
+}
 
 /* 11 §8: the primary surface is the phone, so a row, a select and the action a person aims at are 44 CSS px before anything else is decided. */
 .ui-hit-primary {
@@ -30,6 +83,7 @@
 /* Rule 5: the age label is load-bearing, not caption decoration, and `textMuted` on `surface` is a listed contrast pair rather than a grey someone picked. */
 .ui-age {
   color: var(--ui-color-textMuted);
+  font-size: var(--ui-font-caption);
 }
 
 /* An observation older than the interval that keeps it current changes colour *and* keeps its words: 11 §8 says an error is never colour alone, and neither is a doubt. */
@@ -46,6 +100,10 @@
 
 /* The state word is text on purpose. Tone arrives as a word first and a colour second, which is the difference between a state and a dot. */
 .ui-state {
+  display: inline-flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--ui-space-2);
   color: var(--ui-color-text);
 }
 
@@ -62,4 +120,295 @@
   clip-path: inset(50%);
   position: absolute;
   white-space: nowrap;
+}
+
+/* Use the platform UI font for the workspace and announce route changes by moving focus to its root. */
+.ui-workspace {
+  font-family: system-ui, sans-serif;
+  outline: none;
+}
+
+/* The logo and the two context controls share one bar at every width. */
+.ui-workspace-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-space-3);
+  padding: var(--ui-space-3) max(var(--ui-space-4), calc((100% - 68rem) / 2));
+  background: var(--ui-color-surface);
+  border-block-end: 1px solid var(--ui-color-border);
+}
+
+/* Keep switching teams and account actions beside one another. */
+.ui-workspace-tools {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-2);
+  min-inline-size: 0;
+}
+
+/* Anchor each disclosure to its own trigger. */
+.ui-workspace-menu {
+  position: relative;
+  min-inline-size: 0;
+}
+
+/* Give each workspace action a matching, readable control. */
+.ui-workspace-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-space-3);
+  padding-inline: var(--ui-space-3);
+  max-inline-size: 100%;
+  background: var(--ui-color-surface);
+  color: var(--ui-color-text);
+  border: 1px solid var(--ui-color-border);
+  border-radius: var(--ui-space-3);
+  font: inherit;
+  font-weight: var(--ui-weight-title);
+  font-size: var(--ui-font-label);
+  cursor: pointer;
+}
+
+/* Long team names leave space for the account button and are shown in full in the selector. */
+.ui-workspace-team-label {
+  max-inline-size: min(12rem, 32vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Identify Platfolio with its own simple wordmark and accent. */
+.ui-workspace-mark {
+  display: grid;
+  place-items: center;
+  inline-size: 1.5em;
+  aspect-ratio: 1;
+  background: var(--ui-color-accent);
+  color: var(--ui-color-onAccent);
+  border-radius: var(--ui-space-2);
+}
+
+/* Give the account menu a compact fallback avatar. */
+.ui-workspace-avatar {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 0.1em;
+  inline-size: 1.5em;
+  aspect-ratio: 1;
+  margin-inline: auto;
+  border-radius: 50%;
+  background: var(--ui-color-border);
+  color: var(--ui-color-textMuted);
+}
+
+/* Form the head of a generic account icon. */
+.ui-workspace-avatar-head {
+  inline-size: 0.4em;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+/* Form the shoulders of the account icon. */
+.ui-workspace-avatar-body {
+  inline-size: 0.8em;
+  block-size: 0.35em;
+  border-radius: 0.4em 0.4em 0 0;
+  background: currentColor;
+}
+
+/* Use the control’s surface, border, and typography in its popup. */
+.ui-workspace-popover {
+  position: absolute;
+  z-index: 1;
+  inset-block-start: 100%;
+  inset-inline-start: 0;
+  inline-size: max-content;
+  min-inline-size: 11rem;
+  max-inline-size: min(19rem, 75vw);
+  max-block-size: min(22rem, 65vh);
+  overflow: auto;
+  padding: var(--ui-space-2);
+  background: var(--ui-color-surface);
+  border: 1px solid var(--ui-color-border);
+  border-radius: var(--ui-space-3);
+  font-size: var(--ui-font-label);
+}
+
+/* Keep right-hand disclosures within the screen. */
+.ui-workspace-popover-end {
+  inset-inline-start: auto;
+  inset-inline-end: 0;
+}
+
+/* Distinguish workspace actions from global links. */
+.ui-workspace-menu-section {
+  border-block-start: 1px solid var(--ui-color-border);
+  margin-block-start: var(--ui-space-2);
+  padding-block-start: var(--ui-space-2);
+}
+
+/* Links and actions share a predictable target and alignment. */
+.ui-workspace-item {
+  display: flex;
+  align-items: center;
+  inline-size: 100%;
+  padding: var(--ui-space-2) var(--ui-space-3);
+  border: 0;
+  border-radius: var(--ui-space-2);
+  background: transparent;
+  font: inherit;
+  color: var(--ui-color-text);
+  text-align: start;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+/* Give workspace pages a comfortable shared measure. */
+.ui-workspace-main {
+  inline-size: min(100%, 70rem);
+  margin-inline: auto;
+  padding: var(--ui-space-5) var(--ui-space-4) var(--ui-space-9);
+  outline: none;
+}
+
+/* Let shallow breadcrumbs wrap without obscuring the selected context. */
+.ui-workspace-crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ui-space-2);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: var(--ui-font-caption);
+  color: var(--ui-color-textMuted);
+  overflow-wrap: anywhere;
+}
+
+/* Keep separators with their labels. */
+.ui-workspace-crumbs li {
+  display: inline-flex;
+  gap: var(--ui-space-2);
+  min-inline-size: 0;
+}
+
+/* Keep the observation time next to the data heading. */
+.ui-workspace-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--ui-space-2) var(--ui-space-4);
+}
+
+/* Use a single bordered surface for related workspace rows. */
+.ui-workspace-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--ui-color-border);
+  border-radius: var(--ui-space-3);
+  overflow: hidden;
+}
+
+/* Separate the targets visually while keeping the list compact. */
+.ui-workspace-list li + li {
+  border-block-start: 1px solid var(--ui-color-border);
+}
+
+/* Let the entire row open its team, app, or environment. */
+.ui-workspace-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-space-3);
+  flex-wrap: wrap;
+  padding: var(--ui-space-3) var(--ui-space-4);
+  color: var(--ui-color-text);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+/* Treat keyboard focus and pointer feedback consistently. */
+.ui-workspace-item:hover, .ui-workspace-item:focus-visible, .ui-workspace-row:hover, .ui-workspace-row:focus-visible {
+  background: var(--ui-color-bg);
+  text-decoration: underline;
+  outline-offset: -2px;
+}
+
+/* Keep the focus indicator visible on both control surfaces. */
+.ui-workspace-trigger:focus-visible, .ui-workspace-primary:focus-visible {
+  outline: 2px solid var(--ui-color-accent);
+  outline-offset: 2px;
+}
+
+/* Display secondary metadata and observation age with a readable token pair. */
+.ui-workspace-meta {
+  color: var(--ui-color-textMuted);
+  font-size: var(--ui-font-caption);
+}
+
+/* Reserve space for the healthy empty state. */
+.ui-workspace-empty {
+  padding: var(--ui-space-5);
+  border: 1px dashed var(--ui-color-border);
+  border-radius: var(--ui-space-3);
+  color: var(--ui-color-textMuted);
+}
+
+/* Keep reported environment fields legible on narrow screens. */
+.ui-workspace-facts {
+  display: grid;
+  gap: var(--ui-space-3);
+  overflow-wrap: anywhere;
+}
+
+/* Align values beneath their labels. */
+.ui-workspace-facts dd {
+  margin-inline-start: 0;
+}
+
+/* Give the sign-in transition a simple, portable surface. */
+.ui-workspace-entry {
+  margin: var(--ui-space-8) auto;
+  inline-size: min(calc(100% - 2rem), 28rem);
+  padding: var(--ui-space-6);
+  background: var(--ui-color-surface);
+  border: 1px solid var(--ui-color-border);
+  border-radius: var(--ui-space-4);
+  font-family: system-ui, sans-serif;
+}
+
+/* Keep the Platfolio name visible during authentication. */
+.ui-workspace-entry-brand {
+  margin: 0;
+  font-weight: var(--ui-weight-title);
+  color: var(--ui-color-accent);
+}
+
+/* Use the strong accent for the next step. */
+.ui-workspace-primary {
+  padding-inline: var(--ui-space-5);
+  background: var(--ui-color-accent);
+  color: var(--ui-color-onAccent);
+  border: 0;
+  border-radius: var(--ui-space-3);
+  font: inherit;
+  cursor: pointer;
+}
+
+/* Offer a keyboard shortcut to the page content. */
+.ui-workspace-skip {
+  position: absolute;
+  z-index: 2;
+  transform: translateY(-200%);
+  padding: var(--ui-space-3);
+  background: var(--ui-color-bg);
+}
+
+/* Reveal the shortcut when reached by keyboard. */
+.ui-workspace-skip:focus {
+  transform: none;
 }
