@@ -21,7 +21,11 @@ export async function customerControlPlanePlan(candidateFile: string) {
 }
 
 type Stage = Awaited<ReturnType<typeof customerRailway>>;
-interface PrivateOwner { email: string; password: string }
+interface PrivateOwner {
+  email: string;
+  password: string;
+  smtp?: { host: string; port: number; from: string; user: string; password: string };
+}
 interface InstallOptions {
   adminFile?: string;
   owner?: PrivateOwner;
@@ -61,6 +65,14 @@ export async function launchCustomerControlPlane(stage: Stage, plan: Awaited<Ret
     await stage.setConfig(identity.service, 'PLATFOLIO_INSTALL_OWNER_PASSWORD', owner.password).catch(() => {
       throw new Error('Railway rejected the initial private owner credential');
     });
+    if (owner.smtp) {
+      const { host, port, from, user, password } = owner.smtp;
+      const mail = { PLATFOLIO_SMTP_HOST: host, PLATFOLIO_SMTP_PORT: String(port), PLATFOLIO_EMAIL_FROM: from,
+        PLATFOLIO_SMTP_USER: user, PLATFOLIO_SMTP_PASSWORD: password };
+      for (const [name, value] of Object.entries(mail)) {
+        await stage.setConfig(identity.service, name, value).catch(() => { throw new Error(`Railway did not apply ${name}`); });
+      }
+    }
   }
   for (const item of services) {
     const runtime = { ...item.spec.env, ...outputs[item.name as keyof typeof outputs], PORT: String(item.spec.port) };

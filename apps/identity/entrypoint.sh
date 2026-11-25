@@ -32,8 +32,17 @@ if [ "${1:-}" = start-private ]; then
     unset KC_BOOTSTRAP_ADMIN_USERNAME KC_BOOTSTRAP_ADMIN_PASSWORD
   fi
 
+  realm=platfolio-realm.json
+  if [ -n "${PLATFOLIO_SMTP_HOST:-}${PLATFOLIO_SMTP_PORT:-}${PLATFOLIO_EMAIL_FROM:-}${PLATFOLIO_SMTP_USER:-}${PLATFOLIO_SMTP_PASSWORD:-}" ]; then
+    : "${PLATFOLIO_SMTP_HOST:?Set the private mail relay host}"
+    : "${PLATFOLIO_SMTP_PORT:?Set the private mail relay port}"
+    : "${PLATFOLIO_EMAIL_FROM:?Set the private mail sender address}"
+    : "${PLATFOLIO_SMTP_USER:?Set the private mail relay username}"
+    : "${PLATFOLIO_SMTP_PASSWORD:?Set the private mail relay password}"
+    realm=platfolio-realm-with-mail.json
+  fi
   mkdir -p /opt/keycloak/data/import
-  cp /opt/keycloak/platfolio-private/platfolio-realm.json /opt/keycloak/data/import/platfolio-realm.json
+  cp "/opt/keycloak/platfolio-private/$realm" /opt/keycloak/data/import/platfolio-realm.json
   exec /opt/keycloak/bin/kc.sh start --import-realm "$@"
 fi
 

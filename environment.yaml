@@ -351,7 +351,7 @@ variables:
     secret: false
     environments: all
     deployedTo: railway:variable
-    note: "Optional mail relay configured on the installation API service. The development overlay can use Mailpit."
+    note: "Optional relay for the installation API or a fresh private Keycloak realm. The development API overlay can use Mailpit."
   - name: PLATFOLIO_EXPIRES_AT
     kind: value
     secret: false
@@ -562,19 +562,19 @@ variables:
     secret: false
     environments: all
     deployedTo: railway:variable
-    note: "Optional mail relay configured on the installation API service. The development overlay can use Mailpit."
+    note: "Optional relay for the installation API or a fresh private Keycloak realm. The development API overlay can use Mailpit."
   - name: PLATFOLIO_SMTP_PASSWORD
     kind: secret
     secret: true
     environments: [staging, production]
     deployedTo: railway:variable
-    note: "Optional mail relay configured on the installation API service. The development overlay can use Mailpit."
+    note: "Optional relay for the installation API or a fresh private Keycloak realm. The development API overlay can use Mailpit."
   - name: PLATFOLIO_SMTP_PORT
     kind: value
     secret: false
     environments: all
     deployedTo: railway:variable
-    note: "Optional mail relay configured on the installation API service. The development overlay can use Mailpit."
+    note: "Optional relay for the installation API or a fresh private Keycloak realm. The development API overlay can use Mailpit."
   - name: PLATFOLIO_SMTP_SECURE
     kind: value
     secret: false
@@ -592,7 +592,7 @@ variables:
     secret: false
     environments: [staging, production]
     deployedTo: railway:variable
-    note: "Optional mail relay configured on the installation API service. The development overlay can use Mailpit."
+    note: "Optional relay for the installation API or a fresh private Keycloak realm. The development API overlay can use Mailpit."
   - name: PLATFOLIO_STARTER_HEALTH_URL
     kind: value
     secret: false

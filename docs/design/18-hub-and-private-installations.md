@@ -355,6 +355,13 @@ The customer Railway launcher also accepts `--owner-bootstrap-file` with a priva
 file containing `email` and a generated URL-safe `password`. This starts the private
 realm in the identity service and prints only its public origin.
 
+Set the optional `smtp` object in the same owner file to configure password recovery on a
+new private realm. Supply the installation's STARTTLS relay `host`, numeric `port`,
+`from` address, `user`, and `password`. The themed sign-in screen shows **Forgot password?**
+when recovery is configured. Registration stays closed. To enable the same capability on an
+existing private realm, configure its own SMTP relay and run `configure-auth-theme.ts` with
+`--enable-password-recovery`. Realm import leaves existing users and settings in place.
+
 The customer launcher can run as a private worker in the installation project. Pass a
 CI candidate, the exact installation project ID, and a private `--launch-config-file`
 when applying `launch-customer-railway.ts`. Keep that file in the installation owner's

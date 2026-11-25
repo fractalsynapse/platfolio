@@ -1,6 +1,7 @@
 import { readFile, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
+import { z } from 'zod';
 import { customerRailway } from './customer-railway.ts';
 import { privateMarketplaceOrigin } from './customer-marketplace-connection.ts';
 import { customerControlPlanePlan, launchCustomerControlPlane } from './launch-customer-control-plane.ts';
@@ -40,11 +41,20 @@ async function ownerLaunchConfig(file: string) {
 }
 const launchConfig = values['launch-config-file'] ? await ownerLaunchConfig(values['launch-config-file']) : undefined;
 const ownerFile = values['owner-bootstrap-file'];
+const ownerMail = z.object({
+  host: z.string().regex(/^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$/).max(253),
+  port: z.number().int().min(1).max(65535),
+  from: z.string().email().max(254),
+  user: z.string().min(1).max(512),
+  password: z.string().min(1).max(1024),
+}).strict().optional();
 async function privateOwner(file: string) {
-  const { email, password } = await privateConfig(file, 'the initial owner credentials');
+  const { email, password, smtp } = await privateConfig(file, 'the initial owner credentials');
   if (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ||
     typeof password !== 'string' || !/^[A-Za-z0-9_-]{32,128}$/.test(password)) throw new Error('Supply the first owner email and a generated URL-safe password');
-  return { email, password };
+  const recoveredMail = ownerMail.safeParse(smtp);
+  if (!recoveredMail.success) throw new Error('Supply the host, port, sender address, username and password for the private STARTTLS mail relay');
+  return { email, password, ...(recoveredMail.data ? { smtp: recoveredMail.data } : {}) };
 }
 if (ownerFile && (!values.apply || !values.candidate)) throw new Error('Private owner bootstrap requires --apply and --candidate');
 if (ownerFile && values.candidate) resolveCheckoutCandidate(values.candidate, resolve(import.meta.dirname, '..'));
