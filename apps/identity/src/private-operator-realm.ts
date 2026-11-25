@@ -1,9 +1,16 @@
 import { API_CLIENT_ID, CALLBACK_PATH, REQUIRED_SCOPE, WEB_CLIENT_ID } from '../../../packages/ui/src/web/browser-auth-policy.ts';
 import { browserClientMappers, browserClientShape } from '../../../scripts/keycloak-browser-client.ts';
+import { installationOwnerHash } from '../../../packages/ui/src/web/installation-owner-policy.ts';
 import { passwordResetAttributes } from './password-recovery.ts';
 
 const siteOrigin = '${PLATFOLIO_SITE_ORIGIN}';
 const passwordRecovery = process.argv.includes('--password-recovery');
+const verifier = process.argv.includes('--owner-verifier');
+const ownerCredential = verifier ? {
+  type: 'password',
+  credentialData: JSON.stringify({ algorithm: installationOwnerHash.algorithm, hashIterations: installationOwnerHash.iterations, additionalParameters: {} }),
+  secretData: JSON.stringify({ value: '${PLATFOLIO_INSTALL_OWNER_VERIFIER}', salt: '${PLATFOLIO_INSTALL_OWNER_SALT}', additionalParameters: {} }),
+} : { type: 'password', value: '${PLATFOLIO_INSTALL_OWNER_PASSWORD}', temporary: false };
 const realm = {
   realm: 'platfolio',
   displayName: 'Platfolio',
@@ -29,7 +36,7 @@ const realm = {
   clientScopeMappings: { [API_CLIENT_ID]: [{ client: WEB_CLIENT_ID, roles: [REQUIRED_SCOPE] }] },
   users: [{ id: '${PLATFOLIO_INSTALL_OWNER_SUBJECT}', username: 'owner', firstName: 'Private', lastName: 'Owner', email: '${PLATFOLIO_INSTALL_OWNER_EMAIL}',
     enabled: true, emailVerified: false, clientRoles: { [API_CLIENT_ID]: [REQUIRED_SCOPE] },
-    credentials: [{ type: 'password', value: '${PLATFOLIO_INSTALL_OWNER_PASSWORD}', temporary: false }] }],
+    ...(verifier ? { requiredActions: [installationOwnerHash.requiredAction] } : {}), credentials: [ownerCredential] }],
 };
 
 process.stdout.write(JSON.stringify(realm) + '\n');

@@ -5,6 +5,9 @@ import { defineComponent } from '../contract.ts';
 import { useCommand, useOperation } from '../sdk/use-operation.ts';
 import { isLoaded } from '../sdk/transport.ts';
 import { WorkspaceLink } from '../workspace/workspace-link.tsx';
+import { HostingRemoval } from '../workspace/hosting-removal.tsx';
+import { WorkspaceAction } from '../workspace/workspace-action.tsx';
+import { LaunchProgress } from '../workspace/launch-progress.tsx';
 import { workspacePaths } from '../workspace/routes.ts';
 import { StarterLaunchSetup } from './starter-launch-setup.tsx';
 import type { SuccessOf } from '@platfolio/api-contract/generated/types';
@@ -14,7 +17,6 @@ const headings: Record<Launch['state'], string> = {
   idle: 'Ready to set up', running: 'Setting up your app', ready: 'Your app is ready',
   failed: 'Setup needs attention', removing: 'Removing your app', kept: 'App removed. Data kept.', wiped: 'App removed. Data scheduled for deletion.',
 };
-const status = (value: string) => ({ WORKING: 'Working', READY: 'Complete', SUCCESS: 'Complete', FAILED: 'Needs attention' }[value] ?? value.toLowerCase());
 const props = z.object({ teamId: z.string().min(1), teamName: z.string().min(1).optional() }).strict();
 
 function LaunchPanel({ teamId, teamName }: z.infer<typeof props>) {
@@ -26,21 +28,19 @@ function LaunchPanel({ teamId, teamName }: z.infer<typeof props>) {
   const canWipeData = local || setup.state.status === 'loaded' && setup.state.data.canWipeData === true;
   const start = useCommand('startStarterLaunch');
   const remove = useCommand('removeStarterLaunch');
-  const [confirmation, setConfirmation] = React.useState('');
-  const [selected, select] = React.useState<'keep' | 'wipe' | null>(null);
   const [pending, setPending] = React.useState(false);
   const [problem, setProblem] = React.useState('');
   const report = isLoaded(launch.state) ? launch.state.data : null;
   const now = useClock();
 
-  async function act(action: 'start' | 'keep' | 'wipe') {
+  async function act(action: 'start' | 'keep' | 'wipe', confirmation?: string) {
     setProblem('');
     setPending(true);
     try {
       const result = action === 'start' ? await start({ params })
-        : await remove({ params, body: { data: action, ...(action === 'wipe' ? { confirmation } : {}) } });
+        : await remove({ params, body: { data: action, ...(confirmation === undefined ? {} : { confirmation }) } });
       if (!result.ok) setProblem([400, 409].includes(result.error.status) ? result.error.message : 'Platfolio could not accept that action. Try again.');
-      else { select(null); setConfirmation(''); }
+      return result.ok;
     } finally {
       launch.reload();
       setPending(false);
@@ -63,7 +63,7 @@ function LaunchPanel({ teamId, teamName }: z.infer<typeof props>) {
       {launch.state.status === 'loaded' && <small>{ageLabel(launch.state.freshness, now().toISOString()).text}</small>}
       {ready && ['idle', 'failed', 'kept', 'wiped'].includes(report.state) && <>
         <p>Use your connected Railway workspace. This creates a dedicated staging project and database. Anyone with the generated app link can open it. Railway charges apply to the resources you use.</p>
-        <button className="ui-hit-primary" type="button" disabled={pending} onClick={() => void act('start')}>{report.state === 'kept' ? 'Restore app' : report.state === 'failed' ? 'Resume setup' : 'Launch starter'}</button>
+        <WorkspaceAction variant="primary" disabled={pending} onClick={() => void act('start')}>{report.state === 'kept' ? 'Restore app' : report.state === 'failed' ? 'Resume setup' : 'Launch starter'}</WorkspaceAction>
       </>}
       {report.state === 'ready' && <p className="ui-workspace-links">
         {report.instanceName && teamName && <WorkspaceLink href={workspacePaths.instance(teamName, report.instanceName)}>Manage app</WorkspaceLink>}
@@ -72,29 +72,10 @@ function LaunchPanel({ teamId, teamName }: z.infer<typeof props>) {
       {report.registration === 'pending' && <p role="status">Adding this app to Team workspace…</p>}
       {report.registration === 'conflict' && <p role="status">Another instance uses this name. Its settings have been preserved.</p>}
       <p>Starter Web uses a generated database connection.</p>
-      {report.events.length > 0 && <details open>
-        <summary>Setup progress</summary>
-        <ol aria-label="Setup progress">
-          {report.events.map((event, index) => <li key={`${event.at}-${index}`}>
-            <strong>{event.step}</strong>{` · ${status(event.state)}`}
-            {event.detail && <p>{event.detail}</p>}
-          </li>)}
-        </ol>
-        <a download="platfolio-launch-report.json" href={`data:application/json;charset=utf-8,${encodeURIComponent(JSON.stringify(report, null, 2))}`}>Download troubleshooting report</a>
-      </details>}
-      {ready && report.projectId && ['ready', 'kept', 'failed'].includes(report.state) && <details>
-        <summary>Remove app</summary>
-        <p>Choose what happens to the app’s storage.</p>
-        <button type="button" className="ui-hit-primary" onClick={() => select('keep')}>Remove and keep data</button>{' '}
-        {canWipeData ? <button type="button" className="ui-hit-primary" onClick={() => select('wipe')}>Remove and wipe data</button>
-          : <p>Permanent removal is available with a workspace connection.</p>}
-        {selected === 'keep' && <p>Stops the app and database. Railway keeps the storage and can still charge for it. <button type="button" className="ui-hit-primary" disabled={pending} onClick={() => void act('keep')}>Confirm removal</button></p>}
-        {canWipeData && selected === 'wipe' && <div>
-          <p>Removes the project and schedules deletion of its storage. Type <strong>starter-web</strong> to confirm.</p>
-          <label>App name <input value={confirmation} onChange={(event) => setConfirmation(event.target.value)} /></label>{' '}
-          <button type="button" className="ui-hit-primary" disabled={pending || confirmation !== 'starter-web'} onClick={() => void act('wipe')}>Wipe app data</button>
-        </div>}
-      </details>}
+      <LaunchProgress report={report} />
+      {ready && report.projectId && ['ready', 'kept', 'failed'].includes(report.state) &&
+        <HostingRemoval name={report.instanceName ?? report.template} pending={pending} canWipe={canWipeData}
+          onRemove={({ data, confirmation }) => act(data, confirmation)} />}
     </>}
     {problem && <p role="alert">{problem}</p>}
   </section>;

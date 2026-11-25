@@ -1,5 +1,7 @@
 import { createKernel, disposeKernel, type KernelContext } from '@platfolio/kernel';
-import type { SuccessOf } from '@platfolio/api-contract/generated/types';
+import { railwayInstallationProvider, type RailwayInstallationConfig } from '../../../packages/contracts/src/railway-installation.ts';
+import { installationAuthorizationCallback } from './installation-launch.ts';
+import type { InstallationProvider } from '../../../packages/contracts/src/installation-provider.ts';
 import { EndpointKeySource, IdentityConfigSchema, redactCredentialShaped } from '@platfolio/contracts';
 import { ROUTE_MANIFEST } from './routes.ts';
 import { buildCapabilities } from './capabilities.ts';
@@ -16,7 +18,8 @@ export interface BootConfig {
   issuer: string;
   audience: string;
   marketplaceEnabled?: boolean;
-  installationOffer?: SuccessOf<'getHubInstallationOffer'>;
+  installation?: { configuration: RailwayInstallationConfig; returnTo: string };
+  installationProvider?: { provider: InstallationProvider; returnTo: string };
   starterLaunch?: StarterLaunch;
   infrastructure?: readonly import('@platfolio/kernel').HostingPlugin[];
   customerLaunch?: CustomerLaunchConfig;
@@ -54,10 +57,21 @@ export function configFromEnv(env: NodeJS.ProcessEnv): BootConfig {
   const allowedOrigins = parseAllowedOrigins(env.PLATFOLIO_ALLOWED_ORIGINS);
   const launcher = customerLaunchConfig(env, allowedOrigins);
   const templateCode = env.PLATFOLIO_RAILWAY_INSTALL_TEMPLATE;
+  const templateDigest = env.PLATFOLIO_RAILWAY_INSTALL_CONFIG_SHA;
   const revision = env.PLATFOLIO_RAILWAY_INSTALL_REVISION;
-  if ((templateCode || revision) && (env.PLATFOLIO_MARKETPLACE_ENABLED !== 'true' ||
-      !templateCode || !/^[a-zA-Z0-9_-]{6,64}$/.test(templateCode) || !revision || !/^[0-9a-f]{40}$/.test(revision))) {
-    throw new Error('Offer a verified Railway installer and its exact pinned revision on the hub');
+  const clientId = env.PLATFOLIO_HUB_RAILWAY_OAUTH_CLIENT;
+  const callbackValue = env.PLATFOLIO_HUB_RAILWAY_OAUTH_CALLBACK;
+  const returnTo = allowedOrigins[0];
+  let installation: BootConfig['installation'];
+  if (templateDigest || clientId || callbackValue) {
+    const callback = callbackValue && new URL(callbackValue);
+    if (env.PLATFOLIO_MARKETPLACE_ENABLED !== 'true' || !returnTo || !clientId || !callback ||
+        callback.protocol !== 'https:' || callback.username || callback.password || callback.search || callback.hash ||
+        callback.pathname !== installationAuthorizationCallback || !templateCode || !/^[a-zA-Z0-9_-]{6,64}$/.test(templateCode) ||
+        !templateDigest || !/^[0-9a-f]{64}$/.test(templateDigest) || !revision || !/^[0-9a-f]{40}$/.test(revision)) {
+      throw new Error('The hub launcher requires a verified template, exact OAuth callback and browser origin');
+    }
+    installation = { configuration: { clientId, callback: callback.href, templateCode, templateDigest, revision }, returnTo };
   }
 
   const notificationClient = env.PLATFOLIO_NOTIFICATION_DIRECTORY_CLIENT;
@@ -74,7 +88,7 @@ export function configFromEnv(env: NodeJS.ProcessEnv): BootConfig {
     audience: env.PLATFOLIO_IDENTITY_AUDIENCE as string,
     marketplaceEnabled: env.PLATFOLIO_MARKETPLACE_ENABLED === 'true',
     ...(launcher ? { customerLaunch: launcher } : {}),
-    ...(templateCode && revision ? { installationOffer: { templateCode, revision } } : {}),
+    ...(installation ? { installation } : {}),
     ...(notificationClient && notificationSecret ? { notificationDirectory: { client: notificationClient, secret: notificationSecret } } : {}),
     ...(env.PLATFOLIO_IDENTITY_JWKS_URI ? { jwksUri: env.PLATFOLIO_IDENTITY_JWKS_URI } : {}),
     host: env.HOST ?? '0.0.0.0',
@@ -214,6 +228,9 @@ export async function boot(config: BootConfig, fetchImpl: typeof fetch = fetch) 
   if (ownerSubject && (!storeUrl || config.marketplaceEnabled || !installationTeamId)) {
     throw new Error('First owner setup requires a private installation and persistent storage');
   }
+  const installation = config.installationProvider ?? (config.installation && {
+    provider: railwayInstallationProvider(config.installation.configuration, fetchImpl), returnTo: config.installation.returnTo,
+  });
   const launch = config.customerLaunch && customerLaunch(config.customerLaunch, fetchImpl);
   const infrastructure = config.infrastructure ?? (launch ? [privateHostingPlugin(launch)] : []);
   const ctx = await createKernel({
@@ -253,7 +270,7 @@ export async function boot(config: BootConfig, fetchImpl: typeof fetch = fetch) 
       ...buildCapabilities({
         build: config.build,
         marketplaceEnabled: config.marketplaceEnabled ?? false,
-        ...(config.installationOffer ? { installationOffer: config.installationOffer } : {}),
+        ...(config.marketplaceEnabled && installation ? { installation } : {}),
         accountIssuer: { issuer: config.issuer, request: fetchImpl },
         ...(config.notificationDirectory ? { notificationDirectory: keycloakNotificationDirectory(config.issuer,
           config.notificationDirectory.client, config.notificationDirectory.secret, fetchImpl) } : {}),

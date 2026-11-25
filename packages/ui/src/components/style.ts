@@ -95,9 +95,25 @@ export const COMPONENT_RULES = [
     why: 'Keep labels and fields together and limit the line length on wider screens.',
   },
   {
-    selector: '.ui-workspace-form input',
+    selector: '.ui-workspace-form input:not([type="checkbox"])',
     declarations: ['inline-size: 100%;', 'min-inline-size: 0;', 'min-block-size: var(--ui-target-primary);', 'padding: var(--ui-space-2) var(--ui-space-3);', 'border: 1px solid var(--ui-color-border);', 'border-radius: var(--ui-space-3);', 'background: var(--ui-color-bg);', 'color: var(--ui-color-text);', 'font: inherit;'],
     why: 'Use the same field surface as authentication and preserve the primary input target.',
+  },
+  {
+    selector: '.ui-workspace-form fieldset',
+    declarations: ['display: grid;', 'gap: var(--ui-space-1);', 'min-inline-size: 0;', 'margin: 0;', 'padding: var(--ui-space-2) var(--ui-space-3);',
+      'border: 1px solid var(--ui-color-border);', 'border-radius: var(--ui-space-3);'],
+    why: 'Group related choices on the same surface as other form fields.',
+  },
+  {
+    selector: '.ui-workspace-form fieldset label',
+    declarations: ['display: flex;', 'align-items: center;', 'gap: var(--ui-space-2);', 'min-block-size: var(--ui-target-primary);', 'cursor: pointer;'],
+    why: 'Make the whole checkbox label a comfortable target while keeping the control compact.',
+  },
+  {
+    selector: '.ui-workspace-form input[type="checkbox"]',
+    declarations: ['inline-size: 1rem;', 'block-size: 1rem;', 'margin: 0;', 'accent-color: var(--ui-color-accent);'],
+    why: 'Use the active theme colour and the same control size in every choice group.',
   },
   {
     selector: '.ui-workspace-form input:focus-visible',

@@ -4,7 +4,7 @@
  * hand, because every line reproduces from the specification.
  *
  * Source: apps/control-plane/openapi.yaml (OpenAPI 3.1.0, info.version 0.1.0)
- * Input digest: sha256/d714d099cf3abd1d
+ * Input digest: sha256/186e9eceb7c55360
  *
  * Reproduce it with `pnpm run api:types`. `pnpm run api:types:check` fails when this file stops matching
  * what the committed spec produces, which is the only way a generated type deserves to be trusted.
@@ -240,6 +240,33 @@ export interface HostingRemovalRequest {
   confirmation?: string;
 }
 
+export interface HubInstallationLaunch {
+  state: 'authorizing' | 'authorized' | 'running' | 'ready' | 'failed';
+  projectId?: string;
+  workspaces: Array<{
+    id: string;
+    name: string;
+  }>;
+  events: Array<{
+    at: string;
+    step: string;
+    state: 'WORKING' | 'READY' | 'FAILED';
+  }>;
+  environments: Array<{
+    name: 'staging' | 'production';
+    origin: string;
+  }>;
+}
+
+export interface InstallationLaunchInput {
+  workspaceId: string;
+  name: string;
+  environments: ('staging' | 'production')[];
+  ownerEmail: string;
+  verifier: string;
+  salt: string;
+}
+
 export interface Instance {
   id: string;
   teamId: string;
@@ -436,6 +463,10 @@ export interface ApiParameters {
     environment: string;
     hostname: string;
   };
+  /** POST /api/v1/teams/{teamId}/marketplace/installation-launches */
+  authorizeHubInstallation: {
+    teamId: string;
+  };
   /** POST /api/v1/teams/{teamId}/starter-launch/railway */
   beginStarterRailwayAuthorization: {
     teamId: string;
@@ -453,6 +484,13 @@ export interface ApiParameters {
   claimFreeMarketplaceRelease: {
     teamId: string;
     installationId: string;
+  };
+  /** GET /api/v1/hosting/installation-authorization/callback */
+  completeHubInstallationAuthorization: {
+    state?: string;
+    code?: string;
+    iss?: string;
+    error?: string;
   };
   /** GET /api/v1/railway/callback */
   completeStarterRailwayAuthorization: {
@@ -525,6 +563,11 @@ export interface ApiParameters {
   getHostedStarterBrand: {
     instanceId: string;
     environment: string;
+  };
+  /** GET /api/v1/teams/{teamId}/marketplace/installation-launches/{launchId} */
+  getHubInstallationLaunch: {
+    teamId: string;
+    launchId: string;
   };
   /** GET /api/v1/teams/{teamId}/marketplace/installation-offer */
   getHubInstallationOffer: {
@@ -696,6 +739,11 @@ export interface ApiParameters {
     instanceId: string;
     capability: string;
   };
+  /** PUT /api/v1/teams/{teamId}/marketplace/installation-launches/{launchId} */
+  startHubInstallation: {
+    teamId: string;
+    launchId: string;
+  };
   /** POST /api/v1/teams/{teamId}/starter-launch */
   startStarterLaunch: {
     teamId: string;
@@ -861,6 +909,8 @@ export interface ApiRequestBodies {
     /** A team id, or `*` to offer it to every team. Recorded, never implied. */
     toTeamId: string;
   };
+  /** PUT /api/v1/teams/{teamId}/marketplace/installation-launches/{launchId} */
+  startHubInstallation: InstallationLaunchInput;
   /** POST /api/v1/instances/{instanceId}/dispatches/{dispatchId}/trigger */
   triggerDispatch: {
     /** Branch or tag GitHub should run on. Not the plan's commit: a workflow run belongs to a branch, and the digest it must satisfy travels as an input. */
@@ -934,6 +984,17 @@ export interface ApiResponses {
     '409': Error;
     '503': Error;
   };
+  /** POST /api/v1/teams/{teamId}/marketplace/installation-launches */
+  authorizeHubInstallation: {
+    '201': {
+      id: string;
+      authorizationUrl: string;
+    };
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '409': Error;
+  };
   /** POST /api/v1/teams/{teamId}/starter-launch/railway */
   beginStarterRailwayAuthorization: {
     '200': {
@@ -977,6 +1038,11 @@ export interface ApiResponses {
     '400': Error;
     '401': Error;
     '403': Error;
+    '404': Error;
+  };
+  /** GET /api/v1/hosting/installation-authorization/callback */
+  completeHubInstallationAuthorization: {
+    '303': void;
     '404': Error;
   };
   /** GET /api/v1/railway/callback */
@@ -1147,10 +1213,17 @@ export interface ApiResponses {
     '409': Error;
     '503': Error;
   };
+  /** GET /api/v1/teams/{teamId}/marketplace/installation-launches/{launchId} */
+  getHubInstallationLaunch: {
+    '200': HubInstallationLaunch;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+  };
   /** GET /api/v1/teams/{teamId}/marketplace/installation-offer */
   getHubInstallationOffer: {
     '200': {
-      templateCode: string;
+      provider: string;
       revision: string;
     };
     '401': Error;
@@ -1640,6 +1713,15 @@ export interface ApiResponses {
     '403': Error;
     '404': Error;
   };
+  /** PUT /api/v1/teams/{teamId}/marketplace/installation-launches/{launchId} */
+  startHubInstallation: {
+    '202': HubInstallationLaunch;
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '409': Error;
+  };
   /** POST /api/v1/teams/{teamId}/starter-launch */
   startStarterLaunch: {
     '200': {
@@ -1808,6 +1890,8 @@ export const ENDPOINTS = {
   applyInstanceHostingPlan: { method: 'post', path: '/api/v1/instances/{instanceId}/hosting/apply' },
   /** PUT /api/v1/instances/{instanceId}/environments/{environment}/custom-domains/{hostname} */
   attachHostedCustomDomain: { method: 'put', path: '/api/v1/instances/{instanceId}/environments/{environment}/custom-domains/{hostname}' },
+  /** POST /api/v1/teams/{teamId}/marketplace/installation-launches */
+  authorizeHubInstallation: { method: 'post', path: '/api/v1/teams/{teamId}/marketplace/installation-launches' },
   /** POST /api/v1/teams/{teamId}/starter-launch/railway */
   beginStarterRailwayAuthorization: { method: 'post', path: '/api/v1/teams/{teamId}/starter-launch/railway' },
   /** PUT /api/v1/instances/{instanceId}/bindings/{capability} */
@@ -1816,6 +1900,8 @@ export const ENDPOINTS = {
   claimEnrolledMarketplaceRelease: { method: 'post', path: '/api/v1/marketplace/installations/{installationId}/claim' },
   /** POST /api/v1/teams/{teamId}/marketplace/installations/{installationId}/claim */
   claimFreeMarketplaceRelease: { method: 'post', path: '/api/v1/teams/{teamId}/marketplace/installations/{installationId}/claim' },
+  /** GET /api/v1/hosting/installation-authorization/callback */
+  completeHubInstallationAuthorization: { method: 'get', path: '/api/v1/hosting/installation-authorization/callback' },
   /** GET /api/v1/railway/callback */
   completeStarterRailwayAuthorization: { method: 'get', path: '/api/v1/railway/callback' },
   /** PUT /api/v1/teams/{teamId}/marketplace/installations/{installationId} */
@@ -1852,6 +1938,8 @@ export const ENDPOINTS = {
   getHostedAppStatus: { method: 'get', path: '/api/v1/instances/{instanceId}/status' },
   /** GET /api/v1/instances/{instanceId}/environments/{environment}/configuration/starter-brand */
   getHostedStarterBrand: { method: 'get', path: '/api/v1/instances/{instanceId}/environments/{environment}/configuration/starter-brand' },
+  /** GET /api/v1/teams/{teamId}/marketplace/installation-launches/{launchId} */
+  getHubInstallationLaunch: { method: 'get', path: '/api/v1/teams/{teamId}/marketplace/installation-launches/{launchId}' },
   /** GET /api/v1/teams/{teamId}/marketplace/installation-offer */
   getHubInstallationOffer: { method: 'get', path: '/api/v1/teams/{teamId}/marketplace/installation-offer' },
   /** GET /api/v1/instances/{instanceId} */
@@ -1942,6 +2030,8 @@ export const ENDPOINTS = {
   revokeInvitation: { method: 'delete', path: '/api/v1/teams/{teamId}/invitations/{invitationId}' },
   /** PUT /api/v1/instances/{instanceId}/capability/{capability}/shares */
   shareCapability: { method: 'put', path: '/api/v1/instances/{instanceId}/capability/{capability}/shares' },
+  /** PUT /api/v1/teams/{teamId}/marketplace/installation-launches/{launchId} */
+  startHubInstallation: { method: 'put', path: '/api/v1/teams/{teamId}/marketplace/installation-launches/{launchId}' },
   /** POST /api/v1/teams/{teamId}/starter-launch */
   startStarterLaunch: { method: 'post', path: '/api/v1/teams/{teamId}/starter-launch' },
   /** POST /api/v1/instances/{instanceId}/dispatches/{dispatchId}/trigger */

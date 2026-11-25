@@ -1,3 +1,6 @@
+import { customerInstallationNames, installationWorkerReadiness } from '../packages/contracts/src/customer-installation-services.ts';
+import type { SourceReleaseProgress } from '../packages/contracts/src/source-release-hosting.ts';
+import { deployRailwayTemplate, readRailwayTemplate } from '../packages/contracts/src/railway-template.ts';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -10,14 +13,14 @@ import { customHostname, readRailwayCustomDomain, type RailwayCustomDomain } fro
 import { openBaoConfig, openBaoData, openBaoImage, openBaoStart, workerData, workerStart } from './customer-installation-topology.ts';
 
 const provider = new HttpRailwayTransport();
-const baoService = 'openbao-staging';
-const workerService = 'installation-worker-staging';
+const installationNames = customerInstallationNames('staging');
+const { vault: baoService, worker: workerService } = installationNames;
 const platformProjectName = 'platfolio';
-const platformServices = new Set([baoService, workerService, 'private-api-staging', 'private-site-staging', 'private-identity-staging', 'private-db-staging']);
+const platformServices = new Set<string>(Object.values(installationNames));
 const appServices = new Set(['web-staging', 'app-db-staging']);
 export type CustomerProjectTarget = { name: string; kind: 'installation' | 'app'; id?: string; create?: boolean };
 export type CustomerRailwayGrant = { token: string; workspaceId: string; projectId?: string };
-export type RailwayProgress = (event: { step: string; state: string; resourceId?: string; detail?: string }) => void;
+type RailwayProgress = (event: SourceReleaseProgress) => void;
 type Entry = { id: string; name: string };
 type Edges<T> = { edges: { node: T }[] };
 type Stage = RailwayProject;
@@ -191,14 +194,13 @@ export async function customerRailway(target: CustomerProjectTarget, progress?: 
     let database = (await instances()).find((item) => item.serviceName === name);
     const existingDatabase = Boolean(database);
     if (!database) {
-      type Template = { id: string; serializedConfig: { services: Record<string, Record<string, unknown>> } };
-      const { template } = await call<{ template: Template }>('Postgres template', 'query{template(code:"postgresql"){id serializedConfig}}', {});
-      const entries = Object.entries(template.serializedConfig.services);
-      if (entries.length !== 1 || !entries[0]) throw new Error('Unexpected Railway Postgres template');
+      const { id: templateId, serializedConfig } = await readRailwayTemplate(access, 'postgresql');
+      const entries = Object.entries(serializedConfig?.services ?? {});
+      if (!templateId || entries.length !== 1 || !entries[0]) throw new Error('Unexpected Railway Postgres template');
       const [key, configuration] = entries[0];
       const { networking: _networking, ...privateConfiguration } = configuration;
-      await call('stage private Postgres creation', 'mutation($input:TemplateDeployV2Input!){templateDeployV2(input:$input){operationId}}', {
-        input: { ...scope, workspaceId, templateId: template.id, serializedConfig: { services: { [key]: { ...privateConfiguration, name } } } },
+      await deployRailwayTemplate(access, {
+        ...scope, workspaceId: workspaceId!, templateId, serializedConfig: { services: { [key]: { ...privateConfiguration, name } } },
       });
       for (let attempt = 0; attempt < 60 && !database; attempt++) {
         await delay(2000);
@@ -288,7 +290,7 @@ export async function customerRailway(target: CustomerProjectTarget, progress?: 
     for (const [name, value] of Object.entries(runtime)) {
       await setConfig(service, name, value).catch(() => { throw new Error(`Railway did not apply worker setting ${name}`); });
     }
-    await configure(service, { source: { image }, numReplicas: 1, healthcheckPath: '/status', healthcheckTimeout: 120,
+    await configure(service, { source: { image }, numReplicas: 1, healthcheckPath: installationWorkerReadiness, healthcheckTimeout: 120,
       startCommand: workerStart });
     const deployment = await deployImage(service);
     await assertPrivate(service);

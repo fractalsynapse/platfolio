@@ -31,11 +31,11 @@ export function InstanceOverview({ team, app, freshness, now }: {
           </div>}
           <div><dt>Team</dt><dd>{team.name}</dd></div>
         </dl>
-        {app.template === 'starter-web' && <div className="ui-workspace-links">
-          <WorkspaceLink className="ui-workspace-secondary ui-hit-primary" href={workspacePaths.instanceStatus(team.name, app.name)}>Status</WorkspaceLink>
+        <div className="ui-workspace-links">
+          {app.template === 'starter-web' && <WorkspaceLink className="ui-workspace-secondary ui-hit-primary" href={workspacePaths.instanceStatus(team.name, app.name)}>Status</WorkspaceLink>}
           {team.role === 'owner' && <WorkspaceLink className="ui-workspace-secondary ui-hit-primary"
             href={workspacePaths.instanceSetup(team.name, app.name)}>Manage app</WorkspaceLink>}
-        </div>}
+        </div>
         <small className="ui-workspace-meta">{ageLabel(freshness, now).text}</small>
       </WorkspacePanel>
     </MainContext>

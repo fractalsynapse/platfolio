@@ -164,3 +164,6 @@ export { NotificationRuleSchema, type NotificationRule, type NewNotificationRule
 
 export { hostingProviders } from './hosting-providers.ts';
 export { CustomerHostingCommandSchema, HostingTargetSchema, RAILWAY_AUTHORIZATION_CALLBACK, type CustomerHostingCommand, type HostingTarget } from './customer-hosting-commands.ts';
+
+export { InstallationLaunchInputSchema, type InstallationProvider, type InstallationAuthorization, type InstallationObserver, type InstallationLaunchInput } from './installation-provider.ts';
+export type { SourceReleaseHosting, SourceReleaseObserver } from './source-release-hosting.ts';

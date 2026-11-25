@@ -1,3 +1,4 @@
+import { deployRailwayTemplate, readRailwayTemplate } from './railway-template.ts';
 import {
   InfraPlanSchema, KEEP_DATA_FEATURE, OPERATIONS, planIssues,
   CONTRACT_VERSION,
@@ -1617,14 +1618,8 @@ export class RailwayInfraProvider implements InfraProvider {
       // The catalog read goes on the workspace grant: every live probe that reached a Template did, while an
       // environment-scoped project token is the grant that gets "Bad Access" on project-level operations.
       const workspaceCredential = await this.credentials.workspace();
-      const fetched = await this.transport.graphql<{ template: { id?: string | null; serializedConfig?: { services?: Record<string, Record<string, unknown>> } | null } }>({
-        operation: 'template',
-        credential: workspaceCredential,
-        query: 'query ($code: String!) { template(code: $code) { id serializedConfig } }',
-        variables: { code: templateCode },
-      });
-      const templateId = fetched.template.id;
-      const config = fetched.template.serializedConfig;
+      const access = { transport: this.transport, credential: workspaceCredential };
+      const { id: templateId, serializedConfig: config } = await readRailwayTemplate(access, templateCode);
       if (!templateId) {
         failures.push({ step, code: 'template-config-unexpected', message: `template code "${templateCode}" returned no id to deploy` });
         return;
@@ -1642,16 +1637,13 @@ export class RailwayInfraProvider implements InfraProvider {
       // dataset it does not own (D57, measured as `connect ETIMEDOUT` on the duplicated environment).
       const composedConfig = { ...config, services: { [key]: { ...services[key]!, name: databaseName } } };
 
-      const deployed = await this.transport.graphql<{ templateDeployV2: { operationId?: string | null; workflowId?: string | null } }>({
-        operation: 'templateDeployV2',
-        credential: workspaceCredential,
-        query: 'mutation ($input: TemplateDeployV2Input!) { templateDeployV2(input: $input) { operationId workflowId } }',
-        variables: { input: { templateId, serializedConfig: composedConfig, projectId, environmentId, workspaceId: this.workspaceId } },
+      const deployed = await deployRailwayTemplate(access, {
+        templateId, serializedConfig: composedConfig, projectId, environmentId, workspaceId: this.workspaceId,
       });
       // Template provisioning is a deployment in everything but the call we made, so the budget has to see
       // it, or a second environment would be free to deploy past the tenant's ceiling.
       this.deploymentsUsed += 1;
-      notes.push({ step, code: 'database-provisioning-started', message: `template deploy accepted (operation ${deployed.templateDeployV2.operationId ?? 'unreported'}); provisioning is asynchronous` });
+      notes.push({ step, code: 'database-provisioning-started', message: `template deploy accepted (operation ${deployed.operationId ?? 'unreported'}); provisioning is asynchronous` });
 
       // templateDeployV2 is asynchronous (operationId/workflowId) and the service materialises tens of
       // seconds later -- measured. Listing once immediately reported a healthy provisioning as a missing

@@ -485,6 +485,39 @@ binding and cannot choose a different provider or target.
 
 The execution location retains its existing custody boundary. A managed action loads its
 local adapter, and a private installation uses its customer-side worker. An unconfigured
-execution path reports that it is unavailable. The existing hub launch link still uses
-Railway's native installer. An in-Platfolio replacement must connect provider consent to
-provisioning and establish first owner access without reading provider secrets at the hub.
+execution path reports that it is unavailable. The pinned Starter Web release uses a source
+deployment adapter for its build, configuration, domain, and removal operations. The
+customer worker still holds its grant in OpenBao and the existing launch journal follows the
+same exact project across retries.
+
+## Browser launch
+
+A team owner starts in Connections. Railway consent is the only provider page the owner
+needs to open. Platfolio lists workspaces included in the approval, then creates the named
+project with staging, production, or both. The configuration uses separate service placements
+and storage in each selected environment. Platfolio verifies the published installer config
+against the release digest before creating anything and refuses a pre-existing project of the
+same name. The progress report shows the resulting project ID and the site links that passed
+readiness checks. The worker's readiness check requires a private response from OpenBao.
+The owner initializes or unseals OpenBao before app secret operations become available.
+
+The OAuth grant authorizes one launch and is discarded after that run. The owner’s browser
+generates the first sign-in password and sends only its salted verifier for
+Keycloak to import. Save the password from Connections before leaving. The first sign-in
+requires a password change. Subsequent hosting authorization and OpenBao recovery are
+controlled in the private installation.
+
+To enable the browser launcher, publish the verified candidate installer rendered by
+`scripts/render-railway-installer.ts`. Configure the hub API's
+`PLATFOLIO_RAILWAY_INSTALL_TEMPLATE`, `PLATFOLIO_RAILWAY_INSTALL_CONFIG_SHA`, and
+`PLATFOLIO_RAILWAY_INSTALL_REVISION` from that published config and release.
+The hub uses a public PKCE client in `PLATFOLIO_HUB_RAILWAY_OAUTH_CLIENT` with the exact
+HTTPS `PLATFOLIO_HUB_RAILWAY_OAUTH_CALLBACK` ending in
+`/api/v1/hosting/installation-authorization/callback`. The browser launcher is unavailable
+until those values are configured. Existing installations can continue to sign in and manage
+their apps.
+
+The launch session is held in the serving API process. If that process restarts after project
+creation, the project remains in the customer's workspace. A fresh launch refuses to overwrite
+it. Updating existing installation topology and resuming a partially provisioned launch across
+an API restart require a durable, credential-free installation record.

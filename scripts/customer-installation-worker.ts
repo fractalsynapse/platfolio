@@ -1,3 +1,4 @@
+import { installationWorkerReadiness } from '../packages/contracts/src/customer-installation-services.ts';
 import { timingSafeEqual } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -6,10 +7,8 @@ import { customerLaunchRun } from './customer-launch-run.ts';
 import { customerOpenBao } from './customer-openbao.ts';
 import { customerMarketplaceConnection, privateMarketplaceOrigin } from './customer-marketplace-connection.ts';
 import { customerRailwayOAuth } from './customer-railway-oauth.ts';
-import { customerRailway } from './customer-railway.ts';
-import { FREE_STARTER_RELEASE } from '../packages/manifest/src/template-catalog.ts';
 import { StarterBrandChangeSchema } from '../packages/contracts/src/starter-brand.ts';
-import { readStarterBrand } from './launch-starter-app.ts';
+import { railwayStarterHosting } from './launch-starter-app.ts';
 import { CustomerHostingCommandSchema } from '../packages/contracts/src/customer-hosting-commands.ts';
 import { privateRailwayExecution } from '../apps/control-plane/src/private-railway-execution.ts';
 import { createKernel } from '../packages/kernel/src/index.ts';
@@ -30,7 +29,8 @@ mkdirSync(directory, { recursive: true, mode: 0o700 });
 const bao = customerOpenBao(baoOrigin, baoSecret, directory);
 const marketplace = customerMarketplaceConnection(privateMarketplaceOrigin(process.env.PLATFOLIO_REGISTRY_ORIGIN), bao);
 const oauth = customerRailwayOAuth({ callback, workspaceId: workspace, ...(client ? { clientId: client } : {}), ...(project ? { projectId: project } : {}) }, bao);
-const launch = customerLaunchRun(team, join(directory, 'launch.json'), oauth.credential);
+const sourceHosting = railwayStarterHosting(oauth.credential);
+const launch = customerLaunchRun(team, join(directory, 'launch.json'), sourceHosting);
 const execution = await createKernel({ provider: 'railway', infrastructure: [privateRailwayExecution(team, async () => {
   if (await bao.status() !== 'ready') throw new Error('Unlock OpenBao before managing a project');
   return oauth.credential();
@@ -44,6 +44,10 @@ const server = createServer({ requestTimeout: 10000 }, (request, response) => {
     response.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' });
     response.end(JSON.stringify(body));
   };
+  if (request.method === 'GET' && request.url === installationWorkerReadiness) {
+    void bao.status().then((state) => reply(state === 'unreachable' ? 503 : 200, { status: state }));
+    return;
+  }
   if (request.method === 'GET' && request.url === '/status') { reply(200, { status: 'ok' }); return; }
   const auth = Buffer.from(request.headers.authorization ?? '');
   if (request.method !== 'POST' || request.url !== '/launch' || auth.length !== expected.length || !timingSafeEqual(auth, expected)) {
@@ -81,7 +85,7 @@ const server = createServer({ requestTimeout: 10000 }, (request, response) => {
         const current = await launch.read();
         if (current.projectId !== command.body.projectId || current.deploymentId !== command.body.deploymentId || !current.origin ||
             !['running', 'ready', 'failed'].includes(current.state)) { reply(200, { outcome: 'conflict' }); return; }
-        const value = await readStarterBrand(current.origin);
+        const value = await sourceHosting.publicLabel(current.origin);
         const latest = await launch.read();
         if (latest.deploymentId !== command.body.deploymentId || latest.origin !== current.origin ||
             !['running', 'ready', 'failed'].includes(latest.state)) { reply(200, { outcome: 'conflict' }); return; }
@@ -113,8 +117,7 @@ const server = createServer({ requestTimeout: 10000 }, (request, response) => {
         if (action !== 'list') changingDomain = true;
         try {
           if (await bao.status() !== 'ready') { reply(503, replyError); return; }
-          const rail = await customerRailway({ name: FREE_STARTER_RELEASE.template, kind: 'app', id: current.projectId }, undefined, await oauth.credential());
-          const result = await rail.starterDomains(current.deploymentId, action, command.action === 'domains-list' ? undefined : command.body.hostname);
+          const result = await sourceHosting.domains(current.projectId, current.deploymentId, action, command.action === 'domains-list' ? undefined : command.body.hostname);
           reply(200, result);
         } finally { if (action !== 'list') changingDomain = false; }
         return;

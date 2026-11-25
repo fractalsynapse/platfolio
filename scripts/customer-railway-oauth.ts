@@ -1,10 +1,8 @@
 import { RAILWAY_AUTHORIZATION_CALLBACK } from '../packages/contracts/src/customer-hosting-commands.ts';
-import { createHash, randomBytes } from 'node:crypto';
+import { exchangeRailwayCode, railwayAuthorization, railwayIssuer as issuer, railwayToken, railwayAuthorizedWorkspaces } from '../packages/contracts/src/railway-oauth.ts';
 import { HttpRailwayTransport } from '../packages/contracts/src/railway-transport.ts';
 import { customerRailway, type CustomerRailwayGrant } from './customer-railway.ts';
 import type { customerOpenBao, RailwayGrant, RailwayOAuthClient } from './customer-openbao.ts';
-
-const issuer = 'https://backboard.railway.com';
 
 interface Options { clientId?: string; callback: string; workspaceId: string; projectId?: string }
 type Vault = Pick<ReturnType<typeof customerOpenBao>, 'readGrant' | 'writeGrant' | 'readRailwayClient' | 'writeRailwayClient'>;
@@ -66,35 +64,22 @@ export function customerRailwayOAuth({ clientId, callback, workspaceId, projectI
 
   async function begin() {
     const id = await resolveClientId();
-    const verifier = randomBytes(32).toString('base64url');
-    pending = { state: randomBytes(32).toString('base64url'), verifier, until: Date.now() + 5 * 60_000 };
-    return issuer + '/oauth/auth?' + new URLSearchParams({
-      client_id: id, redirect_uri: callback, response_type: 'code', scope, state: pending.state,
-      code_challenge: createHash('sha256').update(verifier).digest('base64url'), code_challenge_method: 'S256', prompt: 'consent',
-    });
-  }
-
-  async function token(body: Record<string, string>, previous?: string): Promise<RailwayGrant> {
-    const response = await request(issuer + '/oauth/token', {
-      method: 'POST', redirect: 'error', signal: AbortSignal.timeout(10000), body: new URLSearchParams({ client_id: await resolveClientId(), ...body }),
-    });
-    if (!response.ok) throw new Error('Railway authorization expired or was refused');
-    const data = await response.json() as { access_token?: string; refresh_token?: string; expires_in?: number; scope?: string };
-    const refresh = data.refresh_token ?? previous;
-    if (!data.access_token || !refresh || !(Number(data.expires_in) > 0) ||
-        (data.scope && !data.scope.split(' ').includes(providerScope))) throw new Error('Railway did not authorize workspace deployment');
-    return { access: data.access_token, refresh, expires: Date.now() + Number(data.expires_in) * 1000 };
+    const { state, verifier, url } = railwayAuthorization(id, callback, scope);
+    pending = { state, verifier, until: Date.now() + 5 * 60_000 };
+    return url;
   }
 
   async function complete(input: { code: string; state: string; issuer: string; error: string }) {
     if (!pending || pending.state !== input.state || pending.until < Date.now()) return false;
     const { verifier } = pending;
     pending = undefined;
-    if (input.issuer !== issuer || !input.code || input.error) return false;
     try {
-      const grant = await token({ grant_type: 'authorization_code', code: input.code, redirect_uri: callback, code_verifier: verifier });
-      const target = projectId ? { kind: 'app' as const, name: 'starter-web', id: projectId } : { kind: 'installation' as const, name: 'platfolio' };
-      await customerRailway(target, undefined, forProvider(grant.access), new HttpRailwayTransport({ fetch: request }));
+      const exchanged = await exchangeRailwayCode(request, await resolveClientId(), callback, verifier, input, providerScope);
+      if (!exchanged.refresh) return false;
+      const grant: RailwayGrant = { ...exchanged, refresh: exchanged.refresh };
+      const transport = new HttpRailwayTransport({ fetch: request });
+      if (projectId) await customerRailway({ kind: 'app', name: 'starter-web', id: projectId }, undefined, forProvider(grant.access), transport);
+      else if (!(await railwayAuthorizedWorkspaces(grant.access, transport)).some(({ id }) => id === workspaceId)) return false;
       await bao.writeGrant(grant, (await bao.readGrant()).version);
       return true;
     } catch { return false; }
@@ -104,7 +89,8 @@ export function customerRailwayOAuth({ clientId, callback, workspaceId, projectI
     const { version, grant } = await bao.readGrant();
     if (!grant) throw new Error('Connect Railway before launching');
     if (grant.expires > Date.now() + 10 * 60_000) return forProvider(grant.access);
-    const fresh = await token({ grant_type: 'refresh_token', refresh_token: grant.refresh }, grant.refresh);
+    const renewed = await railwayToken(request, await resolveClientId(), { grant_type: 'refresh_token', refresh_token: grant.refresh }, providerScope);
+    const fresh = { ...renewed, refresh: renewed.refresh ?? grant.refresh };
     await bao.writeGrant(fresh, version);
     return forProvider(fresh.access);
   }

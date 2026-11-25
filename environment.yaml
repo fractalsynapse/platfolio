@@ -468,6 +468,20 @@ variables:
     required: false
     deployedTo: railway:variable
     note: "Installation-local generated initial operator password for the opt-in private Keycloak realm import."
+  - name: PLATFOLIO_INSTALL_OWNER_VERIFIER
+    kind: secret
+    secret: true
+    environments: all
+    required: false
+    deployedTo: railway:variable
+    note: "Salted Keycloak bootstrap verifier computed in the owner's browser. No reusable password crosses the hub."
+  - name: PLATFOLIO_INSTALL_OWNER_SALT
+    kind: value
+    secret: false
+    environments: all
+    required: false
+    deployedTo: railway:variable
+    note: "Salt for the private Keycloak bootstrap verifier."
   - name: PLATFOLIO_LAUNCH_APP_PROJECT
     kind: value
     secret: false
@@ -510,6 +524,24 @@ variables:
     environments: [staging, production]
     deployedTo: railway:variable
     note: "The Railway template code offered to hub team owners."
+  - name: PLATFOLIO_RAILWAY_INSTALL_CONFIG_SHA
+    kind: value
+    secret: false
+    environments: [staging, production]
+    deployedTo: railway:variable
+    note: "Canonical SHA-256 of the published installer config for the pinned release."
+  - name: PLATFOLIO_HUB_RAILWAY_OAUTH_CLIENT
+    kind: value
+    secret: false
+    environments: [staging, production]
+    deployedTo: railway:variable
+    note: "Public PKCE OAuth client for new installations; no offline grant."
+  - name: PLATFOLIO_HUB_RAILWAY_OAUTH_CALLBACK
+    kind: value
+    secret: false
+    environments: [staging, production]
+    deployedTo: railway:variable
+    note: "Exact hub API callback for the short-lived installation authorization."
   - name: PLATFOLIO_RAILWAY_OAUTH_CALLBACK
     kind: value
     secret: false

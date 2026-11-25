@@ -66,7 +66,7 @@ export function TeamWorkspace(): React.ReactElement {
     <Breadcrumbs items={[{ label: app.name, href: workspacePaths.instance(team.name, app.name) }, { label: 'Manage app' }]} />
     <WorkspaceHeading title="Manage app" />
     <TeamTabs team={team} />
-    <AppSetup key={app.id} instanceId={app.id} teamId={team.teamId} />
+    <AppSetup key={app.id} app={app} teamId={team.teamId} />
   </> : <UnavailablePage />;
 
   const environment = app.environments.find((item) => item.environment === route.environment);

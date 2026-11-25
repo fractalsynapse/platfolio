@@ -3,10 +3,14 @@ WORKDIR /build
 COPY package.json ./
 COPY apps/identity/src/ ./apps/identity/src/
 COPY scripts/keycloak-browser-client.ts ./scripts/
-COPY packages/ui/src/web/browser-auth-policy.ts ./packages/ui/src/web/
+COPY packages/ui/src/web/browser-auth-policy.ts packages/ui/src/web/installation-owner-policy.ts ./packages/ui/src/web/
 RUN mkdir /realm \
-    && node --experimental-strip-types --disable-warning=ExperimentalWarning apps/identity/src/private-operator-realm.ts > /realm/platfolio-realm.json \
-    && node --experimental-strip-types --disable-warning=ExperimentalWarning apps/identity/src/private-operator-realm.ts --password-recovery > /realm/platfolio-realm-with-mail.json
+    && for owner in '' '-with-verifier'; do \
+         for mail in '' '-with-mail'; do \
+           node --experimental-strip-types --disable-warning=ExperimentalWarning apps/identity/src/private-operator-realm.ts \
+             ${owner:+--owner-verifier} ${mail:+--password-recovery} > "/realm/platfolio-realm$owner$mail.json" || exit; \
+         done; \
+       done
 
 FROM keycloak/keycloak:26.8.2@sha256:c126f032d43b941ed7c5ccca7d6571596d8eab84d748afd7c86989e48ef07b8f
 

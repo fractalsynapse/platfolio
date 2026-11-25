@@ -25068,7 +25068,7 @@ function date4(params) {
 }
 
 // packages/contracts/src/generated/contract-version.ts
-var CONTRACT_VERSION = "6.1.0";
+var CONTRACT_VERSION = "6.2.0";
 
 // packages/contracts/src/infra.ts
 var CONTRACT_NAME = "infra.provider";
@@ -25620,6 +25620,26 @@ var MintingRailwayCredentials = class {
     return found.node.id;
   }
 };
+
+// packages/contracts/src/railway-template.ts
+async function readRailwayTemplate({ transport, credential }, code) {
+  const data = await transport.graphql({
+    operation: "template",
+    credential,
+    query: "query ($code: String!) { template(code: $code) { id serializedConfig } }",
+    variables: { code }
+  });
+  return data.template;
+}
+async function deployRailwayTemplate({ transport, credential }, input2) {
+  const data = await transport.graphql({
+    operation: "templateDeployV2",
+    credential,
+    query: "mutation ($input: TemplateDeployV2Input!) { templateDeployV2(input: $input) { operationId workflowId } }",
+    variables: { input: input2 }
+  });
+  return data.templateDeployV2;
+}
 
 // packages/contracts/src/railway-domains.ts
 function readRailwayCustomDomain(domain3) {
@@ -27088,14 +27108,8 @@ var RailwayInfraProvider = class {
     }
     try {
       const workspaceCredential2 = await this.credentials.workspace();
-      const fetched = await this.transport.graphql({
-        operation: "template",
-        credential: workspaceCredential2,
-        query: "query ($code: String!) { template(code: $code) { id serializedConfig } }",
-        variables: { code: templateCode }
-      });
-      const templateId = fetched.template.id;
-      const config2 = fetched.template.serializedConfig;
+      const access = { transport: this.transport, credential: workspaceCredential2 };
+      const { id: templateId, serializedConfig: config2 } = await readRailwayTemplate(access, templateCode);
       if (!templateId) {
         failures.push({ step, code: "template-config-unexpected", message: `template code "${templateCode}" returned no id to deploy` });
         return;
@@ -27108,14 +27122,15 @@ var RailwayInfraProvider = class {
       }
       const key = keys[0];
       const composedConfig = { ...config2, services: { [key]: { ...services[key], name: databaseName } } };
-      const deployed = await this.transport.graphql({
-        operation: "templateDeployV2",
-        credential: workspaceCredential2,
-        query: "mutation ($input: TemplateDeployV2Input!) { templateDeployV2(input: $input) { operationId workflowId } }",
-        variables: { input: { templateId, serializedConfig: composedConfig, projectId, environmentId, workspaceId: this.workspaceId } }
+      const deployed = await deployRailwayTemplate(access, {
+        templateId,
+        serializedConfig: composedConfig,
+        projectId,
+        environmentId,
+        workspaceId: this.workspaceId
       });
       this.deploymentsUsed += 1;
-      notes.push({ step, code: "database-provisioning-started", message: `template deploy accepted (operation ${deployed.templateDeployV2.operationId ?? "unreported"}); provisioning is asynchronous` });
+      notes.push({ step, code: "database-provisioning-started", message: `template deploy accepted (operation ${deployed.operationId ?? "unreported"}); provisioning is asynchronous` });
       const deadline = Date.now() + this.deployTimeoutMs;
       let created;
       for (; ; ) {
@@ -27881,6 +27896,18 @@ var CustomerHostingCommandSchema = external_exports.discriminatedUnion("action",
   command("hosting-remove", external_exports.object({ target: HostingTargetSchema, options: HostingRemovalSchema }).strict()),
   command("hosting-redeploy", boundEnvironment)
 ]);
+
+// packages/contracts/src/installation-provider.ts
+var installationEnvironment = external_exports.enum(["staging", "production"]);
+var InstallationLaunchInputSchema = external_exports.object({
+  workspaceId: external_exports.string().min(1).max(128),
+  name: external_exports.string().regex(/^[a-z][a-z0-9-]{1,62}$/),
+  environments: external_exports.array(installationEnvironment).min(1).max(2).refine((values) => new Set(values).size === values.length).meta({ uniqueItems: true }),
+  // The provider supports variable interpolation in template values.
+  ownerEmail: external_exports.string().max(254).regex(/^[^\s${}"\\@]+@[^\s${}"\\@]+\.[^\s${}"\\@]+$/).meta({ format: "email" }),
+  verifier: external_exports.string().regex(/^[A-Za-z0-9+/]{86}==$/),
+  salt: external_exports.string().regex(/^[A-Za-z0-9+/]{22}==$/)
+}).strict();
 
 // apps/managed-action/src/runner.ts
 var RELEASE = { version: process.env.PLATFOLIO_ACTION_VERSION ?? "0.0.0-dev", commitSha: process.env.PLATFOLIO_ACTION_SHA ?? "0".repeat(40), imageDigest: `sha256:${"0".repeat(64)}` };

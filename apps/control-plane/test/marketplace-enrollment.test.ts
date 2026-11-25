@@ -7,7 +7,7 @@ import { buildCapabilities } from '../src/capabilities.ts';
 
 test('a private installation can exchange an owner’s code for registry access only', async () => {
   const fixture = createIdentityFixture();
-  const installationOffer = { templateCode: 'test-template', revision: 'b'.repeat(40) };
+  const installationOffer = { provider: 'fixture-host', revision: 'b'.repeat(40) };
   const app: KernelContext = await createKernel({
     provider: 'fake', custody: 'strict', identity: defaultIdentityConfig(fixture), identityKeys: [fixture.jwk],
     store: { driver: 'memory' }, server: { port: 0 },
@@ -15,7 +15,10 @@ test('a private installation can exchange an owner’s code for registry access 
     extensions: buildCapabilities({
       build: { version: null, commit: 'a'.repeat(40), buildTime: '2026-11-24T00:00:00Z' },
       marketplaceEnabled: true,
-      installationOffer,
+      installation: { returnTo: 'https://hub.example.test', provider: {
+        id: installationOffer.provider, revision: installationOffer.revision,
+        authorize() { throw new Error('This test only reads the offer'); },
+      } },
     }),
   });
   const owner = signToken(fixture, { scope: 'platfolio.user', subject: 'owner' });

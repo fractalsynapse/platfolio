@@ -5,7 +5,8 @@ import { dirname, join } from 'node:path';
 import { GitScm } from '../packages/contracts/src/git-scm.ts';
 import { StarterBrandChangeSchema } from '../packages/contracts/src/starter-brand.ts';
 import { FREE_STARTER_RELEASE, readTemplate, templateCatalogEntry } from '../packages/manifest/src/index.ts';
-import { customerRailway, type CustomerRailwayGrant, type RailwayProgress } from './customer-railway.ts';
+import type { SourceReleaseHosting, SourceReleaseObserver, SourceReleaseProgress } from '../packages/contracts/src/source-release-hosting.ts';
+import { customerRailway, type CustomerRailwayGrant } from './customer-railway.ts';
 import { validateStarterSource } from '../packages/manifest/src/starter-release.ts';
 
 const listing = FREE_STARTER_RELEASE;
@@ -24,7 +25,7 @@ export async function readStarterBrand(origin: string): Promise<string | null> {
   } catch { return null; }
 }
 
-export async function launchStarterApp(app: string, project?: string, progress?: RailwayProgress, grant?: CustomerRailwayGrant, brand?: string) {
+export async function launchStarterApp(app: string, project?: string, progress?: (event: SourceReleaseProgress) => void, grant?: CustomerRailwayGrant, brand?: string, observedProject?: SourceReleaseObserver['project']) {
   const scm = new GitScm();
   progress?.({ step: 'Read the pinned release', state: 'WORKING' });
   const source = await readTemplate((request) => scm.readRepositoryFile(request), entry, listing.revision);
@@ -39,6 +40,7 @@ export async function launchStarterApp(app: string, project?: string, progress?:
   }
   const target = project ?? grant?.projectId;
   const rail = await customerRailway({ name: app, kind: 'app', ...(target ? { id: target } : {}), create: !target }, progress, grant);
+  observedProject?.(rail.project.id);
   progress?.({ step: 'Prepare the database', state: 'WORKING' });
   await rail.privatePostgres('app-db-staging');
   progress?.({ step: 'Prepare the database', state: 'READY' });
@@ -72,4 +74,21 @@ export async function launchStarterApp(app: string, project?: string, progress?:
   } finally {
     await rm(archive, { recursive: true, force: true });
   }
+}
+
+export function railwayStarterHosting(credential?: () => Promise<CustomerRailwayGrant>): SourceReleaseHosting {
+  const { template, revision } = listing;
+  async function project(id: string) {
+    return customerRailway({ kind: 'app', name: template, id }, undefined, await credential?.());
+  }
+
+  return {
+    template, revision,
+    async deploy({ projectId, publicLabel }, observer) {
+      return launchStarterApp(template, projectId, observer.step, await credential?.(), publicLabel, observer.project);
+    },
+    async remove(id, data) { return (await project(id)).remove(data); },
+    async domains(id, deployId, action, hostname) { return (await project(id)).starterDomains(deployId, action, hostname); },
+    publicLabel: readStarterBrand,
+  };
 }

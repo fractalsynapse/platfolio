@@ -17,6 +17,7 @@ import type { NotificationDirectory } from './notification-directory.ts';
 import { notificationEmail } from './notification-email.ts';
 import type { StarterLaunch } from './starter-launch.ts';
 import { badRequest, bearerToken, notFound, send, unauthorized } from './respond.ts';
+import { installationLaunch } from './installation-launch.ts';
 import { hostingLifecycle } from './hosting-lifecycle.ts';
 import { accountProfile, type AccountIssuer } from './account-profile.ts';
 import { customHostname } from '../../../packages/contracts/src/railway-domains.ts';
@@ -38,7 +39,7 @@ export interface CapabilityDeps {
   now?: () => Date;
   dispatchTtlMs?: number;
   marketplaceEnabled?: boolean;
-  installationOffer?: import('@platfolio/api-contract/generated/types').SuccessOf<'getHubInstallationOffer'>;
+  installation?: Parameters<typeof installationLaunch>[1];
   invitationOrigin?: string;
   accountIssuer?: AccountIssuer;
   notificationDirectory?: NotificationDirectory;
@@ -1327,9 +1328,6 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
     id: 'marketplace',
     requires: ['identity', 'store'],
     routes: [
-      scoped('GET', '/api/v1/teams/{teamId}/marketplace/installation-offer', 'getHubInstallationOffer', 'marketplace.manage', async () =>
-        deps.marketplaceEnabled && deps.installationOffer ? send('getHubInstallationOffer', 200, deps.installationOffer)
-          : notFound('installation offer', 'platfolio')),
       scoped('GET', marketplaceCollection, 'listMarketplaceInstallations', 'marketplace.manage', async ({ context, teamId }) =>
         deps.marketplaceEnabled ? send('listMarketplaceInstallations', 200, await context.store.listMarketplaceInstallations(teamId))
           : notFound('marketplace installations', '')),
@@ -1618,7 +1616,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
     }],
   };
 
-  return [core, instances, hostingLifecycle(scoped), dispatches, audit, teams, bindings, invitations, secrets, controller, marketplace, privateMarketplace, launcher, catalog, availability, notifications,
+  return [core, instances, hostingLifecycle(scoped), dispatches, audit, teams, bindings, invitations, secrets, controller, marketplace, installationLaunch(scoped, deps.installation), privateMarketplace, launcher, catalog, availability, notifications,
     notificationEmail(authorize, now, deps.notificationDirectory, deps.invitationOrigin),
     accountProfile(authorize, deps.accountIssuer)];
 }

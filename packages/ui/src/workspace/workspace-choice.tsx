@@ -2,7 +2,7 @@ import * as React from 'react';
 import { WorkspaceAction } from './workspace-action.tsx';
 import { WorkspaceMenu } from './workspace-menu.tsx';
 
-export function NotificationChoice<Value extends string>({ label, value, options, onChange }: {
+export function WorkspaceChoice<Value extends string>({ label, value, options, onChange }: {
   label: string;
   value: Value;
   options: readonly { value: Value; label: string }[];
