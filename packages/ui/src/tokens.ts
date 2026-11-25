@@ -44,14 +44,14 @@ const c = (value: string, contrast: ContrastRole, note: string): TokenColor => (
 export const LIGHT: TokenPalette = {
   scheme: 'light',
   colors: {
-    bg: c('#ffffff', 'decorative', 'Page background. Nothing sits on text-coloured ground without a listed pair.'),
-    surface: c('#f6f7f9', 'decorative', 'Raised panel: a card, a sheet body, a table.'),
-    text: c('#14161a', 'text', 'Primary text on bg/surface.'),
-    textMuted: c('#5b6472', 'text', 'Secondary text, labels, timestamps including every age label (rule 5).'),
-    border: c('#d4d8e0', 'decorative', 'Hairline separation only. Not a state indicator — see `accent`.'),
-    accent: c('#1c3faa', 'text', 'Links, focus rings, the primary action. Doubles as an indicator at 8.97:1.'),
+    bg: c('#f5f7fa', 'decorative', 'Workspace canvas from the mockup.'),
+    surface: c('#ffffff', 'decorative', 'Header and raised panels.'),
+    text: c('#202c3d', 'text', 'Primary text on bg and surface.'),
+    textMuted: c('#495b71', 'text', 'Secondary text, labels and timestamps.'),
+    border: c('#ccd5e0', 'decorative', 'Hairline separation.'),
+    accent: c('#1755a0', 'text', 'Links and keyboard focus.'),
     onAccent: c('#ffffff', 'text', 'Foreground on an accent-filled surface.'),
-    ok: c('#15803d', 'text', 'A state word, so it must be readable as text, not just visible as a colour.'),
+    ok: c('#195a3c', 'text', 'Successful status.'),
     warn: c('#b45309', 'text', 'Ditto. Errors are text, never colour alone (11 §8).'),
     danger: c('#b42318', 'text', 'Destructive actions and their confirmations.'),
     info: c('#0c6b6b', 'text', 'Neutral notice.'),
@@ -186,6 +186,17 @@ function scalarDeclarations(indent: string): string {
   lines.push(`${indent}--ui-target-secondary: ${TOUCH.targetSecondary};`);
   lines.push(`${indent}--ui-gap-secondary: ${TOUCH.gapSecondary};`);
   lines.push(`${indent}--ui-container-min: ${TOUCH.minContainer};`);
+  lines.push(`${indent}--ui-font-family-system: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;`);
+  lines.push(`${indent}--ui-workspace-width: 82rem;`);
+  lines.push(`${indent}--ui-color-brand: #253a58;`);
+  lines.push(`${indent}--ui-color-action: #206843;`);
+  lines.push(`${indent}--ui-color-action-hover: #185638;`);
+  lines.push(`${indent}--ui-color-accent-surface: #e9f1fd;`);
+  lines.push(`${indent}--ui-color-check-surface: #e6f4eb;`);
+  lines.push(`${indent}--ui-color-context: #f8fafd;`);
+  lines.push(`${indent}--ui-color-control-border: #a7b5c6;`);
+  lines.push(`${indent}--ui-panel-shadow: 0 1px 2px #192e4710;`);
+  lines.push(`${indent}--ui-menu-shadow: 0 0.5rem 1rem #20354c20;`);
   for (const role of Object.keys(MEASURE) as MeasureRole[]) lines.push(`${indent}${measureVar(role)}: ${MEASURE[role]};`);
   return lines.join('\n');
 }
@@ -223,7 +234,7 @@ ${colorDeclarations(light, '  ')}
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-ui-scheme="light"]) {
     color-scheme: dark;
 
 ${colorDeclarations(dark, '    ')}

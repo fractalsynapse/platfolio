@@ -13,7 +13,7 @@ const tabs = [
 export function AccountWorkspace({ tab }: { readonly tab: typeof tabs[number]['id'] }): React.ReactElement {
   return <>
     <h1>Account</h1>
-    <nav className="ui-workspace-links" aria-label="Account settings">
+    <nav className="ui-workspace-tabs" aria-label="Account settings">
       {tabs.map(({ id, label, href }) => <WorkspaceLink key={id} href={href} aria-current={id === tab ? 'page' : undefined}>{label}</WorkspaceLink>)}
     </nav>
     {tab === 'password' ? <AccountPassword /> : <AccountIdentity key={tab} tab={tab} />}

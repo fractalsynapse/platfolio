@@ -3,7 +3,7 @@
  * only one: this text is not worth editing by hand, because every line reproduces from the token module.
  *
  * Source: packages/ui/src/tokens.ts (the module you are reading; this file is its output)
- * Input digest: sha256/34535a830d56203b
+ * Input digest: sha256/99e670057747b1e7
  *
  * Reproduce it with `pnpm run ui:css`. `pnpm run ui:css:check` fails when this file stops matching what the
  * token module produces -- the same discipline `api:types:check` holds the API types to, for the same reason:
@@ -44,23 +44,34 @@
   --ui-target-secondary: 24px;
   --ui-gap-secondary: 8px;
   --ui-container-min: 320px;
+  --ui-font-family-system: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --ui-workspace-width: 82rem;
+  --ui-color-brand: #253a58;
+  --ui-color-action: #206843;
+  --ui-color-action-hover: #185638;
+  --ui-color-accent-surface: #e9f1fd;
+  --ui-color-check-surface: #e6f4eb;
+  --ui-color-context: #f8fafd;
+  --ui-color-control-border: #a7b5c6;
+  --ui-panel-shadow: 0 1px 2px #192e4710;
+  --ui-menu-shadow: 0 0.5rem 1rem #20354c20;
   --ui-measure-content: 68ch;
 
-  --ui-color-bg: #ffffff;
-  --ui-color-surface: #f6f7f9;
-  --ui-color-text: #14161a;
-  --ui-color-textMuted: #5b6472;
-  --ui-color-border: #d4d8e0;
-  --ui-color-accent: #1c3faa;
+  --ui-color-bg: #f5f7fa;
+  --ui-color-surface: #ffffff;
+  --ui-color-text: #202c3d;
+  --ui-color-textMuted: #495b71;
+  --ui-color-border: #ccd5e0;
+  --ui-color-accent: #1755a0;
   --ui-color-onAccent: #ffffff;
-  --ui-color-ok: #15803d;
+  --ui-color-ok: #195a3c;
   --ui-color-warn: #b45309;
   --ui-color-danger: #b42318;
   --ui-color-info: #0c6b6b;
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-ui-scheme="light"]) {
     color-scheme: dark;
 
     --ui-color-bg: #101216;

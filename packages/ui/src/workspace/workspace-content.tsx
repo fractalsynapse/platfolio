@@ -31,6 +31,7 @@ function WorkspaceContent() {
   const route = matchWorkspaceRoute(navigation?.pathname ?? workspacePaths.home);
   const { state, reload } = useOperation('listTeams', { params });
   const invitations = useOperation('listMyInvitations', { params });
+  const profile = useOperation('getAccountProfile', { params });
   const [created, setCreated] = React.useState<TeamWithRole>();
   const clock = useClock();
   const reauthenticate = state.status === 'failed' && (state.error.status === 401 || state.error.code === 'auth_unavailable');
@@ -45,7 +46,8 @@ function WorkspaceContent() {
   }, [route.kind, created, navigation, teams]);
 
   return <>
-    <WorkspaceHeader teams={teams} team={team?.name} invitationCount={invitationsCount} signOut={() => navigation?.signOut()} />
+    <WorkspaceHeader teams={teams} team={team?.name} invitationCount={invitationsCount}
+      displayName={profile.state.status === 'loaded' ? profile.state.data.displayName : undefined} signOut={() => navigation?.signOut()} />
     <main id="workspace-content" className="ui-workspace-main" tabIndex={-1}>
       {state.status === 'pending' && <p role="status">Loading your workspace…</p>}
       {state.status === 'failed' && <div>
@@ -62,10 +64,14 @@ function WorkspaceContent() {
         : route.kind === 'invitations' ? <MyInvitations invitations={invitations} onAccepted={reload} />
         : route.kind === 'notifications' ? <NotificationsWorkspace teams={teams} />
         : route.kind === 'account' ? <AccountWorkspace tab={route.tab} />
-        : route.kind === 'templates' ? team?.role === 'owner' ? <FreeTemplatePicker team={team.name} /> : <UnavailablePage />
+        : route.kind === 'templates' ? team?.role === 'owner' ? <>
+          <h1>Choose template</h1>
+          <TeamTabs team={team} current="templates" />
+          <FreeTemplatePicker team={team.name} />
+        </> : <UnavailablePage />
         : route.kind === 'team-launch' ? team?.role === 'owner' ? <>
           <h1>Set up Starter Web</h1>
-          <p><WorkspaceLink href={workspacePaths.templates(team.name)}>Choose template</WorkspaceLink></p>
+          <TeamTabs team={team} current="templates" />
           <StarterLaunchScreen selectedTeamId={team.teamId} />
         </> : <UnavailablePage />
         : route.kind === 'team-invitations' || route.kind === 'team-members' ? team?.role === 'owner' ? <>

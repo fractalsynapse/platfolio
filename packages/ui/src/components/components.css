@@ -3,7 +3,7 @@
  * packages/ui/src/components/style.ts and it is the only one.
  *
  * Source: packages/ui/src/components/style.ts
- * Input digest: sha256/3fdc12c703341171
+ * Input digest: sha256/970b90afd2286cbe
  *
  * Reproduce with `pnpm run ui:css`; `pnpm run ui:css:check` fails when this stops matching the module. The
  * numbers in here are not literals: they reference the custom properties in ../tokens.css, which is what makes
@@ -155,23 +155,37 @@
   outline: none;
 }
 
-/* The logo and the two context controls share one bar at every width. */
+/* Match the mockup’s white header across the workspace. */
 .ui-workspace-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--ui-space-3);
-  padding: var(--ui-space-3) max(var(--ui-space-4), calc((100% - 68rem) / 2));
   background: var(--ui-color-surface);
   border-block-end: 1px solid var(--ui-color-border);
 }
 
-/* Keep switching teams and account actions beside one another. */
+/* Place the wordmark and workspace controls on the same measured bar. */
+.ui-workspace-header-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.55rem;
+  min-block-size: 4rem;
+  max-inline-size: var(--ui-workspace-width);
+  margin-inline: auto;
+  padding: 0.4rem 1rem;
+}
+
+/* Keep the workspace selector beside the user icon. */
 .ui-workspace-tools {
   display: flex;
   align-items: center;
-  gap: var(--ui-space-2);
+  justify-content: flex-end;
+  gap: 0.55rem;
   min-inline-size: 0;
+  flex: 1 1 auto;
+}
+
+/* Let the workspace selector use the mockup’s full width on desktop and shrink on phones. */
+.ui-workspace-tools > .ui-workspace-menu:first-child {
+  flex: 0 1 14rem;
 }
 
 /* Anchor each disclosure to its own trigger. */
@@ -197,9 +211,54 @@
   cursor: pointer;
 }
 
+/* The logo and avatar open menus without an extra button frame. */
+.ui-workspace-trigger[data-kind="wordmark"], .ui-workspace-trigger[data-kind="avatar"] {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  gap: 0.45rem;
+}
+
+/* Match the mockup wordmark. */
+.ui-workspace-trigger[data-kind="wordmark"], .ui-workspace-wordmark {
+  font-size: 1.07rem;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+/* The selector uses the same appearance as the form controls in the mockup. */
+.ui-workspace-trigger[data-kind="selector"] {
+  inline-size: 100%;
+  justify-content: space-between;
+  padding-inline: 0.65rem;
+  font: inherit;
+  border-color: var(--ui-color-control-border);
+  border-radius: 0.5rem;
+}
+
+/* Use the same blue disclosure marker as the mockup. */
+.ui-workspace-trigger[data-kind="selector"] > span:last-child {
+  color: var(--ui-color-accent);
+}
+
+/* Retain the full hit target around the circular avatar. */
+.ui-workspace-trigger[data-kind="avatar"] {
+  justify-content: center;
+  border-radius: 50%;
+}
+
+/* Use the same wordmark on public and signed-in pages. */
+.ui-workspace-wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: inherit;
+  text-decoration: none;
+}
+
 /* Long team names leave space for the account button and are shown in full in the selector. */
 .ui-workspace-team-label {
-  max-inline-size: min(12rem, 32vw);
+  min-inline-size: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -209,11 +268,12 @@
 .ui-workspace-mark {
   display: grid;
   place-items: center;
-  inline-size: 1.5em;
+  inline-size: 2.15rem;
   aspect-ratio: 1;
-  background: var(--ui-color-accent);
+  background: var(--ui-color-brand);
   color: var(--ui-color-onAccent);
-  border-radius: var(--ui-space-2);
+  border-radius: 0.55rem;
+  font-weight: 750;
 }
 
 /* Give the account menu a compact fallback avatar. */
@@ -222,12 +282,14 @@
   place-content: center;
   justify-items: center;
   gap: 0.1em;
-  inline-size: 1.5em;
+  inline-size: 2.15rem;
   aspect-ratio: 1;
   margin-inline: auto;
   border-radius: 50%;
-  background: var(--ui-color-border);
-  color: var(--ui-color-textMuted);
+  background: var(--ui-color-accent-surface);
+  color: var(--ui-color-accent);
+  font-size: 0.78rem;
+  font-weight: 750;
 }
 
 /* Form the head of a generic account icon. */
@@ -260,8 +322,9 @@
   padding: var(--ui-space-2);
   background: var(--ui-color-surface);
   border: 1px solid var(--ui-color-border);
-  border-radius: var(--ui-space-3);
-  font-size: var(--ui-font-label);
+  border-radius: 0.8rem;
+  font: inherit;
+  box-shadow: var(--ui-menu-shadow);
 }
 
 /* Keep right-hand disclosures within the screen. */
@@ -295,9 +358,9 @@
 
 /* Give workspace pages a comfortable shared measure. */
 .ui-workspace-main {
-  inline-size: min(100%, 70rem);
+  inline-size: min(100%, var(--ui-workspace-width));
   margin-inline: auto;
-  padding: var(--ui-space-5) var(--ui-space-4) var(--ui-space-9);
+  padding: 1.45rem 1rem 2.75rem;
   outline: none;
 }
 
@@ -319,6 +382,256 @@
   display: inline-flex;
   gap: var(--ui-space-2);
   min-inline-size: 0;
+}
+
+/* Align the public landing page with the width of the workspace and header. */
+.ui-public-main {
+  max-inline-size: var(--ui-workspace-width);
+  margin-inline: auto;
+  padding: 1.45rem 1rem 2.75rem;
+}
+
+/* Keep the landing page heading and actions together in both layouts. */
+.ui-public-intro {
+  padding: 1.4rem 0;
+}
+
+/* Match the mockup’s landing-page title. */
+.ui-public-intro h1 {
+  margin: 0;
+  font-size: clamp(2.05rem, 3.4cqi, 2.65rem);
+  line-height: 1.12;
+  letter-spacing: -0.042em;
+}
+
+/* Preserve the line measure of the mockup’s introductory copy. */
+.ui-public-intro p {
+  max-inline-size: 62ch;
+  color: var(--ui-color-textMuted);
+  margin-block: 0.45rem 1.35rem;
+}
+
+/* Display the hosting steps as an ordered list within the card. */
+.ui-hosting-steps {
+  padding-inline-start: var(--ui-space-6);
+  margin: 0;
+}
+
+/* Use the mockup’s page heading and weight throughout the workspace. */
+.ui-workspace-main h1 {
+  margin: 0;
+  font-size: clamp(2.05rem, 3.4cqi, 2.65rem);
+  line-height: 1.12;
+  letter-spacing: -0.042em;
+  overflow-wrap: anywhere;
+}
+
+/* Use the mockup page rhythm between the title and its navigation. */
+.ui-workspace-page-heading {
+  margin-block-end: 1.35rem;
+}
+
+/* Keep the short page description beside its title. */
+.ui-workspace-page-heading p {
+  margin: 0.45rem 0 0;
+  color: var(--ui-color-textMuted);
+}
+
+/* Keep the mockup’s tabs visible on mobile by allowing them to wrap. */
+.ui-workspace-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.15rem 0.25rem;
+  margin-block: var(--ui-space-3) var(--ui-space-5);
+  border-block-end: 1px solid var(--ui-color-border);
+}
+
+/* Make navigation look and behave like the mockup tabs. */
+.ui-workspace-tabs a {
+  display: inline-flex;
+  align-items: center;
+  min-block-size: var(--ui-target-primary);
+  padding-inline: 0.6rem;
+  border-block-end: 2px solid transparent;
+  border-radius: 0.4rem 0.4rem 0 0;
+  font-size: 0.86rem;
+  font-weight: 620;
+  color: var(--ui-color-text);
+  text-decoration: none;
+}
+
+/* Show the selected tab with the mockup’s underline. */
+.ui-workspace-tabs a[aria-current="page"] {
+  background: var(--ui-color-surface);
+  border-block-end-color: var(--ui-color-accent);
+  color: var(--ui-color-accent);
+}
+
+/* Group vertically related cards on team and environment screens. */
+.ui-workspace-section-stack {
+  display: grid;
+  gap: 1rem;
+}
+
+/* Show the primary panel and its context side by side when both fit, and stack them in reading order on phones. */
+.ui-workspace-columns {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+/* Give the primary panel the larger share of a wide row. */
+.ui-workspace-columns > :first-child {
+  flex: 1.65 1 min(100%, 35.5rem);
+  min-inline-size: 0;
+}
+
+/* Give the context panel a readable width at either layout. */
+.ui-workspace-columns > :last-child {
+  flex: 1 1 min(100%, 21.5rem);
+  min-inline-size: 0;
+}
+
+/* Use the bordered card surface, spacing, and shadow from the mockup. */
+.ui-workspace-panel {
+  min-inline-size: 0;
+  padding: 1.13rem;
+  background: var(--ui-color-surface);
+  border: 1px solid var(--ui-color-border);
+  border-radius: 0.65rem;
+  box-shadow: var(--ui-panel-shadow);
+}
+
+/* Match the subtly tinted App details card. */
+.ui-workspace-panel[data-context] {
+  background: var(--ui-color-context);
+}
+
+/* Use the mockup’s card title typography. */
+.ui-workspace-panel h2 {
+  margin: 0 0 0.8rem;
+  font-size: 1.13rem;
+  line-height: 1.3;
+  letter-spacing: -0.018em;
+}
+
+/* Keep the card text and its following controls grouped. */
+.ui-workspace-panel p {
+  margin: 0 0 0.8rem;
+  line-height: 1.55;
+}
+
+/* Use the mockup’s bordered secondary actions. */
+.ui-workspace-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.55rem 0.9rem;
+  border: 1px solid var(--ui-color-border);
+  border-radius: 0.6rem;
+  background: var(--ui-color-surface);
+  color: var(--ui-color-text);
+  text-decoration: none;
+  font-size: 0.91rem;
+  font-weight: 650;
+}
+
+/* Use dividers inside one panel instead of bordering each list. */
+.ui-environment-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Separate the environment rows without nested card outlines. */
+.ui-environment-list > li + li {
+  border-block-start: 1px solid var(--ui-color-border);
+}
+
+/* Keep the environment marker, summary and open indicator aligned on narrow screens. */
+.ui-environment-summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.68rem 0.55rem;
+  border-radius: 0.6rem;
+  color: var(--ui-color-text);
+  text-decoration: none;
+}
+
+/* Use the mockup’s visible hover surface. */
+.ui-environment-summary:hover, .ui-workspace-tabs a:hover, .ui-workspace-secondary:hover {
+  background: var(--ui-color-accent-surface);
+}
+
+/* Give each environment the compact visual landmark shown in the mockup. */
+.ui-environment-symbol {
+  display: grid;
+  place-items: center;
+  inline-size: 2.15rem;
+  aspect-ratio: 1;
+  border-radius: 0.55rem;
+  background: var(--ui-color-accent-surface);
+  color: var(--ui-color-accent);
+}
+
+/* Keep environment capabilities directly accessible from the overview. */
+.ui-environment-shortcuts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.15rem 0.35rem;
+  padding: 0 0.35rem 0.45rem;
+}
+
+/* Match the mockup shortcuts and keep their touch targets usable. */
+.ui-environment-shortcuts a {
+  display: inline-flex;
+  align-items: center;
+  min-block-size: var(--ui-target-primary);
+  padding-inline: 0.45rem;
+  border-radius: 0.35rem;
+  font-size: 0.83rem;
+  font-weight: 650;
+  text-decoration: none;
+}
+
+/* Show clear feedback on the environment actions. */
+.ui-environment-shortcuts a:hover {
+  background: var(--ui-color-accent-surface);
+  text-decoration: underline;
+}
+
+/* Put observation time on the secondary line of the environment row. */
+.ui-environment-summary small {
+  display: block;
+  color: var(--ui-color-textMuted);
+  font-size: 0.83rem;
+  overflow-wrap: anywhere;
+}
+
+/* Use a readable compact status badge without hiding the state. */
+.ui-environment-summary .ui-state-word {
+  display: inline-block;
+  padding: 0.1rem 0.45rem;
+  border-radius: 1rem;
+  background: var(--ui-color-bg);
+  font-size: 0.73rem;
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
+/* Use the mockup’s green status treatment when the environment is active. */
+.ui-environment-summary .ui-tone-ok .ui-state-word {
+  background: var(--ui-color-check-surface);
+  color: var(--ui-color-ok);
+}
+
+/* Keep the server observation time on its own readable line. */
+.ui-environment-summary .ui-age {
+  display: block;
+  font-size: 0.83rem;
 }
 
 /* Keep the observation time next to the data heading. */
@@ -417,8 +730,12 @@
 
 /* Use the strong accent for the next step. */
 .ui-workspace-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   padding-inline: var(--ui-space-5);
-  background: var(--ui-color-accent);
+  text-decoration: none;
+  background: var(--ui-color-action);
   color: var(--ui-color-onAccent);
   border: 0;
   border-radius: var(--ui-space-3);

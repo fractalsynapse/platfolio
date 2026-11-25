@@ -11,8 +11,6 @@ export function FreeTemplatePicker({ team }: { readonly team: string }): React.R
   const clock = useClock();
 
   return <>
-    <p><WorkspaceLink href={workspacePaths.team(team)}>Team workspace</WorkspaceLink></p>
-    <h1>Choose a template</h1>
     {state.status === 'pending' && <p role="status">Loading templates…</p>}
     {state.status === 'failed' && <p role="status">Couldn’t load the templates. <button type="button" className="ui-workspace-trigger ui-hit-primary" onClick={reload}>Try again</button></p>}
     {state.status === 'loaded' && <>
@@ -27,7 +25,7 @@ export function FreeTemplatePicker({ team }: { readonly team: string }): React.R
             <div><dt>Version</dt><dd><a href={`https://github.com/${release.repo}/tree/${release.revision}`}>{release.version} · View source</a></dd></div>
           </dl>
           <p>Railway charges for the resources your app uses.</p>
-          <WorkspaceLink href={workspacePaths.launchForTeam(team)}>Choose Starter Web</WorkspaceLink>
+          <WorkspaceLink className="ui-workspace-primary ui-hit-primary" href={workspacePaths.launchForTeam(team)}>Choose Starter Web</WorkspaceLink>
         </div>
       </article>)}
     </>}

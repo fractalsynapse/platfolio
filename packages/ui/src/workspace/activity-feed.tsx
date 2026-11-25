@@ -1,5 +1,5 @@
-import { useId } from 'react';
 import { WorkspaceLink } from './workspace-link.tsx';
+import { WorkspacePanel } from './workspace-panel.tsx';
 
 export interface ActivityEntry {
   readonly id: string;
@@ -10,9 +10,7 @@ export interface ActivityEntry {
 }
 
 export function ActivityFeed({ title, empty, entries }: { title: string; empty: string; entries: readonly ActivityEntry[] }) {
-  const heading = useId();
-  return <section aria-labelledby={heading}>
-    <h2 id={heading}>{title}</h2>
+  return <WorkspacePanel title={title}>
     {entries.length ? <ol className="ui-workspace-list">
       {entries.map((entry) => <li className="ui-workspace-row" key={entry.id}>
         <div>
@@ -22,5 +20,5 @@ export function ActivityFeed({ title, empty, entries }: { title: string; empty: 
         <time className="ui-workspace-meta" dateTime={entry.at}>{new Date(entry.at).toLocaleString()}</time>
       </li>)}
     </ol> : <p>{empty}</p>}
-  </section>;
+  </WorkspacePanel>;
 }

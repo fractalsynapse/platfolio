@@ -33,7 +33,7 @@ export function EnvironmentWorkspace({ instanceId, canManage, environment, route
   const clock = useClock();
 
   return <>
-    <nav className="ui-workspace-links" aria-label="Environment">
+    <nav className="ui-workspace-tabs" aria-label="Environment">
       {tabs.map(({ id, label }) => <WorkspaceLink key={id}
         href={workspacePaths.environment(route.team, route.instance, route.environment, id)}
         aria-current={route.tab === id ? 'page' : undefined}>{label}</WorkspaceLink>)}
