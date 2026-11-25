@@ -1,5 +1,5 @@
 import {
-  InfraPlanSchema, OPERATIONS, planIssues,
+  InfraPlanSchema, KEEP_DATA_FEATURE, OPERATIONS, planIssues,
   CONTRACT_VERSION,
   type ApplyResult, type CapabilityInfo, type DeleteOptions, type DeleteResult, type InfraPlan, type InfraProvider,
   type Issue, type RedeployResult, type SecretPresence, type SecretWriteResult, type ServicePlan, type StateSnapshot,
@@ -9,7 +9,9 @@ import {
 } from './railway-transport.ts';
 import { readRailwayCustomDomain, type RailwayCustomDomain } from './railway-domains.ts';
 import { redactCredentialShaped } from './managed-action.ts';
-import { stopRailwayDeployments, wipeRailwayProject, type RailwayDeployment } from './railway-removal.ts';
+import { configureRailwayService, createRailwayServiceDomain, deployRailwayService, writeRailwayVariable } from './railway-service.ts';
+import { createRailwayEnvironment, createRailwayProject, listRailwayProjects } from './railway-project.ts';
+import { railwayRetainedVolumeIds, stopRailwayDeployments, wipeRailwayProject, type RailwayDeployment } from './railway-removal.ts';
 
 /**
  * Railway provider. Its contract version is DERIVED (D59); `InfraPlan.contract` carries it, and it is
@@ -116,6 +118,8 @@ export interface RailwayProviderOptions {
   credentials: RailwayCredentialSource;
   transport?: RailwayTransport;
   workspaceId: string;
+  /** An authorized instance can reserve its own project name in the customer workspace. */
+  project?: { instanceId: string; name: string };
   /** Engine kind -> Railway Template code; public catalog entries are read by code (#75). */
   databaseTemplates?: Record<string, string>;
   /**
@@ -157,6 +161,7 @@ export class RailwayInfraProvider implements InfraProvider {
   private readonly credentials: RailwayCredentialSource;
   private readonly transport: RailwayTransport;
   private readonly workspaceId: string;
+  private readonly project: RailwayProviderOptions['project'];
   private readonly deployBudget: number;
   private readonly deployTimeoutMs: number;
   private readonly pollIntervalMs: number;
@@ -172,6 +177,7 @@ export class RailwayInfraProvider implements InfraProvider {
     this.credentials = options.credentials;
     this.transport = options.transport ?? new HttpRailwayTransport();
     this.workspaceId = options.workspaceId;
+    this.project = options.project;
     this.databaseTemplates = { postgres: 'postgresql', ...options.databaseTemplates };
     this.deployBudget = options.deployBudget ?? 4;
     this.deployTimeoutMs = options.deployTimeoutMs ?? 180_000;
@@ -191,7 +197,7 @@ export class RailwayInfraProvider implements InfraProvider {
       // What is actually supported. Ceilings and databases/buckets are absent from this list on purpose.
       // `per-environment-provisioning` replaced `environment-cloning`: every environment is created from its own
       // declaration, because a duplicated environment inherits the source's database configuration (D57).
-      features: ['service-domains', 'custom-domains', 'literal-configuration', 'preserve-secret-references', 'per-environment-tokens', 'deploy-waiting', 'per-environment-provisioning'],
+      features: [KEEP_DATA_FEATURE, 'service-domains', 'custom-domains', 'literal-configuration', 'preserve-secret-references', 'per-environment-tokens', 'deploy-waiting', 'per-environment-provisioning'],
     };
   }
 
@@ -247,7 +253,7 @@ export class RailwayInfraProvider implements InfraProvider {
 
     const name = this.projectName(plan);
     const existing = await this.findProject(name);
-    const projectId = existing ? existing.id : await this.createProject(name);
+    const projectId = existing ? existing.id : await this.createProject(name, plan.environments[0]!.name);
     this.lastProjectId = projectId;
     const workspaceCredential = await this.credentials.workspace();
 
@@ -477,8 +483,7 @@ export class RailwayInfraProvider implements InfraProvider {
     // name for projects a tenant created by hand. applyPlan creates by derived name, so the first lookup is
     // the one that makes read-back work -- and read-back is the whole point of the controller loop.
     const project = await this.findProject(this.projectName({ instanceId }))
-      ?? await this.findProjectById(instanceId)
-      ?? await this.findProject(instanceId);
+      ?? (this.project ? null : await this.findProjectById(instanceId) ?? await this.findProject(instanceId));
     if (!project) throw new Error(`railway readState: no project for instance "${instanceId}"`);
     const state = await this.snapshot(project.id);
     return {
@@ -500,7 +505,7 @@ export class RailwayInfraProvider implements InfraProvider {
     const credential = await this.credentials.workspace();
     const project = await this.findProject(this.projectName({ instanceId }));
     if (!project) return { instanceId, removed: [], orphans: [] };
-    if (!project.description?.startsWith(MARKER)) {
+    if (!this.ownsBoundProject(project)) {
       throw new Error('Railway project is not managed by this provider');
     }
 
@@ -509,6 +514,9 @@ export class RailwayInfraProvider implements InfraProvider {
     const projectExists = async () => (await this.workspaceProjects(credential)).some(({ id }) => id === project.id);
     if (data === 'keep') {
       try {
+        const placements = () => Promise.all(environments.map(({ id }) =>
+          railwayRetainedVolumeIds({ transport: this.transport, credential }, id)));
+        const keptPlacements = await placements();
         for (const environment of environments) {
           const token = await this.credentials.forEnvironment(project.id, environment.name);
           await stopRailwayDeployments({
@@ -518,9 +526,12 @@ export class RailwayInfraProvider implements InfraProvider {
           });
         }
         const stillPresent = new Set((await this.listVolumes(project.id, credential)).map(({ id }) => id));
-        if (!await projectExists() || stillPresent.size !== volumes.length || !volumes.every(({ id }) => stillPresent.has(id))) {
+        if (!await projectExists() || stillPresent.size !== volumes.length || !volumes.every(({ id }) => stillPresent.has(id)) ||
+            JSON.stringify(await placements()) !== JSON.stringify(keptPlacements)) {
           throw new Error('Railway storage changed while stopping workloads');
         }
+        // Resume must apply the same plan again even though service rows and their volumes still exist.
+        await this.writeMarker(project.id, 'none', credential);
         return { instanceId, removed: [], orphans: [], retained: volumes.map(({ name }) => name) };
       } catch {
         return { instanceId, removed: [], orphans: [], failures: [
@@ -612,6 +623,10 @@ export class RailwayInfraProvider implements InfraProvider {
    * succeeded, then readState could not find the project it had just created.
    */
   private projectName(plan: { instanceId: string }): string {
+    if (this.project) {
+      if (this.project.instanceId !== plan.instanceId) throw new Error('Railway adapter is bound to a different instance');
+      return this.project.name;
+    }
     return `platfolio-${plan.instanceId}`.toLowerCase().replace(/[^a-z0-9._-]+/g, '-');
   }
 
@@ -792,12 +807,7 @@ export class RailwayInfraProvider implements InfraProvider {
       }
       this.deploymentsUsed += 1;
       services.push(label);
-      await this.transport.graphql({
-        operation: 'serviceInstanceDeploy',
-        credential: token,
-        query: 'mutation ($environmentId: String!, $serviceId: String!) { serviceInstanceDeploy(environmentId: $environmentId, serviceId: $serviceId, latestCommit: true) }',
-        variables: { environmentId: env.id, serviceId },
-      });
+      await deployRailwayService({ transport: this.transport, credential: token }, { environmentId: env.id, serviceId });
     }
 
     // Read back only for the services we actually asked about. A deployment whose id did not move is reported,
@@ -840,33 +850,26 @@ export class RailwayInfraProvider implements InfraProvider {
     return out;
   }
 
-  private async workspaceProjects(credential: RailwayCredential): Promise<ProjectNode[]> {
-    const projects: ProjectNode[] = [];
-    let after: string | null = null;
-    do {
-      const data: { projects: { edges: { node: { id: string; name: string; description: string | null } }[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } } } =
-        await this.transport.graphql({
-          operation: 'projects',
-          credential,
-          query: 'query ($workspaceId: String!, $after: String) { projects(workspaceId: $workspaceId, first: 100, after: $after) { edges { node { id name description } } pageInfo { hasNextPage endCursor } } }',
-          variables: { workspaceId: this.workspaceId, after },
-        });
-      for (const { node } of data.projects.edges) {
-        const project = this.toProject(node);
-        if (project) projects.push(project);
-      }
-      if (!data.projects.pageInfo.hasNextPage) return projects;
-      const cursor = data.projects.pageInfo.endCursor;
-      if (!cursor || cursor === after) throw new Error('Incomplete Railway workspace inventory');
-      after = cursor;
-    } while (after);
-    return projects;
+  private workspaceProjects(credential: RailwayCredential) {
+    return listRailwayProjects({ transport: this.transport, credential }, this.workspaceId);
+  }
+
+  private ownsBoundProject(project: ProjectNode): boolean {
+    return this.project
+      ? project.description?.startsWith(this.projectDescription('')) === true
+      : project.description?.startsWith(MARKER) === true;
+  }
+
+  private projectDescription(hash: string): string {
+    return `${this.project ? `platfolio:instance=${this.project.instanceId} ` : ''}${MARKER}${hash}`;
   }
 
   private async findProject(name: string): Promise<ProjectNode | null> {
     const projects = (await this.workspaceProjects(await this.credentials.workspace())).filter((project) => project.name === name);
     if (projects.length > 1) throw new Error('More than one Railway project matches this instance');
-    return projects[0] ?? null;
+    const project = this.toProject(projects[0]);
+    if (project && this.project && !this.ownsBoundProject(project)) throw new Error('The named Railway project belongs to another instance');
+    return project;
   }
 
   private async findProjectById(id: string): Promise<ProjectNode | null> {
@@ -889,15 +892,10 @@ export class RailwayInfraProvider implements InfraProvider {
     return { id: node.id, name: node.name, ...(node.description ? { description: node.description } : {}) };
   }
 
-  private async createProject(name: string): Promise<string> {
-    const credential = await this.credentials.workspace();
-    const data = await this.transport.graphql<{ projectCreate: { id: string } }>({
-      operation: 'projectCreate',
-      credential,
-      query: 'mutation ($input: ProjectCreateInput!) { projectCreate(input: $input) { id } }',
-      variables: { input: { name, workspaceId: this.workspaceId, isPublic: false, description: `${MARKER}none` } },
+  private async createProject(name: string, defaultEnvironmentName: string): Promise<string> {
+    return createRailwayProject({ transport: this.transport, credential: await this.credentials.workspace() }, {
+      name, workspaceId: this.workspaceId, defaultEnvironmentName, prDeploys: false, description: this.projectDescription('none'),
     });
-    return data.projectCreate.id;
   }
 
   private async environments(projectId: string, credential: RailwayCredential): Promise<EnvironmentNode[]> {
@@ -924,17 +922,7 @@ export class RailwayInfraProvider implements InfraProvider {
     const found = await this.environments(projectId, credential);
     const existing = found.find((e) => e.name === environment);
     if (existing) return existing.id;
-    const data = await this.transport.graphql<{ environmentCreate: { id: string } }>({
-      operation: 'environmentCreate',
-      credential,
-      query: 'mutation ($input: EnvironmentCreateInput!) { environmentCreate(input: $input) { id } }',
-      // No `sourceEnvironmentId` is ever sent, and this is not a formatting choice: measured on the live API,
-      // creating an environment from a source gave the new environment the source's service ids, and its api
-      // failed with `connect ETIMEDOUT` against a database it does not own. The field stays in the input
-      // allowlist of the test double precisely so that nobody reintroduces it here unnoticed.
-      variables: { input: { projectId, name: environment, skipInitialDeploys: true } },
-    });
-    return data.environmentCreate.id;
+    return (await createRailwayEnvironment({ transport: this.transport, credential }, projectId, environment)).id;
   }
 
   private async listServices(projectId: string, credential?: RailwayCredential): Promise<ServiceNode[]> {
@@ -1237,39 +1225,15 @@ export class RailwayInfraProvider implements InfraProvider {
     };
     if (service.command) input.startCommand = service.command;
     if (service.preDeployCommand) input.preDeployCommand = service.preDeployCommand;
-    await this.transport.graphql({
-      operation: 'serviceInstanceUpdate',
-      credential,
-      query: 'mutation ($environmentId: String!, $serviceId: String!, $input: ServiceInstanceUpdateInput!) { serviceInstanceUpdate(environmentId: $environmentId, serviceId: $serviceId, input: $input) }',
-      variables: { environmentId, serviceId, input },
-    });
+    await configureRailwayService({ transport: this.transport, credential }, { environmentId, serviceId }, input);
   }
 
-  private async upsertVariable(projectId: string, environmentId: string, serviceId: string, name: string, value: string, credential: RailwayCredential, skipDeploys = true): Promise<void> {
-    await this.transport.graphql({
-      operation: 'variableUpsert',
-      credential,
-      query: 'mutation ($input: VariableUpsertInput!) { variableUpsert(input: $input) }',
-      // skipDeploys defaults to true: a configuration write must not trigger a redeploy we did not decide on.
-      // `false` is the deliberate exception, and only the refresh path passes it (see putSecretValue).
-      variables: { input: { projectId, environmentId, serviceId, name, value, skipDeploys } },
-    });
+  private upsertVariable(projectId: string, environmentId: string, serviceId: string, name: string, value: string, credential: RailwayCredential, skipDeploys = true) {
+    return writeRailwayVariable({ transport: this.transport, credential }, { projectId, environmentId, serviceId, name, value, skipDeploys });
   }
 
-  /**
-   * Write one variable at ENVIRONMENT scope. Railway's `VariableUpsertInput` makes every field optional, and
-   * omitting `serviceId` is exactly what distinguishes a shared variable from a service variable: the value
-   * belongs to the environment, and services opt in to reading it.
-   */
-  private async upsertSharedVariable(projectId: string, environmentId: string, name: string, value: string, credential: RailwayCredential, skipDeploys = true): Promise<void> {
-    await this.transport.graphql({
-      operation: 'variableUpsert',
-      credential,
-      query: 'mutation ($input: VariableUpsertInput!) { variableUpsert(input: $input) }',
-      // No serviceId: environment scope. skipDeploys for the same reason as the service-scoped write -- a
-      // credential arriving is not a decision to redeploy.
-      variables: { input: { projectId, environmentId, name, value, skipDeploys } },
-    });
+  private upsertSharedVariable(projectId: string, environmentId: string, name: string, value: string, credential: RailwayCredential, skipDeploys = true) {
+    return writeRailwayVariable({ transport: this.transport, credential }, { projectId, environmentId, name, value, skipDeploys });
   }
 
   /**
@@ -1346,12 +1310,7 @@ export class RailwayInfraProvider implements InfraProvider {
       return false;
     }
     this.deploymentsUsed += 1;
-    await this.transport.graphql({
-      operation: 'serviceInstanceDeploy',
-      credential,
-      query: 'mutation ($environmentId: String!, $serviceId: String!) { serviceInstanceDeploy(environmentId: $environmentId, serviceId: $serviceId, latestCommit: true) }',
-      variables: { environmentId, serviceId },
-    });
+    await deployRailwayService({ transport: this.transport, credential }, { environmentId, serviceId });
     return true;
   }
 
@@ -1461,13 +1420,7 @@ export class RailwayInfraProvider implements InfraProvider {
     try {
       let actual = domain.host;
       if (isRailwayDomain) {
-        const created = await this.transport.graphql<{ serviceDomainCreate: { domain?: string } }>({
-          operation: 'serviceDomainCreate',
-          credential,
-          query: 'mutation ($input: ServiceDomainCreateInput!) { serviceDomainCreate(input: $input) { id domain } }',
-          variables: { input: { environmentId, serviceId, targetPort: domain.port } },
-        });
-        actual = created.serviceDomainCreate.domain ?? domain.host;
+        actual = await createRailwayServiceDomain({ transport: this.transport, credential }, { environmentId, serviceId }, domain.port);
       } else {
         // Availability is asked before the attach, because it is the only source of a human-readable reason:
         // a refused create returns the bare "Failed to create custom domain, please try again", which cannot
@@ -1627,7 +1580,8 @@ export class RailwayInfraProvider implements InfraProvider {
           // creates the database in its own environment and deploys it there, so this branch is now the re-apply
           // case (an interrupted apply, a deploy refused by the ceiling); the read still tells the two apart, so
           // the provider starts what the environment has never run. Budget and idempotency still apply.
-          const started = placedRow.rawStatus == null ? await this.deploy(existing.id, environmentId, token, failures) : true;
+          const stopped = placedRow.rawStatus == null || ['REMOVED', 'SKIPPED'].includes(placedRow.rawStatus);
+          const started = stopped ? await this.deploy(existing.id, environmentId, token, failures) : true;
           if (started) {
             const outcome = await this.awaitDeployment(projectId, environmentId, existing.id, token, failures, notes);
             if (outcome.status !== 'live') {
@@ -2060,7 +2014,7 @@ export class RailwayInfraProvider implements InfraProvider {
       // the whole call at validation time -- which is what E26 hit, and because this write happens at the
       // END of applyPlan, it meant the marker was never stored and every retry re-deployed everything.
       query: 'mutation ($id: String!, $input: ProjectUpdateInput!) { projectUpdate(id: $id, input: $input) { id } }',
-      variables: { id: projectId, input: { description: `${MARKER}${planHash}` } },
+      variables: { id: projectId, input: { description: this.projectDescription(planHash) } },
     });
   }
 }

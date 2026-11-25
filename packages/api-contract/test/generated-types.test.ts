@@ -172,7 +172,6 @@ test('what the shapes come out as -- the cases a UI actually reads', () => {
   assert.match(output, /export interface TeamWithRole \{\n {2}teamId: string;\n {2}name: Slug;/);
   // enum-likes become literal unions, both as a component and inside an object.
   assert.match(output, /export type Slug = string;/);
-  assert.match(output, / {2}provider: 'railway' \| 'fake';/);
   assert.match(output, / {2}role: 'owner' \| 'member';/);
   assert.match(output, / {2}state: 'pending' \| 'provisioning' \| 'live' \| 'degraded' \| 'paused' \| 'failed' \| 'deprovisioning' \| 'removed';/);
   // `const: false` becomes the literal type, which is what makes the invariant readable at the call site.
@@ -193,6 +192,7 @@ test('what the shapes come out as -- the cases a UI actually reads', () => {
   // shape, one definition -- and the two definitions are checked to be genuinely different shapes.
   const record = /export interface Instance \{[\s\S]*?\n\}/.exec(output)?.[0] ?? '';
   assert.ok(record.length > 0, 'the record interface was not emitted at all');
+  assert.match(record, /^ {2}provider: string;/m, 'registered provider IDs must survive in the instance contract');
   // A MEMBER named `environments`, not the word anywhere: the record's `state` description legitimately says
   // "`InstanceResponse.environments` is what actually happened per place", and prose is not a field.
   assert.ok(!/^ {2}environments:/m.test(record), 'Instance is InstanceSchema: a stored row, no environment rows');

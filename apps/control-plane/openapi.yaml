@@ -765,6 +765,7 @@ paths:
                 teamId: { type: string, minLength: 1 }
                 name: { type: string, minLength: 1, maxLength: 80, pattern: '^[a-z0-9]([a-z0-9-]{0,78}[a-z0-9])?$' }
                 template: { type: string, minLength: 1, description: "Catalog identifier, e.g. starter-web" }
+                provider: { type: string, pattern: '^[a-z0-9]+(-[a-z0-9]+)*$', maxLength: 64, description: An installed hosting provider identifier. }
                 templateRef:
                   type: object
                   additionalProperties: false
@@ -861,6 +862,107 @@ paths:
           $ref: '#/components/responses/Unauthenticated'
         '404':
           description: No such instance for this principal.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/instances/{instanceId}/hosting:
+    parameters:
+      - { name: instanceId, in: path, required: true, schema: { type: string, minLength: 1 } }
+    get:
+      operationId: getInstanceHostingState
+      summary: Read the bound hosting provider state
+      security: [{ bearerJwt: [] }]
+      responses:
+        '200':
+          description: The provider's observed result.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StateSnapshot' }
+        '400':
+          description: Invalid removal policy or stored plan.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: The current hosting state or dependent apps prevent this operation.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '503':
+          description: The instance's hosting provider is unavailable.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/instances/{instanceId}/hosting/apply:
+    parameters:
+      - { name: instanceId, in: path, required: true, schema: { type: string, minLength: 1 } }
+    post:
+      operationId: applyInstanceHostingPlan
+      summary: Apply the stored plan with the bound hosting provider
+      security: [{ bearerJwt: [] }]
+      responses:
+        '200':
+          description: The provider's observed result.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApplyResult' }
+        '400':
+          description: Invalid removal policy or stored plan.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: The current hosting state or dependent apps prevent this operation.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '503':
+          description: The instance's hosting provider is unavailable.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/instances/{instanceId}/hosting/removal:
+    parameters:
+      - { name: instanceId, in: path, required: true, schema: { type: string, minLength: 1 } }
+    post:
+      operationId: removeInstanceHosting
+      summary: Stop workloads and keep storage or permanently remove the bound hosting resources
+      security: [{ bearerJwt: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/HostingRemovalRequest' }
+      responses:
+        '200':
+          description: The provider's observed result.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeleteResult' }
+        '400':
+          description: Invalid removal policy or stored plan.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: The current hosting state or dependent apps prevent this operation.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '503':
+          description: The instance's hosting provider is unavailable.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -1176,6 +1278,13 @@ paths:
                     every service in `path` already carries a digest; otherwise the refusal says which service
                     is unpinned.
                   default: compose.prod.yaml
+                environments:
+                  type: array
+                  description: Environments to plan. Omit to include every enabled environment.
+                  minItems: 1
+                  maxItems: 2
+                  uniqueItems: true
+                  items: { type: string, enum: [staging, production] }
       responses:
         '200':
           description: The plan is recorded; a runner may now be asked to satisfy this digest.
@@ -2993,11 +3102,185 @@ components:
             otherwise the worst among the environments (#179). `InstanceResponse.environments` is
             what actually happened per place.
           enum: [pending, provisioning, live, degraded, paused, failed, deprovisioning, removed]
-        provider: { type: string, enum: [railway, fake], default: railway }
+        provider: { type: string, pattern: '^[a-z0-9]+(-[a-z0-9]+)*$', default: railway, maxLength: 64 }
         desiredPlanHash: { type: string, pattern: '^[0-9a-f]{64}$' }
         lastAppliedPlanHash: { type: string, pattern: '^[0-9a-f]{64}$' }
         createdAt: { type: string, format: date-time, minLength: 1 }
         updatedAt: { type: string, format: date-time, minLength: 1 }
+      additionalProperties: false
+
+    StateSnapshot:
+      # GENERATED by scripts/gen-api-spec.ts from StateSnapshotSchema (packages/contracts). Do not hand-edit: pnpm run spec:check fails on a difference, and the prose lives in packages/api-contract/src/spec-annotations.ts.
+      type: object
+      required: [instanceId, projectExternalId, capturedAt, services, domains, ceilings]
+      properties:
+        instanceId: { type: string, minLength: 1 }
+        projectExternalId: { type: string, minLength: 1 }
+        capturedAt: { type: string, minLength: 1 }
+        services:
+          type: array
+          items:
+            type: object
+            required: [name, environment, externalId, status, image, numReplicas]
+            properties:
+              name: { type: string, minLength: 1 }
+              environment: { type: string, minLength: 1 }
+              externalId: { type: string, minLength: 1 }
+              status:
+                type: string
+                enum: [pending, building, deploying, live, stopped, failed, crashed, sleeping, awaiting-approval, removed]
+              rawStatus: { type: string }
+              image: { type: string, minLength: 1 }
+              numReplicas: { type: integer, minimum: 0, maximum: 9007199254740991 }
+            additionalProperties: false
+        domains:
+          type: array
+          items:
+            type: object
+            required: [host, dnsStatus, certificateStatus, targetService]
+            properties:
+              host: { type: string, minLength: 1 }
+              dnsStatus: { type: string, enum: [pending, verified, failed] }
+              certificateStatus: { type: string, enum: [pending, issued, failed] }
+              records:
+                type: array
+                items:
+                  type: object
+                  required: [host, fqdn, zone, type, value, status, purpose]
+                  properties:
+                    host: { type: string, minLength: 1 }
+                    fqdn: { type: string, minLength: 1 }
+                    zone: { type: string, minLength: 1 }
+                    type: { type: string, enum: [A, CNAME, TXT, NS] }
+                    value: { type: string, minLength: 1 }
+                    current: { type: string }
+                    status: { type: string, enum: [requires-update, propagated, unspecified] }
+                    purpose: { type: string, enum: [traffic, ownership, challenge, unspecified] }
+                  additionalProperties: false
+              targetService: { type: string, minLength: 1 }
+            additionalProperties: false
+        ceilings:
+          type: array
+          items:
+            type: object
+            required: [name, cpu, memoryMB]
+            properties:
+              name: { type: string, minLength: 1 }
+              cpu: { type: number }
+              memoryMB: { type: number }
+            additionalProperties: false
+      additionalProperties: false
+
+    ApplyResult:
+      # GENERATED by scripts/gen-api-spec.ts from ApplyResultSchema (packages/contracts). Do not hand-edit: pnpm run spec:check fails on a difference, and the prose lives in packages/api-contract/src/spec-annotations.ts.
+      type: object
+      required: [instanceId, planHash, verified, services, domains, failures, noop]
+      properties:
+        instanceId: { type: string, minLength: 1 }
+        planHash: { type: string, minLength: 1 }
+        verified: { type: boolean }
+        services:
+          type: array
+          items:
+            type: object
+            required: [name, environment, externalId, status, image, numReplicas]
+            properties:
+              name: { type: string, minLength: 1 }
+              environment: { type: string, minLength: 1 }
+              externalId: { type: string, minLength: 1 }
+              status:
+                type: string
+                enum: [pending, building, deploying, live, stopped, failed, crashed, sleeping, awaiting-approval, removed]
+              rawStatus: { type: string }
+              image: { type: string, minLength: 1 }
+              numReplicas: { type: integer, minimum: 0, maximum: 9007199254740991 }
+            additionalProperties: false
+        domains:
+          type: array
+          items:
+            type: object
+            required: [host, dnsStatus, certificateStatus, targetService]
+            properties:
+              host: { type: string, minLength: 1 }
+              dnsStatus: { type: string, enum: [pending, verified, failed] }
+              certificateStatus: { type: string, enum: [pending, issued, failed] }
+              records:
+                type: array
+                items:
+                  type: object
+                  required: [host, fqdn, zone, type, value, status, purpose]
+                  properties:
+                    host: { type: string, minLength: 1 }
+                    fqdn: { type: string, minLength: 1 }
+                    zone: { type: string, minLength: 1 }
+                    type: { type: string, enum: [A, CNAME, TXT, NS] }
+                    value: { type: string, minLength: 1 }
+                    current: { type: string }
+                    status: { type: string, enum: [requires-update, propagated, unspecified] }
+                    purpose: { type: string, enum: [traffic, ownership, challenge, unspecified] }
+                  additionalProperties: false
+              targetService: { type: string, minLength: 1 }
+            additionalProperties: false
+        failures:
+          type: array
+          items:
+            type: object
+            required: [step, code, message]
+            properties:
+              step: { type: string, minLength: 1 }
+              code: { type: string, minLength: 1 }
+              message: { type: string, minLength: 1 }
+            additionalProperties: false
+        notes:
+          type: array
+          items:
+            type: object
+            required: [step, code, message]
+            properties:
+              step: { type: string, minLength: 1 }
+              code: { type: string, minLength: 1 }
+              message: { type: string, minLength: 1 }
+            additionalProperties: false
+        noop: { type: boolean }
+      additionalProperties: false
+
+    DeleteResult:
+      # GENERATED by scripts/gen-api-spec.ts from DeleteResultSchema (packages/contracts). Do not hand-edit: pnpm run spec:check fails on a difference, and the prose lives in packages/api-contract/src/spec-annotations.ts.
+      type: object
+      required: [instanceId, removed, orphans]
+      properties:
+        instanceId: { type: string, minLength: 1 }
+        removed:
+          type: array
+          items: { type: string, minLength: 1 }
+        orphans:
+          type: array
+          items: { type: string, minLength: 1 }
+        failures:
+          type: array
+          items:
+            type: object
+            required: [step, code, message]
+            properties:
+              step: { type: string, minLength: 1 }
+              code: { type: string, minLength: 1 }
+              message: { type: string, minLength: 1 }
+            additionalProperties: false
+        releasedWithProject:
+          type: array
+          items: { type: string, minLength: 1 }
+        retained:
+          type: array
+          items: { type: string, minLength: 1 }
+      additionalProperties: false
+
+    HostingRemovalRequest:
+      # GENERATED by scripts/gen-api-spec.ts from HostingRemovalRequestSchema (packages/contracts). Do not hand-edit: pnpm run spec:check fails on a difference, and the prose lives in packages/api-contract/src/spec-annotations.ts.
+      type: object
+      required: [data]
+      properties:
+        data: { type: string, enum: [keep, wipe] }
+        confirmation: { type: string }
       additionalProperties: false
 
     InstanceResponse:
@@ -3039,7 +3322,7 @@ components:
             otherwise the worst among the environments (#179). `InstanceResponse.environments` is
             what actually happened per place.
           enum: [pending, provisioning, live, degraded, paused, failed, deprovisioning, removed]
-        provider: { type: string, enum: [railway, fake], default: railway }
+        provider: { type: string, pattern: '^[a-z0-9]+(-[a-z0-9]+)*$', default: railway, maxLength: 64 }
         desiredPlanHash: { type: string, pattern: '^[0-9a-f]{64}$' }
         lastAppliedPlanHash: { type: string, pattern: '^[0-9a-f]{64}$' }
         createdAt: { type: string, format: date-time, minLength: 1 }

@@ -8,18 +8,20 @@ import { EmailService, EmailConfigSchema } from './email.ts';
 import { StoreService, StoreConfigSchema } from './store.ts';
 import { ScmService, ScmConfigSchema } from './scm.ts';
 import { ExtensionService, type ExtensionDescriptor } from './extension.ts';
-import { InfraService, ProviderConfigSchema } from './infra-provider.ts';
+import { InfraService, ProviderConfigSchema, type HostingPlugin } from './infra-provider.ts';
 import type { IdentityConfig, Jwk, VariablePort, RedactionSinks } from '@platfolio/contracts';
 // D59: the default required contract range is derived, so this must import the generated value as a
 // runtime value -- a type-only import cannot carry it.
-import { CONTRACT_VERSION } from '@platfolio/contracts';
+import { CONTRACT_VERSION, FakeInfraProvider, RailwayInfraProvider } from '@platfolio/contracts';
 
 export interface KernelOptions {
   /** Email transport selection (D46). Absent means no email capability is installed at all. */
   email?: import('./email.ts').EmailConfigInput;
   /** Source control (D22): where platfolio reads a tenant's declared platform and asks for a run. */
   scm?: import('./scm.ts').ScmConfigInput;
-  provider?: 'fake' | 'railway';
+  provider?: string;
+  /** Build-time hosting plugins installed in this execution process. */
+  infrastructure?: readonly HostingPlugin[];
   contract?: string;
   custody?: 'managed' | 'strict';
   /** Required when provider is 'railway'. */
@@ -73,6 +75,10 @@ export async function createKernel(options: KernelOptions = {}): Promise<Context
   }
 }
 
+function missingRailway(): never {
+  throw new Error('provider "railway" requires options.railway { workspaceId, credentials }');
+}
+
 async function install(ctx: Context, options: KernelOptions): Promise<Context> {
   const config = ProviderConfigSchema.parse({
     provider: options.provider ?? 'fake',
@@ -80,11 +86,15 @@ async function install(ctx: Context, options: KernelOptions): Promise<Context> {
     features: [],
   });
   const custody = CustodyConfigSchema.parse({ mode: options.custody ?? 'strict', delivery: options.delivery ?? 'relay-sealed' });
-  await ctx.plugin(InfraService, config);
-  if (config.provider === 'railway') {
-    if (!options.railway) throw new Error('provider "railway" requires options.railway { workspaceId, credentials }');
-    ctx.infra.attachRailway(options.railway);
+  const providers = options.infrastructure === undefined
+    ? config.provider === 'railway'
+      ? [new RailwayInfraProvider(options.railway ?? missingRailway())]
+      : config.provider === 'fake' ? [new FakeInfraProvider()] : []
+    : options.infrastructure;
+  if (options.infrastructure === undefined && !providers.length) {
+    throw new Error(`Infrastructure provider "${config.provider}" is not configured`);
   }
+  await ctx.plugin(InfraService, { ...config, providers, developmentAlias: options.infrastructure === undefined && config.provider === 'fake' });
   await ctx.plugin(CustodyService, custody);
   // Ports are attached by the composition root. This line was lost once already while the function was being
   // restructured into install(), and the kernel test caught it by counting provider writes -- a reminder that a

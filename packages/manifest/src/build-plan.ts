@@ -33,6 +33,7 @@ export interface InstanceConfig {
   domains?: 'omit' | 'generated';
   /** Limit an operator apply to one declared environment. */
   environment?: string;
+  environments?: readonly string[];
 }
 
 // Template documentation values, e.g. sha256:1111... or sha2222...: a single repeated character is not what a
@@ -43,7 +44,13 @@ const PLACEHOLDER = /^sha256:([0-9a-f])\1{63}$/;
 export function buildPlan(manifest: Manifest, config: InstanceConfig): InfraPlan {
   const platform = manifest.metadata.name;
   const enabled = enabledEnvironments(manifest);
-  const selected = enabled.filter((name) => config.environment === undefined || name === config.environment);
+  if (config.environment !== undefined && config.environments !== undefined) throw new Error('Specify either one environment or an environment list');
+  const selected = enabled.filter((name) => config.environments
+    ? config.environments.includes(name)
+    : config.environment === undefined || name === config.environment);
+  if (config.environments && (selected.length === 0 || selected.length !== config.environments.length)) {
+    throw new Error('Selected environments must be unique and enabled by the platform');
+  }
   if (config.environment !== undefined && selected.length === 0) {
     throw new Error(`Environment "${config.environment}" is not enabled`);
   }

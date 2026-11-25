@@ -4,7 +4,7 @@
  * hand, because every line reproduces from the specification.
  *
  * Source: apps/control-plane/openapi.yaml (OpenAPI 3.1.0, info.version 0.1.0)
- * Input digest: sha256/108619db96fc0ee3
+ * Input digest: sha256/d714d099cf3abd1d
  *
  * Reproduce it with `pnpm run api:types`. `pnpm run api:types:check` fails when this file stops matching
  * what the committed spec produces, which is the only way a generated type deserves to be trusted.
@@ -18,6 +18,48 @@
  * measured, not reasoned from habit). Someone who wants both should write `import type { Error as ApiError }`,
  * or reach for the whole surface with `import type * as Api` and use `Api.Error`.
  */
+
+export interface ApplyResult {
+  instanceId: string;
+  planHash: string;
+  verified: boolean;
+  services: Array<{
+    name: string;
+    environment: string;
+    externalId: string;
+    status: 'pending' | 'building' | 'deploying' | 'live' | 'stopped' | 'failed' | 'crashed' | 'sleeping' | 'awaiting-approval' | 'removed';
+    rawStatus?: string;
+    image: string;
+    numReplicas: number;
+  }>;
+  domains: Array<{
+    host: string;
+    dnsStatus: 'pending' | 'verified' | 'failed';
+    certificateStatus: 'pending' | 'issued' | 'failed';
+    records?: Array<{
+      host: string;
+      fqdn: string;
+      zone: string;
+      type: 'A' | 'CNAME' | 'TXT' | 'NS';
+      value: string;
+      current?: string;
+      status: 'requires-update' | 'propagated' | 'unspecified';
+      purpose: 'traffic' | 'ownership' | 'challenge' | 'unspecified';
+    }>;
+    targetService: string;
+  }>;
+  failures: Array<{
+    step: string;
+    code: string;
+    message: string;
+  }>;
+  notes?: Array<{
+    step: string;
+    code: string;
+    message: string;
+  }>;
+  noop: boolean;
+}
 
 export interface Attestation {
   dispatchId: string;
@@ -130,6 +172,19 @@ export interface CurrentPerson {
   }>;
 }
 
+export interface DeleteResult {
+  instanceId: string;
+  removed: string[];
+  orphans: string[];
+  failures?: Array<{
+    step: string;
+    code: string;
+    message: string;
+  }>;
+  releasedWithProject?: string[];
+  retained?: string[];
+}
+
 export interface DispatchIntent {
   instanceId: string;
   teamId: string;
@@ -180,6 +235,11 @@ export interface HostedStarter {
   observedAt: string;
 }
 
+export interface HostingRemovalRequest {
+  data: 'keep' | 'wipe';
+  confirmation?: string;
+}
+
 export interface Instance {
   id: string;
   teamId: string;
@@ -194,7 +254,7 @@ export interface Instance {
   };
   /** The rollup, not the truth: production's state when a production environment exists, otherwise the worst among the environments (#179). `InstanceResponse.environments` is what actually happened per place. */
   state: 'pending' | 'provisioning' | 'live' | 'degraded' | 'paused' | 'failed' | 'deprovisioning' | 'removed';
-  provider: 'railway' | 'fake';
+  provider: string;
   desiredPlanHash?: string;
   lastAppliedPlanHash?: string;
   createdAt: string;
@@ -215,7 +275,7 @@ export interface InstanceResponse {
   };
   /** The rollup, not the truth: production's state when a production environment exists, otherwise the worst among the environments (#179). `InstanceResponse.environments` is what actually happened per place. */
   state: 'pending' | 'provisioning' | 'live' | 'degraded' | 'paused' | 'failed' | 'deprovisioning' | 'removed';
-  provider: 'railway' | 'fake';
+  provider: string;
   desiredPlanHash?: string;
   lastAppliedPlanHash?: string;
   createdAt: string;
@@ -285,6 +345,42 @@ export interface StarterBrandChange {
   value: string;
 }
 
+export interface StateSnapshot {
+  instanceId: string;
+  projectExternalId: string;
+  capturedAt: string;
+  services: Array<{
+    name: string;
+    environment: string;
+    externalId: string;
+    status: 'pending' | 'building' | 'deploying' | 'live' | 'stopped' | 'failed' | 'crashed' | 'sleeping' | 'awaiting-approval' | 'removed';
+    rawStatus?: string;
+    image: string;
+    numReplicas: number;
+  }>;
+  domains: Array<{
+    host: string;
+    dnsStatus: 'pending' | 'verified' | 'failed';
+    certificateStatus: 'pending' | 'issued' | 'failed';
+    records?: Array<{
+      host: string;
+      fqdn: string;
+      zone: string;
+      type: 'A' | 'CNAME' | 'TXT' | 'NS';
+      value: string;
+      current?: string;
+      status: 'requires-update' | 'propagated' | 'unspecified';
+      purpose: 'traffic' | 'ownership' | 'challenge' | 'unspecified';
+    }>;
+    targetService: string;
+  }>;
+  ceilings: Array<{
+    name: string;
+    cpu: number;
+    memoryMB: number;
+  }>;
+}
+
 export interface TeamWithRole {
   teamId: string;
   name: Slug;
@@ -329,6 +425,10 @@ export interface ApiParameters {
   /** POST /api/v1/me/invitations/{invitationId}/accept */
   acceptInvitation: {
     invitationId: string;
+  };
+  /** POST /api/v1/instances/{instanceId}/hosting/apply */
+  applyInstanceHostingPlan: {
+    instanceId: string;
   };
   /** PUT /api/v1/instances/{instanceId}/environments/{environment}/custom-domains/{hostname} */
   attachHostedCustomDomain: {
@@ -438,6 +538,10 @@ export interface ApiParameters {
   getInstanceEnvironment: {
     instanceId: string;
     environment: string;
+  };
+  /** GET /api/v1/instances/{instanceId}/hosting */
+  getInstanceHostingState: {
+    instanceId: string;
   };
   /** GET /api/v1/instances/{instanceId}/latest-attestation */
   getLatestAttestation: {
@@ -559,6 +663,10 @@ export interface ApiParameters {
   registerPlanFromRepository: {
     instanceId: string;
   };
+  /** POST /api/v1/instances/{instanceId}/hosting/removal */
+  removeInstanceHosting: {
+    instanceId: string;
+  };
   /** POST /api/v1/teams/{teamId}/starter-launch/remove */
   removeStarterLaunch: {
     teamId: string;
@@ -655,6 +763,8 @@ export interface ApiRequestBodies {
     name: string;
     /** Catalog identifier, e.g. starter-web */
     template: string;
+    /** An installed hosting provider identifier. */
+    provider?: string;
     templateRef?: {
       repo: string;
       commitSha: string;
@@ -724,7 +834,11 @@ export interface ApiRequestBodies {
     path?: string;
     /** The pinned production overlay. Default `compose.prod.yaml`. Absent is allowed only when every service in `path` already carries a digest; otherwise the refusal says which service is unpinned. */
     overlayPath?: string;
+    /** Environments to plan. Omit to include every enabled environment. */
+    environments?: ('staging' | 'production')[];
   };
+  /** POST /api/v1/instances/{instanceId}/hosting/removal */
+  removeInstanceHosting: HostingRemovalRequest;
   /** POST /api/v1/teams/{teamId}/starter-launch/remove */
   removeStarterLaunch: {
     data: 'keep' | 'wipe';
@@ -799,6 +913,16 @@ export interface ApiResponses {
     '401': Error;
     '404': Error;
     '409': Error;
+  };
+  /** POST /api/v1/instances/{instanceId}/hosting/apply */
+  applyInstanceHostingPlan: {
+    '200': ApplyResult;
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '409': Error;
+    '503': Error;
   };
   /** PUT /api/v1/instances/{instanceId}/environments/{environment}/custom-domains/{hostname} */
   attachHostedCustomDomain: {
@@ -1062,6 +1186,16 @@ export interface ApiResponses {
     };
     '401': Error;
     '404': Error;
+  };
+  /** GET /api/v1/instances/{instanceId}/hosting */
+  getInstanceHostingState: {
+    '200': StateSnapshot;
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '409': Error;
+    '503': Error;
   };
   /** GET /api/v1/instances/{instanceId}/latest-attestation */
   getLatestAttestation: {
@@ -1421,6 +1555,16 @@ export interface ApiResponses {
     '404': Error;
     '503': Error;
   };
+  /** POST /api/v1/instances/{instanceId}/hosting/removal */
+  removeInstanceHosting: {
+    '200': DeleteResult;
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '409': Error;
+    '503': Error;
+  };
   /** POST /api/v1/teams/{teamId}/starter-launch/remove */
   removeStarterLaunch: {
     '200': {
@@ -1660,6 +1804,8 @@ export interface Endpoint {
 export const ENDPOINTS = {
   /** POST /api/v1/me/invitations/{invitationId}/accept */
   acceptInvitation: { method: 'post', path: '/api/v1/me/invitations/{invitationId}/accept' },
+  /** POST /api/v1/instances/{instanceId}/hosting/apply */
+  applyInstanceHostingPlan: { method: 'post', path: '/api/v1/instances/{instanceId}/hosting/apply' },
   /** PUT /api/v1/instances/{instanceId}/environments/{environment}/custom-domains/{hostname} */
   attachHostedCustomDomain: { method: 'put', path: '/api/v1/instances/{instanceId}/environments/{environment}/custom-domains/{hostname}' },
   /** POST /api/v1/teams/{teamId}/starter-launch/railway */
@@ -1712,6 +1858,8 @@ export const ENDPOINTS = {
   getInstance: { method: 'get', path: '/api/v1/instances/{instanceId}' },
   /** GET /api/v1/instances/{instanceId}/environments/{environment} */
   getInstanceEnvironment: { method: 'get', path: '/api/v1/instances/{instanceId}/environments/{environment}' },
+  /** GET /api/v1/instances/{instanceId}/hosting */
+  getInstanceHostingState: { method: 'get', path: '/api/v1/instances/{instanceId}/hosting' },
   /** GET /api/v1/instances/{instanceId}/latest-attestation */
   getLatestAttestation: { method: 'get', path: '/api/v1/instances/{instanceId}/latest-attestation' },
   /** GET /api/v1/me/notification-email */
@@ -1780,6 +1928,8 @@ export const ENDPOINTS = {
   redeployInstance: { method: 'post', path: '/api/v1/instances/{instanceId}/redeploy' },
   /** POST /api/v1/instances/{instanceId}/plan/from-repository */
   registerPlanFromRepository: { method: 'post', path: '/api/v1/instances/{instanceId}/plan/from-repository' },
+  /** POST /api/v1/instances/{instanceId}/hosting/removal */
+  removeInstanceHosting: { method: 'post', path: '/api/v1/instances/{instanceId}/hosting/removal' },
   /** POST /api/v1/teams/{teamId}/starter-launch/remove */
   removeStarterLaunch: { method: 'post', path: '/api/v1/teams/{teamId}/starter-launch/remove' },
   /** DELETE /api/v1/teams/{teamId}/members/{personId} */

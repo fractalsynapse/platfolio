@@ -1,5 +1,5 @@
 import { appendFileSync } from 'node:fs';
-import { HttpRailwayTransport, MintingRailwayCredentials, RailwayInfraProvider, type ApplyResult, type Attestation, type DispatchIntent, type InfraPlan } from '../../../packages/contracts/src/index.ts';
+import { HttpRailwayTransport, MintingRailwayCredentials, RailwayInfraProvider, hostingProviders, type ApplyResult, type Attestation, type DispatchIntent, type InfraPlan } from '../../../packages/contracts/src/index.ts';
 import { runManagedAction } from './runner.ts';
 
 /** Named per instance so a tenant can see which workflow minted what, in their own token list. */
@@ -45,30 +45,29 @@ const headers = {
 
 await runManagedAction({
   env: process.env as Record<string, string | undefined>,
+  missingCredentials: () => ['RAILWAY_TOKEN', 'RAILWAY_WORKSPACE_ID'].filter((name) => !process.env[name]),
   async fetchDispatch(intent: DispatchIntent): Promise<{ plan: InfraPlan; planHash: string }> {
     const response = await fetch(`${url}/api/v1/instances/${encodeURIComponent(intent.instanceId)}/dispatches/${encodeURIComponent(intent.dispatchId)}`, { headers });
     if (!response.ok) throw new Error(`plan fetch failed (${String(response.status)}); refusing to act on a plan we could not read`);
     const body = await response.json() as { plan: InfraPlan; planHash: string };
     return { plan: body.plan, planHash: String(body.planHash).replace(/^sha256:/, '') };
   },
-  async applyPlan(plan: InfraPlan): Promise<ApplyResult> {
+  async applyPlan(plan: InfraPlan, intent: DispatchIntent): Promise<ApplyResult> {
+    const credentials = new MintingRailwayCredentials({
+      workspaceCredential: { kind: 'workspace', token: process.env.RAILWAY_TOKEN ?? '' },
+      transport: new HttpRailwayTransport({ requestTimeoutMs: 25_000 }),
+      tokenName: `platfolio-${intentName(process.env)}-${intent.dispatchId.slice(0, 8)}`,
+    });
     const provider = new RailwayInfraProvider({
-      // The workspace-tier credential is what the provider's provisioning path requires today; narrowing to
-      // a per-environment project token is #135's remaining refactor, and this line is where that will change.
-      credentials: new MintingRailwayCredentials({
-        workspaceCredential: { kind: 'workspace', token: process.env.RAILWAY_TOKEN ?? '' },
-        // The same transport the provider uses: environment-scoped project tokens are minted through it, so
-        // the workspace credential is never sent on the per-service calls the plan actually makes.
-        transport: new HttpRailwayTransport({ requestTimeoutMs: 25_000 }),
-        tokenName: `platfolio-${intentName(process.env)}`,
-      }),
+      credentials,
       transport: new HttpRailwayTransport({ requestTimeoutMs: 60_000 }),
       workspaceId: process.env.RAILWAY_WORKSPACE_ID ?? '',
       deployBudget: Number(process.env.PLATFOLIO_DEPLOY_BUDGET ?? '12'),
       deployTimeoutMs: Number(process.env.PLATFOLIO_DEPLOY_TIMEOUT_MS ?? '600000'),
       pollIntervalMs: 10_000,
     });
-    return await provider.applyPlan(plan);
+    try { return await hostingProviders([provider]).require(plan.provider).applyPlan(plan); }
+    finally { await credentials.revokeAll(); }
   },
   async postAttestation(attestation: Attestation): Promise<void> {
     const response = await fetch(`${url}/api/v1/attestations`, { method: 'POST', headers, body: JSON.stringify(attestation) });

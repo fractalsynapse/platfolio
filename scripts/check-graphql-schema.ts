@@ -19,7 +19,9 @@ const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
 const SCHEMA_FILE = path.join(ROOT, 'packages', 'contracts', 'railway-graphql-schema.json');
 const SOURCES = [
   'packages/contracts/src/railway-provider.ts',
+  'packages/contracts/src/railway-project.ts',
   'packages/contracts/src/railway-removal.ts',
+  'packages/contracts/src/railway-service.ts',
   'packages/contracts/src/railway-transport.ts',
   'scripts/railway-live-conformance.ts',
   'scripts/customer-railway.ts',

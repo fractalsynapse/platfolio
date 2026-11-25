@@ -76,6 +76,8 @@ const NameSchema = z
   .min(1)
   .refine((v) => /^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$/i.test(v), { message: 'names use letters, digits, dot, underscore, hyphen' });
 
+export const HostingProviderIdSchema = z.string().max(64).regex(/^[a-z0-9]+(-[a-z0-9]+)*$/);
+
 export const SecretRefSchema = z.object({
   /** Secret name only. A value here is a validation error by construction. */
   name: NameSchema,
@@ -252,7 +254,11 @@ export const ApplyResultSchema = z.object({
   noop: z.boolean(),
 });
 
-export type DeleteOptions = { data: 'keep' | 'wipe' };
+export const KEEP_DATA_FEATURE = 'keep-data-on-removal';
+
+export const HostingRemovalSchema = z.object({ data: z.enum(['keep', 'wipe']) }).strict();
+export type DeleteOptions = z.infer<typeof HostingRemovalSchema>;
+export const HostingRemovalRequestSchema = HostingRemovalSchema.extend({ confirmation: z.string().optional() });
 
 export const DeleteResultSchema = z.object({
   instanceId: NameSchema,

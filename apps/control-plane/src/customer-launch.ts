@@ -1,4 +1,6 @@
-const callbackPath = '/api/v1/railway/callback';
+import { ApplyResultSchema, CONTRACT_VERSION, KEEP_DATA_FEATURE, CustomerHostingCommandSchema, DeleteResultSchema, RAILWAY_AUTHORIZATION_CALLBACK,
+  RedeployResultSchema, StateSnapshotSchema, planIssues, type CustomerHostingCommand, type HostingTarget } from '@platfolio/contracts';
+import type { HostingPlugin } from '@platfolio/kernel';
 
 export interface CustomerLaunchConfig {
   teamId: string;
@@ -32,18 +34,61 @@ export function customerLaunchConfig(env: NodeJS.ProcessEnv, origins: readonly s
 export function customerLaunch(config: CustomerLaunchConfig, request: typeof fetch) {
   return {
     teamId: config.teamId,
-    callbackPath,
+    callbackPath: RAILWAY_AUTHORIZATION_CALLBACK,
     returnTo: new URL('/dashboard/launch', config.siteOrigin).href,
-    async call(action: 'report' | 'setup' | 'initialize' | 'unlock' | 'authorize' | 'callback' | 'start' | 'redeploy' | 'remove' |
-      'marketplace-status' | 'marketplace-enroll' | 'domains-list' | 'domain-attach' | 'domain-detach' | 'brand-read' | 'brand-apply', body?: object) {
+    async call(action: CustomerHostingCommand['action'], body?: object) {
+      const command = CustomerHostingCommandSchema.safeParse({ action, ...(body === undefined ? {} : { body }) });
+      if (!command.success) return { ok: false as const, status: 400 };
       try {
         const response = await request(config.workerUrl + '/launch', {
-          method: 'POST', redirect: 'error', signal: AbortSignal.timeout(['initialize', 'unlock', 'callback'].includes(action) ? 55000 : 15000),
+          method: 'POST', redirect: 'error', signal: AbortSignal.timeout(action === 'hosting-apply' ? 720_000 : ['initialize', 'unlock', 'callback', 'hosting-remove'].includes(action) ? 120_000 : 15000),
           headers: { authorization: 'Bearer ' + config.workerKey, 'content-type': 'application/json' },
-          body: JSON.stringify({ action, body }),
+          body: JSON.stringify(command.data),
         });
         return response.ok ? { ok: true as const, body: await response.json() as unknown } : { ok: false as const, status: response.status };
       } catch { return { ok: false as const, status: undefined }; }
+    },
+  };
+}
+
+
+/** RPC adapter for the customer execution worker. The installation owns the provider grant. */
+export function privateHostingPlugin(launch: ReturnType<typeof customerLaunch>): HostingPlugin {
+  const info = () => ({
+    provider: 'railway', contract: CONTRACT_VERSION,
+    operations: ['describe', 'validatePlan', 'applyPlan', 'readState', 'deleteInstance', 'redeploy'] as const,
+    features: [KEEP_DATA_FEATURE, 'volumes'],
+  });
+  const refuse = async (): Promise<never> => { throw new Error('Hosting operations require a bound instance'); };
+  async function call(action: CustomerHostingCommand['action'], body: object) {
+    const outcome = await launch.call(action, body);
+    if (!outcome.ok) throw new Error('The private hosting worker could not complete the operation');
+    return outcome.body;
+  }
+  return {
+    describe: () => ({ ...info(), operations: [...info().operations] }),
+    validatePlan: planIssues,
+    applyPlan: refuse, readState: refuse, deleteInstance: refuse, redeploy: refuse,
+    bindInstance(instance) {
+      if (instance.teamId !== launch.teamId || instance.provider !== 'railway') return undefined;
+      const target: HostingTarget = { id: instance.id, teamId: instance.teamId, name: instance.name, provider: instance.provider };
+      return {
+        describe: () => ({ ...info(), operations: [...info().operations] }),
+        validatePlan: planIssues,
+        applyPlan: async (plan) => ApplyResultSchema.parse(await call('hosting-apply', { target, plan })),
+        readState: async (id) => {
+          if (target.id !== id) throw new Error('Hosting instance did not match the bound target');
+          return StateSnapshotSchema.parse(await call('hosting-observe', target));
+        },
+        deleteInstance: async (id, options = { data: 'wipe' }) => {
+          if (target.id !== id) throw new Error('Hosting instance did not match the bound target');
+          return DeleteResultSchema.parse(await call('hosting-remove', { target, options }));
+        },
+        redeploy: async ({ instanceId, ...input }) => {
+          if (target.id !== instanceId) throw new Error('Hosting instance did not match the bound target');
+          return RedeployResultSchema.parse(await call('hosting-redeploy', { target, ...input }));
+        },
+      };
     },
   };
 }

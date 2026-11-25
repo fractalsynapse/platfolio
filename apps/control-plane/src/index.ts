@@ -5,7 +5,7 @@ import { ROUTE_MANIFEST } from './routes.ts';
 import { buildCapabilities } from './capabilities.ts';
 import { describeAllowedOriginsConfig, parseAllowedOrigins, type CorsBootConfig } from './cors.ts';
 import type { StarterLaunch } from './starter-launch.ts';
-import { customerLaunch, customerLaunchConfig, type CustomerLaunchConfig } from './customer-launch.ts';
+import { customerLaunch, customerLaunchConfig, privateHostingPlugin, type CustomerLaunchConfig } from './customer-launch.ts';
 import { isReleaseTag } from './release-tag.ts';
 import { keycloakNotificationDirectory } from './notification-directory.ts';
 
@@ -18,6 +18,7 @@ export interface BootConfig {
   marketplaceEnabled?: boolean;
   installationOffer?: SuccessOf<'getHubInstallationOffer'>;
   starterLaunch?: StarterLaunch;
+  infrastructure?: readonly import('@platfolio/kernel').HostingPlugin[];
   customerLaunch?: CustomerLaunchConfig;
   jwksUri?: string;
   host: string;
@@ -213,8 +214,12 @@ export async function boot(config: BootConfig, fetchImpl: typeof fetch = fetch) 
   if (ownerSubject && (!storeUrl || config.marketplaceEnabled || !installationTeamId)) {
     throw new Error('First owner setup requires a private installation and persistent storage');
   }
+  const launch = config.customerLaunch && customerLaunch(config.customerLaunch, fetchImpl);
+  const infrastructure = config.infrastructure ?? (launch ? [privateHostingPlugin(launch)] : []);
   const ctx = await createKernel({
-    provider: 'fake',
+    ...(infrastructure.length === 0 && config.infrastructure === undefined && !storeUrl
+      ? { provider: 'fake' }
+      : { provider: 'railway', infrastructure }),
     custody: 'strict',
     identity,
     store: storeConfig,
@@ -254,7 +259,7 @@ export async function boot(config: BootConfig, fetchImpl: typeof fetch = fetch) 
           config.notificationDirectory.client, config.notificationDirectory.secret, fetchImpl) } : {}),
         ...(config.cors?.allowedOrigins.length === 1 ? { invitationOrigin: config.cors.allowedOrigins[0]! } : {}),
         ...(config.starterLaunch ? { starterLaunch: config.starterLaunch } : {}),
-        ...(config.customerLaunch ? { customerLaunch: customerLaunch(config.customerLaunch, fetchImpl) } : {}),
+        ...(launch ? { customerLaunch: launch } : {}),
       }),
     ],
     requiredServices: ['identity', 'server', 'store', 'extensions'],

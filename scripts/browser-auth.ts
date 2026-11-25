@@ -185,6 +185,8 @@ export function codeChallenge(verifier: string): string {
  * temporarily, not redacted.
  */
 export const AUDIT_DETAIL_KEYS_ALLOWLIST = [
+  // Provider ID, explicit keep/wipe choice, and verification flag for hosted operations.
+  'provider', 'storagePolicy', 'verified',
   'template', 'teamId', 'from', 'state', 'planHash', 'repo', 'commit', 'files', 'service', 'image', 'digest',
   'dispatchId', 'action', 'environment', 'ref', 'workflow', 'result', 'resources', 'to', 'environmentState',
   'capability', 'toTeamId', 'providerInstanceId', 'email', 'role', 'sent', 'personId', 'reason', 'name',

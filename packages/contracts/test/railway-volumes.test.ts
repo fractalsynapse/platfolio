@@ -222,8 +222,24 @@ test('keep stops deployments and preserves the same volume in a reachable projec
   assert.equal(kept.failures, undefined);
   assert.ok((await provider.readState(plan().instanceId)).services.every(({ status }) => status === 'removed'));
 
+  const resumed = await provider.applyPlan(withVolume(plan(), 'survive'));
+  assert.equal(resumed.verified, true);
+  assert.equal(resumed.noop, false);
+  assert.deepEqual(mock.volumes.map(({ id }) => id), [volumeId]);
+
   const wiped = await provider.deleteInstance(plan().instanceId, { data: 'wipe' });
   assert.equal(mock.projects.size, 0);
   assert.equal(mock.volumes.length, 0);
   assert.equal(wiped.retained, undefined);
+});
+
+
+test('keep refuses to report a volume that is already marked for deletion', async () => {
+  const { mock, provider } = harness();
+  await provider.applyPlan(withVolume(plan(), 'survive'));
+  mock.volumes[0]!.pendingDeletion = true;
+  const kept = await provider.deleteInstance(plan().instanceId, { data: 'keep' });
+  assert.equal(kept.retained, undefined);
+  assert.equal(kept.failures?.[0]?.code, 'retention-unverified');
+  assert.equal(mock.projects.size, 1);
 });

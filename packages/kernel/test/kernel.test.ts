@@ -47,7 +47,8 @@ test('an unsatisfiable contract range refuses to boot', async () => {
 });
 
 test('a bad provider config is refused by the schema, not coerced', () => {
-  assert.throws(() => ProviderConfigSchema.parse({ provider: 'heroku' }), /invalid|expected/i);
+  assert.equal(ProviderConfigSchema.parse({ provider: 'compute-fixture' }).provider, 'compute-fixture');
+  assert.throws(() => ProviderConfigSchema.parse({ provider: '../compute' }), /invalid/i);
   assert.throws(() => ProviderConfigSchema.parse({ provider: 'fake', unexpected: 1 }), /unrecognized|unexpected/i);
 });
 

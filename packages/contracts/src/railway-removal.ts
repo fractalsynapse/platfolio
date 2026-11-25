@@ -58,3 +58,30 @@ export async function wipeRailwayProject(input: {
     return { step: 'project', code: 'teardown-unverified', message: 'Railway project removal could not be verified' };
   }
 }
+
+export async function railwayRetainedVolumeIds(
+  { transport, credential }: { transport: RailwayTransport; credential: RailwayCredential },
+  environmentId: string,
+): Promise<string[]> {
+  type VolumePlacement = { volumeId: string; isPendingDeletion: boolean };
+  const ids: string[] = [];
+  let after: string | null = null;
+  do {
+    const answer: { environment: { volumeInstances: {
+      edges: { node: VolumePlacement }[];
+      pageInfo: { hasNextPage: boolean; endCursor: string | null };
+    } } | null } = await transport.graphql({
+      operation: 'environment.retainedVolumes', credential,
+      query: 'query ($environmentId: String!, $after: String) { environment(id: $environmentId) { volumeInstances(first: 100, after: $after) { edges { node { volumeId isPendingDeletion } } pageInfo { hasNextPage endCursor } } } }',
+      variables: { environmentId, after },
+    });
+    const page = answer.environment?.volumeInstances;
+    if (!page || page.edges.some(({ node }) => node.isPendingDeletion)) throw new Error('Railway storage is unavailable or scheduled for deletion');
+    ids.push(...page.edges.map(({ node }) => node.volumeId));
+    if (!page.pageInfo.hasNextPage) return ids.sort();
+    const cursor: string | null = page.pageInfo.endCursor;
+    if (!cursor || cursor === after) throw new Error('Railway volume placement inventory is incomplete');
+    after = cursor;
+  } while (after);
+  return ids.sort();
+}

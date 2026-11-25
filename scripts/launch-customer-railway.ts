@@ -1,3 +1,4 @@
+import { RAILWAY_AUTHORIZATION_CALLBACK } from '../packages/contracts/src/customer-hosting-commands.ts';
 import { readFile, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
@@ -76,7 +77,7 @@ if (values.apply) {
     console.log(JSON.stringify(origins));
     if (launchConfig) {
       console.log(JSON.stringify(await stage.installLaunchWorker(plan.api.image + '@' + plan.api.digest, {
-        ...launchConfig, callback: origins.api + '/api/v1/railway/callback', ...(registryOrigin ? { registryOrigin } : {}),
+        ...launchConfig, callback: origins.api + RAILWAY_AUTHORIZATION_CALLBACK, ...(registryOrigin ? { registryOrigin } : {}),
       })));
     }
   }

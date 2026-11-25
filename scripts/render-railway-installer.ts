@@ -1,3 +1,4 @@
+import { RAILWAY_AUTHORIZATION_CALLBACK } from '../packages/contracts/src/customer-hosting-commands.ts';
 import { createHash } from 'node:crypto';
 import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
@@ -94,7 +95,7 @@ export async function renderRailwayInstaller(candidateFile: string, registryOrig
         ...variables({ PORT: '8080', HOST: '::', RAILWAY_RUN_UID: '0', PLATFOLIO_LAUNCH_STATE_DIR: workerData,
           PLATFOLIO_LAUNCH_TEAM: team, PLATFOLIO_LAUNCH_WORKER_KEY: secret, PLATFOLIO_OPENBAO_WORKER_SECRET: secret,
           PLATFOLIO_OPENBAO_URL: 'http://' + privateHost(vault) + ':8200', PLATFOLIO_REGISTRY_ORIGIN: registryOrigin,
-          PLATFOLIO_RAILWAY_OAUTH_CALLBACK: publicOrigin(api) + '/api/v1/railway/callback',
+          PLATFOLIO_RAILWAY_OAUTH_CALLBACK: publicOrigin(api) + RAILWAY_AUTHORIZATION_CALLBACK,
         }),
         RAILWAY_WORKSPACE_ID: { defaultValue: '', description: 'The ID of the Railway workspace that owns this project.' },
         PLATFOLIO_LAUNCH_APP_PROJECT: { defaultValue: '', isOptional: true, description: 'Limit Railway authorization to an existing app project.' },

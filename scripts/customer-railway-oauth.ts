@@ -1,3 +1,4 @@
+import { RAILWAY_AUTHORIZATION_CALLBACK } from '../packages/contracts/src/customer-hosting-commands.ts';
 import { createHash, randomBytes } from 'node:crypto';
 import { HttpRailwayTransport } from '../packages/contracts/src/railway-transport.ts';
 import { customerRailway, type CustomerRailwayGrant } from './customer-railway.ts';
@@ -16,7 +17,7 @@ export function customerRailwayOAuth({ clientId, callback, workspaceId, projectI
   const localConfiguredClient = clientId && redirect.protocol === 'http:' && redirect.hostname === '127.0.0.1';
   if ((redirect.protocol !== 'https:' && !localConfiguredClient) || redirect.hostname.includes('*') ||
       redirect.username || redirect.password || redirect.search || redirect.hash ||
-      redirect.pathname !== '/api/v1/railway/callback') throw new Error('Use the installation’s exact HTTPS Railway callback');
+      redirect.pathname !== RAILWAY_AUTHORIZATION_CALLBACK) throw new Error('Use the installation’s exact HTTPS Railway callback');
   let pending: { state: string; verifier: string; until: number } | undefined;
   let refreshing: Promise<CustomerRailwayGrant> | undefined;
   let registering: Promise<string> | undefined;

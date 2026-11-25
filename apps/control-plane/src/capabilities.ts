@@ -1,11 +1,12 @@
 import { createHash, randomBytes } from 'node:crypto';
 import {
-  AttestationSchema, NotificationRuleSchema, StarterBrandChangeSchema, checkBindingPolicy, CONTRACT_NAME, CONTRACT_VERSION, DispatchIntentSchema, InstanceSchema,
+  AttestationSchema, NotificationRuleSchema, StarterBrandChangeSchema, checkBindingPolicy, CONTRACT_NAME, CONTRACT_VERSION, DispatchIntentSchema, HostingProviderIdSchema, InstanceSchema, RAILWAY_AUTHORIZATION_CALLBACK,
   reasonOf, decide, checkInvitationAcceptance, bindingImpact, normaliseName, rollupState, type BindingRecord, type CapabilityOffer, type PolicyAction, type VerifiedClaims,
 } from '@platfolio/contracts';
 import { RepositoryReadError } from '@platfolio/contracts';
 import { ScmNotConfiguredError } from '@platfolio/kernel';
-import { buildPlan, FREE_STARTER_RELEASE, parseCompose, templateCatalogEntry } from '@platfolio/manifest';
+import { buildPlan, enabledEnvironments, FREE_STARTER_RELEASE, parseCompose, templateCatalogEntry } from '@platfolio/manifest';
+import type { RequestBodyOf } from '@platfolio/api-contract/generated/types';
 import type { ExtensionDescriptor, KernelContext, Request, Response_, RouteDefinition } from '@platfolio/kernel';
 import { ArtifactRecordSchema, InfraPlanSchema, secretWriteScope } from '@platfolio/contracts';
 import type { customerLaunch } from './customer-launch.ts';
@@ -16,6 +17,7 @@ import type { NotificationDirectory } from './notification-directory.ts';
 import { notificationEmail } from './notification-email.ts';
 import type { StarterLaunch } from './starter-launch.ts';
 import { badRequest, bearerToken, notFound, send, unauthorized } from './respond.ts';
+import { hostingLifecycle } from './hosting-lifecycle.ts';
 import { accountProfile, type AccountIssuer } from './account-profile.ts';
 import { customHostname } from '../../../packages/contracts/src/railway-domains.ts';
 
@@ -134,7 +136,7 @@ function actionFor(operationId: string, action: PolicyAction): void {
 }
 
 /** Wraps a handler so the scope is resolved before it runs. Team-scoped routes are built with this only. */
-function scoped(method: string, path: string, operationId: string, action: PolicyAction, handler: ScopedHandler): RouteDefinition {
+export function scoped(method: string, path: string, operationId: string, action: PolicyAction, handler: ScopedHandler): RouteDefinition {
   actionFor(operationId, action);
   return {
     method,
@@ -301,7 +303,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
           // so leaving a documented field out made the handler reject the very body the contract describes --
           // found by running the operation against a live control plane, not by reading the code. The fix is to
           // pick the fields the request has, and the test below is the assertion that keeps them in step.
-          const input = InstanceSchema.pick({ teamId: true, name: true, template: true, templateRef: true }).safeParse(parsed.value ?? {});
+          const input = InstanceSchema.pick({ teamId: true, name: true, template: true, templateRef: true }).extend({ provider: HostingProviderIdSchema.optional() }).safeParse(parsed.value ?? {});
           if (!input.success) return badRequest(input.error.issues.map((i) => `${i.path.join('.') || '<root>'} ${i.message}`).join('; '));
           // Membership is checked against the team named in the body, which resolveScope cannot read from
           // params. Passing it explicitly keeps the decision in one place: the caller may act for that team or
@@ -313,10 +315,14 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
           // exactOptionalPropertyTypes those are different things. Passing an explicit `templateRef: undefined`
           // is a type error the compiler catches; passing a whole object that merely CONTAINS one is how the
           // distinction would have been lost.
+          if (input.data.provider && !context.infra.forProvider(input.data.provider)) {
+            return badRequest('The selected hosting provider is not configured');
+          }
           const created = await context.store.createInstance({
             teamId: input.data.teamId,
             name: input.data.name,
             template: input.data.template,
+            ...(input.data.provider === undefined ? {} : { provider: input.data.provider }),
             ...(input.data.templateRef === undefined ? {} : { templateRef: input.data.templateRef }),
           });
           if (created.ok === false) return { status: 400, body: { error: created.code, message: reasonOf(created) } };
@@ -401,10 +407,11 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
 
         // A provider that cannot restart is discoverable from its advertised operations, so this answers 501
         // with the provider's name rather than attempting a call that throws inside a facade.
-        if (scope.context.infra.canRedeploy === false) {
-          return { status: 501, body: { error: 'provider-cannot-redeploy', message: `the selected provider (${scope.context.infra.describe().provider}) cannot redeploy a service; restart it in your own provider project` } };
+        const provider = scope.context.infra.forInstance(found.value);
+        if (!provider?.redeploy || !provider.describe().operations.includes('redeploy')) {
+          return { status: 501, body: { error: 'provider-cannot-redeploy', message: `The selected provider (${found.value.provider}) cannot redeploy this instance. Restart it in your own provider project.` } };
         }
-        const result = await scope.context.infra.redeploy({ instanceId: id, environment, ...(service === undefined ? {} : { service }) });
+        const result = await provider.redeploy({ instanceId: id, environment, ...(service === undefined ? {} : { service }) });
         await scope.context.store.appendAudit({
           actorKind: 'user', actorRef: scope.personId, action: 'instance.redeploy', target: id,
           // Names, counts and codes only. Nothing here could carry a configuration value, and `verified:false`
@@ -501,8 +508,13 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
             },
           };
         }
-        const body = bodyOf<{ path?: string; overlayPath?: string }>(request);
+        const body = bodyOf<RequestBodyOf<'registerPlanFromRepository'>>(request);
         if (body.ok === false) return badRequest(body.error);
+        const selected = body.value?.environments;
+        if (selected !== undefined && (!Array.isArray(selected) || !selected.length || selected.length > 2 ||
+            new Set(selected).size !== selected.length || selected.some((name) => name !== 'staging' && name !== 'production'))) {
+          return badRequest('Choose staging, production, or both.');
+        }
         const mainPath = body.value?.path ?? 'compose.yaml';
         const overlayPath = body.value?.overlayPath ?? 'compose.prod.yaml';
 
@@ -552,7 +564,13 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
           };
         }
 
-        const plan = buildPlan(parsed.manifest, { instanceId: id, teamId: instance.teamId });
+        const enabled = enabledEnvironments(parsed.manifest);
+        const disabled = selected?.find((name) => !enabled.includes(name));
+        if (disabled) return badRequest(`Environment "${disabled}" is disabled in the platform manifest.`);
+        const plan = buildPlan(parsed.manifest, {
+          instanceId: id, teamId: instance.teamId, provider: instance.provider,
+          ...(selected === undefined ? {} : { environments: selected }),
+        });
         // One hash, one home. `plan.planHash` is handed to the store exactly as PUT …/plan demands a caller
         // supply it; re-deriving a digest in the API is the bug that made every honest attestation fail 400.
         const stored = await scope.context.store.putPlan(id, plan, plan.planHash);
@@ -1203,8 +1221,9 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
           // the same act as overwriting it).
           return badRequest('value must be a non-empty string; platfolio has no delete verb for secrets yet, and an empty write is not one');
         }
-        if (scope.context.infra.canDeliverSecrets === false) {
-          return { status: 501, body: { error: 'provider-cannot-deliver', message: `the selected provider (${scope.context.infra.describe().provider}) cannot deliver secrets; the value stays the tenant's to set in their own provider project` } };
+        const provider = scope.context.infra.forInstance(found.value);
+        if (!provider?.putSecretValue || !provider.describe().operations.includes('putSecretValue')) {
+          return { status: 501, body: { error: 'provider-cannot-deliver', message: `the selected provider (${found.value.provider}) cannot deliver secrets; the value stays the tenant's to set in their own provider project` } };
         }
         // WHERE the value lands is decided by the platform description, not by whoever holds the value
         // (D52, D53): the registered plan's own secrets entry for this service in this environment carries the
@@ -1228,7 +1247,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
         if (body.value?.refresh !== undefined && refresh === undefined) {
           return badRequest(`refresh must be "suppress" or "auto"; got an unrecognised value`);
         }
-        const delivered = await scope.context.infra.putSecretValue({ instanceId: id, environment, service, name, value, source, ...(refresh === 'auto' ? { refresh: 'auto' as const } : {}) });
+        const delivered = await provider.putSecretValue({ instanceId: id, environment, service, name, value, source, ...(refresh === 'auto' ? { refresh: 'auto' as const } : {}) });
         if (delivered.ok === false) {
           if (delivered.code === 'not-found') return notFound(delivered.reason.includes('environment') ? 'environment' : 'service', id);
           if (delivered.code === 'invalid-value') return badRequest(delivered.reason);
@@ -1262,12 +1281,13 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
           return { status: 400, body: { error: 'unknown-service', message: `the registered plan has no service "${service}" in environment "${environment}"` } };
         }
         if (names.length === 0) return send('listSecretPresence', 200, { instanceId: id, environment, service, presence: [] });
-        if (scope.context.infra.canDeliverSecrets === false) {
+        const provider = scope.context.infra.forInstance(found.value);
+        if (!provider?.secretPresence || !provider.describe().operations.includes('secretPresence')) {
           // 501 rather than a table of `missing`: "we cannot check" and "it is not there" are different facts,
           // and collapsing them is how an operator rebuilds something that was already correct.
-          return { status: 501, body: { error: 'provider-cannot-read-presence', message: `the selected provider (${scope.context.infra.describe().provider}) cannot read secret presence` } };
+          return { status: 501, body: { error: 'provider-cannot-read-presence', message: `the selected provider (${found.value.provider}) cannot read secret presence` } };
         }
-        const presence = await scope.context.infra.secretPresence({ instanceId: id, environment, service, names });
+        const presence = await provider.secretPresence({ instanceId: id, environment, service, names });
         return send('listSecretPresence', 200, {
           instanceId: id, environment, service,
           presence: names.map((n) => ({ name: n, state: presence[n] ?? 'unverifiable' })),
@@ -1523,7 +1543,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
       scoped('POST', launchPath + '/railway', 'beginStarterRailwayAuthorization', 'marketplace.manage',
         async ({ teamId }) => relay(teamId, 'beginStarterRailwayAuthorization', 'authorize')),
       {
-        method: 'GET', path: '/api/v1/railway/callback', operationId: 'completeStarterRailwayAuthorization',
+        method: 'GET', path: RAILWAY_AUTHORIZATION_CALLBACK, operationId: 'completeStarterRailwayAuthorization',
         async handle(request) {
           if (!customer) return notFound('launch', 'starter');
           const values = ['code', 'state', 'iss', 'error'].map((key) => request.query.get(key) ?? '');
@@ -1598,7 +1618,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
     }],
   };
 
-  return [core, instances, dispatches, audit, teams, bindings, invitations, secrets, controller, marketplace, privateMarketplace, launcher, catalog, availability, notifications,
+  return [core, instances, hostingLifecycle(scoped), dispatches, audit, teams, bindings, invitations, secrets, controller, marketplace, privateMarketplace, launcher, catalog, availability, notifications,
     notificationEmail(authorize, now, deps.notificationDirectory, deps.invitationOrigin),
     accountProfile(authorize, deps.accountIssuer)];
 }

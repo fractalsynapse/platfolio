@@ -474,3 +474,17 @@ configuration, and storage remain available for recovery. Verify that workloads 
 that the same storage still exists. A wipe request can delete the bound project and its data.
 Require provider acceptance and an inventory read that confirms absence. A refused request,
 an unreadable inventory, or surviving resources cannot produce a successful removal report.
+
+## Hosting plugin selection
+
+A trusted runtime registers hosting provider implementations that declare the infrastructure
+contract they support. Each instance persists its provider identifier. Planning, execution,
+observation, and removal resolve that identifier from the authorized instance. Browser requests
+can select an installed provider when creating an instance. Operation requests use the stored
+binding and cannot choose a different provider or target.
+
+The execution location retains its existing custody boundary. A managed action loads its
+local adapter, and a private installation uses its customer-side worker. An unconfigured
+execution path reports that it is unavailable. The existing hub launch link still uses
+Railway's native installer. An in-Platfolio replacement must connect provider consent to
+provisioning and establish first owner access without reading provider secrets at the hub.

@@ -105,7 +105,7 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
   readonly takenDomains = new Set<string>();
   readonly domainCreates: string[] = [];
   /** Template deploys recorded so tests can assert the composed name and the grant used. */
-  volumes: { id: string; projectId: string; name: string; serviceId: string; environmentId: string; mountPath: string }[] = [];
+  volumes: { id: string; projectId: string; name: string; serviceId: string; environmentId: string; mountPath: string; pendingDeletion?: boolean }[] = [];
   /** How many template-created services are still hidden (diagnostics for tests). */
   hiddenServiceCount(): number { return this.hiddenServices.size; }
   /** Services hidden until read N times, so single-shot lookups fail as they do live (#77). */
@@ -335,14 +335,14 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
         return { project: found ? { id: found.id, name: found.name, description: found.description } : null } as T;
       }
       case 'projectCreate': {
-        const input = v.input as { name: string; workspaceId: string; description?: string };
+        const input = v.input as { name: string; workspaceId: string; description?: string; defaultEnvironmentName?: string };
         if ([...this.projects.values()].some((p) => p.workspaceId === input.workspaceId && p.name === input.name)) {
           throw new Error('railway projectCreate: name already exists in workspace [BAD_USER_INPUT]');
         }
         const id = `proj-${this.sequence++}`;
         this.projects.set(id, { id, name: input.name, workspaceId: input.workspaceId, description: input.description ?? '' });
         const environmentId = `env-${this.sequence++}`;
-        this.environments.set(environmentId, { id: environmentId, projectId: id, name: 'production' });
+        this.environments.set(environmentId, { id: environmentId, projectId: id, name: input.defaultEnvironmentName ?? 'production' });
         return { projectCreate: { id } } as T;
       }
       case 'projectUpdate': {
@@ -440,6 +440,12 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
         this.volumes.push({ id, projectId: input.projectId, name: volumeName, serviceId: input.serviceId, environmentId: input.environmentId, mountPath: input.mountPath });
         return { volumeCreate: { id, name: volumeName } } as T;
       }
+      case 'environment.retainedVolumes':
+        return { environment: { volumeInstances: {
+          edges: this.volumes.filter(({ environmentId }) => environmentId === v.environmentId)
+            .map(({ id, pendingDeletion }) => ({ node: { volumeId: id, isPendingDeletion: pendingDeletion ?? false } })),
+          pageInfo: { hasNextPage: false, endCursor: null },
+        } } } as T;
       case 'environment.volumeInstances': {
         // Scoped to the ENVIRONMENT, not to the project: `VolumeInstance.environmentId` is NON_NULL, so asking
         // what is mounted here must not answer with what is mounted somewhere else. The double used to filter

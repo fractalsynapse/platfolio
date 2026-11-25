@@ -161,3 +161,6 @@ export { StarterBrandChangeSchema } from './starter-brand.ts';
 export { HostedCustomDomainSchema, type HostedCustomDomain } from './infra.ts';
 
 export { NotificationRuleSchema, type NotificationRule, type NewNotificationRule } from './persistence.ts';
+
+export { hostingProviders } from './hosting-providers.ts';
+export { CustomerHostingCommandSchema, HostingTargetSchema, RAILWAY_AUTHORIZATION_CALLBACK, type CustomerHostingCommand, type HostingTarget } from './customer-hosting-commands.ts';

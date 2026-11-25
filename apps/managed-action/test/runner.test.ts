@@ -19,6 +19,7 @@ function harness(over: Partial<RunnerDeps> & { applyResult?: ApplyResult } = {})
   let clock = 1_000;
   const deps: RunnerDeps = {
     env,
+    missingCredentials: () => [],
     fetchDispatch: async () => ({ plan: samplePlan(), planHash: HASH }),
     applyPlan: async (plan) => {
       applied.push(plan);
@@ -51,7 +52,7 @@ test('the dispatch inputs become an intent, and a missing one is a hard error', 
 test('a missing provider credential refuses before any plan is fetched or applied', async () => {
   const h = harness();
   const withoutToken = { ...env, RAILWAY_TOKEN: '' };
-  const result = await runManagedAction({ ...h.deps, env: withoutToken });
+  const result = await runManagedAction({ ...h.deps, env: withoutToken, missingCredentials: () => ['RAILWAY_TOKEN'] });
   assert.equal(result.status, 'failed');
   assert.equal(h.applied.length, 0, 'no provider call was attempted');
   assert.match(String(result.attestation.errorCode), /credential-missing/);
