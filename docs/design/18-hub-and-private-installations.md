@@ -379,8 +379,16 @@ owner decrypts and saves the recovery file locally and confirms it in the browse
 The file contains three Shamir shares, of which two unlock the store, plus the initial
 bootstrap credential. After verifying its scoped AppRole, the worker revokes that
 bootstrap credential. Keep the recovery file in the owner's credential store and use
-it to unlock OpenBao after a restart. The owner can recover an administrative token
-from the shares through OpenBao's standard recovery procedure.
+it to unlock OpenBao after a restart. On fresh installations the worker also creates a
+separate owner recovery role before retiring the initial administrator. Two distinct
+shares authenticate this role and meet OpenBao's recovery threshold. The launcher role
+has no access to the authenticated root-generation endpoints. [OpenBao root recovery](https://openbao.org/docs/commands/operator/generate-root/)
+
+From the installation's private network, the owner can run
+`scripts/restore-customer-openbao-policy.ts` with `--origin` and `--recovery-file`
+to restore the launcher's shipped policy. The command verifies the policy and revokes
+its temporary administrator. Vaults initialized before the owner recovery role require
+an existing administrator to update the policy. Keep the legacy unauthenticated endpoints disabled.
 
 After OpenBao is ready, the owner grants access in Railway. If the installation has no
 configured client ID, its worker first registers a public OAuth client with Railway for

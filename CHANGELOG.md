@@ -5,6 +5,7 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+- Fresh private vaults let owners restore the launcher policy with two recovery shares using OpenBao's authenticated recovery API (#288).
 - The private identity image can create its operator realm and initial sign-in on first boot using installation-local inputs (#288).
 - Private installations can register their own Railway callback after OpenBao is ready. A new Starter Web launch configured for the marketplace uses a saved claim, including after hub disconnection (#288).
 - Hub team owners can create one-time marketplace connection codes, see when their private installations enroll, and revoke marketplace access from Connections (#288).
