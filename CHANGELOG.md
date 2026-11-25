@@ -5,6 +5,7 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+- Keep private installation progress across hub restarts. Owners can reauthorize and resume setup or add an environment in the same project without modifying previously installed environments (#288).
 - Launch private Platfolio from Connections. Choose an approved workspace, name the project, and deploy staging, production, or both through the hosting provider API. Download the first sign-in password and a separate troubleshooting report (#288).
 - Show the provider-neutral hosting controls on each app's management page. Starter Web and planned instances share verified keep-data and wipe-data controls, and the Starter release runner uses an injected source deployment adapter (#288).
 - Verify that workloads stop and storage remains for keep-data removal. Wipe requires confirmed project deletion and provider read-back (#288).

@@ -7,6 +7,7 @@ export interface InstallationAuthorization {
   workspaces: readonly InstallationWorkspace[];
   expires: number;
   launch(input: InstallationLaunchInput, observe: InstallationObserver): Promise<void>;
+  recover?(input: InstallationLaunchInput, observe: InstallationCheckpointObserver, recovery: InstallationRecovery): Promise<void>;
 }
 export const InstallationLaunchInputSchema = z.object({
   workspaceId: z.string().min(1).max(128),
@@ -23,6 +24,16 @@ export interface InstallationObserver {
   step(label: string, state: 'WORKING' | 'READY' | 'FAILED'): void;
   project(id: string): void;
   environment(name: InstallationEnvironment, origin: string): void;
+}
+export type InstallationCheckpointObserver = {
+  [K in keyof InstallationObserver]: (...args: Parameters<InstallationObserver[K]>) => Promise<void>;
+};
+export interface InstallationRecovery {
+  id: string;
+  projectId?: string;
+  verified: readonly InstallationEnvironment[];
+  submitted: readonly InstallationEnvironment[];
+  beforeWrite(environment?: InstallationEnvironment): Promise<void>;
 }
 export interface InstallationAuthorizationRequest {
   state: string;

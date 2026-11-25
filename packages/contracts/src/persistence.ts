@@ -1,3 +1,4 @@
+import type { InstallationJournal } from './installation-journal.ts';
 import { z } from 'zod';
 import { AttestationSchema, type Attestation } from './attestation.ts';
 import { HostingProviderIdSchema } from './infra.ts';
@@ -530,6 +531,10 @@ export interface NotificationEmailDelivery {
 }
 
 export interface Store {
+  listInstallationJournals(teamId: string, personId: string): Promise<InstallationJournal[]>;
+  getInstallationJournal(teamId: string, personId: string, id: string): Promise<InstallationJournal | undefined>;
+  saveInstallationJournal(next: InstallationJournal): Promise<boolean>;
+
   readonly driver: string;
   describe(): { driver: string; contract: string; schemaReady: boolean };
   ping(): Promise<boolean>;

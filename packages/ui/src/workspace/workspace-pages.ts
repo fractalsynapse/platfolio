@@ -48,7 +48,7 @@ export const workspacePages = {
   'workspace.team-invitations': page('workspace.team-invitations', 'Team invitations', TeamMembershipPage,
     ['listInvitations', 'createInvitation', 'revokeInvitation'], true),
   'workspace.team-connections': page('workspace.team-connections', 'Connections', ConnectionsPage,
-    [...setupReads, 'getHubInstallationOffer', 'authorizeHubInstallation', 'getHubInstallationLaunch', 'startHubInstallation', 'listMarketplaceInstallations', 'issueMarketplaceEnrollment',
+    [...setupReads, 'getHubInstallationOffer', 'listHubInstallationLaunches', 'authorizeHubInstallation', 'getHubInstallationLaunch', 'startHubInstallation', 'listMarketplaceInstallations', 'issueMarketplaceEnrollment',
       'disconnectMarketplaceInstallation', 'getPrivateMarketplaceConnection', 'enrollPrivateMarketplaceConnection'], true),
   'workspace.team': page('workspace.team', 'Team workspace', TeamWorkspace, [...instanceReads, 'listTeamActivity']),
   'workspace.team-activity': page('workspace.team-activity', 'Activity', TeamWorkspace, [...instanceReads, 'listTeamActivity']),

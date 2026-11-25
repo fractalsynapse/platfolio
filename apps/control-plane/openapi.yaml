@@ -2386,11 +2386,36 @@ paths:
   /api/v1/teams/{teamId}/marketplace/installation-launches:
     parameters:
       - { name: teamId, in: path, required: true, schema: { type: string } }
-    post:
-      operationId: authorizeHubInstallation
-      summary: Begin a short-lived authorization for one installation launch
+    get:
+      operationId: listHubInstallationLaunches
+      summary: List the owner's private installation journals
       security: [{ bearerJwt: [] }]
       responses:
+        '200':
+          description: Recorded private installations and available recovery actions.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/HubInstallationJournal' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      operationId: authorizeHubInstallation
+      summary: Begin a short-lived authorization for a new or recorded installation
+      security: [{ bearerJwt: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [installationId]
+              properties:
+                installationId: { type: string, format: uuid }
+      responses:
+        '400': { $ref: '#/components/responses/BadRequest' }
         '201':
           description: The provider authorization URL and the launch it belongs to.
           content:
@@ -2955,6 +2980,21 @@ components:
         verifier: { type: string, pattern: '^[A-Za-z0-9+/]{86}==$' }
         salt: { type: string, pattern: '^[A-Za-z0-9+/]{22}==$' }
       additionalProperties: false
+    HubInstallationJournal:
+      type: object
+      additionalProperties: false
+      required: [id, name, workspaceId, state, requested, verified]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        workspaceId: { type: string }
+        state: { type: string, enum: [running, failed, ready] }
+        requested:
+          type: array
+          items: { type: string, enum: [staging, production] }
+        verified:
+          type: array
+          items: { type: string, enum: [staging, production] }
     HubInstallationLaunch:
       type: object
       additionalProperties: false

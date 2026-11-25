@@ -1,3 +1,4 @@
+import type { InstallationJournal } from './installation-journal.ts';
 import { randomUUID } from 'node:crypto';
 import { AttestationSchema, type Attestation } from './attestation.ts';
 import { RepoConnectionSchema, reasonOf, type DispatchRecord, type Store, type StoreError, type StoreResult } from './persistence.ts';
@@ -82,6 +83,30 @@ const expectErr = (result: { ok: boolean; value?: unknown } & Partial<StoreError
     if (!instance.ok) throw new Error('seed instance create failed');
     return { store, team: team.value, instance: instance.value };
   };
+
+  await add('installation checkpoints are credential-free and use a scoped compare-and-swap', async () => {
+    const store = await fresh();
+    const team = mustOk(await store.createTeam({ name: tName('installation-journal') }), 'team');
+    const person = mustOk(await store.resolvePerson({ issuer: 'https://fixture.example.test', subject: team.id }), 'person').person;
+    const row: InstallationJournal = {
+      id: randomUUID(), teamId: team.id, personId: person.id, provider: 'fixture', workspaceId: team.id,
+      name: 'platfolio', revision: 'a'.repeat(40), requested: ['staging'], submitted: [], events: [],
+      environments: [], state: 'running', version: 0, leaseUntil: new Date().toISOString(),
+    };
+    const created = await store.saveInstallationJournal(row);
+    const blocked = await store.saveInstallationJournal({ ...row, id: randomUUID() });
+    const contenders = await Promise.all([
+      store.saveInstallationJournal({ ...row, version: 1, submitted: ['staging'] }),
+      store.saveInstallationJournal({ ...row, version: 1, projectId: 'second-writer' }),
+    ]);
+    const foreign = await store.getInstallationJournal(team.id, 'another-person', row.id);
+    const credential = await store.saveInstallationJournal({ ...row, version: 2, verifier: 'must-not-persist' } as InstallationJournal);
+    const read = await store.listInstallationJournals(team.id, person.id);
+    const accepted = created && !blocked && contenders.filter(Boolean).length === 1 && !foreign && !credential &&
+      read.length === 1 && read[0]?.version === 1;
+    return accepted ? { status: 'pass', detail: 'scoped, fenced, and strict' }
+      : { status: 'fail', detail: 'journal scope, version, or credential rejection differed' };
+  });
 
   await add('marketplace links preserve team scope and remain revoked on connect replay', async () => {
     const store = await fresh();

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { test } from 'node:test';
-import type { InstallationEnvironment, InstallationObserver } from '../src/installation-provider.ts';
+import type { InstallationEnvironment, InstallationObserver, InstallationRecovery } from '../src/installation-provider.ts';
 import { railwayInstallationProvider } from '../src/railway-installation.ts';
 import { railwayIssuer } from '../src/railway-oauth.ts';
 import { railwayTemplateDigest, type RailwayTemplateConfig } from '../src/railway-template.ts';
@@ -20,13 +20,14 @@ const workspaceId = 'workspace-owned';
 const projectId = 'project-owned';
 const input = { workspaceId, name: 'platfolio', ownerEmail: 'owner@example.test', verifier: 'fixture-verifier', salt: 'fixture-salt' };
 
-function fixture(change: 'none' | 'drift' | 'conflict' | 'public-vault' = 'none') {
+function fixture(change: 'none' | 'drift' | 'conflict' | 'public-vault' | 'after-submit' = 'none') {
   const approved = [{ id: workspaceId, name: 'Owner workspace' }];
   const environments: { name: string; id: string }[] = [];
   const deployments = new Map<string, RailwayTemplateConfig>();
   const calls: string[] = [];
   let created: object | undefined;
   let challenge = '';
+  let interrupted = false;
   const request: typeof fetch = async (url, options) => {
     if (url === railwayIssuer + '/oauth/token') {
       const body = new URLSearchParams(String(options?.body));
@@ -77,6 +78,10 @@ function fixture(change: 'none' | 'drift' | 'conflict' | 'public-vault' = 'none'
           assert.equal(body.workspaceId, workspaceId);
           assert.ok(environments.some(({ id }) => id === body.environmentId));
           deployments.set(body.environmentId, body.serializedConfig);
+          if (change === 'after-submit' && !interrupted) {
+            interrupted = true;
+            throw new Error('Connection lost after provider accepted the request');
+          }
           return { templateDeployV2: { operationId: 'op-' + body.environmentId } } as T;
         }
         case 'installationServices': {
@@ -104,7 +109,7 @@ function fixture(change: 'none' | 'drift' | 'conflict' | 'public-vault' = 'none'
   const grant = auth.complete({ code: 'one-use', state: auth.state, issuer: railwayIssuer, error: '' });
   const completed: string[] = [];
   const observer: InstallationObserver = {
-    step() {}, project: (value) => assert.equal(value, projectId), environment: (name) => completed.push(name),
+    step() {}, project: (value) => assert.equal(value, projectId), environment: (name) => { completed.push(name); },
   };
   return { grant, calls, deployments, environments, observer, completed };
 }
@@ -136,7 +141,7 @@ test('browser install refuses unapproved workspaces, changed templates and pre-e
   assert.deepEqual(run.calls, ['authorizedWorkspaces']);
   for (const issue of ['drift', 'conflict'] as const) {
     const unsafe = fixture(issue);
-    await assert.rejects((await unsafe.grant).launch({ ...input, environments: ['staging'] }, unsafe.observer), /changed|already a project/);
+    await assert.rejects((await unsafe.grant).launch({ ...input, environments: ['staging'] }, unsafe.observer), /changed|could not be verified/);
     assert.ok(!unsafe.calls.includes('projectCreate'));
   }
 });
@@ -145,4 +150,36 @@ test('browser install refuses readiness if Railway exposes OpenBao publicly', as
   const run = fixture('public-vault');
   await assert.rejects((await run.grant).launch({ ...input, environments: ['staging'] }, run.observer), /public ingress/);
   assert.deepEqual(run.completed, []);
+});
+
+test('recovery observes the existing deployment and expansion deploys only the new environment', async () => {
+  const run = fixture('after-submit');
+  const grant = await run.grant;
+  assert.ok(grant.recover);
+  const observe = {
+    async step() {},
+    async project(id: string) { run.observer.project(id); },
+    async environment(name: InstallationEnvironment, origin: string) { run.observer.environment(name, origin); },
+  };
+  const initial: InstallationRecovery = {
+    id: 'marked-launch', verified: [], submitted: [],
+    async beforeWrite(name) { if (name) assert.equal(name, 'staging'); },
+  };
+  await assert.rejects(grant.recover({ ...input, environments: ['staging'] }, observe, initial), /Connection lost/);
+  assert.equal(run.calls.filter((operation) => operation === 'templateDeployV2').length, 1);
+
+  const resumed = { ...initial, projectId, submitted: ['staging'] as const,
+    async beforeWrite() { throw new Error('Recovery must not replay a write'); } };
+  await grant.recover({ ...input, environments: ['staging'] }, observe, resumed);
+  const staging = run.deployments.get('env-staging');
+  assert.ok(staging);
+  assert.equal(run.calls.filter((operation) => operation === 'templateDeployV2').length, 1);
+
+  const expanded = { ...resumed, verified: ['staging'] as const,
+    async beforeWrite(name?: InstallationEnvironment) { if (name) assert.equal(name, 'production'); } };
+  await grant.recover({ ...input, environments: ['staging', 'production'] }, observe, expanded);
+  assert.deepEqual(run.completed, ['staging', 'production']);
+  assert.equal(run.deployments.get('env-staging'), staging);
+  assert.equal(run.calls.filter((operation) => operation === 'templateDeployV2').length, 2);
+  assert.equal(run.calls.filter((operation) => operation === 'projectCreate').length, 1);
 });

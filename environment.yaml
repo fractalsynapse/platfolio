@@ -530,6 +530,12 @@ variables:
     environments: [staging, production]
     deployedTo: railway:variable
     note: "Canonical SHA-256 of the published installer config for the pinned release."
+  - name: PLATFOLIO_RAILWAY_INSTALL_CONFIG_JSON
+    kind: value
+    secret: false
+    environments: [staging]
+    deployedTo: railway:variable
+    note: "Optional credential-free installer artifact for staging. Its source revision and config digest must match the configured candidate."
   - name: PLATFOLIO_HUB_RAILWAY_OAUTH_CLIENT
     kind: value
     secret: false

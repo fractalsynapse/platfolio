@@ -4,7 +4,7 @@
  * hand, because every line reproduces from the specification.
  *
  * Source: apps/control-plane/openapi.yaml (OpenAPI 3.1.0, info.version 0.1.0)
- * Input digest: sha256/186e9eceb7c55360
+ * Input digest: sha256/84e3342ba5bba6a0
  *
  * Reproduce it with `pnpm run api:types`. `pnpm run api:types:check` fails when this file stops matching
  * what the committed spec produces, which is the only way a generated type deserves to be trusted.
@@ -238,6 +238,15 @@ export interface HostedStarter {
 export interface HostingRemovalRequest {
   data: 'keep' | 'wipe';
   confirmation?: string;
+}
+
+export interface HubInstallationJournal {
+  id: string;
+  name: string;
+  workspaceId: string;
+  state: 'running' | 'failed' | 'ready';
+  requested: ('staging' | 'production')[];
+  verified: ('staging' | 'production')[];
 }
 
 export interface HubInstallationLaunch {
@@ -642,6 +651,10 @@ export interface ApiParameters {
     instanceId: string;
     environment: string;
   };
+  /** GET /api/v1/teams/{teamId}/marketplace/installation-launches */
+  listHubInstallationLaunches: {
+    teamId: string;
+  };
   /** GET /api/v1/templates */
   listInstallableTemplates: Record<string, never>;
   /** GET /api/v1/instances */
@@ -792,6 +805,10 @@ export interface ApiParameters {
 export interface ApiRequestBodies {
   /** POST /api/v1/me/invitations/{invitationId}/accept */
   acceptInvitation: Record<string, never>;
+  /** POST /api/v1/teams/{teamId}/marketplace/installation-launches */
+  authorizeHubInstallation: {
+    installationId: string;
+  };
   /** PUT /api/v1/instances/{instanceId}/bindings/{capability} */
   bindCapability: {
     providerInstanceId: string;
@@ -990,6 +1007,7 @@ export interface ApiResponses {
       id: string;
       authorizationUrl: string;
     };
+    '400': Error;
     '401': Error;
     '403': Error;
     '404': Error;
@@ -1413,6 +1431,13 @@ export interface ApiResponses {
     '404': Error;
     '409': Error;
     '503': Error;
+  };
+  /** GET /api/v1/teams/{teamId}/marketplace/installation-launches */
+  listHubInstallationLaunches: {
+    '200': HubInstallationJournal[];
+    '401': Error;
+    '403': Error;
+    '404': Error;
   };
   /** GET /api/v1/templates */
   listInstallableTemplates: {
@@ -1980,6 +2005,8 @@ export const ENDPOINTS = {
   listConsumers: { method: 'get', path: '/api/v1/instances/{instanceId}/consumers' },
   /** GET /api/v1/instances/{instanceId}/environments/{environment}/custom-domains */
   listHostedCustomDomains: { method: 'get', path: '/api/v1/instances/{instanceId}/environments/{environment}/custom-domains' },
+  /** GET /api/v1/teams/{teamId}/marketplace/installation-launches */
+  listHubInstallationLaunches: { method: 'get', path: '/api/v1/teams/{teamId}/marketplace/installation-launches' },
   /** GET /api/v1/templates */
   listInstallableTemplates: { method: 'get', path: '/api/v1/templates' },
   /** GET /api/v1/instances */

@@ -517,7 +517,21 @@ HTTPS `PLATFOLIO_HUB_RAILWAY_OAUTH_CALLBACK` ending in
 until those values are configured. Existing installations can continue to sign in and manage
 their apps.
 
-The launch session is held in the serving API process. If that process restarts after project
-creation, the project remains in the customer's workspace. A fresh launch refuses to overwrite
-it. Updating existing installation topology and resuming a partially provisioned launch across
-an API restart require a durable, credential-free installation record.
+Staging can use its reviewed installer artifact with an owned, unpublished Railway template.
+Set `PLATFOLIO_RAILWAY_INSTALL_CONFIG_JSON` to the renderer's JSON output. The hub checks
+the artifact's revision and digest before serving it to Railway through the template deployment
+API. Never put a password or token in the installer artifact.
+
+The hub keeps a credential-free installation journal. Team owners can reopen the launch
+from Connections, reauthorize the original workspace, and continue. The provider binds
+the customer's project to the journal ID before deploying and checks that binding
+on retry. Each selected environment has a durable submission checkpoint. Recovery
+checks an earlier submission instead of sending it a second time. If the provider
+cannot establish the outcome of an earlier submission, Platfolio reports the unresolved
+environment and preserves the customer's resources.
+
+A ready installation can add an environment from Connections. The new environment
+gets its own services, domain, database, OpenBao, and first owner sign-in. Previously
+verified environments and their data stay in place. An unfinished launch resumes with
+its original release and environment choices. An expansion uses the current installer
+release for the new environment.

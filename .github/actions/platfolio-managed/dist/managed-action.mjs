@@ -25068,7 +25068,7 @@ function date4(params) {
 }
 
 // packages/contracts/src/generated/contract-version.ts
-var CONTRACT_VERSION = "6.2.0";
+var CONTRACT_VERSION = "6.3.0";
 
 // packages/contracts/src/infra.ts
 var CONTRACT_NAME = "infra.provider";
@@ -27743,6 +27743,44 @@ var InvitationSchema = external_exports.object({
   emailError: external_exports.string().max(300).optional()
 }).strict();
 
+// packages/contracts/src/installation-provider.ts
+var installationEnvironment = external_exports.enum(["staging", "production"]);
+var InstallationLaunchInputSchema = external_exports.object({
+  workspaceId: external_exports.string().min(1).max(128),
+  name: external_exports.string().regex(/^[a-z][a-z0-9-]{1,62}$/),
+  environments: external_exports.array(installationEnvironment).min(1).max(2).refine((values) => new Set(values).size === values.length).meta({ uniqueItems: true }),
+  // The provider supports variable interpolation in template values.
+  ownerEmail: external_exports.string().max(254).regex(/^[^\s${}"\\@]+@[^\s${}"\\@]+\.[^\s${}"\\@]+$/).meta({ format: "email" }),
+  verifier: external_exports.string().regex(/^[A-Za-z0-9+/]{86}==$/),
+  salt: external_exports.string().regex(/^[A-Za-z0-9+/]{22}==$/)
+}).strict();
+
+// packages/contracts/src/installation-journal.ts
+var installationEnvironment2 = InstallationLaunchInputSchema.shape.environments.element;
+var safeId = external_exports.string().min(1).max(128).regex(/^[A-Za-z0-9_/-]+$/);
+var readyEnvironment = external_exports.object({ name: installationEnvironment2, origin: external_exports.url({ protocol: /^https$/ }) }).strict();
+var InstallationJournalSchema = external_exports.object({
+  id: external_exports.uuid(),
+  teamId: safeId,
+  personId: safeId,
+  name: external_exports.string().regex(/^[a-z][a-z0-9-]{1,62}$/),
+  workspaceId: safeId,
+  provider: external_exports.string().min(1).max(64),
+  revision: external_exports.string().regex(/^[a-f0-9]{40}$/),
+  requested: external_exports.array(installationEnvironment2).min(1).max(2),
+  projectId: safeId.optional(),
+  submitted: external_exports.array(installationEnvironment2).max(2),
+  environments: external_exports.array(readyEnvironment).max(2),
+  events: external_exports.array(external_exports.object({
+    at: external_exports.iso.datetime(),
+    step: external_exports.string().min(1).max(120),
+    state: external_exports.enum(["WORKING", "READY", "FAILED"])
+  }).strict()).max(100),
+  state: external_exports.enum(["running", "failed", "ready"]),
+  version: external_exports.number().int().min(0),
+  leaseUntil: external_exports.iso.datetime()
+}).strict();
+
 // node_modules/.pnpm/pg@8.23.1/node_modules/pg/esm/index.mjs
 var import_lib = __toESM(require_lib2(), 1);
 var Client = import_lib.default.Client;
@@ -27896,18 +27934,6 @@ var CustomerHostingCommandSchema = external_exports.discriminatedUnion("action",
   command("hosting-remove", external_exports.object({ target: HostingTargetSchema, options: HostingRemovalSchema }).strict()),
   command("hosting-redeploy", boundEnvironment)
 ]);
-
-// packages/contracts/src/installation-provider.ts
-var installationEnvironment = external_exports.enum(["staging", "production"]);
-var InstallationLaunchInputSchema = external_exports.object({
-  workspaceId: external_exports.string().min(1).max(128),
-  name: external_exports.string().regex(/^[a-z][a-z0-9-]{1,62}$/),
-  environments: external_exports.array(installationEnvironment).min(1).max(2).refine((values) => new Set(values).size === values.length).meta({ uniqueItems: true }),
-  // The provider supports variable interpolation in template values.
-  ownerEmail: external_exports.string().max(254).regex(/^[^\s${}"\\@]+@[^\s${}"\\@]+\.[^\s${}"\\@]+$/).meta({ format: "email" }),
-  verifier: external_exports.string().regex(/^[A-Za-z0-9+/]{86}==$/),
-  salt: external_exports.string().regex(/^[A-Za-z0-9+/]{22}==$/)
-}).strict();
 
 // apps/managed-action/src/runner.ts
 var RELEASE = { version: process.env.PLATFOLIO_ACTION_VERSION ?? "0.0.0-dev", commitSha: process.env.PLATFOLIO_ACTION_SHA ?? "0".repeat(40), imageDigest: `sha256:${"0".repeat(64)}` };

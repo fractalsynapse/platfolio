@@ -1,5 +1,5 @@
 import { setTimeout as delay } from 'node:timers/promises';
-import type { InstallationEnvironment, InstallationLaunchInput, InstallationObserver, InstallationProvider } from './installation-provider.ts';
+import type { InstallationCheckpointObserver, InstallationEnvironment, InstallationLaunchInput, InstallationObserver, InstallationProvider, InstallationRecovery } from './installation-provider.ts';
 import { exchangeRailwayCode, railwayAuthorization, railwayAuthorizedWorkspaces } from './railway-oauth.ts';
 import { createRailwayEnvironment, createRailwayProject, listRailwayProjects } from './railway-project.ts';
 import { customerInstallationNames, customerInstallationServices as services, installationWorkerReadiness } from './customer-installation-services.ts';
@@ -16,6 +16,7 @@ export interface RailwayInstallationConfig {
   templateCode: string;
   templateDigest: string;
   revision: string;
+  installer?: RailwayTemplateConfig;
 }
 
 function forEnvironment(config: RailwayTemplateConfig, input: InstallationLaunchInput, environment: InstallationEnvironment) {
@@ -70,16 +71,20 @@ type Service = {
   domains: { serviceDomains: { domain: string }[]; customDomains: { id: string }[] };
 };
 
+async function readServices(access: RailwayAccess, projectId: string, environmentId: string): Promise<Service[]> {
+  const { environment: observed } = await access.transport.graphql<{ environment: { serviceInstances: { edges: { node: Service }[] } } }>({
+    ...access, operation: 'installationServices',
+    query: 'query ($projectId: String!, $environmentId: String!) { environment(projectId: $projectId, id: $environmentId) { serviceInstances(first: 100) { edges { node { serviceId serviceName source { image } activeDeployments { status } domains { serviceDomains { domain } customDomains { id } } } } } } }',
+    variables: { projectId, environmentId },
+  });
+  return observed.serviceInstances.edges.map(({ node }) => node);
+}
+
 async function readyOrigin(access: RailwayAccess, projectId: string, environmentId: string, environment: InstallationEnvironment,
   config: ReturnType<typeof forEnvironment>, request: typeof fetch, sleep: (ms: number) => Promise<unknown>) {
   const names = customerInstallationNames(environment);
   for (let attempt = 0; attempt < 84; attempt++) {
-    const { environment: observed } = await access.transport.graphql<{ environment: { serviceInstances: { edges: { node: Service }[] } } }>({
-      ...access, operation: 'installationServices',
-      query: 'query ($projectId: String!, $environmentId: String!) { environment(projectId: $projectId, id: $environmentId) { serviceInstances(first: 100) { edges { node { serviceId serviceName source { image } activeDeployments { status } domains { serviceDomains { domain } customDomains { id } } } } } } }',
-      variables: { projectId, environmentId },
-    });
-    const entries = observed.serviceInstances.edges.map(({ node }) => node);
+    const entries = await readServices(access, projectId, environmentId);
     const expected = Object.values(config.services);
     if (entries.some(({ serviceName }) => !expected.some(({ name }) => serviceName === name))) throw new Error('Unexpected service in the new environment');
     if (expected.every((service) => entries.some((row) => row.serviceName === service.name && row.source?.image === service.source?.image &&
@@ -121,55 +126,84 @@ export function railwayInstallationProvider(config: RailwayInstallationConfig, r
           const { access: token, expires } = await exchangeRailwayCode(request, config.clientId, config.callback, verifier, callback, scope);
           const workspaces = await railwayAuthorizedWorkspaces(token, transport);
           const access: RailwayAccess = { transport, credential: { kind: 'workspace', token } };
-          return { expires, workspaces,
-            async launch(input, observe) {
-              if (expires <= Date.now() || !workspaces.some(({ id }) => id === input.workspaceId)) throw new Error('The workspace was not authorized');
-              const { workspaceId, name } = input;
-              const key = JSON.stringify([workspaceId, name]);
-              if (active.has(key)) throw new Error('A launch is already creating this project');
-              active.add(key);
-              try {
-                await createInstallation(access, config, input, observe, request, sleep);
-              } finally {
-                active.delete(key);
-              }
-            },
-          };
+          async function launch(input: InstallationLaunchInput, observe: InstallationObserver | InstallationCheckpointObserver,
+            recovery?: InstallationRecovery) {
+            if (expires <= Date.now() || !workspaces.some(({ id }) => id === input.workspaceId)) throw new Error('The workspace was not authorized');
+            const { workspaceId, name } = input;
+            const key = JSON.stringify([workspaceId, name]);
+            if (active.has(key)) throw new Error('A launch is already creating this project');
+            active.add(key);
+            try {
+              await createInstallation(access, config, input, observe, request, sleep, recovery);
+            } finally {
+              active.delete(key);
+            }
+          }
+          return { expires, workspaces, launch, recover: launch };
         },
       };
     },
   };
 }
 
-async function createInstallation(access: RailwayAccess, config: RailwayInstallationConfig, input: InstallationLaunchInput, observe: InstallationObserver,
-  request: typeof fetch, sleep: (ms: number) => Promise<unknown>) {
+async function createInstallation(access: RailwayAccess, config: RailwayInstallationConfig, input: InstallationLaunchInput, observe: InstallationObserver | InstallationCheckpointObserver,
+  request: typeof fetch, sleep: (ms: number) => Promise<unknown>, recovery?: InstallationRecovery) {
   const { step, project, environment } = observe;
-  step('Verify the pinned installer', 'WORKING');
-  const { id: templateId, serializedConfig } = await readRailwayTemplate(access, config.templateCode);
+  await step('Verify the pinned installer', 'WORKING');
+  const template = await readRailwayTemplate(access, config.templateCode);
+  const { id: templateId } = template;
+  const serializedConfig = config.installer ?? template.serializedConfig;
   if (!templateId || !serializedConfig || railwayTemplateDigest(serializedConfig) !== config.templateDigest) throw new Error('The published installer changed');
-  const plans = input.environments.map((name) => ({ name, config: forEnvironment(serializedConfig, input, name) }));
-  if (!plans.length) throw new Error('Choose an environment');
-  step('Verify the pinned installer', 'READY');
+  const plans = input.environments.filter((name) => !recovery?.verified.includes(name))
+    .map((name) => ({ name, config: forEnvironment(serializedConfig, input, name) }));
+  await step('Verify the pinned installer', 'READY');
+
   const { name, workspaceId } = input;
-  step('Create the hosting project', 'WORKING');
+  const description = recovery ? 'Platfolio installation ' + recovery.id : 'Platfolio project role installation/' + name;
   const projects = () => listRailwayProjects(access, workspaceId);
-  if ((await projects()).some((row) => row.name === name)) throw new Error('There is already a project with this name');
-  const description = 'Platfolio project role installation/' + name;
-  const id = await createRailwayProject(access, { name, workspaceId, description, defaultEnvironmentName: plans[0]!.name, prDeploys: false });
-  const created = (await projects()).find((row) => row.id === id);
-  const initial = created?.environments.edges.map(({ node }) => node);
-  if (created?.workspaceId !== workspaceId || created.name !== name || created.description !== description ||
-      initial?.length !== 1 || initial[0]?.name !== plans[0]!.name) throw new Error('Could not verify the project and its first environment');
-  project(id);
-  step('Create the hosting project', 'READY');
+  const matches = (await projects()).filter((row) => row.name === name || row.id === recovery?.projectId);
+  const owns = (row: typeof matches[number] | undefined) =>
+    row?.workspaceId === workspaceId && row.name === name && row.description === description &&
+    (!recovery?.projectId || recovery.projectId === row.id);
+  let bound = matches[0];
+  if (matches.length > 1 || (bound && (!recovery || !owns(bound))) || (!bound && recovery?.projectId)) {
+    throw new Error('The original project could not be verified');
+  }
+  if (!bound) {
+    if (!plans[0]) throw new Error('Choose an environment');
+    await step('Create the hosting project', 'WORKING');
+    await recovery?.beforeWrite();
+    const id = await createRailwayProject(access, { name, workspaceId, description, defaultEnvironmentName: plans[0].name, prDeploys: false });
+    bound = (await projects()).find((row) => row.id === id);
+  }
+  if (!bound || !owns(bound)) throw new Error('Could not verify the project and its placement');
+  const id = bound.id;
+  const initial = bound.environments.edges.map(({ node }) => node);
+  const allowed = new Set(input.environments);
+  if (!initial.length || initial.some((row) => !allowed.has(row.name as InstallationEnvironment)) ||
+      new Set(initial.map((row) => row.name)).size !== initial.length ||
+      recovery?.verified.some((name) => !initial.some((row) => row.name === name))) throw new Error('Unexpected environments in the bound project');
+  await project(id);
+  await step('Verify the hosting project', 'READY');
+
   for (const plan of plans) {
-    const label = 'Deploy and check ' + plan.name;
-    step(label, 'WORKING');
-    const placement = initial.find((row) => row.name === plan.name) ?? await createRailwayEnvironment(access, id, plan.name);
+    const submitted = recovery?.submitted.includes(plan.name) ?? false;
+    const label = (submitted ? 'Check the earlier deployment of ' : 'Deploy and check ') + plan.name;
+    await step(label, 'WORKING');
+    let placement = initial.find((row) => row.name === plan.name);
+    if (submitted && !placement) throw new Error('Previously submitted environment is missing');
+    if (!placement) {
+      await recovery?.beforeWrite();
+      placement = await createRailwayEnvironment(access, id, plan.name);
+    }
     if (placement.name !== plan.name || !placement.id) throw new Error('The provider returned a different environment');
-    await deployRailwayTemplate(access, { projectId: id, environmentId: placement.id, workspaceId, templateId, serializedConfig: plan.config });
+    if (!submitted) {
+      if ((await readServices(access, id, placement.id)).length !== 0) throw new Error('The environment already contains services');
+      await recovery?.beforeWrite(plan.name);
+      await deployRailwayTemplate(access, { projectId: id, environmentId: placement.id, workspaceId, templateId, serializedConfig: plan.config });
+    }
     const origin = await readyOrigin(access, id, placement.id, plan.name, plan.config, request, sleep);
-    environment(plan.name, origin);
-    step(label, 'READY');
+    await environment(plan.name, origin);
+    await step(label, 'READY');
   }
 }

@@ -1,3 +1,4 @@
+import { railwayTemplateDigest, type RailwayTemplateConfig } from '../../../packages/contracts/src/railway-template.ts';
 import { createKernel, disposeKernel, type KernelContext } from '@platfolio/kernel';
 import { railwayInstallationProvider, type RailwayInstallationConfig } from '../../../packages/contracts/src/railway-installation.ts';
 import { installationAuthorizationCallback } from './installation-launch.ts';
@@ -59,11 +60,12 @@ export function configFromEnv(env: NodeJS.ProcessEnv): BootConfig {
   const templateCode = env.PLATFOLIO_RAILWAY_INSTALL_TEMPLATE;
   const templateDigest = env.PLATFOLIO_RAILWAY_INSTALL_CONFIG_SHA;
   const revision = env.PLATFOLIO_RAILWAY_INSTALL_REVISION;
+  const installerJson = env.PLATFOLIO_RAILWAY_INSTALL_CONFIG_JSON;
   const clientId = env.PLATFOLIO_HUB_RAILWAY_OAUTH_CLIENT;
   const callbackValue = env.PLATFOLIO_HUB_RAILWAY_OAUTH_CALLBACK;
   const returnTo = allowedOrigins[0];
   let installation: BootConfig['installation'];
-  if (templateDigest || clientId || callbackValue) {
+  if (templateDigest || clientId || callbackValue || installerJson) {
     const callback = callbackValue && new URL(callbackValue);
     if (env.PLATFOLIO_MARKETPLACE_ENABLED !== 'true' || !returnTo || !clientId || !callback ||
         callback.protocol !== 'https:' || callback.username || callback.password || callback.search || callback.hash ||
@@ -71,7 +73,19 @@ export function configFromEnv(env: NodeJS.ProcessEnv): BootConfig {
         !templateDigest || !/^[0-9a-f]{64}$/.test(templateDigest) || !revision || !/^[0-9a-f]{40}$/.test(revision)) {
       throw new Error('The hub launcher requires a verified template, exact OAuth callback and browser origin');
     }
-    installation = { configuration: { clientId, callback: callback.href, templateCode, templateDigest, revision }, returnTo };
+    let installer: RailwayTemplateConfig | undefined;
+    if (installerJson) {
+      try {
+        const artifact = JSON.parse(installerJson) as { sourceCommit?: string; serializedConfig?: RailwayTemplateConfig };
+        if (artifact.sourceCommit !== revision || !artifact.serializedConfig?.services ||
+            railwayTemplateDigest(artifact.serializedConfig) !== templateDigest) throw new Error('Installer pin mismatch');
+        installer = artifact.serializedConfig;
+      } catch {
+        throw new Error('The installer artifact must match the configured release and digest');
+      }
+    }
+    installation = { configuration: { clientId, callback: callback.href, templateCode, templateDigest, revision,
+      ...(installer ? { installer } : {}) }, returnTo };
   }
 
   const notificationClient = env.PLATFOLIO_NOTIFICATION_DIRECTORY_CLIENT;
