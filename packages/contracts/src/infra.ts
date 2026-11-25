@@ -206,6 +206,10 @@ export const DomainStateSchema = z.object({
   targetService: NameSchema,
 });
 
+export const HostedCustomDomainSchema = DomainStateSchema.omit({ targetService: true })
+  .required({ records: true }).strict();
+export type HostedCustomDomain = z.infer<typeof HostedCustomDomainSchema>;
+
 export const ServiceStateSchema = z.object({
   name: NameSchema,
   environment: NameSchema,

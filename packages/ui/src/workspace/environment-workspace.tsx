@@ -6,6 +6,7 @@ import { useOperation } from '../sdk/use-operation.ts';
 import { EnvironmentOverview } from './environment-overview.tsx';
 import { EnvironmentDeployments } from './environment-deployments.tsx';
 import { EnvironmentDomains } from './environment-domains.tsx';
+import { HostedCustomDomains } from './hosted-custom-domains.tsx';
 import { StarterRedeploy } from './starter-redeploy.tsx';
 import { ServiceSecretPresence } from './service-secret-presence.tsx';
 import { workspacePaths, type WorkspaceRoute } from './routes.ts';
@@ -56,7 +57,11 @@ export function EnvironmentWorkspace({ instanceId, canManage, environment, route
           <StarterRedeploy key={state.data.hosting.deploymentId} params={params} progressPath={workspacePaths.instanceSetup(route.team, route.instance)} />}
         <EnvironmentDeployments deployments={state.data.deployments} />
       </>}
-      {route.tab === 'domains' && <EnvironmentDomains domains={state.data.domains} planned={state.data.planned} hosting={state.data.hosting} />}
+      {route.tab === 'domains' && <>
+        <EnvironmentDomains domains={state.data.domains} planned={state.data.planned} hosting={state.data.hosting} />
+        {state.data.hosting && state.data.hosting.state !== 'paused' && state.data.hosting.state !== 'removed' &&
+          <HostedCustomDomains params={params} canManage={canManage} />}
+      </>}
       {route.tab === 'configuration' && <section aria-label="Environment configuration">
         <h2>Configuration</h2>
         {!state.data.planned && (state.data.hosting ? <p>Starter Web uses a database connection generated in Railway.</p>

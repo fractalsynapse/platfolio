@@ -156,5 +156,6 @@ export { SmtpEmailTransport, type SmtpOptions } from './smtp-email.ts';
 
 export type { HostedAppCheck } from './persistence.ts';
 export { HostedStarterSchema, type HostedStarter, type NewHostedStarter } from './persistence.ts';
+export { HostedCustomDomainSchema, type HostedCustomDomain } from './infra.ts';
 
 export { NotificationRuleSchema, type NotificationRule, type NewNotificationRule } from './persistence.ts';

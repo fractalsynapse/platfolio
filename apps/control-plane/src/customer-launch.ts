@@ -29,7 +29,7 @@ export function customerLaunch(config: CustomerLaunchConfig, request: typeof fet
     teamId: config.teamId,
     callbackPath,
     returnTo: new URL('/dashboard/launch', config.siteOrigin).href,
-    async call(action: 'report' | 'setup' | 'initialize' | 'unlock' | 'authorize' | 'callback' | 'start' | 'redeploy' | 'remove' | 'marketplace-status' | 'marketplace-enroll', body?: object) {
+    async call(action: 'report' | 'setup' | 'initialize' | 'unlock' | 'authorize' | 'callback' | 'start' | 'redeploy' | 'remove' | 'marketplace-status' | 'marketplace-enroll' | 'domains-list' | 'domain-attach' | 'domain-detach', body?: object) {
       try {
         const response = await request(config.workerUrl + '/launch', {
           method: 'POST', redirect: 'error', signal: AbortSignal.timeout(action === 'unlock' || action === 'callback' ? 55000 : 15000),

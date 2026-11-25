@@ -43,6 +43,13 @@ One root domain per instance is the MVP; multi-domain (a second hostname pointin
 per-service domain) is a later addition and the state model below already supports it, since records are
 keyed per host.
 
+The private Starter Web launcher allows a team owner to attach one custom hostname
+to the already verified staging web service. The private worker uses its existing
+Railway grant and rechecks the recorded project and deployment before writing.
+Railway supplies the DNS instructions and verification state. The generated Railway
+address stays available while DNS is pending. Removing the custom hostname leaves
+the service, deployment, storage and generated address in place.
+
 ## The flow
 
 ```

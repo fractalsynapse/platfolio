@@ -25068,7 +25068,7 @@ function date4(params) {
 }
 
 // packages/contracts/src/generated/contract-version.ts
-var CONTRACT_VERSION = "5.11.0";
+var CONTRACT_VERSION = "5.12.0";
 
 // packages/contracts/src/infra.ts
 var OPERATIONS = [
@@ -25180,6 +25180,7 @@ var DomainStateSchema = external_exports.object({
   records: external_exports.array(DnsRecordStateSchema).optional(),
   targetService: NameSchema
 });
+var HostedCustomDomainSchema = DomainStateSchema.omit({ targetService: true }).required({ records: true }).strict();
 var ServiceStateSchema = external_exports.object({
   name: NameSchema,
   environment: NameSchema,
@@ -25590,6 +25591,51 @@ var MintingRailwayCredentials = class {
     return found.node.id;
   }
 };
+
+// packages/contracts/src/railway-domains.ts
+function readRailwayCustomDomain(domain2) {
+  const raw = domain2.status?.dnsRecords ?? [];
+  const records = raw.flatMap((record2) => {
+    const { fqdn, zone: zone2, requiredValue, currentValue, recordType, status, purpose } = record2;
+    const type = recordType?.endsWith("_CNAME") ? "CNAME" : recordType?.endsWith("_TXT") ? "TXT" : recordType?.endsWith("_A") ? "A" : recordType?.endsWith("_NS") ? "NS" : void 0;
+    if (!type || !fqdn || !zone2 || !requiredValue) return [];
+    return [{
+      host: record2.hostlabel || fqdn,
+      fqdn,
+      zone: zone2,
+      type,
+      value: requiredValue,
+      ...currentValue ? { current: currentValue } : {},
+      status: status?.endsWith("PROPAGATED") ? "propagated" : status?.endsWith("REQUIRES_UPDATE") ? "requires-update" : "unspecified",
+      purpose: purpose?.endsWith("TRAFFIC_ROUTE") ? "traffic" : purpose?.endsWith("ACME_DNS01_CHALLENGE") ? "challenge" : "unspecified"
+    }];
+  });
+  const verificationHost = domain2.status?.verificationDnsHost;
+  const verificationValue = domain2.status?.verificationToken;
+  const zone = raw.find((record2) => record2.zone)?.zone;
+  if (verificationHost && verificationValue && zone) {
+    const fqdn = verificationHost === zone || verificationHost.endsWith("." + zone) ? verificationHost : `${verificationHost}.${zone}`;
+    const index = records.findIndex((record2) => record2.type === "TXT" && record2.fqdn === fqdn);
+    if (index === -1) records.push({
+      host: verificationHost,
+      fqdn,
+      zone,
+      type: "TXT",
+      value: verificationValue,
+      status: domain2.status?.verified ? "propagated" : "requires-update",
+      purpose: "ownership"
+    });
+    else records[index].purpose = "ownership";
+  }
+  const certificate = domain2.status?.certificateStatus;
+  const failed = certificate === "CERTIFICATE_STATUS_TYPE_ISSUE_FAILED";
+  return {
+    host: domain2.domain,
+    records,
+    dnsStatus: domain2.status?.verified ? "verified" : failed ? "failed" : "pending",
+    certificateStatus: certificate === "CERTIFICATE_STATUS_TYPE_VALID" ? "issued" : failed ? "failed" : "pending"
+  };
+}
 
 // packages/contracts/src/managed-action.ts
 function parseDispatchIntent(source) {
@@ -26709,40 +26755,11 @@ var RailwayInfraProvider = class {
             states[d.domain] = { dnsStatus: active ? "verified" : "pending", certificateStatus: active ? "issued" : "pending" };
             if (d.id) ids[d.domain] = d.id;
           }
-          for (const d of domains?.customDomains ?? []) {
-            const raw = d.status?.dnsRecords ?? [];
-            const records = raw.filter((r) => r?.requiredValue).map((r) => ({
-              host: r.hostlabel || r.fqdn,
-              fqdn: r.fqdn,
-              zone: r.zone,
-              type: r.recordType?.endsWith("_CNAME") ? "CNAME" : r.recordType?.endsWith("_TXT") ? "TXT" : r.recordType?.endsWith("_A") ? "A" : "NS",
-              value: r.requiredValue ?? "",
-              ...r.currentValue ? { current: r.currentValue } : {},
-              status: r.status?.endsWith("PROPAGATED") ? "propagated" : r.status?.endsWith("REQUIRES_UPDATE") ? "requires-update" : "unspecified",
-              purpose: r.purpose?.endsWith("TRAFFIC_ROUTE") ? "traffic" : r.purpose?.endsWith("ACME_DNS01_CHALLENGE") ? "challenge" : "unspecified"
-            }));
-            const vHost = d.status?.verificationDnsHost;
-            const vToken = d.status?.verificationToken;
-            if (vHost && vToken && !records.some((r) => r.purpose === "ownership")) {
-              const zone = raw[0]?.zone ?? d.domain.split(".").slice(-2).join(".");
-              records.push({
-                host: vHost,
-                fqdn: vHost.includes(".") ? vHost : `${vHost}.${zone}`,
-                zone,
-                type: "TXT",
-                value: vToken,
-                status: d.status?.verified ? "propagated" : "requires-update",
-                purpose: "ownership"
-              });
-            }
-            if (records.length) recordsByHost[d.domain] = records;
-            const cert = d.status?.certificateStatus ?? "";
-            const failed = cert === "CERTIFICATE_STATUS_TYPE_ISSUE_FAILED";
-            states[d.domain] = {
-              dnsStatus: d.status?.verified ? "verified" : failed ? "failed" : "pending",
-              certificateStatus: cert === "CERTIFICATE_STATUS_TYPE_VALID" ? "issued" : failed ? "failed" : "pending"
-            };
-            if (d.id) ids[d.domain] = d.id;
+          for (const domain2 of domains?.customDomains ?? []) {
+            const { host, records, dnsStatus, certificateStatus } = readRailwayCustomDomain(domain2);
+            if (records.length) recordsByHost[host] = records;
+            states[host] = { dnsStatus, certificateStatus };
+            if (domain2.id) ids[host] = domain2.id;
           }
           return { domainHosts: Object.keys(states), domainStates: states, domainIds: ids, domainRecords: recordsByHost };
         })()
