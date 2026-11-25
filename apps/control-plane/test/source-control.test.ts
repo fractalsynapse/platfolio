@@ -200,6 +200,31 @@ test('a plan is built from the tenant repository and recorded with the digest bu
   }
 });
 
+test('the repository planner records exactly the selected environments', async () => {
+  const compose = PINNED_COMPOSE.replace('mode: hosted', 'mode: development')
+    .replace('staging: { enabled: false }', 'staging: { enabled: true, branch: staging }')
+    .replace('      public: true', '      public: true\n      environments: [production, staging]');
+  const github = stubGithub({ files: { 'compose.yaml': compose } });
+  const app = await start();
+  try {
+    const plan = (environments: string[]) => app.call(fromRepo(app.instanceId), {
+      method: 'POST', ...app.asUser(), body: JSON.stringify({ environments }),
+    });
+    for (const selection of [['staging'], ['production'], ['production', 'staging']]) {
+      const response = await plan(selection);
+      assert.equal(response.status, 200, response.text);
+      const stored = await app.ctx.store.getPlan(app.instanceId);
+      assert.ok(stored.ok);
+      assert.deepEqual((stored.value.plan as { environments: { name: string }[] }).environments.map(({ name }) => name), selection);
+    }
+    assert.equal((await plan([])).status, 400);
+    assert.equal((await plan(['staging', 'staging'])).status, 400);
+  } finally {
+    github.restore();
+    await disposeKernel(app.ctx);
+  }
+});
+
 test('an unpinned first-party image is refused with the renderer’s own reason, not a paraphrase', async () => {
   const github = stubGithub({ files: { 'compose.yaml': UNPINNED_COMPOSE } });
   const app = await start();

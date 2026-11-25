@@ -4,7 +4,7 @@
  * hand, because every line reproduces from the specification.
  *
  * Source: apps/control-plane/openapi.yaml (OpenAPI 3.1.0, info.version 0.1.0)
- * Input digest: sha256/108619db96fc0ee3
+ * Input digest: sha256/7a8398bde8e2320f
  *
  * Reproduce it with `pnpm run api:types`. `pnpm run api:types:check` fails when this file stops matching
  * what the committed spec produces, which is the only way a generated type deserves to be trusted.
@@ -724,6 +724,8 @@ export interface ApiRequestBodies {
     path?: string;
     /** The pinned production overlay. Default `compose.prod.yaml`. Absent is allowed only when every service in `path` already carries a digest; otherwise the refusal says which service is unpinned. */
     overlayPath?: string;
+    /** Environments to include in the plan. Omit to include every environment enabled by the platform. */
+    environments?: ('staging' | 'production')[];
   };
   /** POST /api/v1/teams/{teamId}/starter-launch/remove */
   removeStarterLaunch: {

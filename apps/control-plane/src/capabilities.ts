@@ -5,7 +5,8 @@ import {
 } from '@platfolio/contracts';
 import { RepositoryReadError } from '@platfolio/contracts';
 import { ScmNotConfiguredError } from '@platfolio/kernel';
-import { buildPlan, FREE_STARTER_RELEASE, parseCompose, templateCatalogEntry } from '@platfolio/manifest';
+import { buildPlan, enabledEnvironments, FREE_STARTER_RELEASE, parseCompose, templateCatalogEntry } from '@platfolio/manifest';
+import type { RequestBodyOf } from '@platfolio/api-contract/generated/types';
 import type { ExtensionDescriptor, KernelContext, Request, Response_, RouteDefinition } from '@platfolio/kernel';
 import { ArtifactRecordSchema, InfraPlanSchema, secretWriteScope } from '@platfolio/contracts';
 import type { customerLaunch } from './customer-launch.ts';
@@ -501,8 +502,13 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
             },
           };
         }
-        const body = bodyOf<{ path?: string; overlayPath?: string }>(request);
+        const body = bodyOf<RequestBodyOf<'registerPlanFromRepository'>>(request);
         if (body.ok === false) return badRequest(body.error);
+        const environments = body.value?.environments;
+        if (environments !== undefined && (!Array.isArray(environments) || !environments.length || environments.length > 2 ||
+            new Set(environments).size !== environments.length || environments.some((name) => name !== 'staging' && name !== 'production'))) {
+          return badRequest('Choose staging, production, or both');
+        }
         const mainPath = body.value?.path ?? 'compose.yaml';
         const overlayPath = body.value?.overlayPath ?? 'compose.prod.yaml';
 
@@ -552,7 +558,11 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
           };
         }
 
-        const plan = buildPlan(parsed.manifest, { instanceId: id, teamId: instance.teamId });
+        const available = enabledEnvironments(parsed.manifest);
+        const unavailable = environments?.find((name) => !available.includes(name));
+        if (unavailable) return badRequest(`Environment "${unavailable}" is disabled in the platform manifest`);
+        const selected = environments?.length === 1 ? environments[0] : undefined;
+        const plan = buildPlan(parsed.manifest, { instanceId: id, teamId: instance.teamId, ...(selected ? { environment: selected } : {}) });
         // One hash, one home. `plan.planHash` is handed to the store exactly as PUT …/plan demands a caller
         // supply it; re-deriving a digest in the API is the bug that made every honest attestation fail 400.
         const stored = await scope.context.store.putPlan(id, plan, plan.planHash);
