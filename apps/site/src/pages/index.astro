@@ -3,20 +3,24 @@ import Page from '../layouts/page.astro';
 ---
 <Page title="Platfolio — Put your app online">
   <div class="ui-welcome">
-    <section class="ui-public-intro">
-      <h1>Put your app online</h1>
-      <p>Launch your app from GitHub on hosting your team owns. Keep control of your code and data, and pay your hosting provider directly.</p>
-      <div class="ui-workspace-links">
-        <a class="ui-workspace-primary ui-hit-primary" href="/dashboard">Sign in</a>
-      </div>
-    </section>
-    <section class="ui-workspace-panel" aria-label="How hosting works">
-      <h2>How hosting works</h2>
-      <ol class="ui-hosting-steps">
-        <li><strong>Connect your code and hosting</strong><p>Choose where your code lives in GitHub and where it will run in Railway.</p></li>
-        <li><strong>Review the setup before launch</strong><p>See what you’ll run and approve the setup changes in GitHub.</p></li>
-        <li><strong>Check your app after launch</strong><p>See what’s running and whether it passed its checks. Pause the app when you don’t need it.</p></li>
-      </ol>
-    </section>
+    <div class="ui-columns" data-columns="2">
+      <section class="ui-prose ui-public-intro">
+        <div>
+          <h1>Put your app online</h1>
+          <p>Launch your app from GitHub on hosting your team owns. Keep control of your code and data, and pay your hosting provider directly.</p>
+          <div class="ui-workspace-links">
+            <a class="ui-workspace-primary ui-hit-primary" href="/dashboard">Sign in</a>
+          </div>
+        </div>
+      </section>
+      <section class="ui-workspace-panel" aria-label="How hosting works">
+        <h2>How hosting works</h2>
+        <ol class="ui-hosting-steps">
+          <li><strong>Connect your code and hosting</strong><p>Choose where your code lives in GitHub and where it will run in Railway.</p></li>
+          <li><strong>Review the setup before launch</strong><p>See what you’ll run and approve the setup changes in GitHub.</p></li>
+          <li><strong>Check your app after launch</strong><p>See what’s running and whether it passed its checks. Pause the app when you don’t need it.</p></li>
+        </ol>
+      </section>
+    </div>
   </div>
 </Page>

@@ -59,6 +59,8 @@ export interface ContentPrimitive {
   readonly wideFromRem: number | null;
   /** How many tracks `columns` uses at wide, and the gap between them. Both `null` on the primitives that never go multi-column. */
   readonly tracks: number | null;
+  /** An explicitly selected two-panel composition for a document with two related sections. */
+  readonly pairedTracks?: 2;
   readonly wideGapStep: SpacingStep | null;
   readonly note: string;
 }
@@ -91,6 +93,7 @@ export const CONTENT_TABLE = {
     gapStep: 5,
     wideFromRem: 48,
     tracks: 3,
+    pairedTracks: 2,
     wideGapStep: 6,
     note: 'A group of blocks: one column at the floor, three when its container has room. Less scrolling, no new capability.',
   },
@@ -148,7 +151,8 @@ export function renderContentCss(digest: string): string {
     const head = `.${p.className} {\n${base}\n  /* ${p.slot}: ${p.note} */\n}`;
     const wide = contentWideDeclarations(p);
     if (wide === null) return head;
-    return `${head}\n\n/* ${p.slot} adds simultaneity when its own container has room. Nothing that exists only at\n   this width is a capability -- rule 2, and the reason a content threshold lives here rather than in an\n   app stylesheet, where gate \u00a7D65 refuses it as a second owner of one decision. */\n@container (min-width: ${String(p.wideFromRem)}rem) {\n  .${p.className} {\n${wide.map((d) => `    ${d}`).join('\n')}\n  }\n}`;
+    const pair = p.pairedTracks ? `\n  .${p.className}[data-columns="${p.pairedTracks}"] {\n    grid-template-columns: repeat(${p.pairedTracks}, minmax(0, 1fr));\n    align-items: center;\n  }` : '';
+    return `${head}\n\n/* ${p.slot} adds simultaneity when its own container has room. Nothing that exists only at\n   this width is a capability -- rule 2, and the reason a content threshold lives here rather than in an\n   app stylesheet, where gate \u00a7D65 refuses it as a second owner of one decision. */\n@container (min-width: ${String(p.wideFromRem)}rem) {\n  .${p.className} {\n${wide.map((d) => `    ${d}`).join('\n')}\n  }${pair}\n}`;
   }).join('\n\n');
 
   return `/*

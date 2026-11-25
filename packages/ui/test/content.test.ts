@@ -142,8 +142,7 @@ test('apps/site imports the sheet and names the primitives instead of composing 
   assert.equal(/max-width:\s*68ch/.test(sheetBody), false, 'the measure is restated in the app instead of referenced');
   assert.equal(/container-type\s*:/.test(sheetBody), false, 'the app declares its own container again');
 
-  const layout = fs.readFileSync(path.join(ROOT, 'apps/site/src/layouts/page.astro'), 'utf8');
-  assert.match(layout, /<main class="ui-prose">/, 'the document column does not name the prose primitive');
   const landing = fs.readFileSync(path.join(ROOT, 'apps/site/src/pages/index.astro'), 'utf8');
-  assert.match(landing, /<section class="ui-columns">/, 'the three-point row does not name the columns primitive');
+  assert.match(landing, /class="ui-prose ui-public-intro"/, 'the signup introduction does not name the prose primitive');
+  assert.match(landing, /class="ui-columns" data-columns="2"/, 'the welcome panel does not use the two-column primitive');
 });

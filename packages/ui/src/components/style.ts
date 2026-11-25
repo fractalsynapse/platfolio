@@ -308,8 +308,7 @@ export const COMPONENT_RULES = [
   },
   {
     selector: '.ui-welcome',
-    declarations: ['display: grid;', 'grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr));',
-      'align-items: center;', 'gap: 1.25rem;', 'padding: clamp(1.1rem, 4%, 3rem);', 'border: 1px solid var(--ui-color-border);',
+    declarations: ['padding: clamp(1.1rem, 4%, 3rem);', 'border: 1px solid var(--ui-color-border);',
       'border-radius: 1.2rem;', 'background: linear-gradient(135deg, var(--ui-color-surface), var(--ui-color-accent-surface));'],
     why: 'Place the public welcome and hosting steps inside the same panel.',
   },
