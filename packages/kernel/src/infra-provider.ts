@@ -1,9 +1,6 @@
 import { Context, Service } from 'cordis';
 import { z } from 'zod';
-import {
-  CONTRACT_NAME, CONTRACT_VERSION, FakeInfraProvider, RailwayInfraProvider, satisfiesRange,
-  type InfraPlan, type InfraProvider,
-} from '@platfolio/contracts';
+import { CONTRACT_NAME, CONTRACT_VERSION, satisfiesRange, type InfraPlan, type InfraProvider } from '@platfolio/contracts';
 
 /**
  * The `infra.provider` capability, exposed as a stable `ctx.infra` service. This file is the seam
@@ -11,7 +8,7 @@ import {
  * import `cordis` (docs/design/10, D15).
  */
 export const ProviderConfigSchema = z.object({
-  provider: z.enum(['fake', 'railway']),
+  provider: z.string().regex(/^[a-z][a-z0-9-]*$/),
   // D59: the default required range is derived from the contract this build compiled against, so a
   // version bump cannot leave a stale "^1.0.0" guard that refuses the provider it ships with.
   contract: z.string().min(1).default(`^${CONTRACT_VERSION}`),
@@ -25,47 +22,27 @@ export interface RailwayWiring {
   transport?: import('@platfolio/contracts').RailwayTransport;
 }
 
-/** Refuses loudly on first use: an unattached Railway selection is a misconfiguration. */
-const unwired = (): never => {
-  throw new Error('railway provider has no workspace or credential source attached — call ctx.infra.attachRailway() at the composition root');
-};
+type InfraServiceConfig = z.infer<typeof ProviderConfigSchema> & { implementation: InfraProvider };
 
-const unwiredProvider = (): InfraProvider => ({
-  describe: () => ({ provider: 'railway', contract: '1.0.0', operations: [], features: [] }),
-  validatePlan: (plan: InfraPlan) => { void plan; return unwired(); },
-  applyPlan: () => unwired(),
-  readState: () => unwired(),
-  deleteInstance: () => unwired(),
-});
-
-export class InfraService extends Service<z.infer<typeof ProviderConfigSchema>> {
+export class InfraService extends Service<InfraServiceConfig> {
   static inject = [] as const;
   static provide = 'infra' as const;
 
-  private selected: InfraProvider;
-  private readonly wantedRailway: boolean;
+  private readonly selected: InfraProvider;
 
-  constructor(ctx: Context, config: z.infer<typeof ProviderConfigSchema>) {
+  constructor(ctx: Context, { implementation, ...config }: InfraServiceConfig) {
     super(ctx, 'infra');
-    const parsed = ProviderConfigSchema.parse(config ?? { provider: 'fake' });
-    this.wantedRailway = parsed.provider === 'railway';
-    this.selected = this.wantedRailway ? unwiredProvider() : new FakeInfraProvider();
-    this.guard(parsed.contract);
-  }
-
-  /** Attach the real Railway provider once the composition root has credentials and a workspace. */
-  attachRailway(wiring: RailwayWiring): void {
-    if (!this.wantedRailway) throw new Error('attachRailway() called while the selected provider is not "railway"');
-    this.selected = new RailwayInfraProvider({ workspaceId: wiring.workspaceId, credentials: wiring.credentials, ...(wiring.transport ? { transport: wiring.transport } : {}) });
-    this.guard(ProviderConfigSchema.parse({ provider: 'railway' }).contract);
-  }
-
-  private guard(range: string): void {
-    const info = this.selected.describe();
-    if (!info.operations.length && this.wantedRailway) return; // unwired: refusal happens on first call
-    if (!satisfiesRange(info.contract, range)) {
-      throw new Error(`${CONTRACT_NAME}: provider "${info.provider}" at ${info.contract} does not satisfy required range "${range}"`);
+    const { provider, contract, features } = ProviderConfigSchema.parse(config);
+    const info = implementation.describe();
+    if (info.provider !== provider) {
+      throw new Error(`${CONTRACT_NAME}: registered provider "${provider}" identifies as "${info.provider}"`);
     }
+    if (!satisfiesRange(info.contract, contract)) {
+      throw new Error(`${CONTRACT_NAME}: provider "${info.provider}" at ${info.contract} does not satisfy required range "${contract}"`);
+    }
+    const missing = features.filter((feature) => !info.features.includes(feature));
+    if (missing.length) throw new Error(`${CONTRACT_NAME}: provider "${provider}" is missing required features: ${missing.join(', ')}`);
+    this.selected = implementation;
   }
 
   get impl(): InfraProvider { return this.selected; }

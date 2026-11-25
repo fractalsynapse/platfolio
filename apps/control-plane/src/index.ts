@@ -1,4 +1,4 @@
-import { createKernel, disposeKernel, type KernelContext } from '@platfolio/kernel';
+import { createKernel, disposeKernel, type KernelContext, type KernelOptions } from '@platfolio/kernel';
 import type { SuccessOf } from '@platfolio/api-contract/generated/types';
 import { EndpointKeySource, IdentityConfigSchema, redactCredentialShaped } from '@platfolio/contracts';
 import { ROUTE_MANIFEST } from './routes.ts';
@@ -19,6 +19,8 @@ export interface BootConfig {
   installationOffer?: SuccessOf<'getHubInstallationOffer'>;
   starterLaunch?: StarterLaunch;
   customerLaunch?: CustomerLaunchConfig;
+  /** Provider plugins and credential wiring supplied by the trusted composition root. */
+  infrastructure?: Pick<KernelOptions, 'provider' | 'infrastructureProviders' | 'railway' | 'contract'>;
   jwksUri?: string;
   host: string;
   port: number;
@@ -214,7 +216,7 @@ export async function boot(config: BootConfig, fetchImpl: typeof fetch = fetch) 
     throw new Error('First owner setup requires a private installation and persistent storage');
   }
   const ctx = await createKernel({
-    provider: 'fake',
+    ...config.infrastructure,
     custody: 'strict',
     identity,
     store: storeConfig,

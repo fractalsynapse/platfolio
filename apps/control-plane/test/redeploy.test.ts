@@ -27,9 +27,10 @@ function must<T>(result: StoreResult<T>, label: string): T {
   throw new Error(`${label} refused: ${reasonOf(result)}`);
 }
 
-async function startApp() {
+async function startApp(provider: () => FakeInfraProvider = () => new FakeInfraProvider()) {
   const ctx = await createKernel({
     provider: 'fake',
+    infrastructureProviders: { fake: provider },
     custody: 'strict',
     identity: defaultIdentityConfig(fixture),
     identityKeys: [fixture.jwk],
@@ -50,22 +51,6 @@ async function startApp() {
   const team = await createTeamWith(ctx);
   const instance = must(await ctx.store.createInstance({ teamId: team, name: 'refresh-probe', template: 'starter-web' }), 'createInstance');
   return { ctx, call, asUser, scoped, team, instance };
-}
-
-/**
- * The double that does NOT claim the verb, installed by replacing the provider the service holds.
- *
- * There is no configuration knob for this, and adding one to `ProviderConfigSchema` would mean a production
- * option whose only user is a test. `ctx.infra.impl` is the object the handler reads `describe()` from, so
- * swapping it exercises exactly the path the handler takes: `describe().operations` without `redeploy` must
- * produce a 501 that names the provider, not a 500 from a facade calling undefined.
- */
-function withoutRedeploy(ctx: KernelContext): void {
-  const partial = new FakeInfraProvider({ without: ['redeploy'] });
-  // `impl` is a getter over the private `selected`, so the field is what has to change. This reaches inside the
-  // service, which is a test-only liberty; the production answer to "can this provider do it" stays
-  // `describe().operations`, which is exactly what the handler consults and therefore what is under test.
-  (ctx.infra as unknown as { selected: unknown }).selected = partial;
 }
 
 /** Membership granted to the subject the request guard will resolve, so a pass is not a fixture artifact. */
@@ -180,8 +165,7 @@ test('a provider without the verb answers 501, naming the provider -- not a 500 
   // The reason `redeploy` is in `describe().operations`: "this platform cannot restart your service" is a fact
   // the API can state BEFORE attempting anything, and the operator needs the provider's name to know where to
   // go instead. A TypeError from `fn.call` on undefined would be a 500 and a mystery.
-  const app = await startApp();
-  withoutRedeploy(app.ctx);
+  const app = await startApp(() => new FakeInfraProvider({ without: ['redeploy'] }));
   try {
     const response = await app.call(`/api/v1/instances/${app.instance.id}/redeploy`, { ...app.asUser(app.scoped()), method: 'POST', body: JSON.stringify({ environment: 'production' }) });
     assert.equal(response.status, 501, `expected 501, got ${String(response.status)}: ${response.text.slice(0, 240)}`);

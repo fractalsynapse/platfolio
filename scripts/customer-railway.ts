@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { setTimeout as delay } from 'node:timers/promises';
 import { HttpRailwayTransport, type RailwayTransport } from '../packages/contracts/src/railway-transport.ts';
+import { createRailwayProject } from '../packages/contracts/src/railway-project.ts';
 import { customHostname, readRailwayCustomDomain, type RailwayCustomDomain } from '../packages/contracts/src/railway-domains.ts';
 
 import { openBaoConfig, openBaoData, openBaoImage, openBaoStart, workerData, workerStart } from './customer-installation-topology.ts';
@@ -29,9 +30,12 @@ export async function customerRailway(target: CustomerProjectTarget, progress?: 
   const token = grant?.token ?? process.env.RAILWAY_TOKEN;
   const workspaceId = grant?.workspaceId ?? process.env.RAILWAY_WORKSPACE_ID;
   if (!token || !workspaceId) throw new Error('Provide the customer workspace ID and workspace token locally');
+  const credential = { kind: 'workspace' as const, token };
   const call = <T>(operation: string, query: string, variables: Record<string, unknown>) =>
-    transport.graphql<T>({ operation, query, variables, credential: { kind: 'workspace', token } });
+    transport.graphql<T>({ operation, query, variables, credential });
   const projectFields = 'id name description environments{edges{node{id name}}}';
+  const projectById = (id: string, label: string) => call<{ project: Stage & { workspaceId: string } }>(
+    label, `query($id:String!){project(id:$id){${projectFields} workspaceId}}`, { id });
   async function workspaceProjects(): Promise<Stage[]> {
     const result: Stage[] = [];
     let after: string | null = null;
@@ -47,19 +51,22 @@ export async function customerRailway(target: CustomerProjectTarget, progress?: 
     return result;
   }
   if (grant?.projectId && (target.kind !== 'app' || target.id !== grant.projectId)) throw new Error('The Railway grant is limited to the selected app project');
-  const selected = target.id ? (await call<{ project: Stage & { workspaceId: string } }>(
-    target.kind === 'app' ? 'selected app project' : 'selected installation project',
-    `query($id:String!){project(id:$id){${projectFields} workspaceId}}`, { id: target.id })).project : undefined;
+  const selected = target.id ? (await projectById(target.id,
+    target.kind === 'app' ? 'selected app project' : 'selected installation project')).project : undefined;
   if (selected && selected.workspaceId !== workspaceId) throw new Error('The selected project is in a different Railway workspace');
   const matches = (selected ? [selected] : await workspaceProjects()).filter(({ name }) => name === target.name);
   if (matches.length > 1) throw new Error('More than one project has this name. Choose a unique app name.');
   let project = matches[0];
   if (target.id && project?.id !== target.id) throw new Error('Railway project ID does not match the approved name and workspace');
   if (!project && target.create) {
-    const result = await call<{ projectCreate: Stage }>('customer project creation',
-      `mutation($input:ProjectCreateInput!){projectCreate(input:$input){${projectFields}}}`,
-      { input: { name: target.name, description: marker, workspaceId, defaultEnvironmentName: 'staging', prDeploys: false, isPublic: false } });
-    project = result.projectCreate;
+    const id = await createRailwayProject({ transport, credential }, {
+      name: target.name, description: marker, workspaceId, defaultEnvironmentName: 'staging', prDeploys: false,
+    });
+    const created = (await projectById(id, 'verify customer project')).project;
+    if (created?.id !== id || created.name !== target.name || created.workspaceId !== workspaceId) {
+      throw new Error('Railway created a project outside the requested name or workspace');
+    }
+    project = created;
   }
   const environments = project?.environments.edges.map(({ node }) => node);
   const environment = environments?.find(({ name }) => name === 'staging');

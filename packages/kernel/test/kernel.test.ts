@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { InfraService, ProviderConfigSchema, createKernel, disposeKernel } from '../src/index.ts';
+import { FakeInfraProvider } from '@platfolio/contracts';
 import { samplePlan, RailwayMock } from './test-helpers.ts';
 
 test('capability resolves by name, not by import at the call site', async () => {
@@ -37,9 +38,30 @@ test('the railway selection refuses to boot without wiring, then works with it',
   }
 });
 
-test('an unwired railway provider fails loudly rather than pretending', async () => {
-  const ctx = await createKernel({ provider: 'fake' });
-  await disposeKernel(ctx);
+test('a composition can install another provider through the same Cordis capability', async () => {
+  class ComputeFixture extends FakeInfraProvider {
+    override describe() { return { ...super.describe(), provider: 'compute-fixture' }; }
+  }
+  const ctx = await createKernel({
+    provider: 'compute-fixture',
+    infrastructureProviders: { 'compute-fixture': () => new ComputeFixture() },
+  });
+  try {
+    const plan = samplePlan();
+    assert.equal(ctx.infra.describe().provider, 'compute-fixture');
+    assert.ok((await ctx.infra.applyPlan(plan)).verified);
+    assert.equal((await ctx.infra.readState(plan.instanceId)).services.length, 2);
+    assert.deepEqual((await ctx.infra.deleteInstance(plan.instanceId)).orphans, []);
+  } finally {
+    await disposeKernel(ctx);
+  }
+});
+
+test('an unregistered implementation or an identity mismatch refuses to boot', async () => {
+  await assert.rejects(() => createKernel({ provider: 'compute-fixture' }), /not registered/);
+  await assert.rejects(() => createKernel({
+    provider: 'compute-fixture', infrastructureProviders: { 'compute-fixture': () => new FakeInfraProvider() },
+  }), /identifies as "fake"/);
 });
 
 test('an unsatisfiable contract range refuses to boot', async () => {
@@ -47,7 +69,7 @@ test('an unsatisfiable contract range refuses to boot', async () => {
 });
 
 test('a bad provider config is refused by the schema, not coerced', () => {
-  assert.throws(() => ProviderConfigSchema.parse({ provider: 'heroku' }), /invalid|expected/i);
+  assert.throws(() => ProviderConfigSchema.parse({ provider: 'Invalid / name' }), /invalid|expected/i);
   assert.throws(() => ProviderConfigSchema.parse({ provider: 'fake', unexpected: 1 }), /unrecognized|unexpected/i);
 });
 

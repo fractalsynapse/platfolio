@@ -42,6 +42,49 @@ catalog releases, including the version and provenance needed for a pinned insta
    independently and can opt in later through **Connect to marketplace** using the same approval
    and enrollment contract.
 
+### Deployment and lifecycle in Platfolio
+
+The launch form takes the platform name from its Platfolio record and offers **Staging**
+and **Production** as independently selectable checkboxes. At least one environment is
+required. The same view follows deployment progress and shows which environments are ready.
+
+| Selection | Use | Project | Initial environments |
+| --- | --- | --- | --- |
+| Production | Shared and upstream services | Platform name | `production` |
+| Staging | Prototypes and tests | Platform name | `staging` |
+| Staging and Production | Platforms under development and serving users | Platform name | `staging`, `production` |
+
+The project for a staging installation of Platfolio is `platfolio` and its only initial
+environment is `staging`. Add an environment later to the same project using the recorded
+provider project ID. Each environment provisions its own services, storage, and credentials
+from its plan. A separate platform gets its own project. Changes to the selected environments
+never remove an existing environment.
+
+Launch, progress, health, environment changes, and removal run through Platfolio operations.
+Provider consent is the external step when a valid connection is unavailable. Platfolio
+returns the user to the launch after consent. The hub sees the installation's deployment
+status within the approved scope. Workloads inside a private installation and their
+credentials stay under that installation's control. Marketplace enrollment stays independent
+of deployment authorization.
+
+Use the registered [infrastructure provider capability](10-cordis-kernel-and-extension-seams.md)
+for provider operations and normalized deployment state. The launch workflow composes that
+capability with provider authorization and persistent launch records. Provider-specific
+placement, health, and teardown logic belongs in the provider implementation. Add a GPU host
+by registering an implementation and its authorization flow at composition. The UI uses the
+same API and displays the operations the selected provider supports. A host can map project
+and environment boundaries to its own resource model.
+
+For removal, the owner chooses whether to keep or wipe data. Keep stops the workloads and
+verifies the retained storage. Wipe verifies the project was removed and reports any resources
+that remain or are pending deletion under the provider's recovery policy. Removal uses the
+recorded project identity and checks dependent platforms before making changes.
+
+The current Railway template link hands off project creation to Railway. It still needs to
+be replaced with the authenticated launch workflow described here. API verification of a
+named staging project establishes provider behavior. Exercising the browser flow also
+requires the authorization return and the team's persistent project record.
+
 **Manage installation** can link to the private console. Local roles determine what someone
 can do there. A future remote support capability needs separate local approval, a named scope,
 an expiry, and revocation. A registry credential cannot replace running code or exercise a

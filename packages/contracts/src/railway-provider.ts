@@ -7,6 +7,7 @@ import {
 import {
   HttpRailwayTransport, type RailwayCredential, type RailwayCredentialSource, type RailwayTransport,
 } from './railway-transport.ts';
+import { createRailwayEnvironment, createRailwayProject } from './railway-project.ts';
 import { readRailwayCustomDomain, type RailwayCustomDomain } from './railway-domains.ts';
 import { redactCredentialShaped } from './managed-action.ts';
 
@@ -246,7 +247,8 @@ export class RailwayInfraProvider implements InfraProvider {
 
     const name = this.projectName(plan);
     const existing = await this.findProject(name);
-    const projectId = existing ? existing.id : await this.createProject(name);
+    const firstEnvironment = parsed.data.environments.find(({ name }) => name === 'production') ?? parsed.data.environments[0]!;
+    const projectId = existing ? existing.id : await this.createProject(name, firstEnvironment.name);
     this.lastProjectId = projectId;
     const workspaceCredential = await this.credentials.workspace();
 
@@ -899,15 +901,11 @@ export class RailwayInfraProvider implements InfraProvider {
     return { id: node.id, name: node.name, ...(node.description ? { description: node.description } : {}) };
   }
 
-  private async createProject(name: string): Promise<string> {
+  private async createProject(name: string, defaultEnvironmentName: string): Promise<string> {
     const credential = await this.credentials.workspace();
-    const data = await this.transport.graphql<{ projectCreate: { id: string } }>({
-      operation: 'projectCreate',
-      credential,
-      query: 'mutation ($input: ProjectCreateInput!) { projectCreate(input: $input) { id } }',
-      variables: { input: { name, workspaceId: this.workspaceId, isPublic: false, description: `${MARKER}none` } },
+    return createRailwayProject({ transport: this.transport, credential }, {
+      name, workspaceId: this.workspaceId, defaultEnvironmentName, description: `${MARKER}none`,
     });
-    return data.projectCreate.id;
   }
 
   private async environments(projectId: string, credential: RailwayCredential): Promise<EnvironmentNode[]> {
@@ -934,17 +932,7 @@ export class RailwayInfraProvider implements InfraProvider {
     const found = await this.environments(projectId, credential);
     const existing = found.find((e) => e.name === environment);
     if (existing) return existing.id;
-    const data = await this.transport.graphql<{ environmentCreate: { id: string } }>({
-      operation: 'environmentCreate',
-      credential,
-      query: 'mutation ($input: EnvironmentCreateInput!) { environmentCreate(input: $input) { id } }',
-      // No `sourceEnvironmentId` is ever sent, and this is not a formatting choice: measured on the live API,
-      // creating an environment from a source gave the new environment the source's service ids, and its api
-      // failed with `connect ETIMEDOUT` against a database it does not own. The field stays in the input
-      // allowlist of the test double precisely so that nobody reintroduces it here unnoticed.
-      variables: { input: { projectId, name: environment, skipInitialDeploys: true } },
-    });
-    return data.environmentCreate.id;
+    return (await createRailwayEnvironment({ transport: this.transport, credential }, projectId, environment)).id;
   }
 
   private async listServices(projectId: string, credential?: RailwayCredential): Promise<ServiceNode[]> {

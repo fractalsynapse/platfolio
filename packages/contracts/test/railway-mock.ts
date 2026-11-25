@@ -328,14 +328,14 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
         return { project: found ? { id: found.id, name: found.name, description: found.description } : null } as T;
       }
       case 'projectCreate': {
-        const input = v.input as { name: string; workspaceId: string; description?: string };
+        const input = v.input as { name: string; workspaceId: string; description?: string; defaultEnvironmentName?: string };
         if ([...this.projects.values()].some((p) => p.workspaceId === input.workspaceId && p.name === input.name)) {
           throw new Error('railway projectCreate: name already exists in workspace [BAD_USER_INPUT]');
         }
         const id = `proj-${this.sequence++}`;
         this.projects.set(id, { id, name: input.name, workspaceId: input.workspaceId, description: input.description ?? '' });
         const environmentId = `env-${this.sequence++}`;
-        this.environments.set(environmentId, { id: environmentId, projectId: id, name: 'production' });
+        this.environments.set(environmentId, { id: environmentId, projectId: id, name: input.defaultEnvironmentName ?? 'production' });
         return { projectCreate: { id } } as T;
       }
       case 'projectUpdate': {

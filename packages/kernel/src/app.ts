@@ -12,14 +12,16 @@ import { InfraService, ProviderConfigSchema } from './infra-provider.ts';
 import type { IdentityConfig, Jwk, VariablePort, RedactionSinks } from '@platfolio/contracts';
 // D59: the default required contract range is derived, so this must import the generated value as a
 // runtime value -- a type-only import cannot carry it.
-import { CONTRACT_VERSION } from '@platfolio/contracts';
+import { CONTRACT_VERSION, FakeInfraProvider, RailwayInfraProvider, type InfraProvider } from '@platfolio/contracts';
 
 export interface KernelOptions {
   /** Email transport selection (D46). Absent means no email capability is installed at all. */
   email?: import('./email.ts').EmailConfigInput;
   /** Source control (D22): where platfolio reads a tenant's declared platform and asks for a run. */
   scm?: import('./scm.ts').ScmConfigInput;
-  provider?: 'fake' | 'railway';
+  provider?: string;
+  /** Trusted implementations registered by the composition root and selected by provider ID. */
+  infrastructureProviders?: Readonly<Record<string, () => InfraProvider>>;
   contract?: string;
   custody?: 'managed' | 'strict';
   /** Required when provider is 'railway'. */
@@ -80,11 +82,17 @@ async function install(ctx: Context, options: KernelOptions): Promise<Context> {
     features: [],
   });
   const custody = CustodyConfigSchema.parse({ mode: options.custody ?? 'strict', delivery: options.delivery ?? 'relay-sealed' });
-  await ctx.plugin(InfraService, config);
-  if (config.provider === 'railway') {
-    if (!options.railway) throw new Error('provider "railway" requires options.railway { workspaceId, credentials }');
-    ctx.infra.attachRailway(options.railway);
-  }
+  const providers: Readonly<Record<string, () => InfraProvider>> = {
+    fake: () => new FakeInfraProvider(),
+    railway: () => {
+      if (!options.railway) throw new Error('provider "railway" requires options.railway { workspaceId, credentials }');
+      return new RailwayInfraProvider(options.railway);
+    },
+    ...options.infrastructureProviders,
+  };
+  const createProvider = Object.hasOwn(providers, config.provider) ? providers[config.provider] : undefined;
+  if (!createProvider) throw new Error(`Infrastructure provider "${config.provider}" is not registered`);
+  await ctx.plugin(InfraService, { ...config, implementation: createProvider() });
   await ctx.plugin(CustodyService, custody);
   // Ports are attached by the composition root. This line was lost once already while the function was being
   // restructured into install(), and the kernel test caught it by counting provider writes -- a reminder that a

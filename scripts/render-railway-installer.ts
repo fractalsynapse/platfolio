@@ -1,18 +1,14 @@
 import { createHash } from 'node:crypto';
 import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
+import type { EnvName } from '../packages/manifest/src/environments.ts';
+import { physicalServiceName } from '../packages/contracts/src/railway-provider.ts';
 import { customerControlPlanePlan } from './launch-customer-control-plane.ts';
 import { openBaoConfig, openBaoData, openBaoImage, openBaoStart, workerData, workerStart } from './customer-installation-topology.ts';
 import { resolveCheckoutCandidate } from './platform-candidate.ts';
 
 const databaseImage = 'postgres:17.11@sha256:ff87138949ad9a46f32ff23bd6852b52ce024a13dffe9b4087be98292cdd3b4f';
 const databaseVolume = '/var/lib/postgresql/data';
-const database = 'private-db-staging';
-const identity = 'private-identity-staging';
-const site = 'private-site-staging';
-const api = 'private-api-staging';
-const worker = 'installation-worker-staging';
-const vault = 'openbao-staging';
 const reference = (service: string, variable: string) => '${{' + service + '.' + variable + '}}';
 const publicOrigin = (service: string) => 'https://' + reference(service, 'RAILWAY_PUBLIC_DOMAIN');
 const privateHost = (service: string) => reference(service, 'RAILWAY_PRIVATE_DOMAIN');
@@ -50,10 +46,16 @@ function service(name: string, image: string, values: Record<string, TemplateVar
   };
 }
 
-export async function renderRailwayInstaller(candidateFile: string, registryOrigin: string) {
+export async function renderRailwayInstaller(candidateFile: string, registryOrigin: string, environment: EnvName = 'staging') {
   const registry = new URL(registryOrigin);
   if (registry.protocol !== 'https:' || registry.origin !== registryOrigin) throw new Error('Use an exact HTTPS marketplace origin');
   const plan = await customerControlPlanePlan(candidateFile);
+  const database = physicalServiceName('private-db', environment);
+  const identity = physicalServiceName('private-identity', environment);
+  const site = physicalServiceName('private-site', environment);
+  const api = physicalServiceName('private-api', environment);
+  const worker = physicalServiceName('installation-worker', environment);
+  const vault = physicalServiceName('openbao', environment);
   const issuer = publicOrigin(identity) + '/realms/platfolio';
   const ownerSubject = reference(identity, 'PLATFOLIO_INSTALL_OWNER_SUBJECT');
   const apiImage = plan.api.image + '@' + plan.api.digest;
@@ -104,9 +106,11 @@ export async function renderRailwayInstaller(candidateFile: string, registryOrig
 }
 
 if (import.meta.url === 'file://' + process.argv[1]) {
-  const { values } = parseArgs({ options: { candidate: { type: 'string' }, registry: { type: 'string' } } });
+  const { values } = parseArgs({ options: { candidate: { type: 'string' }, registry: { type: 'string' }, environment: { type: 'string' } } });
   if (!values.candidate || !values.registry) throw new Error('Pass --candidate and --registry to render the installer');
+  const environment = values.environment ?? 'staging';
+  if (environment !== 'staging' && environment !== 'production') throw new Error('Choose staging or production');
   resolveCheckoutCandidate(values.candidate, fileURLToPath(new URL('..', import.meta.url)));
-  const installer = await renderRailwayInstaller(values.candidate, values.registry);
+  const installer = await renderRailwayInstaller(values.candidate, values.registry, environment);
   process.stdout.write(JSON.stringify(installer, null, 2) + '\n');
 }

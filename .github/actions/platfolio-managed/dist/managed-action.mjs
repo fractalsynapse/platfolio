@@ -25592,6 +25592,27 @@ var MintingRailwayCredentials = class {
   }
 };
 
+// packages/contracts/src/railway-project.ts
+async function createRailwayProject({ transport, credential }, input2) {
+  const data = await transport.graphql({
+    operation: "projectCreate",
+    credential,
+    query: "mutation ($input: ProjectCreateInput!) { projectCreate(input: $input) { id } }",
+    variables: { input: { ...input2, isPublic: false } }
+  });
+  return data.projectCreate.id;
+}
+async function createRailwayEnvironment({ transport, credential }, projectId, name) {
+  const data = await transport.graphql({
+    operation: "environmentCreate",
+    credential,
+    query: "mutation ($input: EnvironmentCreateInput!) { environmentCreate(input: $input) { id name } }",
+    // An empty environment owns its resources. Cloning would share the source environment's service rows.
+    variables: { input: { projectId, name, skipInitialDeploys: true } }
+  });
+  return data.environmentCreate;
+}
+
 // packages/contracts/src/railway-domains.ts
 function readRailwayCustomDomain(domain2) {
   const raw = domain2.status?.dnsRecords ?? [];
@@ -25816,7 +25837,8 @@ var RailwayInfraProvider = class {
     const domains = [];
     const name = this.projectName(plan);
     const existing = await this.findProject(name);
-    const projectId = existing ? existing.id : await this.createProject(name);
+    const firstEnvironment = parsed.data.environments.find(({ name: name2 }) => name2 === "production") ?? parsed.data.environments[0];
+    const projectId = existing ? existing.id : await this.createProject(name, firstEnvironment.name);
     this.lastProjectId = projectId;
     const workspaceCredential = await this.credentials.workspace();
     await this.writeMarker(projectId, plan.planHash, workspaceCredential);
@@ -26301,15 +26323,14 @@ var RailwayInfraProvider = class {
     if (!node2) return null;
     return { id: node2.id, name: node2.name, ...node2.description ? { description: node2.description } : {} };
   }
-  async createProject(name) {
+  async createProject(name, defaultEnvironmentName) {
     const credential = await this.credentials.workspace();
-    const data = await this.transport.graphql({
-      operation: "projectCreate",
-      credential,
-      query: "mutation ($input: ProjectCreateInput!) { projectCreate(input: $input) { id } }",
-      variables: { input: { name, workspaceId: this.workspaceId, isPublic: false, description: `${MARKER}none` } }
+    return createRailwayProject({ transport: this.transport, credential }, {
+      name,
+      workspaceId: this.workspaceId,
+      defaultEnvironmentName,
+      description: `${MARKER}none`
     });
-    return data.projectCreate.id;
   }
   async environments(projectId, credential) {
     const data = await this.transport.graphql({
@@ -26334,17 +26355,7 @@ var RailwayInfraProvider = class {
     const found = await this.environments(projectId, credential);
     const existing = found.find((e) => e.name === environment);
     if (existing) return existing.id;
-    const data = await this.transport.graphql({
-      operation: "environmentCreate",
-      credential,
-      query: "mutation ($input: EnvironmentCreateInput!) { environmentCreate(input: $input) { id } }",
-      // No `sourceEnvironmentId` is ever sent, and this is not a formatting choice: measured on the live API,
-      // creating an environment from a source gave the new environment the source's service ids, and its api
-      // failed with `connect ETIMEDOUT` against a database it does not own. The field stays in the input
-      // allowlist of the test double precisely so that nobody reintroduces it here unnoticed.
-      variables: { input: { projectId, name: environment, skipInitialDeploys: true } }
-    });
-    return data.environmentCreate.id;
+    return (await createRailwayEnvironment({ transport: this.transport, credential }, projectId, environment)).id;
   }
   async listServices(projectId, credential) {
     const cred = credential ?? await this.credentials.workspace();
