@@ -21,12 +21,23 @@ export async function customerControlPlanePlan(candidateFile: string) {
 }
 
 type Stage = Awaited<ReturnType<typeof customerRailway>>;
+interface PrivateOwner { email: string; password: string }
+interface InstallOptions {
+  adminFile?: string;
+  owner?: PrivateOwner;
+  updateImages?: boolean;
+  launchConfig?: { team: string; workerKey: string };
+}
 
-export async function launchCustomerControlPlane(stage: Stage, plan: Awaited<ReturnType<typeof customerControlPlanePlan>>, adminFile: string, updateImages = false, launchConfig?: { team: string; workerKey: string }) {
-  const mode = await stat(adminFile);
-  if (!mode.isFile() || (mode.mode & 0o077)) throw new Error('Use a private file for the customer Keycloak bootstrap credential');
-  const admin = (await readFile(adminFile, 'utf8')).trim();
-  if (admin.length < 32) throw new Error('Use a fresh customer Keycloak bootstrap credential of at least 32 characters');
+export async function launchCustomerControlPlane(stage: Stage, plan: Awaited<ReturnType<typeof customerControlPlanePlan>>,
+    { adminFile, owner, updateImages = false, launchConfig }: InstallOptions) {
+  let admin: string | undefined;
+  if (adminFile) {
+    const mode = await stat(adminFile);
+    if (!mode.isFile() || (mode.mode & 0o077)) throw new Error('Use a private file for the customer Keycloak bootstrap credential');
+    admin = (await readFile(adminFile, 'utf8')).trim();
+    if (admin.length < 32) throw new Error('Use a fresh customer Keycloak bootstrap credential of at least 32 characters');
+  }
 
   const database = 'private-db-staging';
   await stage.privatePostgres(database);
@@ -43,8 +54,14 @@ export async function launchCustomerControlPlane(stage: Stage, plan: Awaited<Ret
     api: { PLATFOLIO_IDENTITY_ISSUER: issuer, PLATFOLIO_IDENTITY_JWKS_URI: `${issuer}/protocol/openid-connect/certs`, PLATFOLIO_ALLOWED_ORIGINS: site.origin, PLATFOLIO_DB_MIGRATE: 'true', PLATFOLIO_SCM_DRIVER: 'git', ...(launchConfig ? { PLATFOLIO_LAUNCH_WORKER_URL: 'http://installation-worker-staging.railway.internal:8080',
       PLATFOLIO_LAUNCH_WORKER_KEY: launchConfig.workerKey, PLATFOLIO_LAUNCH_TEAM: launchConfig.team } : {}) },
     site: { PLATFOLIO_SITE_ORIGIN: site.origin, PLATFOLIO_URL: api.origin, PLATFOLIO_IDENTITY_ISSUER: issuer },
-    identity: { KC_HOSTNAME: identity.origin, KC_HOSTNAME_STRICT: 'true' },
+    identity: { KC_HOSTNAME: identity.origin, KC_HOSTNAME_STRICT: 'true', ...(owner ? { PLATFOLIO_SITE_ORIGIN: site.origin } : {}) },
   };
+  if (owner) {
+    await stage.setConfig(identity.service, 'PLATFOLIO_INSTALL_OWNER_EMAIL', owner.email);
+    await stage.setConfig(identity.service, 'PLATFOLIO_INSTALL_OWNER_PASSWORD', owner.password).catch(() => {
+      throw new Error('Railway rejected the initial private owner credential');
+    });
+  }
   for (const item of services) {
     const runtime = { ...item.spec.env, ...outputs[item.name as keyof typeof outputs], PORT: String(item.spec.port) };
     for (const [key, value] of Object.entries(runtime)) await stage.setConfig(item.service, key, value);
@@ -52,10 +69,11 @@ export async function launchCustomerControlPlane(stage: Stage, plan: Awaited<Ret
       if (reference.database !== 'main') throw new Error('Unexpected Platfolio database reference');
       await stage.setConfig(item.service, reference.variable, '${{' + `${database}.${reference.output ?? 'DATABASE_URL'}` + '}}');
     }
+    const start = item.name === 'identity' && owner ? 'start-private' : item.spec.start;
     await stage.configure(item.service, { numReplicas: 1, healthcheckPath: item.spec.healthPath ?? '/status', healthcheckTimeout: 240,
-      ...(item.spec.start ? { startCommand: item.spec.start } : {}) });
+      ...(start ? { startCommand: start } : {}) });
   }
-  await stage.setConfig(identity.service, 'KC_BOOTSTRAP_ADMIN_PASSWORD', admin).catch(() => {
+  if (admin) await stage.setConfig(identity.service, 'KC_BOOTSTRAP_ADMIN_PASSWORD', admin).catch(() => {
     throw new Error('Railway rejected the customer Keycloak bootstrap credential');
   });
   const pending = new Map(services.map((item) => [item.name, item]));

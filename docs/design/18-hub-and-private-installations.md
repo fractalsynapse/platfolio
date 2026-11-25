@@ -344,6 +344,17 @@ reached OpenBao privately while the store was sealed and uninitialized.
 
 ### Hosted starter launch
 
+A fresh private Keycloak can seed its operator realm on first startup. Start the identity
+image with `start-private`, the private `PLATFOLIO_SITE_ORIGIN`, an initial owner email,
+and a generated initial owner password under the installation's custody. The import derives
+the exact browser callback from the site origin. It creates one operator and disables open
+registration. An existing realm is skipped on restart. After the owner signs in and changes
+the initial password, switch the service to `start` and remove the two bootstrap values.
+The owner then creates their team in Platfolio and completes the vault setup.
+The customer Railway launcher also accepts `--owner-bootstrap-file` with a private JSON
+file containing `email` and a generated URL-safe `password`. This starts the private
+realm in the identity service and prints only its public origin.
+
 The customer launcher can run as a private worker in the installation project. Pass a
 CI candidate, the exact installation project ID, and a private `--launch-config-file`
 when applying `launch-customer-railway.ts`. Keep that file in the installation owner's

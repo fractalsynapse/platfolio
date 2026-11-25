@@ -1,0 +1,36 @@
+#!/bin/sh
+set -eu
+
+if [ "${1:-}" = start-private ]; then
+  shift
+  : "${PLATFOLIO_SITE_ORIGIN:?Set the private site origin}"
+  : "${PLATFOLIO_INSTALL_OWNER_EMAIL:?Set the initial owner email}"
+  : "${PLATFOLIO_INSTALL_OWNER_PASSWORD:?Set the generated initial owner password}"
+
+  case "$PLATFOLIO_SITE_ORIGIN" in
+    https://*) hostname=${PLATFOLIO_SITE_ORIGIN#https://} ;;
+    http://127.0.0.1:*) hostname=${PLATFOLIO_SITE_ORIGIN#http://} ;;
+    *) echo 'Use an HTTPS site origin or local loopback' >&2; exit 1 ;;
+  esac
+  case "$hostname" in
+    ''|*[!a-zA-Z0-9.:-]*) echo 'Use an exact site origin without a path or wildcard' >&2; exit 1 ;;
+  esac
+  case "$PLATFOLIO_INSTALL_OWNER_EMAIL" in
+    *[[:space:]]*|*@*@*) echo 'Use an email address for the initial owner' >&2; exit 1 ;;
+    ?*@?*.?*) ;;
+    *) echo 'Use an email address for the initial owner' >&2; exit 1 ;;
+  esac
+  case "$PLATFOLIO_INSTALL_OWNER_PASSWORD" in
+    *[!a-zA-Z0-9_-]*) echo 'Use a generated URL-safe initial owner password' >&2; exit 1 ;;
+  esac
+  if [ "${#PLATFOLIO_INSTALL_OWNER_PASSWORD}" -lt 32 ]; then
+    echo 'Use a generated initial owner password of at least 32 characters' >&2
+    exit 1
+  fi
+
+  mkdir -p /opt/keycloak/data/import
+  cp /opt/keycloak/platfolio-private/platfolio-realm.json /opt/keycloak/data/import/platfolio-realm.json
+  exec /opt/keycloak/bin/kc.sh start --import-realm "$@"
+fi
+
+exec /opt/keycloak/bin/kc.sh "$@"

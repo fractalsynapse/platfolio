@@ -8,6 +8,7 @@ import { resolveCheckoutCandidate } from './platform-candidate.ts';
 
 const { values } = parseArgs({ options: {
   project: { type: 'string' }, candidate: { type: 'string' }, 'identity-bootstrap-file': { type: 'string' },
+  'owner-bootstrap-file': { type: 'string' },
   'launch-config-file': { type: 'string' }, apply: { type: 'boolean' }, 'update-images': { type: 'boolean' },
   'registry-origin': { type: 'string' },
 } });
@@ -29,15 +30,29 @@ async function ownerLaunchConfig(file: string) {
   return { team, workerKey, openBaoSecret, ...(client ? { client } : {}), ...(appProject ? { appProject } : {}) };
 }
 const launchConfig = values['launch-config-file'] ? await ownerLaunchConfig(values['launch-config-file']) : undefined;
+const ownerFile = values['owner-bootstrap-file'];
+async function privateOwner(file: string) {
+  const mode = await stat(file);
+  if (!mode.isFile() || mode.mode & 0o077) throw new Error('Use a private file for the initial owner credentials');
+  const { email, password } = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>;
+  if (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ||
+    typeof password !== 'string' || !/^[A-Za-z0-9_-]{32,128}$/.test(password)) throw new Error('Supply the first owner email and a generated URL-safe password');
+  return { email, password };
+}
+if (ownerFile && (!values.apply || !values.candidate)) throw new Error('Private owner bootstrap requires --apply and --candidate');
+if (ownerFile && values.candidate) resolveCheckoutCandidate(values.candidate, resolve(import.meta.dirname, '..'));
+const owner = ownerFile ? await privateOwner(ownerFile) : undefined;
+const adminFile = values['identity-bootstrap-file'];
+if (values.apply && values.candidate && !adminFile && !owner) throw new Error('Pass --owner-bootstrap-file or --identity-bootstrap-file');
 const stage = await customerRailway({ name: 'platfolio', kind: 'installation', ...(values.project ? { id: values.project } : {}), create: values.apply === true && !values['update-images'] });
 console.log(`Target ${stage.project.name}/staging (${stage.scope.projectId})`);
 console.log('Place one OpenBao volume and one installation worker on the project’s private network.');
 const plan = values.candidate ? await customerControlPlanePlan(values.candidate) : undefined;
 if (plan) console.log(`Place Platfolio API, site, Keycloak, and private Postgres for candidate ${plan.sourceCommit}.`);
 if (values.apply) {
-  if (plan && !values['identity-bootstrap-file']) throw new Error('Pass --identity-bootstrap-file for the customer Keycloak bootstrap credential');
-  if (plan && values['identity-bootstrap-file']) {
-    const origins = await launchCustomerControlPlane(stage, plan, values['identity-bootstrap-file'], values['update-images'], launchConfig);
+  if (plan) {
+    const origins = await launchCustomerControlPlane(stage, plan, { ...(adminFile ? { adminFile } : {}), ...(owner ? { owner } : {}),
+      updateImages: values['update-images'] === true, ...(launchConfig ? { launchConfig } : {}) });
     console.log(JSON.stringify(origins));
     if (launchConfig) {
       console.log(JSON.stringify(await stage.installLaunchWorker(plan.api.image + '@' + plan.api.digest, {

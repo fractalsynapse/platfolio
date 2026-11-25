@@ -100,8 +100,14 @@ jobs:
           cmp packages/ui/src/tokens.css identity-tokens.css
           docker cp identity-smoke:/opt/keycloak/themes/platfolio/login/resources/css/components.css identity-components.css
           cmp packages/ui/src/components/components.css identity-components.css
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' "http://$address/realms/platfolio")" = 404
           test "$(curl --silent --output /dev/null --write-out '%{http_code}' -H 'Accept: text/html' "http://$address/realms/master/account/")" = 404
           test "$(curl --silent --output /dev/null --write-out '%{http_code}' -H 'Accept: application/json' "http://$address/realms/master/account/")" = 401
+          if docker run --rm "$IDENTITY_IMAGE" start-private > identity-missing-input.log 2>&1; then
+            echo 'Private identity started without its owner inputs' >&2
+            exit 1
+          fi
+          grep -q 'Set the private site origin' identity-missing-input.log
           echo "image=$IDENTITY_IMAGE" >> "$GITHUB_OUTPUT"
 
       # The image answers its own healthcheck during the run, so a green job means the container serves --
