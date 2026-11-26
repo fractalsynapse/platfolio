@@ -4,6 +4,7 @@ import { useCommand } from '../sdk/use-operation.ts';
 import { OperationState } from './operation-state.tsx';
 import { WorkspaceAction } from './workspace-action.tsx';
 import { WorkspaceField } from './workspace-field.tsx';
+import { WorkspacePanel } from './workspace-panel.tsx';
 import { useWorkspaceModel } from './workspace-model.ts';
 
 const params = {};
@@ -41,15 +42,18 @@ export function AccountIdentity({ tab }: { readonly tab: 'profile' | 'emails' })
     }
   }
 
-  return <section>
-    <h2>{tab === 'profile' ? 'Profile' : 'Sign-in email'}</h2>
+  return <WorkspacePanel title={tab === 'profile' ? 'Profile' : 'Email addresses'} form>
     <OperationState status={state.status} pending="Loading your account…" retry={reload}
       failed={<>Couldn’t open your account details. {state.status === 'failed' && state.error.status === 503 &&
         'Ask a Platfolio owner to check the identity settings.'}</>} />
     {state.status === 'loaded' && <>
       <p className="ui-workspace-meta">{ageLabel(state.freshness, clock().toISOString()).text}</p>
       {tab === 'emails' ? <dl className="ui-workspace-facts">
-        <div><dt>Primary email</dt><dd>{state.data.email || 'No email is set'}{state.data.email && (state.data.emailVerified ? ' · Verified' : ' · Verification needed')}</dd></div>
+        <div><dt>Primary email</dt><dd>{state.data.email || 'No email is set'}{state.data.email && <>
+          {' '}<span className="ui-setup-status" data-tone={state.data.emailVerified ? 'success' : 'attention'}>
+            {state.data.emailVerified ? 'Verified' : 'Unverified'}
+          </span>
+        </>}</dd></div>
       </dl> : <form className="ui-workspace-form" onSubmit={(event) => void submit(event)}>
         <WorkspaceField id="account-username" label="Username">
           <input id="account-username" autoComplete="username" minLength={3} maxLength={255} value={username ?? state.data.username} onChange={(event) => { setUsername(event.target.value); setSaved(false); }} required />
@@ -57,10 +61,10 @@ export function AccountIdentity({ tab }: { readonly tab: 'profile' | 'emails' })
         <WorkspaceField id="account-display-name" label="Display name">
           <input id="account-display-name" autoComplete="nickname" maxLength={100} value={displayName ?? state.data.displayName} onChange={(event) => { setDisplayName(event.target.value); setSaved(false); }} required />
         </WorkspaceField>
-        <WorkspaceAction type="submit" variant="primary" disabled={pending}>{pending ? 'Saving…' : 'Save profile'}</WorkspaceAction>
+        <div><WorkspaceAction type="submit" variant="primary" disabled={pending}>{pending ? 'Saving…' : 'Save profile'}</WorkspaceAction></div>
         {saved && <p role="status">Profile saved.</p>}
         {problem && <p role="alert">{problem}</p>}
       </form>}
     </>}
-  </section>;
+  </WorkspacePanel>;
 }

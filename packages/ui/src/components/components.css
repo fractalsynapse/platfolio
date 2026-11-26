@@ -3,7 +3,7 @@
  * packages/ui/src/components/style.ts and it is the only one.
  *
  * Source: packages/ui/src/components/style.ts
- * Input digest: sha256/c2737fae45b5a257
+ * Input digest: sha256/8c3fb91fe4125024
  *
  * Reproduce with `pnpm run ui:css`; `pnpm run ui:css:check` fails when this stops matching the module. The
  * numbers in here are not literals: they reference the custom properties in ../tokens.css, which is what makes
@@ -37,6 +37,18 @@
   background: var(--ui-color-bg);
   color: var(--ui-color-textMuted);
   font-size: var(--ui-font-caption);
+}
+
+/* Use the same readable success badge for verification and active rules. */
+.ui-setup-status[data-tone="success"] {
+  background: color-mix(in srgb, var(--ui-color-ok) 12%, var(--ui-color-surface));
+  color: var(--ui-color-ok);
+}
+
+/* Identify a state that needs attention with a word and a tinted badge. */
+.ui-setup-status[data-tone="attention"] {
+  background: color-mix(in srgb, var(--ui-color-warn) 10%, var(--ui-color-surface));
+  color: var(--ui-color-warn);
 }
 
 /* Place related workspace actions together at each supported width. */
@@ -111,22 +123,28 @@
 /* Keep labels and fields together and limit the line length on wider screens. */
 .ui-workspace-form {
   display: grid;
-  gap: var(--ui-space-3);
-  max-inline-size: 28rem;
+  gap: 0.55rem;
+  max-inline-size: 29rem;
   margin-block: var(--ui-space-4);
 }
 
 /* Use the same field surface as authentication and preserve the primary input target. */
-.ui-workspace-form input:not([type="checkbox"]) {
+.ui-workspace-form input:not([type="checkbox"], [type="hidden"]), .ui-workspace-input {
   inline-size: 100%;
   min-inline-size: 0;
   min-block-size: var(--ui-target-primary);
-  padding: var(--ui-space-2) var(--ui-space-3);
-  border: 1px solid var(--ui-color-border);
+  padding: 0.52rem 0.72rem;
+  border: 1px solid var(--ui-color-control-border);
   border-radius: var(--ui-space-3);
-  background: var(--ui-color-bg);
+  background: var(--ui-color-surface);
   color: var(--ui-color-text);
   font: inherit;
+}
+
+/* Share the same field labels across workspace and authentication forms. */
+.ui-workspace-form label, .ui-workspace-label {
+  font-size: var(--ui-font-label);
+  font-weight: 680;
 }
 
 /* Group related choices on the same surface as other form fields. */
@@ -157,10 +175,10 @@
   accent-color: var(--ui-color-accent);
 }
 
-/* Make keyboard focus visible on workspace fields. */
-.ui-workspace-form input:focus-visible {
-  outline: 2px solid var(--ui-color-accent);
-  outline-offset: 2px;
+/* Make keyboard focus visible on form fields and authentication links. */
+.ui-workspace-form input:focus-visible, .ui-workspace-input:focus-visible, .ui-auth-card a:focus-visible {
+  outline: 3px solid var(--ui-color-accent);
+  outline-offset: 3px;
 }
 
 /* 11 §8: the primary surface is the phone, so a row, a select and the action a person aims at are 44 CSS px before anything else is decided. */
@@ -336,8 +354,9 @@
 }
 
 /* Identify Platfolio with its own simple wordmark and accent. */
-.ui-workspace-mark {
+.ui-workspace-mark, .ui-auth-wordmark::before {
   display: grid;
+  flex: none;
   place-items: center;
   inline-size: 2.15rem;
   aspect-ratio: 1;
@@ -404,6 +423,22 @@
   inset-inline-end: 0;
 }
 
+/* Match the selector popup to its trigger’s measure, border, and rounding. */
+.ui-workspace-popover[data-kind="selector"] {
+  inline-size: 100%;
+  min-inline-size: min(100%, 11rem);
+  max-inline-size: none;
+  border-color: var(--ui-color-control-border);
+  border-radius: 0.5rem;
+}
+
+/* Show the current choice inside any workspace selection popup. */
+.ui-workspace-popover[data-kind="selector"] [aria-pressed="true"], .ui-workspace-item[aria-current="true"] {
+  background: var(--ui-color-accent-surface);
+  color: var(--ui-color-accent);
+  font-weight: var(--ui-weight-title);
+}
+
 /* Distinguish workspace actions from global links. */
 .ui-workspace-menu-section {
   border-block-start: 1px solid var(--ui-color-border);
@@ -441,7 +476,7 @@
   flex-wrap: wrap;
   gap: var(--ui-space-2);
   list-style: none;
-  margin: 0;
+  margin: 0 0 0.6rem;
   padding: 0;
   font-size: var(--ui-font-caption);
   color: var(--ui-color-textMuted);
@@ -534,6 +569,11 @@
   color: var(--ui-color-textMuted);
 }
 
+/* Keep team tabs directly under the page title without a second row of spacing. */
+.ui-workspace-page-heading:has(+ .ui-workspace-tabs) {
+  margin-block-end: 0.8rem;
+}
+
 /* Keep the mockup’s tabs visible on mobile by allowing them to wrap. */
 .ui-workspace-tabs {
   display: flex;
@@ -586,19 +626,23 @@
 }
 
 /* Keep nearby tabs readable and easy to tap. */
-.ui-workspace-segments a {
+.ui-workspace-segments a, .ui-workspace-segments button {
   display: inline-flex;
   align-items: center;
   min-block-size: var(--ui-target-primary);
   padding-inline: 0.62rem;
+  border: 0;
   border-radius: var(--ui-space-2);
   color: var(--ui-color-text);
+  background: transparent;
+  font: inherit;
   font-size: 0.87rem;
   text-decoration: none;
+  cursor: pointer;
 }
 
 /* Show the selected environment or page without a colored underline. */
-.ui-workspace-segments a[aria-current="page"] {
+.ui-workspace-segments a[aria-current="page"], .ui-workspace-segments button[aria-pressed="true"] {
   background: var(--ui-color-surface);
   color: var(--ui-color-accent);
   box-shadow: 0 1px 3px color-mix(in srgb, var(--ui-color-text) 12%, transparent);
@@ -821,22 +865,139 @@
   margin-inline-start: 0;
 }
 
-/* Give the sign-in transition a simple, portable surface. */
-.ui-workspace-entry {
-  margin: var(--ui-space-8) auto;
-  inline-size: min(calc(100% - 2rem), 28rem);
-  padding: var(--ui-space-6);
-  background: var(--ui-color-surface);
-  border: 1px solid var(--ui-color-border);
-  border-radius: var(--ui-space-4);
-  font-family: system-ui, sans-serif;
+/* Share the mockup’s centered card between the site entry and Keycloak. */
+.ui-auth-card {
+  margin: 2.25rem auto 3rem;
+  inline-size: min(calc(100% - 2rem), 30rem);
+  padding: clamp(1.2rem, 6%, 1.85rem);
+  box-sizing: border-box;
 }
 
-/* Keep the Platfolio name visible during authentication. */
-.ui-workspace-entry-brand {
+/* Match the title on the mockup authentication cards. */
+.ui-auth-card h1 {
+  margin: 0 0 1.4rem;
+  font-size: 1.88rem;
+  line-height: 1.12;
+  letter-spacing: -0.042em;
+  overflow-wrap: anywhere;
+}
+
+/* Add the decorative mark to the wordmark rendered by Keycloak. */
+.ui-auth-wordmark::before {
+  content: "P" / "";
+}
+
+/* Keep single-column forms and their panels at the mockup’s measure. */
+.ui-workspace-form-panel {
+  max-inline-size: 42rem;
+}
+
+/* Let template search use the full width of its card. */
+.ui-template-search {
+  margin-block: 0;
+  max-inline-size: none;
+}
+
+/* Keep page actions above the related card. */
+.ui-workspace-page-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ui-space-3);
+  margin-block-end: var(--ui-space-5);
+}
+
+/* Use the same card surface inside a keyboard-accessible confirmation dialog. */
+.ui-workspace-dialog {
+  inline-size: min(100% - 2rem, 32rem);
+  max-block-size: calc(100% - 2rem);
+  margin: auto;
+  color: var(--ui-color-text);
+  overflow: auto;
+}
+
+/* Keep the dialog distinct from the inactive page. */
+.ui-workspace-dialog::backdrop {
+  background: color-mix(in srgb, var(--ui-color-text) 48%, transparent);
+}
+
+/* Put the date range and bars together on the mockup’s inset surface. */
+.ui-activity-history {
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--ui-color-border);
+  border-radius: 0.5rem;
+  background: var(--ui-color-bg);
+}
+
+/* Match the mockup’s compact 14-day activity chart. */
+.ui-activity-bars {
+  display: grid;
+  grid-template-columns: repeat(14, minmax(0, 1fr));
+  align-items: end;
+  gap: 0.24rem;
+  min-block-size: 2.25rem;
   margin: 0;
-  font-weight: var(--ui-weight-title);
-  color: var(--ui-color-accent);
+  padding: 0;
+  list-style: none;
+}
+
+/* Scale the bar to the observed record count with a marker for inactive days. */
+.ui-activity-bars li {
+  block-size: max(0.35rem, calc(var(--ui-activity-level, 0) * 0.75rem));
+  background: var(--ui-color-border);
+  border-radius: 0.22rem 0.22rem 0.1rem 0.1rem;
+}
+
+/* Show days with deployments verified by their hosting provider. */
+.ui-activity-bars li[data-tone="success"] {
+  background: var(--ui-color-ok);
+}
+
+/* Distinguish confirmed availability changes in the same history layout. */
+.ui-activity-bars li[data-tone="attention"] {
+  background: var(--ui-color-warn);
+}
+
+/* Label the date range below both charts. */
+.ui-activity-range {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--ui-space-2);
+  margin-block-start: var(--ui-space-3);
+}
+
+/* Use the same open timeline across activity and status pages. */
+.ui-activity-timeline {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Keep timeline entries readable in the same bordered panel at every width. */
+.ui-activity-timeline li {
+  position: relative;
+  margin-inline-start: 0.35rem;
+  padding: 0 0 0.85rem 0.95rem;
+  border-inline-start: 1px solid var(--ui-color-border);
+  overflow-wrap: anywhere;
+}
+
+/* Use the same timeline marker for any event kind. */
+.ui-activity-timeline li::before {
+  content: "";
+  position: absolute;
+  inset-block-start: 0.35rem;
+  inset-inline-start: -0.25rem;
+  inline-size: 0.45rem;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: var(--ui-color-accent);
+}
+
+/* Show the event text below its date and label. */
+.ui-activity-timeline h3 {
+  margin: var(--ui-space-2) 0 0;
+  font-size: 0.98rem;
+  line-height: 1.3;
 }
 
 /* Use the strong accent for the next step. */
@@ -844,14 +1005,66 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding-inline: var(--ui-space-5);
+  padding: 0.55rem 0.9rem;
   text-decoration: none;
   background: var(--ui-color-action);
   color: var(--ui-color-onAccent);
-  border: 0;
-  border-radius: var(--ui-space-3);
+  border: 1px solid transparent;
+  border-radius: 0.6rem;
   font: inherit;
+  font-size: 0.91rem;
+  font-weight: 650;
   cursor: pointer;
+}
+
+/* Give primary actions the same hover response in the app and Keycloak. */
+.ui-workspace-primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--ui-color-action) 86%, black);
+}
+
+/* Group rules in a single list surface. */
+.ui-notification-rules {
+  border: 1px solid var(--ui-color-border);
+  border-radius: 0.65rem;
+}
+
+/* Give a rule room for its event, scope and actions. */
+.ui-notification-rule {
+  display: grid;
+  gap: 0.65rem;
+  padding: 0.95rem;
+  min-inline-size: 0;
+}
+
+/* Place the event mark, title and status in a single readable row. */
+.ui-notification-rule-header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 0.65rem;
+}
+
+/* Keep the rule name distinct from its scope. */
+.ui-notification-rule-header h3 {
+  margin: 0;
+  font-size: 0.98rem;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+/* Show each rule’s available metadata on a quieter surface. */
+.ui-notification-rule-details {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 8.25rem), 1fr));
+  margin: 0;
+  padding: 0.55rem 0.65rem;
+  border-radius: 0.45rem;
+  background: var(--ui-color-bg);
+  font-size: var(--ui-font-label);
+}
+
+/* Keep rule actions together above the next entry. */
+.ui-notification-rule .ui-workspace-links {
+  gap: 0.3rem;
 }
 
 /* Offer a keyboard shortcut to the page content. */

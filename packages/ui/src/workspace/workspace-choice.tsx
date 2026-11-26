@@ -10,8 +10,9 @@ export function WorkspaceChoice<Value extends string>({ label, value, options, o
 }): React.ReactElement {
   const selected = options.find((item) => item.value === value);
   return <div>
-    <span className="ui-workspace-meta">{label}</span>
-    <WorkspaceMenu label={`${label}, ${selected?.label ?? 'choose an option'}`} trigger={<>{selected?.label ?? 'Choose an option'} <span aria-hidden="true">▾</span></>}>
+    <span className="ui-workspace-label">{label}</span>
+    <WorkspaceMenu kind="selector" label={`${label}, ${selected?.label ?? 'choose an option'}`} trigger={
+      <><span className="ui-workspace-team-label">{selected?.label ?? 'Choose an option'}</span><span aria-hidden="true">▾</span></>}>
       {options.map((option) => <WorkspaceAction key={option.value} type="button" variant="menu"
         aria-pressed={option.value === value} onClick={() => onChange(option.value)}>{option.label}</WorkspaceAction>)}
     </WorkspaceMenu>

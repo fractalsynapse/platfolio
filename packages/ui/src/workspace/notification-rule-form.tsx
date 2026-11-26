@@ -5,9 +5,9 @@ import { useCommand } from '../sdk/use-operation.ts';
 import { WorkspaceChoice } from './workspace-choice.tsx';
 
 export const notificationEvents = [
-  { value: 'deployment-failed', label: 'Deployment failed' },
-  { value: 'app-outage', label: 'App outage' },
-  { value: 'secret-updated', label: 'Environment secret updated' },
+  { value: 'deployment-failed', label: 'Deployment fails', mark: '!' },
+  { value: 'app-outage', label: 'App goes down', mark: '↓' },
+  { value: 'secret-updated', label: 'Password or key is updated', mark: '↻' },
 ] as const;
 
 export function NotificationRuleForm({ teams, apps, initial, onSaved, onCancel }: {
@@ -45,21 +45,25 @@ export function NotificationRuleForm({ teams, apps, initial, onSaved, onCancel }
   }
 
   return <form className="ui-workspace-form" aria-label={initial ? 'Edit notification rule' : 'New notification rule'} onSubmit={(eventObject) => void submit(eventObject)}>
-    {initial ? <p>{chosen?.name ?? 'App unavailable'}</p> : <>
-      <WorkspaceChoice label="Team" value={teamId} options={teams.map((team) => ({ value: team.teamId, label: team.name }))}
-        onChange={(value) => { setTeam(value); setInstance(''); setEnvironment(''); }} />
-      {options.length > 0 ? <WorkspaceChoice label="App" value={chosen?.id ?? ''} options={options.map((app) => ({ value: app.id, label: app.name }))}
-        onChange={(value) => { setInstance(value); setEnvironment(''); }} /> : <p>No apps in this team.</p>}
-    </>}
-    <WorkspaceChoice label="Environment" value={environment} options={[
-      { value: '', label: 'Any environment' },
-      ...(chosen?.environments.map((item) => ({ value: item.environment, label: item.environment })) ?? []),
-    ]} onChange={setEnvironment} />
-    <WorkspaceChoice label="Event" value={event} options={notificationEvents} onChange={setEvent} />
+    <fieldset><legend>App scope</legend>
+      {initial ? <p>{chosen?.name ?? 'App unavailable'}</p> : <>
+        <WorkspaceChoice label="Team" value={teamId} options={teams.map((team) => ({ value: team.teamId, label: team.name }))}
+          onChange={(value) => { setTeam(value); setInstance(''); setEnvironment(''); }} />
+        {options.length > 0 ? <WorkspaceChoice label="App" value={chosen?.id ?? ''} options={options.map((app) => ({ value: app.id, label: app.name }))}
+          onChange={(value) => { setInstance(value); setEnvironment(''); }} /> : <p>No apps in this team.</p>}
+      </>}
+      <WorkspaceChoice label="Environment" value={environment} options={[
+        { value: '', label: 'All environments' },
+        ...(chosen?.environments.map((item) => ({ value: item.environment, label: item.environment })) ?? []),
+      ]} onChange={setEnvironment} />
+    </fieldset>
+    <fieldset><legend>Event and delivery</legend>
+      <WorkspaceChoice label="Notify me when" value={event} options={notificationEvents} onChange={setEvent} />
+    </fieldset>
     {problem && <p role="alert">{problem}</p>}
     <div className="ui-workspace-links">
-      <WorkspaceAction type="submit" variant="primary" disabled={busy || !chosen}>Save rule</WorkspaceAction>
-      <WorkspaceAction type="button" onClick={onCancel} disabled={busy}>Cancel</WorkspaceAction>
+      <WorkspaceAction type="submit" variant="primary" disabled={busy || !chosen}>{initial ? 'Save rule' : 'Add rule'}</WorkspaceAction>
+      {initial && <WorkspaceAction type="button" onClick={onCancel} disabled={busy}>Cancel editing</WorkspaceAction>}
     </div>
   </form>;
 }

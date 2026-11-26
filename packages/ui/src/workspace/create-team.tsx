@@ -5,6 +5,9 @@ import type { TeamWithRole } from '@platfolio/api-contract/generated/types';
 import { useCommand } from '../sdk/use-operation.ts';
 import { WorkspaceLink } from './workspace-link.tsx';
 import { workspacePaths } from './routes.ts';
+import { Breadcrumbs } from './breadcrumbs.tsx';
+import { WorkspaceHeading } from './workspace-heading.tsx';
+import { WorkspacePanel } from './workspace-panel.tsx';
 
 export function CreateTeam({ onCreated }: { readonly onCreated: (team: TeamWithRole) => void }): React.ReactElement {
   const create = useCommand('createTeam');
@@ -29,17 +32,20 @@ export function CreateTeam({ onCreated }: { readonly onCreated: (team: TeamWithR
   }
 
   return <>
-    <h1>Create a team</h1>
-    <p>Use a short name for your team’s web address.</p>
-    <form className="ui-workspace-form" onSubmit={(event) => void submit(event)}>
-      <WorkspaceField id="new-team-name" label="Name">
-        <input id="new-team-name" value={name} onChange={(event) => setName(event.target.value)} pattern="[A-Za-z0-9](?:[A-Za-z0-9\\-]{0,38}[A-Za-z0-9])?" maxLength={40} required />
-      </WorkspaceField>
-      <div className="ui-workspace-heading">
-        <WorkspaceAction variant="primary" type="submit" disabled={pending}>{pending ? 'Creating team…' : 'Create team'}</WorkspaceAction>
-        <WorkspaceLink href={workspacePaths.home}>Cancel</WorkspaceLink>
-      </div>
-      {problem && <p role="alert">{problem}</p>}
-    </form>
+    <Breadcrumbs items={[{ label: 'Your teams', href: workspacePaths.home }, { label: 'Create team' }]} />
+    <WorkspaceHeading title="Create team"><p>Choose a name for your team’s web address. You’ll become the team owner.</p></WorkspaceHeading>
+    <WorkspacePanel title="Team details" form>
+      <form className="ui-workspace-form" onSubmit={(event) => void submit(event)}>
+        <WorkspaceField id="new-team-name" label="Name">
+          <input id="new-team-name" value={name} onChange={(event) => setName(event.target.value)} pattern="[A-Za-z0-9](?:[A-Za-z0-9\\-]{0,38}[A-Za-z0-9])?" maxLength={40} required />
+        </WorkspaceField>
+        <p className="ui-workspace-meta">Lowercase letters, numbers, and hyphens.</p>
+        <div className="ui-workspace-links">
+          <WorkspaceAction variant="primary" type="submit" disabled={pending}>{pending ? 'Creating team…' : 'Create team'}</WorkspaceAction>
+          <WorkspaceLink className="ui-workspace-secondary ui-hit-primary" href={workspacePaths.home}>Cancel</WorkspaceLink>
+        </div>
+        {problem && <p role="alert">{problem}</p>}
+      </form>
+    </WorkspacePanel>
   </>;
 }

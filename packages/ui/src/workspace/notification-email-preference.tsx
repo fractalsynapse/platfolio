@@ -2,7 +2,6 @@ import { WorkspaceAction } from './workspace-action.tsx';
 import * as React from 'react';
 import { ageLabel, useClock } from '../components/freshness.ts';
 import { useCommand, useOperation } from '../sdk/use-operation.ts';
-import { WorkspacePanel } from './workspace-panel.tsx';
 
 const params = {};
 
@@ -31,11 +30,11 @@ export function NotificationEmailPreference() {
   </p>;
   if (preference.state.status !== 'loaded') return null;
   const { available, enabled } = preference.state.data;
-  return <WorkspacePanel title="Email alerts">
+  return <>
     <p>{available ? 'Send matching alerts to your verified primary email address.' : 'Email delivery is unavailable in this installation.'}</p>
     <p className="ui-workspace-meta">{ageLabel(preference.state.freshness, clock().toISOString()).text}</p>
     {(available || enabled) && <WorkspaceAction type="button" disabled={pending}
       onClick={() => void change(!enabled)}>{pending ? 'Saving…' : enabled ? 'Turn off email alerts' : 'Turn on email alerts'}</WorkspaceAction>}
     {error && <p role="alert">{error}</p>}
-  </WorkspacePanel>;
+  </>;
 }

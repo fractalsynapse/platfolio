@@ -1,6 +1,7 @@
 import { WorkspaceAction } from './workspace-action.tsx';
 import * as React from 'react';
 import type { TeamWithRole } from '@platfolio/api-contract/generated/types';
+import { BrandLabel } from './brand-label.tsx';
 import { teamSectionLinks, workspacePaths } from './routes.ts';
 import { WorkspaceLink } from './workspace-link.tsx';
 import { WorkspaceMenu } from './workspace-menu.tsx';
@@ -18,7 +19,7 @@ export function WorkspaceHeader({ teams, team, invitationCount, displayName, sig
   const active = teams.find(({ name }) => name === team) ?? teams[0];
   return <header className="ui-workspace-header">
     <div className="ui-workspace-header-inner">
-    <WorkspaceMenu kind="wordmark" label="Platfolio navigation" trigger={<><span className="ui-workspace-mark" aria-hidden="true">P</span>Platfolio</>}>
+    <WorkspaceMenu kind="wordmark" label="Platfolio navigation" trigger={<BrandLabel />}>
       <a className="ui-workspace-item ui-hit-primary" href="/">Home</a>
       {active && <div className="ui-workspace-menu-section">
         {teamSectionLinks(active, undefined, true).map(({ href, label }) =>

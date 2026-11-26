@@ -71,20 +71,23 @@ export function EnvironmentWorkspace({ instanceId, canManage, environment, targe
           {canManage && <p><WorkspaceLink href={workspacePaths.instanceSetup(route.team, route.instance)}>Open app setup</WorkspaceLink></p>}
         </WorkspacePanel>}
       </MainContext>}
-      {route.tab === 'domains' && <>
+      {route.tab === 'domains' && <MainContext>
         <EnvironmentDomains domains={state.data.domains} planned={state.data.planned} hosting={state.data.hosting} />
         {state.data.hosting && state.data.hosting.state !== 'paused' && state.data.hosting.state !== 'removed' &&
           <HostedCustomDomains params={params} canManage={canManage} />}
-      </>}
-      {route.tab === 'configuration' && <WorkspacePanel title="Configuration">
-        {route.environment === 'staging' && state.data.hosting && state.data.hosting.state !== 'paused' && state.data.hosting.state !== 'removed' &&
-          <HostedStarterBrand key={instanceId} params={params} canManage={canManage} progressPath={workspacePaths.instanceSetup(route.team, route.instance)} />}
+      </MainContext>}
+      {route.tab === 'configuration' && <MainContext><WorkspacePanel title="Passwords and keys">
         {!state.data.planned && (state.data.hosting ? <p>Starter Web uses a database connection generated in Railway.</p>
           : <p>Register a deployment plan to check this environment’s settings.</p>)}
         {state.data.planned && state.data.services.every(({ secrets }) => secrets.length === 0) && <p>No app secrets are declared for this environment.</p>}
         {state.data.services.filter(({ secrets }) => secrets.length > 0).map(({ name, secrets }) =>
           <ServiceSecretPresence key={name} scope={{ ...params, service: name }} names={secrets} />)}
-      </WorkspacePanel>}
+      </WorkspacePanel>
+        {route.environment === 'staging' && state.data.hosting && state.data.hosting.state !== 'paused' && state.data.hosting.state !== 'removed' &&
+          <WorkspacePanel title="App branding" context>
+            <HostedStarterBrand key={instanceId} params={params} canManage={canManage} progressPath={workspacePaths.instanceSetup(route.team, route.instance)} />
+          </WorkspacePanel>}
+      </MainContext>}
       {route.tab === 'overview' && state.data.services.length > 0 && <section aria-label="Planned services">
         <h2>Planned services</h2>
         <ul className="ui-workspace-list">{state.data.services.map(({ name }) => <li className="ui-workspace-row" key={name}>{name}</li>)}</ul>

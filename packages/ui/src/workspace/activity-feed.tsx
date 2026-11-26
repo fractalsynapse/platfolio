@@ -8,18 +8,28 @@ export interface ActivityEntry {
   readonly at: string;
   readonly detail?: string;
   readonly href?: string;
+  readonly label?: string;
 }
 
-export function ActivityFeed({ title, empty, entries }: { title: string; empty: string; entries: readonly ActivityEntry[] }): React.ReactElement {
+export function ActivityFeed({ title, empty, entries, history, observation }: {
+  readonly title: string;
+  readonly empty: string;
+  readonly entries: readonly ActivityEntry[];
+  readonly history?: React.ReactNode;
+  readonly observation?: string | undefined;
+}): React.ReactElement {
   return <WorkspacePanel title={title}>
-    {entries.length ? <ol className="ui-workspace-list">
-      {entries.map((entry) => <li className="ui-workspace-row" key={entry.id}>
-        <div>
-          {entry.href ? <WorkspaceLink href={entry.href}><strong>{entry.title}</strong></WorkspaceLink> : <strong>{entry.title}</strong>}
-          {entry.detail && <p className="ui-workspace-meta">{entry.detail}</p>}
+    {observation && <p className="ui-workspace-meta">{observation}</p>}
+    {history}
+    {entries.length ? <ol className="ui-activity-timeline">
+      {entries.map((entry) => <li key={entry.id}>
+        <div className="ui-workspace-links">
+          {entry.label && <span className="ui-setup-status">{entry.label}</span>}
+          <time className="ui-workspace-meta" dateTime={entry.at}>{new Date(entry.at).toLocaleString()}</time>
         </div>
-        <time className="ui-workspace-meta" dateTime={entry.at}>{new Date(entry.at).toLocaleString()}</time>
+        <h3>{entry.href ? <WorkspaceLink href={entry.href}>{entry.title}</WorkspaceLink> : entry.title}</h3>
+        {entry.detail && <p className="ui-workspace-meta">{entry.detail}</p>}
       </li>)}
-    </ol> : <p>{empty}</p>}
+    </ol> : <p className="ui-workspace-empty">{empty}</p>}
   </WorkspacePanel>;
 }

@@ -44,6 +44,16 @@ export const COMPONENT_RULES = [
     why: 'Keep setup status visible next to each card title.',
   },
   {
+    selector: '.ui-setup-status[data-tone="success"]',
+    declarations: ['background: color-mix(in srgb, var(--ui-color-ok) 12%, var(--ui-color-surface));', 'color: var(--ui-color-ok);'],
+    why: 'Use the same readable success badge for verification and active rules.',
+  },
+  {
+    selector: '.ui-setup-status[data-tone="attention"]',
+    declarations: ['background: color-mix(in srgb, var(--ui-color-warn) 10%, var(--ui-color-surface));', 'color: var(--ui-color-warn);'],
+    why: 'Identify a state that needs attention with a word and a tinted badge.',
+  },
+  {
     selector: '.ui-workspace-links',
     declarations: ['display: flex;', 'flex-wrap: wrap;', 'gap: var(--ui-space-4);'],
     why: 'Place related workspace actions together at each supported width.',
@@ -91,13 +101,18 @@ export const COMPONENT_RULES = [
   },
   {
     selector: '.ui-workspace-form',
-    declarations: ['display: grid;', 'gap: var(--ui-space-3);', 'max-inline-size: 28rem;', 'margin-block: var(--ui-space-4);'],
+    declarations: ['display: grid;', 'gap: 0.55rem;', 'max-inline-size: 29rem;', 'margin-block: var(--ui-space-4);'],
     why: 'Keep labels and fields together and limit the line length on wider screens.',
   },
   {
-    selector: '.ui-workspace-form input:not([type="checkbox"])',
-    declarations: ['inline-size: 100%;', 'min-inline-size: 0;', 'min-block-size: var(--ui-target-primary);', 'padding: var(--ui-space-2) var(--ui-space-3);', 'border: 1px solid var(--ui-color-border);', 'border-radius: var(--ui-space-3);', 'background: var(--ui-color-bg);', 'color: var(--ui-color-text);', 'font: inherit;'],
+    selector: '.ui-workspace-form input:not([type="checkbox"], [type="hidden"]), .ui-workspace-input',
+    declarations: ['inline-size: 100%;', 'min-inline-size: 0;', 'min-block-size: var(--ui-target-primary);', 'padding: 0.52rem 0.72rem;', 'border: 1px solid var(--ui-color-control-border);', 'border-radius: var(--ui-space-3);', 'background: var(--ui-color-surface);', 'color: var(--ui-color-text);', 'font: inherit;'],
     why: 'Use the same field surface as authentication and preserve the primary input target.',
+  },
+  {
+    selector: '.ui-workspace-form label, .ui-workspace-label',
+    declarations: ['font-size: var(--ui-font-label);', 'font-weight: 680;'],
+    why: 'Share the same field labels across workspace and authentication forms.',
   },
   {
     selector: '.ui-workspace-form fieldset',
@@ -116,9 +131,9 @@ export const COMPONENT_RULES = [
     why: 'Use the active theme colour and the same control size in every choice group.',
   },
   {
-    selector: '.ui-workspace-form input:focus-visible',
-    declarations: ['outline: 2px solid var(--ui-color-accent);', 'outline-offset: 2px;'],
-    why: 'Make keyboard focus visible on workspace fields.',
+    selector: '.ui-workspace-form input:focus-visible, .ui-workspace-input:focus-visible, .ui-auth-card a:focus-visible',
+    declarations: ['outline: 3px solid var(--ui-color-accent);', 'outline-offset: 3px;'],
+    why: 'Make keyboard focus visible on form fields and authentication links.',
   },
   {
     selector: '.ui-hit-primary',
@@ -254,8 +269,8 @@ export const COMPONENT_RULES = [
     why: 'Long team names leave space for the account button and are shown in full in the selector.',
   },
   {
-    selector: '.ui-workspace-mark',
-    declarations: ['display: grid;', 'place-items: center;', 'inline-size: 2.15rem;', 'aspect-ratio: 1;', 'background: var(--ui-color-brand);', 'color: var(--ui-color-onAccent);', 'border-radius: 0.55rem;', 'font-weight: 750;'],
+    selector: '.ui-workspace-mark, .ui-auth-wordmark::before',
+    declarations: ['display: grid;', 'flex: none;', 'place-items: center;', 'inline-size: 2.15rem;', 'aspect-ratio: 1;', 'background: var(--ui-color-brand);', 'color: var(--ui-color-onAccent);', 'border-radius: 0.55rem;', 'font-weight: 750;'],
     why: 'Identify Platfolio with its own simple wordmark and accent.',
   },
   {
@@ -289,6 +304,17 @@ export const COMPONENT_RULES = [
     why: 'Keep right-hand disclosures within the screen.',
   },
   {
+    selector: '.ui-workspace-popover[data-kind="selector"]',
+    declarations: ['inline-size: 100%;', 'min-inline-size: min(100%, 11rem);', 'max-inline-size: none;',
+      'border-color: var(--ui-color-control-border);', 'border-radius: 0.5rem;'],
+    why: 'Match the selector popup to its trigger’s measure, border, and rounding.',
+  },
+  {
+    selector: '.ui-workspace-popover[data-kind="selector"] [aria-pressed="true"], .ui-workspace-item[aria-current="true"]',
+    declarations: ['background: var(--ui-color-accent-surface);', 'color: var(--ui-color-accent);', 'font-weight: var(--ui-weight-title);'],
+    why: 'Show the current choice inside any workspace selection popup.',
+  },
+  {
     selector: '.ui-workspace-menu-section',
     declarations: ['border-block-start: 1px solid var(--ui-color-border);', 'margin-block-start: var(--ui-space-2);', 'padding-block-start: var(--ui-space-2);'],
     why: 'Distinguish workspace actions from global links.',
@@ -309,7 +335,7 @@ export const COMPONENT_RULES = [
   },
   {
     selector: '.ui-workspace-crumbs',
-    declarations: ['display: flex;', 'flex-wrap: wrap;', 'gap: var(--ui-space-2);', 'list-style: none;', 'margin: 0;', 'padding: 0;', 'font-size: var(--ui-font-caption);', 'color: var(--ui-color-textMuted);', 'overflow-wrap: anywhere;'],
+    declarations: ['display: flex;', 'flex-wrap: wrap;', 'gap: var(--ui-space-2);', 'list-style: none;', 'margin: 0 0 0.6rem;', 'padding: 0;', 'font-size: var(--ui-font-caption);', 'color: var(--ui-color-textMuted);', 'overflow-wrap: anywhere;'],
     why: 'Let shallow breadcrumbs wrap without obscuring the selected context.',
   },
   {
@@ -379,6 +405,11 @@ export const COMPONENT_RULES = [
     why: 'Keep the short page description beside its title.',
   },
   {
+    selector: '.ui-workspace-page-heading:has(+ .ui-workspace-tabs)',
+    declarations: ['margin-block-end: 0.8rem;'],
+    why: 'Keep team tabs directly under the page title without a second row of spacing.',
+  },
+  {
     selector: '.ui-workspace-tabs',
     declarations: ['display: flex;', 'flex-wrap: wrap;', 'gap: 0.15rem 0.25rem;', 'margin-block: var(--ui-space-3) var(--ui-space-5);',
       'border-block-end: 1px solid var(--ui-color-border);'],
@@ -409,13 +440,14 @@ export const COMPONENT_RULES = [
     why: 'Share the mockup’s segmented navigation between account sections and environment controls.',
   },
   {
-    selector: '.ui-workspace-segments a',
+    selector: '.ui-workspace-segments a, .ui-workspace-segments button',
     declarations: ['display: inline-flex;', 'align-items: center;', 'min-block-size: var(--ui-target-primary);', 'padding-inline: 0.62rem;',
-      'border-radius: var(--ui-space-2);', 'color: var(--ui-color-text);', 'font-size: 0.87rem;', 'text-decoration: none;'],
+      'border: 0;', 'border-radius: var(--ui-space-2);', 'color: var(--ui-color-text);', 'background: transparent;',
+      'font: inherit;', 'font-size: 0.87rem;', 'text-decoration: none;', 'cursor: pointer;'],
     why: 'Keep nearby tabs readable and easy to tap.',
   },
   {
-    selector: '.ui-workspace-segments a[aria-current="page"]',
+    selector: '.ui-workspace-segments a[aria-current="page"], .ui-workspace-segments button[aria-pressed="true"]',
     declarations: ['background: var(--ui-color-surface);', 'color: var(--ui-color-accent);', 'box-shadow: 0 1px 3px color-mix(in srgb, var(--ui-color-text) 12%, transparent);'],
     why: 'Show the selected environment or page without a colored underline.',
   },
@@ -562,19 +594,143 @@ export const COMPONENT_RULES = [
     why: 'Align values beneath their labels.',
   },
   {
-    selector: '.ui-workspace-entry',
-    declarations: ['margin: var(--ui-space-8) auto;', 'inline-size: min(calc(100% - 2rem), 28rem);', 'padding: var(--ui-space-6);', 'background: var(--ui-color-surface);', 'border: 1px solid var(--ui-color-border);', 'border-radius: var(--ui-space-4);', 'font-family: system-ui, sans-serif;'],
-    why: 'Give the sign-in transition a simple, portable surface.',
+    selector: '.ui-auth-card',
+    declarations: ['margin: 2.25rem auto 3rem;', 'inline-size: min(calc(100% - 2rem), 30rem);',
+      'padding: clamp(1.2rem, 6%, 1.85rem);', 'box-sizing: border-box;'],
+    why: 'Share the mockup’s centered card between the site entry and Keycloak.',
   },
   {
-    selector: '.ui-workspace-entry-brand',
-    declarations: ['margin: 0;', 'font-weight: var(--ui-weight-title);', 'color: var(--ui-color-accent);'],
-    why: 'Keep the Platfolio name visible during authentication.',
+    selector: '.ui-auth-card h1',
+    declarations: ['margin: 0 0 1.4rem;', 'font-size: 1.88rem;', 'line-height: 1.12;', 'letter-spacing: -0.042em;', 'overflow-wrap: anywhere;'],
+    why: 'Match the title on the mockup authentication cards.',
+  },
+  {
+    selector: '.ui-auth-wordmark::before',
+    declarations: ['content: "P" / "";'],
+    why: 'Add the decorative mark to the wordmark rendered by Keycloak.',
+  },
+  {
+    selector: '.ui-workspace-form-panel',
+    declarations: ['max-inline-size: 42rem;'],
+    why: 'Keep single-column forms and their panels at the mockup’s measure.',
+  },
+  {
+    selector: '.ui-template-search',
+    declarations: ['margin-block: 0;', 'max-inline-size: none;'],
+    why: 'Let template search use the full width of its card.',
+  },
+  {
+    selector: '.ui-workspace-page-actions',
+    declarations: ['display: flex;', 'flex-wrap: wrap;', 'gap: var(--ui-space-3);', 'margin-block-end: var(--ui-space-5);'],
+    why: 'Keep page actions above the related card.',
+  },
+  {
+    selector: '.ui-workspace-dialog',
+    declarations: ['inline-size: min(100% - 2rem, 32rem);', 'max-block-size: calc(100% - 2rem);', 'margin: auto;',
+      'color: var(--ui-color-text);', 'overflow: auto;'],
+    why: 'Use the same card surface inside a keyboard-accessible confirmation dialog.',
+  },
+  {
+    selector: '.ui-workspace-dialog::backdrop',
+    declarations: ['background: color-mix(in srgb, var(--ui-color-text) 48%, transparent);'],
+    why: 'Keep the dialog distinct from the inactive page.',
+  },
+  {
+    selector: '.ui-activity-history',
+    declarations: ['padding: 0.55rem 0.65rem;', 'border: 1px solid var(--ui-color-border);',
+      'border-radius: 0.5rem;', 'background: var(--ui-color-bg);'],
+    why: 'Put the date range and bars together on the mockup’s inset surface.',
+  },
+  {
+    selector: '.ui-activity-bars',
+    declarations: ['display: grid;', 'grid-template-columns: repeat(14, minmax(0, 1fr));', 'align-items: end;',
+      'gap: 0.24rem;', 'min-block-size: 2.25rem;', 'margin: 0;', 'padding: 0;', 'list-style: none;'],
+    why: 'Match the mockup’s compact 14-day activity chart.',
+  },
+  {
+    selector: '.ui-activity-bars li',
+    declarations: ['block-size: max(0.35rem, calc(var(--ui-activity-level, 0) * 0.75rem));',
+      'background: var(--ui-color-border);', 'border-radius: 0.22rem 0.22rem 0.1rem 0.1rem;'],
+    why: 'Scale the bar to the observed record count with a marker for inactive days.',
+  },
+  {
+    selector: '.ui-activity-bars li[data-tone="success"]',
+    declarations: ['background: var(--ui-color-ok);'],
+    why: 'Show days with deployments verified by their hosting provider.',
+  },
+  {
+    selector: '.ui-activity-bars li[data-tone="attention"]',
+    declarations: ['background: var(--ui-color-warn);'],
+    why: 'Distinguish confirmed availability changes in the same history layout.',
+  },
+  {
+    selector: '.ui-activity-range',
+    declarations: ['display: flex;', 'justify-content: space-between;', 'gap: var(--ui-space-2);', 'margin-block-start: var(--ui-space-3);'],
+    why: 'Label the date range below both charts.',
+  },
+  {
+    selector: '.ui-activity-timeline',
+    declarations: ['margin: 0;', 'padding: 0;', 'list-style: none;'],
+    why: 'Use the same open timeline across activity and status pages.',
+  },
+  {
+    selector: '.ui-activity-timeline li',
+    declarations: ['position: relative;', 'margin-inline-start: 0.35rem;', 'padding: 0 0 0.85rem 0.95rem;',
+      'border-inline-start: 1px solid var(--ui-color-border);', 'overflow-wrap: anywhere;'],
+    why: 'Keep timeline entries readable in the same bordered panel at every width.',
+  },
+  {
+    selector: '.ui-activity-timeline li::before',
+    declarations: ['content: "";', 'position: absolute;', 'inset-block-start: 0.35rem;', 'inset-inline-start: -0.25rem;',
+      'inline-size: 0.45rem;', 'aspect-ratio: 1;', 'border-radius: 50%;', 'background: var(--ui-color-accent);'],
+    why: 'Use the same timeline marker for any event kind.',
+  },
+  {
+    selector: '.ui-activity-timeline h3',
+    declarations: ['margin: var(--ui-space-2) 0 0;', 'font-size: 0.98rem;', 'line-height: 1.3;'],
+    why: 'Show the event text below its date and label.',
   },
   {
     selector: '.ui-workspace-primary',
-    declarations: ['display: inline-flex;', 'align-items: center;', 'justify-content: center;', 'padding-inline: var(--ui-space-5);', 'text-decoration: none;', 'background: var(--ui-color-action);', 'color: var(--ui-color-onAccent);', 'border: 0;', 'border-radius: var(--ui-space-3);', 'font: inherit;', 'cursor: pointer;'],
+    declarations: ['display: inline-flex;', 'align-items: center;', 'justify-content: center;', 'padding: 0.55rem 0.9rem;', 'text-decoration: none;', 'background: var(--ui-color-action);', 'color: var(--ui-color-onAccent);', 'border: 1px solid transparent;', 'border-radius: 0.6rem;', 'font: inherit;', 'font-size: 0.91rem;', 'font-weight: 650;', 'cursor: pointer;'],
     why: 'Use the strong accent for the next step.',
+  },
+  {
+    selector: '.ui-workspace-primary:hover:not(:disabled)',
+    declarations: ['background: color-mix(in srgb, var(--ui-color-action) 86%, black);'],
+    why: 'Give primary actions the same hover response in the app and Keycloak.',
+  },
+  {
+    selector: '.ui-notification-rules',
+    declarations: ['border: 1px solid var(--ui-color-border);', 'border-radius: 0.65rem;'],
+    why: 'Group rules in a single list surface.',
+  },
+  {
+    selector: '.ui-notification-rule',
+    declarations: ['display: grid;', 'gap: 0.65rem;', 'padding: 0.95rem;', 'min-inline-size: 0;'],
+    why: 'Give a rule room for its event, scope and actions.',
+  },
+  {
+    selector: '.ui-notification-rule-header',
+    declarations: ['display: grid;', 'grid-template-columns: auto minmax(0, 1fr) auto;', 'align-items: start;', 'gap: 0.65rem;'],
+    why: 'Place the event mark, title and status in a single readable row.',
+  },
+  {
+    selector: '.ui-notification-rule-header h3',
+    declarations: ['margin: 0;', 'font-size: 0.98rem;', 'line-height: 1.3;', 'overflow-wrap: anywhere;'],
+    why: 'Keep the rule name distinct from its scope.',
+  },
+  {
+    selector: '.ui-notification-rule-details',
+    declarations: ['grid-template-columns: repeat(auto-fit, minmax(min(100%, 8.25rem), 1fr));',
+      'margin: 0;', 'padding: 0.55rem 0.65rem;', 'border-radius: 0.45rem;', 'background: var(--ui-color-bg);',
+      'font-size: var(--ui-font-label);'],
+    why: 'Show each rule’s available metadata on a quieter surface.',
+  },
+  {
+    selector: '.ui-notification-rule .ui-workspace-links',
+    declarations: ['gap: 0.3rem;'],
+    why: 'Keep rule actions together above the next entry.',
   },
   {
     selector: '.ui-workspace-skip',

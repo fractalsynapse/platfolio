@@ -237,7 +237,7 @@ ${colorDeclarations(light, '  ')}
 }
 
 @media (prefers-color-scheme: dark) {
-  :root:not([data-ui-scheme="light"]) {
+  :root:not([data-ui-scheme="light"], .ui-scheme-light) {
     color-scheme: dark;
 
 ${colorDeclarations(dark, '    ')}

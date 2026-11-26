@@ -20,7 +20,7 @@
             </div>
             <div class="${properties.kcFormButtonsClass!}">
                 <button type="submit" class="${properties.kcButtonClass!} ${properties.kcButtonPrimaryClass!}">${msg("platfolioRequestResetLink")}</button>
-                <a href="${url.loginUrl}">${msg("backToLogin")}</a>
+                <a class="ui-workspace-secondary ui-hit-primary" href="${url.loginUrl}">${msg("backToLogin")}</a>
             </div>
         </form>
     </#if>

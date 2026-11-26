@@ -14,6 +14,7 @@
  * credential, and `public/config.js` is tracked as a comment because a committed origin is D47's failure.
  */
 import '../styles/site.css';
+import { PublicHeader } from '@platfolio/ui';
 
 interface Props {
   title: string;
@@ -43,12 +44,7 @@ const origin = Astro.site ?? new URL(Astro.request.url).origin;
   </head>
   <body>
     {workspace ? <slot /> : <>
-      <header class="ui-workspace-header">
-        <div class="ui-workspace-header-inner">
-          <a class="ui-workspace-wordmark ui-hit-primary" href="/"><span class="ui-workspace-mark" aria-hidden="true">P</span>Platfolio</a>
-          <a class="ui-workspace-secondary ui-hit-primary" href="/dashboard">Sign in</a>
-        </div>
-      </header>
+      <PublicHeader signIn />
       <main class="ui-page ui-public-main">
         <slot />
       </main>

@@ -32,9 +32,9 @@ export function TeamWorkspace(): React.ReactElement {
   const now = clock().toISOString();
   const age = ageLabel(state.freshness, now).text;
   if (route.kind === 'team') return <>
-    <WorkspaceHeading title="Team workspace" />
+    <WorkspaceHeading title="Team workspace"><p>{team.role === 'owner' ? 'Owner' : 'Member'} access</p></WorkspaceHeading>
     <TeamTabs team={team} current="apps" />
-    <MainContext>
+    <MainContext contextFirst>
       <WorkspacePanel title="Apps">
         <p className="ui-workspace-meta">{age}</p>
         <AppList team={team.name} apps={apps} />
@@ -45,7 +45,7 @@ export function TeamWorkspace(): React.ReactElement {
     </MainContext>
   </>;
   if (route.kind === 'team-activity') return <>
-    <WorkspaceHeading title="Activity" />
+    <WorkspaceHeading title="Team activity" />
     <TeamTabs team={team} current="activity" />
     <TeamActivity key={team.teamId} team={team} apps={apps} />
   </>;
