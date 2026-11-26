@@ -402,7 +402,7 @@ Members can see the team roster and roles. Owners can use Change role or Remove 
 
 History uses the same list on both sizes. It shows revoked, expired, and accepted entries with creation time and email status. Owners can preview an available email from History. Revoke and Invite member are Active actions.
 
-An owner can invite an email address before its holder has an account. The invitation record and delivery outcome are separate. The recipient signs in or creates an account, verifies the addressed primary email, then accepts in [My invitations](account.md#my-invitations). Opening or forwarding the email alone grants no membership. The mockup prepares a local email preview.
+An owner can invite an email address before its holder has an account. If email delivery fails or is unavailable, keep a pending invitation in Active until it expires, is revoked, or is accepted. The recipient signs in or creates an account, verifies the addressed primary email, then accepts in [My invitations](account.md#my-invitations). Opening or forwarding the email alone grants no membership. The mockup prepares a local email preview.
 
 ## Connections
 

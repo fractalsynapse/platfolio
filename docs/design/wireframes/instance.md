@@ -285,7 +285,12 @@ Both shared identity and other declared capabilities fit this page. The consumer
 | +------------------------------------------------------------------------+ |
 | | Action review (when open)                                              | |
 | | Railway compute and data | GitHub workflow | Provider grants           | |
+| | Affected apps | Blockers                                               | |
 | | Confirm or cancel                                                      | |
+| +------------------------------------------------------------------------+ |
+| +------------------------------------------------------------------------+ |
+| | Removal progress                                                      | |
+| | Requested | Blocked | Confirmed                                        | |
 | +------------------------------------------------------------------------+ |
 | +------------------------------------------------------------------------+ |
 | | After removal                                                          | |
@@ -325,7 +330,12 @@ Both shared identity and other declared capabilities fit this page. The consumer
 | | Action review (when open)        | |
 | | Effects on compute and data      | |
 | | Workflow and provider access     | |
+| | Affected apps | Blockers         | |
 | | Confirm or cancel                | |
+| +----------------------------------+ |
+| +----------------------------------+ |
+| | Removal progress                 | |
+| | Requested | Blocked | Confirmed  | |
 | +----------------------------------+ |
 | +----------------------------------+ |
 | | After removal                    | |
@@ -335,7 +345,9 @@ Both shared identity and other declared capabilities fit this page. The consumer
 +--------------------------------------+
 ```
 
-Review applies to the chosen action across the instance. Suspension retains data, resume uses the retained configuration, and removal hands off the stack in its existing state. The owner types the instance name to confirm removal and can reach the same route from Removed apps to export and complete the handoff.
+Review applies to the chosen action across the instance. Suspension retains data, and resume uses the retained configuration. In the mockup's handoff flow, removal leaves the stack running. The owner types the instance name to confirm the handoff and can reach the same route from Removed apps to export.
+
+For keep-data and wipe-data removal, show the outcome in Manage app. Show Requested while the provider action is pending. If a dependent app blocks removal, show which app needs attention. Confirm keep-data removal after checking that the deployments stopped and the volumes remain. Confirm a wipe after checking that Railway deleted the project. See the [lifecycle scope in the sitemap](../../sitemap.md#instance-workspace).
 
 ## Status
 
