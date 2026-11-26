@@ -1,0 +1,27 @@
+---
+import Page from './page.astro';
+import { resolveSiteConfig } from '../lib/site-config.ts';
+
+interface Props {
+  title: string;
+  description: string;
+}
+
+const { apiBaseUrl } = resolveSiteConfig(process.env);
+---
+<Page {...Astro.props} scriptSrc="/config.js">
+  <div data-public-template-catalog data-catalog-api={apiBaseUrl}>
+    <slot name="heading" />
+    <p class="ui-workspace-meta" role="status" data-release-status hidden></p>
+    <noscript><p>Enable JavaScript to see published versions and pinned source links.</p></noscript>
+    <slot />
+  </div>
+</Page>
+
+<script>
+  import { setUpTemplateFilters } from '../lib/template-filters.ts';
+  import { showPublicTemplateReleases } from '../lib/public-template-releases.ts';
+
+  const catalog = document.querySelector<HTMLElement>('[data-public-template-catalog]');
+  if (catalog) showPublicTemplateReleases(catalog, setUpTemplateFilters(catalog));
+</script>

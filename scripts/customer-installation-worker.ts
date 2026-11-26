@@ -91,6 +91,7 @@ const server = createServer({ requestTimeout: 10000 }, (request, response) => {
       case 'marketplace-status': reply(200, await marketplace.connection()); return;
       case 'marketplace-enroll': reply(200, await marketplace.enroll(command.body.handoff)); return;
       case 'marketplace-catalog': reply(200, await marketplace.catalog()); return;
+      case 'marketplace-public-catalog': reply(200, await marketplace.publicCatalog()); return;
       case 'template-report': reply(200, privateRun(command.body.template).read()); return;
       case 'template-start':
       case 'template-remove':

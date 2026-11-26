@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
-import { TEMPLATE_CATALOG } from '@platfolio/manifest';
+import { MARKETPLACE_RELEASES, TEMPLATE_CATALOG } from '@platfolio/manifest';
 
 const ROOT = path.resolve(import.meta.dirname, '../../..');
 const SITE = path.join(ROOT, 'apps/site');
@@ -90,11 +90,18 @@ test('the landing page emits no client JavaScript at all', () => {
 test('the public template catalog and details are prerendered without React hydration', () => {
   const catalog = readPage('/templates');
   assert.match(catalog, /<h1>Templates<\/h1>/);
+  assert.match(catalog, /<script src="\/config\.js">/);
+  assert.match(catalog, /data-release-version="label" hidden/);
   for (const { name, repo } of TEMPLATE_CATALOG) {
     assert.ok(catalog.includes(`href="/templates/${name}"`), `The catalog should link to ${name}`);
     const detail = readPage(`/templates/${name}`);
     assert.ok(detail.includes(`href="https://github.com/${repo}"`), `Missing canonical source link for ${name}`);
-    assert.doesNotMatch(detail, /<script[\s>]|<astro-island[\s>]/);
+    assert.doesNotMatch(detail, /<astro-island[\s>]/);
+    assert.match(detail, /data-release-tree hidden/);
+    assert.match(detail, /<script src="\/config\.js">/);
+    const bundled = MARKETPLACE_RELEASES.find(({ template }) => template === name)!;
+    assert.ok(!detail.includes(bundled.revision), `${name} must not bake a release commit into its public page`);
+    assert.ok(!catalog.includes(`Version ${bundled.version}`), 'The public catalog must not bake release versions');
   }
   assert.doesNotMatch(catalog, /<astro-island[\s>]/);
 });

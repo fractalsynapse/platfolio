@@ -160,7 +160,7 @@ export class PollTransport implements Transport {
   async call<O extends OperationId>(
     op: O,
     input: { params: ParamsOf<O>; body?: RequestBodyOf<O> },
-    auth: AuthSource,
+    auth: AuthSource | undefined,
     signal?: AbortSignal,
   ): Promise<Result<SuccessOf<O>>> {
     const endpoint = endpointFor(this.endpoints, op);
@@ -171,9 +171,9 @@ export class PollTransport implements Transport {
     }
     const url = `${this.config.baseUrl.replace(/\/$/, '')}${path}${queryString(endpoint.path, params)}`;
 
-    let token: string;
+    let token: string | undefined;
     try {
-      token = await auth.token();
+      token = await auth?.token();
     } catch {
       // Auth is injected (07), so a failure here is the shell's, and the UI needs to be able to say so without
       // implying the server refused.
@@ -193,10 +193,11 @@ export class PollTransport implements Transport {
       response = await doFetch(url, {
         method,
         headers: {
-          authorization: `Bearer ${token}`,
+          ...(token === undefined ? {} : { authorization: `Bearer ${token}` }),
           ...(requestBody === undefined ? {} : { 'content-type': 'application/json' }),
         },
         ...(requestBody === undefined ? {} : { body: requestBody }),
+        ...(auth === undefined ? { credentials: 'omit', redirect: 'error' } : {}),
         ...(signal === undefined ? {} : { signal }),
       });
     } catch (cause) {

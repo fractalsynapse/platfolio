@@ -49,6 +49,7 @@ export const CustomerHostingCommandSchema = z.discriminatedUnion('action', [
   command('remove', HostingRemovalSchema),
   command('marketplace-status', empty),
   command('marketplace-catalog', empty),
+  command('marketplace-public-catalog', empty),
   command('marketplace-enroll', z.object({ handoff: z.string().regex(/^[0-9a-f-]{36}:[A-Za-z0-9_-]{43}$/) }).strict()),
   command('domains-list', target),
   command('domain-attach', domain),
