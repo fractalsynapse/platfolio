@@ -66,7 +66,7 @@ export interface Transport {
   call<O extends OperationId>(
     op: O,
     input: { params: ParamsOf<O>; body?: RequestBodyOf<O> },
-    auth: AuthSource | undefined,
+    auth: AuthSource,
     signal?: AbortSignal,
   ): Promise<Result<SuccessOf<O>>>;
   /** Optional by the spec of 11 §6. An operation with no freshness source is one no panel may claim is fresh. */

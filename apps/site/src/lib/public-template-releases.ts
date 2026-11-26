@@ -1,4 +1,4 @@
-import { PollTransport } from '@platfolio/ui';
+import { createPublicMarketplaceCatalog } from '@platfolio/ui';
 import { runtimeConfigFrom } from './site-config.ts';
 
 export function showPublicTemplateReleases(catalog: HTMLElement, afterRefresh?: () => void): void {
@@ -7,9 +7,9 @@ export function showPublicTemplateReleases(catalog: HTMLElement, afterRefresh?: 
   status.hidden = false;
   status.textContent = 'Checking published releases…';
 
-  let transport: PollTransport;
+  let client: ReturnType<typeof createPublicMarketplaceCatalog>;
   try {
-    transport = new PollTransport({ baseUrl: runtimeConfigFrom(globalThis)?.apiBaseUrl ?? catalog.dataset.catalogApi ?? '' });
+    client = createPublicMarketplaceCatalog(runtimeConfigFrom(globalThis)?.apiBaseUrl ?? catalog.dataset.catalogApi ?? '');
   } catch {
     status.textContent = 'Published releases are unavailable. Try again shortly.';
     return;
@@ -17,14 +17,13 @@ export function showPublicTemplateReleases(catalog: HTMLElement, afterRefresh?: 
 
   const entries = catalog.querySelectorAll<HTMLElement>('[data-release-template]');
   const checked = new Intl.DateTimeFormat(undefined, { timeStyle: 'short' });
-  const operation = 'getPublicMarketplaceCatalog';
   let checking = false;
 
   async function refresh() {
     if (checking || !status) return;
     checking = true;
     try {
-      const result = await transport.call(operation, { params: {} }, undefined, AbortSignal.timeout(8000));
+      const result = await client.read();
       const releases = result.ok && Array.isArray(result.value) ? result.value : undefined;
       let available = 0;
 
@@ -63,7 +62,7 @@ export function showPublicTemplateReleases(catalog: HTMLElement, afterRefresh?: 
     }
   }
 
-  const unsubscribe = transport.freshness(operation).subscribe(() => { void refresh(); });
+  const unsubscribe = client.subscribe(() => { void refresh(); });
   window.addEventListener('pagehide', (event) => { if (!event.persisted) unsubscribe(); });
   void refresh();
 }

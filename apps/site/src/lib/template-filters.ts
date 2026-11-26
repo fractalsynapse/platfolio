@@ -1,8 +1,8 @@
 export function setUpTemplateFilters(catalog: HTMLElement): (() => void) | undefined {
-  const filters = catalog?.querySelector<HTMLFormElement>('[data-template-filters]');
-  const count = catalog?.querySelector('[data-template-count]');
-  const entries = catalog?.querySelectorAll<HTMLLIElement>('[data-template]');
-  const empty = catalog?.querySelector<HTMLElement>('[data-template-empty]');
+  const filters = catalog.querySelector<HTMLFormElement>('[data-template-filters]');
+  const count = catalog.querySelector('[data-template-count]');
+  const entries = catalog.querySelectorAll<HTMLLIElement>('[data-release-template]');
+  const empty = catalog.querySelector<HTMLElement>('[data-template-empty]');
 
   if (filters && count && entries && empty) {
     const parameters = new URLSearchParams(location.search);
@@ -18,7 +18,7 @@ export function setUpTemplateFilters(catalog: HTMLElement): (() => void) | undef
       const category = values.get('category');
       let visible = 0;
       for (const entry of entries) {
-        const text = [entry.dataset.template, entry.dataset.repo, entry.textContent].join(' ').toLocaleLowerCase();
+        const text = [entry.dataset.releaseTemplate, entry.dataset.releaseRepo, entry.textContent].join(' ').toLocaleLowerCase();
         entry.hidden = Boolean((mode && entry.dataset.mode !== mode) ||
           (category && entry.dataset.category !== category) || !terms.every((term) => text.includes(term)));
         if (!entry.hidden) visible++;

@@ -3,7 +3,7 @@ import http from 'node:http';
 import { test } from 'node:test';
 import { ENDPOINTS } from '@platfolio/api-contract/generated/types';
 import type { OperationId, ParamsOf } from '@platfolio/api-contract/generated/types';
-import { PollTransport, type AuthSource } from '../src/index.ts';
+import { createPublicMarketplaceCatalog, PollTransport, type AuthSource } from '../src/index.ts';
 
 /**
  * #258, over a socket.
@@ -78,6 +78,18 @@ test('the generated table drives a real HTTP request end to end', async () => {
     assert.equal(call.method, 'GET');
     assert.equal(call.url, ENDPOINTS.listInstances.path, 'the server resolved a path the table did not name');
     assert.equal(call.headers.authorization, 'Bearer a-token-from-the-shell', 'the injected AuthSource did not reach the socket');
+  });
+});
+
+test('the public catalog uses the generated read without sending credentials', async () => {
+  await withServer(() => ({ status: 200, body: [] }), async (baseUrl, seen) => {
+    const catalog = createPublicMarketplaceCatalog(baseUrl);
+    assert.deepEqual(await catalog.read(), { ok: true, value: [] });
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0]?.method, 'GET');
+    assert.equal(seen[0]?.url, ENDPOINTS.getPublicMarketplaceCatalog.path);
+    assert.equal(seen[0]?.headers.authorization, undefined);
+    assert.equal(seen[0]?.headers.cookie, undefined);
   });
 });
 

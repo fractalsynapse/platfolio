@@ -13,7 +13,7 @@ const description = 'Find a starting point for your next platform.';
     <Breadcrumbs items={[{ label: 'Home', href: '/' }, { label: 'Templates' }]} />
     <WorkspaceHeading title="Templates"><p>{description}</p></WorkspaceHeading>
   </Fragment>
-  <section aria-label="Template catalog" data-template-catalog>
+  <section aria-label="Template catalog">
     <form class="ui-workspace-panel ui-workspace-form ui-template-search" role="search" aria-label="Search and filter templates" data-template-filters hidden>
       <div class="ui-columns">
         <div>
@@ -39,7 +39,7 @@ const description = 'Find a starting point for your next platform.';
     </form>
     <p class="ui-workspace-meta" role="status" data-template-count>{entries.length} templates</p>
     <ul class="ui-columns ui-template-catalog" role="list">
-      {entries.map(({ name, repo, display }) => <li data-template={name} data-repo={repo} data-release-template={name} data-release-repo={repo} data-category={display.category} data-mode={display.mode}>
+      {entries.map(({ name, repo, display }) => <li data-release-template={name} data-release-repo={repo} data-category={display.category} data-mode={display.mode}>
         <TemplateCard name={name} repo={repo} free>
           <a class="ui-workspace-secondary ui-hit-primary" href={templatePaths.details(name)} aria-label={`View template for ${display.title}`}>View template</a>
         </TemplateCard>

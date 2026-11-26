@@ -157,7 +157,20 @@ export class PollTransport implements Transport {
     return this.endpoints;
   }
 
-  async call<O extends OperationId>(
+  call<O extends OperationId>(
+    op: O,
+    input: { params: ParamsOf<O>; body?: RequestBodyOf<O> },
+    auth: AuthSource,
+    signal?: AbortSignal,
+  ): Promise<Result<SuccessOf<O>>> {
+    return this.request(op, input, auth, signal);
+  }
+
+  readPublicMarketplaceCatalog(signal?: AbortSignal) {
+    return this.request('getPublicMarketplaceCatalog', { params: {} }, undefined, signal);
+  }
+
+  private async request<O extends OperationId>(
     op: O,
     input: { params: ParamsOf<O>; body?: RequestBodyOf<O> },
     auth: AuthSource | undefined,
@@ -249,6 +262,16 @@ export class PollTransport implements Transport {
   get sourceCount(): number {
     return this.sources.size;
   }
+}
+
+/** The public pages have one anonymous read, with the same routing and refresh policy as the workspace. */
+export function createPublicMarketplaceCatalog(baseUrl: string) {
+  const transport = new PollTransport({ baseUrl });
+  const source = transport.freshness('getPublicMarketplaceCatalog');
+  return {
+    read: () => transport.readPublicMarketplaceCatalog(AbortSignal.timeout(8_000)),
+    subscribe: (listener: () => void) => source.subscribe(listener),
+  };
 }
 
 /**
