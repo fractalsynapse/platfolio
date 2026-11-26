@@ -240,5 +240,5 @@ test('workspace deep links each reach their own checked page document', () => {
 
 test('the legacy Railway callback and team link use one launch screen', () => {
   assert.equal(workspacePageId(matchWorkspaceRoute('/dashboard/launch')),
-    workspacePageId(matchWorkspaceRoute('/dashboard/teams/fractalsynapse/create-instance/launch')));
+    workspacePageId(matchWorkspaceRoute(workspaceFixtureRoutes['workspace.team-launch'])));
 });

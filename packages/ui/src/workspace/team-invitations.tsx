@@ -6,6 +6,7 @@ import { ageLabel, useClock } from '../components/freshness.ts';
 import { useCommand, useOperation } from '../sdk/use-operation.ts';
 import { WorkspaceChoice } from './workspace-choice.tsx';
 import { WorkspaceDialog } from './workspace-dialog.tsx';
+import { ResourceText } from './resource-text.tsx';
 import { WorkspacePanel } from './workspace-panel.tsx';
 
 const roles = [{ value: 'member', label: 'Member' }, { value: 'owner', label: 'Owner' }] as const;
@@ -63,6 +64,7 @@ export function TeamInvitations({ teamId }: { readonly teamId: string }): React.
   }
 
   const displayed = state.status === 'loaded' ? state.data.filter((entry) => active(entry) !== history) : [];
+  const observation = state.status === 'loaded' ? ageLabel(state.freshness, now.toISOString()) : undefined;
   return <>
     <div className="ui-workspace-page-actions">
       <div className="ui-workspace-segments" role="group" aria-label="Invitation views">
@@ -73,22 +75,20 @@ export function TeamInvitations({ teamId }: { readonly teamId: string }): React.
         setEmail(''); setRole('member'); setFeedback(undefined); setInviting(true);
       }}>Invite member</WorkspaceAction></div>}
     </div>
-    <WorkspacePanel title={history ? 'Invitation history' : 'Active invitations'}>
+    <WorkspacePanel title={history ? 'Invitation history' : 'Active invitations'} observation={observation?.text} stale={observation?.mayBeStale}>
       {feedback && !inviting && !revoking && <p role={feedback.failed ? 'alert' : 'status'}>{feedback.text}</p>}
       <OperationState status={state.status} pending="Checking team invitations…" failed="Couldn’t load team invitations." retry={reload} />
       {state.status === 'loaded' && <>
-        <p className="ui-workspace-meta">{ageLabel(state.freshness, now.toISOString()).text}</p>
         {displayed.length === 0 ? <p className="ui-workspace-empty">{history ? 'No past invitations.' : 'No active invitations.'}</p> : <ul className="ui-workspace-list">
           {displayed.map((entry) => <li className="ui-workspace-row" key={entry.id}>
-            <div><strong>{entry.email}</strong>{' '}
+            <ResourceText title={<>{entry.email}{' '}
               <span className="ui-setup-status" data-tone={history ? undefined : 'attention'}>
                 {history ? entry.state === 'pending' ? 'Expired' : entry.state : 'Pending'}
-              </span>
-              <div className="ui-workspace-meta">{entry.role === 'owner' ? 'Owner' : 'Member'} · Created {new Date(entry.createdAt).toLocaleDateString()}
-                {!history && <> · Expires {new Date(entry.expiresAt).toLocaleDateString()}</>}
-              </div>
-              <div className="ui-workspace-meta">{entry.emailReceipt ? 'Email sent' : entry.emailError ? 'Email failed' : 'No email receipt'}</div>
-            </div>
+              </span></>} detail={<>
+              {entry.role === 'owner' ? 'Owner' : 'Member'} · Created <time dateTime={entry.createdAt}>{new Date(entry.createdAt).toLocaleDateString()}</time>
+              {!history && <> · Expires <time dateTime={entry.expiresAt}>{new Date(entry.expiresAt).toLocaleDateString()}</time></>}
+              {' · '}{entry.emailReceipt ? 'Email sent' : entry.emailError ? 'Email failed' : 'No email receipt'}
+            </>} />
             {!history && <WorkspaceAction variant="secondary" disabled={busy} onClick={() => {
               setFeedback(undefined); setRevoking(entry);
             }}>Revoke</WorkspaceAction>}

@@ -5,6 +5,8 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+- Apply the mockup’s shared page spacing, account layout, resource rows, and deployment history across the workspace. Browse the published templates on Astro pages and manage an installed Starter Web app from its own management page (#288).
+
 - Match the Your teams page to the mockup, including team instance counts and the pending invitation card. The existing Starter Web launch links share one screen (#288).
 - Bring the Keycloak theme, team and account pages, activity and notification panels, invitations, and template picker closer to the approved workspace mockup (#288).
 - Keep private installation progress across hub restarts. Owners can reauthorize and resume setup or add an environment in the same project without modifying previously installed environments (#288).

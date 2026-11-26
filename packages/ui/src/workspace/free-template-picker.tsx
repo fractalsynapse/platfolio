@@ -1,4 +1,3 @@
-import { OperationState } from './operation-state.tsx';
 import * as React from 'react';
 import { ageLabel, useClock } from '../components/freshness.ts';
 import { useOperation } from '../sdk/use-operation.ts';
@@ -7,19 +6,20 @@ import { workspacePaths } from './routes.ts';
 import { WorkspaceAction } from './workspace-action.tsx';
 import { WorkspaceField } from './workspace-field.tsx';
 import { WorkspacePanel } from './workspace-panel.tsx';
+import { OperationState } from './operation-state.tsx';
+import { TemplateCard } from './template-card.tsx';
+import { describeTemplate, templatePaths } from './template-presentation.ts';
 
 const params = {};
-const starterName = 'Starter Web';
-const starterSummary = 'Launch a website with a database and an API for other tools to use.';
-const starterCapabilities = ['Website', 'API', 'Private PostgreSQL'];
 
 export function FreeTemplatePicker({ team }: { readonly team: string }): React.ReactElement {
   const { state, reload } = useOperation('listInstallableTemplates', { params });
   const clock = useClock();
   const [search, setSearch] = React.useState('');
   const terms = search.trim().toLowerCase().split(/\s+/);
-  const matches = state.status === 'loaded' ? state.data.filter(({ repo }) => {
-    const text = [starterName, repo, starterSummary, ...starterCapabilities].join(' ').toLowerCase();
+  const matches = state.status === 'loaded' ? state.data.filter(({ repo, template }) => {
+    const { title, summary, capabilities } = describeTemplate(template);
+    const text = [title, repo, summary, ...capabilities].join(' ').toLowerCase();
     return terms.every((term) => text.includes(term));
   }) : [];
 
@@ -38,25 +38,12 @@ export function FreeTemplatePicker({ team }: { readonly team: string }): React.R
       </WorkspacePanel>
       <p className="ui-workspace-meta"><span role="status">{matches.length} {matches.length === 1 ? 'template' : 'templates'}</span>
         {' · '}{ageLabel(state.freshness, clock().toISOString()).text}</p>
-      {matches.length === 0 ? <p className="ui-workspace-empty">{state.data.length ? 'No templates match your search.' : 'No templates are available to install.'}</p> : matches.map((release) => <article key={release.template} className="ui-template-card">
-        <header><p className="ui-template-card-type"><span>Web apps</span><span>Web · Development</span></p><h2>{starterName}</h2></header>
-        <div className="ui-template-card-meta"><span>Published by <strong>{release.repo.split('/')[0]}</strong></span><span>Version {release.version}</span></div>
-        <div className="ui-template-card-body">
-          <p>{starterSummary}</p>
-          <div className="ui-workspace-links" aria-label="Capabilities">
-            {starterCapabilities.map((capability) => <span key={capability} className="ui-setup-status">{capability}</span>)}
-          </div>
-          <dl className="ui-workspace-facts">
-            <div><dt>Template price</dt><dd>Free</dd></div>
-            <div><dt>Database</dt><dd>Private PostgreSQL</dd></div>
-          </dl>
-          <p>Railway charges for the resources your app uses.</p>
-        </div>
-        <footer className="ui-template-card-actions">
-          <a className="ui-workspace-secondary ui-hit-primary" href={`https://github.com/${release.repo}/tree/${release.revision}`}>View source</a>
+      {matches.length === 0 ? <p className="ui-workspace-empty">{state.data.length ? 'No templates match your search.' : 'No templates are available to install.'}</p> : <div className="ui-columns">
+        {matches.map(({ template, repo, version, priceMinor }) => <TemplateCard key={template} name={template} repo={repo} version={version} free={priceMinor === 0}>
+          <a className="ui-workspace-secondary ui-hit-primary" href={templatePaths.details(template)}>View details</a>
           <WorkspaceLink className="ui-workspace-primary ui-hit-primary" href={workspacePaths.launchForTeam(team)}>Use template</WorkspaceLink>
-        </footer>
-      </article>)}
+        </TemplateCard>)}
+      </div>}
     </>}
   </>;
 }

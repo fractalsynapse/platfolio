@@ -49,7 +49,7 @@ export const workspacePages = {
   'workspace.team-connections': page('workspace.team-connections', 'Connections', ConnectionsPage,
     [...setupReads, 'getHubInstallationOffer', 'listHubInstallationLaunches', 'authorizeHubInstallation', 'getHubInstallationLaunch', 'startHubInstallation', 'listMarketplaceInstallations', 'issueMarketplaceEnrollment',
       'disconnectMarketplaceInstallation', 'getPrivateMarketplaceConnection', 'enrollPrivateMarketplaceConnection'], true),
-  'workspace.team': page('workspace.team', 'Team workspace', TeamWorkspace, [...instanceReads, 'listTeamActivity']),
+  'workspace.team': page('workspace.team', 'Team workspace', TeamWorkspace, [...instanceReads, 'listTeamActivity', 'listTeamMembers']),
   'workspace.team-activity': page('workspace.team-activity', 'Activity', TeamWorkspace, [...instanceReads, 'listTeamActivity']),
   'workspace.instance': page('workspace.instance', 'App overview', TeamWorkspace, instanceReads),
   'workspace.instance-status': page('workspace.instance-status', 'App status', TeamWorkspace, [...instanceReads, 'getHostedAppStatus']),

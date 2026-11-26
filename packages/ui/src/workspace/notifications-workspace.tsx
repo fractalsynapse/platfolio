@@ -41,6 +41,7 @@ export function NotificationsWorkspace({ teams }: { readonly teams: readonly Tea
 
   const apps = instances.state.status === 'loaded' ? instances.state.data : [];
   const rules = feed.state.status === 'loaded' ? feed.state.data.rules : [];
+  const observation = feed.state.status === 'loaded' ? ageLabel(feed.state.freshness, clock().toISOString()) : undefined;
   const activeCount = rules.filter(({ enabled }) => enabled).length;
   return <>
     <Breadcrumbs items={[{ label: 'Home', href: '/' }, { label: 'Notifications' }]} />
@@ -54,11 +55,8 @@ export function NotificationsWorkspace({ teams }: { readonly teams: readonly Tea
       <WorkspaceAction type="button" onClick={instances.reload}>Try again</WorkspaceAction>
     </p>}
     <MainContext>
-      <WorkspacePanel title="Your rules">
-        {feed.state.status === 'loaded' && <p className="ui-workspace-meta">
-          {rules.length > 0 && <>{activeCount} active · {rules.length - activeCount} paused · </>}
-          {ageLabel(feed.state.freshness, clock().toISOString()).text}
-        </p>}
+      <WorkspacePanel title="Your rules" observation={observation?.text} stale={observation?.mayBeStale}>
+        {rules.length > 0 && <p className="ui-workspace-meta">{activeCount} active · {rules.length - activeCount} paused</p>}
         {rules.length > 0 ? <ul className="ui-workspace-list ui-notification-rules">
           {rules.map((rule) => {
             const app = apps.find((item) => item.id === rule.instanceId);
@@ -101,6 +99,7 @@ export function NotificationsWorkspace({ teams }: { readonly teams: readonly Tea
     </MainContext>
     {feed.state.status === 'loaded' &&
       <ActivityFeed title="Recent notifications" empty="No recent events match your active rules."
+        observation={observation?.text} stale={observation?.mayBeStale}
         entries={feed.state.data.updates.map((item) => {
           const app = apps.find(({ id }) => id === item.instanceId);
           const team = teams.find(({ teamId }) => teamId === app?.teamId);

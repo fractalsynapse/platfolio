@@ -62,6 +62,7 @@ export interface ContentPrimitive {
   /** An explicitly selected two-panel composition for a document with two related sections. */
   readonly pairedTracks?: 2;
   readonly contextTracks?: readonly string[];
+  readonly welcomeTracks?: readonly string[];
   readonly contextWideFromRem?: number;
   readonly wideGapStep: SpacingStep | null;
   readonly note: string;
@@ -97,6 +98,7 @@ export const CONTENT_TABLE = {
     tracks: 3,
     pairedTracks: 2,
     contextTracks: ['minmax(0, 1.65fr)', 'minmax(0, 1fr)'],
+    welcomeTracks: ['minmax(0, 1.3fr)', 'minmax(0, 1fr)'],
     contextWideFromRem: 58, // The workspace uses 1rem of padding on each side of the mockup’s 60rem layout.
     wideGapStep: 6,
     note: 'A group of blocks: one column at the floor, three when its container has room. Less scrolling, no new capability.',
@@ -161,15 +163,27 @@ export function renderContentCss(digest: string): string {
     align-items: start;
     gap: var(--ui-space-5);
   }` : '';
+    const welcomeFloor = p.welcomeTracks ? `
+  .${p.className}[data-columns="welcome"] {
+    grid-template-columns: minmax(0, 1fr);
+  }` : '';
+    const welcomeWide = p.welcomeTracks ? `
+  .${p.className}[data-columns="welcome"] {
+    grid-template-columns: ${p.welcomeTracks.join(' ')};
+    gap: 2.5rem;
+    margin-block-start: 0.75rem;
+    --ui-welcome-title-size: 3.5rem;
+    --ui-welcome-panel-padding: 1.4rem;
+  }` : '';
     const wideContext = p.contextTracks && p.contextWideFromRem ? `\n\n@container (min-width: ${p.contextWideFromRem}rem) {
   .${p.className}[data-columns="main-context"]:has(> :nth-child(2)) {
     grid-template-columns: ${p.contextTracks.join(' ')};
   }
   .${p.className}[data-columns="main-context"][data-context-first]:has(> :nth-child(2)) {
     grid-template-columns: ${[...p.contextTracks].reverse().join(' ')};
-  }
+  }${welcomeWide}
 }` : '';
-    return `${head}\n\n/* ${p.slot} adds simultaneity when its own container has room. Nothing that exists only at\n   this width is a capability -- rule 2, and the reason a content threshold lives here rather than in an\n   app stylesheet, where gate \u00a7D65 refuses it as a second owner of one decision. */\n@container (min-width: ${String(p.wideFromRem)}rem) {\n  .${p.className} {\n${wide.map((d) => `    ${d}`).join('\n')}\n  }${pair}${context}\n}${wideContext}`;
+    return `${head}\n\n/* ${p.slot} adds simultaneity when its own container has room. Nothing that exists only at\n   this width is a capability -- rule 2, and the reason a content threshold lives here rather than in an\n   app stylesheet, where gate \u00a7D65 refuses it as a second owner of one decision. */\n@container (min-width: ${String(p.wideFromRem)}rem) {\n  .${p.className} {\n${wide.map((d) => `    ${d}`).join('\n')}\n  }${pair}${context}${welcomeFloor}\n}${wideContext}`;
   }).join('\n\n');
 
   return `/*

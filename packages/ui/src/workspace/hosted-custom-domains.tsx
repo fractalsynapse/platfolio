@@ -4,6 +4,8 @@ import type { ParamsOf } from '@platfolio/api-contract/generated/types';
 import { ageLabel, useClock } from '../components/freshness.ts';
 import { useCommand, useOperation } from '../sdk/use-operation.ts';
 import { DomainDnsRecords } from './domain-dns-records.tsx';
+import { WorkspaceField } from './workspace-field.tsx';
+import { WorkspacePanel } from './workspace-panel.tsx';
 
 export function HostedCustomDomains({ params, canManage }: {
   readonly params: ParamsOf<'listHostedCustomDomains'>;
@@ -36,15 +38,16 @@ export function HostedCustomDomains({ params, canManage }: {
     } finally { setPending(false); }
   }
 
-  return <section aria-label="Custom hostnames">
-    <h3>Custom hostnames</h3>
+  const observation = domains.state.status === 'loaded' ? ageLabel(domains.state.freshness, clock().toISOString()) : undefined;
+  const canAttach = domains.state.status === 'loaded' && !domains.state.data.length && canManage;
+  return <WorkspacePanel title={canAttach ? 'Attach a custom domain' : 'Custom domain'} context
+    observation={observation?.text} stale={observation?.mayBeStale}>
     {domains.state.status === 'pending' && <p role="status">Checking custom hostnames…</p>}
     {domains.state.status === 'failed' && <p role="status">Couldn’t check custom hostnames. Check that the app, Railway, and OpenBao are ready.</p>}
-    <WorkspaceAction type="button" disabled={pending} onClick={domains.reload}>Check DNS now</WorkspaceAction>
+    {!canAttach && <WorkspaceAction type="button" variant="secondary" disabled={pending} onClick={domains.reload}>Check DNS now</WorkspaceAction>}
     {domains.state.status === 'loaded' && <>
-      <p className="ui-workspace-meta">{ageLabel(domains.state.freshness, clock().toISOString()).text}</p>
       {domains.state.data.map(({ host, dnsStatus, certificateStatus, records }) => <section key={host} aria-label={host}>
-        <h4>{dnsStatus === 'verified' && certificateStatus === 'issued' ? <a href={`https://${host}`}>{host}</a> : host}</h4>
+        <h3>{dnsStatus === 'verified' && certificateStatus === 'issued' ? <a href={`https://${host}`}>{host}</a> : host}</h3>
         <p>DNS {dnsStatus === 'verified' ? 'verified' : dnsStatus === 'failed' ? 'needs attention' : 'waiting for records'}
           {' · '}HTTPS {certificateStatus === 'issued' ? 'ready' : certificateStatus === 'failed' ? 'needs attention' : 'certificate pending'}</p>
         <DomainDnsRecords records={records} />
@@ -55,15 +58,17 @@ export function HostedCustomDomains({ params, canManage }: {
         </div> : <WorkspaceAction type="button" disabled={pending}
           onClick={() => setRemoving(host)}>Remove</WorkspaceAction>)}
       </section>)}
-      {domains.state.data.length === 0 && (canManage ? <form onSubmit={(event) => {
+      {domains.state.data.length === 0 && (canAttach ? <form className="ui-workspace-form" onSubmit={(event) => {
         event.preventDefault();
         if (hostname.trim() && !pending) void save('attach', hostname);
       }}>
-        <p><label>Hostname <input type="text" autoComplete="off" required maxLength={253} placeholder="staging.example.com"
-          value={hostname} onChange={(event) => setHostname(event.currentTarget.value)} disabled={pending} /></label></p>
-        <WorkspaceAction type="submit" variant="primary" disabled={pending}>{pending ? 'Adding hostname…' : 'Add hostname'}</WorkspaceAction>
+        <WorkspaceField id="custom-domain-hostname" label="Hostname">
+          <input id="custom-domain-hostname" type="text" autoComplete="off" required maxLength={253} placeholder="staging.example.com"
+            value={hostname} onChange={(event) => setHostname(event.currentTarget.value)} disabled={pending} />
+        </WorkspaceField>
+        <div><WorkspaceAction type="submit" variant="primary" disabled={pending}>{pending ? 'Adding hostname…' : 'Add hostname'}</WorkspaceAction></div>
       </form> : <p>No custom hostname is attached.</p>)}
     </>}
     {problem && <p role="alert">{problem}</p>}
-  </section>;
+  </WorkspacePanel>;
 }

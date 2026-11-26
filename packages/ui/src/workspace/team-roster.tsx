@@ -4,6 +4,8 @@ import type { SuccessOf } from '@platfolio/api-contract/generated/types';
 import { ageLabel, useClock } from '../components/freshness.ts';
 import { useCommand, useOperation } from '../sdk/use-operation.ts';
 import { WorkspaceDialog } from './workspace-dialog.tsx';
+import { WorkspaceAvatar } from './workspace-avatar.tsx';
+import { ResourceText } from './resource-text.tsx';
 import { WorkspacePanel } from './workspace-panel.tsx';
 
 type Member = SuccessOf<'listTeamMembers'>[number];
@@ -35,23 +37,22 @@ export function TeamRoster({ teamId }: { readonly teamId: string }) {
     }
   }
 
-  return <WorkspacePanel title="Team roster">
+  const observation = roster.state.status === 'loaded' ? ageLabel(roster.state.freshness, clock().toISOString()) : undefined;
+  return <WorkspacePanel title="Team roster" observation={observation?.text} stale={observation?.mayBeStale}>
     {roster.state.status === 'pending' && <p role="status">Loading members…</p>}
     {roster.state.status === 'failed' && <p role="status">Couldn’t load members.{' '}
       <WorkspaceAction type="button" onClick={roster.reload}>Try again</WorkspaceAction>
     </p>}
     {roster.state.status === 'loaded' && <>
-      <p className="ui-workspace-meta">{ageLabel(roster.state.freshness, clock().toISOString()).text}</p>
       {roster.state.data.length === 0 ? <p className="ui-workspace-empty">No members to display.</p> : <ul className="ui-workspace-list">
         {roster.state.data.map((member) => {
           const role = member.role === 'owner' ? 'member' : 'owner';
           const name = nameFor(member);
           return <li className="ui-workspace-row" key={member.personId}>
             <div className="ui-workspace-links">
-              <span className="ui-workspace-avatar" aria-hidden="true">{name.slice(0, 2).toUpperCase()}</span>
-              <div><strong>{name}</strong>{' '}<span className="ui-setup-status">{member.role === 'owner' ? 'Owner' : 'Member'}</span>
-                <div className="ui-workspace-meta">Joined {new Date(member.addedAt).toLocaleDateString()}</div>
-              </div>
+              <WorkspaceAvatar name={name} />
+              <ResourceText title={name} detail={<>Joined <time dateTime={member.addedAt}>{new Date(member.addedAt).toLocaleDateString()}</time></>} />
+              <span className="ui-setup-status">{member.role === 'owner' ? 'Owner' : 'Member'}</span>
             </div>
             {!member.self && <div className="ui-workspace-links">
               <WorkspaceAction variant="secondary" aria-label={`Change role for ${name}`} disabled={busy}

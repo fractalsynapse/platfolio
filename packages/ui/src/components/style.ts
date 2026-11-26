@@ -60,7 +60,7 @@ export const COMPONENT_RULES = [
   },
   {
     selector: '.ui-template-card',
-    declarations: ['max-inline-size: 27rem;', 'border: 1px solid var(--ui-color-border);', 'border-radius: var(--ui-space-4);',
+    declarations: ['display: flex;', 'flex-direction: column;', 'block-size: 100%;', 'border: 1px solid var(--ui-color-border);', 'border-radius: var(--ui-space-4);',
       'background: var(--ui-color-surface);', 'box-shadow: var(--ui-panel-shadow);', 'overflow: hidden;'],
     why: 'Keep the starter details and action on one bordered card.',
   },
@@ -69,6 +69,16 @@ export const COMPONENT_RULES = [
     declarations: ['padding: 0.9rem 1.1rem 1rem;', 'color: var(--ui-color-template-ink);',
       'background: linear-gradient(125deg, var(--ui-color-template-web-start), var(--ui-color-template-web-end));'],
     why: 'Use the mockup’s template gradient and foreground.',
+  },
+  {
+    selector: '.ui-template-card[data-category="background-workers"] header',
+    declarations: ['background: linear-gradient(125deg, var(--ui-color-template-worker-start), var(--ui-color-template-worker-end));'],
+    why: 'Use the worker category gradient from the template catalog.',
+  },
+  {
+    selector: '.ui-template-card[data-category="identity"] header',
+    declarations: ['background: linear-gradient(125deg, var(--ui-color-template-identity-start), var(--ui-color-template-identity-end));'],
+    why: 'Use the sign-in category gradient from the template catalog.',
   },
   {
     selector: '.ui-template-card header h2',
@@ -90,8 +100,44 @@ export const COMPONENT_RULES = [
   },
   {
     selector: '.ui-template-card-body',
-    declarations: ['padding: var(--ui-space-5);'],
-    why: 'Group the source metadata and launch action below the card title.',
+    declarations: ['flex: 1;', 'padding: var(--ui-space-5);'],
+    why: 'Group the capabilities below the card title and line up action rows.',
+  },
+  {
+    selector: '.ui-template-card-body p',
+    declarations: ['margin: 0 0 var(--ui-space-3);'],
+    why: 'Group the capabilities with the description they expand.',
+  },
+  {
+    selector: '.ui-template-highlights, .ui-template-catalog',
+    declarations: ['list-style: none;', 'margin: 0;', 'padding: 0;'],
+    why: 'Keep catalog cards and their capabilities aligned with their containers.',
+  },
+  {
+    selector: '.ui-template-highlights',
+    declarations: ['display: flex;', 'flex-wrap: wrap;', 'gap: var(--ui-space-2);'],
+    why: 'Show all capabilities on small and large cards.',
+  },
+  {
+    selector: '.ui-template-card-specs',
+    declarations: ['border-block-start: 1px solid var(--ui-color-border);', 'padding-inline: var(--ui-space-5);'],
+    why: 'Separate template specifications from the description and actions.',
+  },
+  {
+    selector: '.ui-template-catalog [hidden], .ui-template-search[hidden]',
+    declarations: ['display: none;'],
+    why: 'Keep the Astro filter hidden until ready and remove unmatched cards from the grid.',
+  },
+  {
+    selector: '.ui-template-search .ui-workspace-input',
+    declarations: ['appearance: base-select;'],
+    why: 'Use the design system on the native Astro catalog select and its picker where supported.',
+  },
+  {
+    selector: '.ui-template-search .ui-workspace-input::picker(select)',
+    declarations: ['appearance: base-select;', 'border: 1px solid var(--ui-color-control-border);', 'border-radius: var(--ui-space-3);',
+      'background: var(--ui-color-surface);', 'color: var(--ui-color-text);', 'font: inherit;', 'box-shadow: var(--ui-menu-shadow);'],
+    why: 'Match the catalog picker’s border, font and surface to its trigger.',
   },
   {
     selector: '.ui-template-card-actions',
@@ -335,6 +381,16 @@ export const COMPONENT_RULES = [
     why: 'Give workspace pages a comfortable shared measure.',
   },
   {
+    selector: '.ui-workspace-main .ui-screen-stack',
+    declarations: ['gap: 0;'],
+    why: 'Let workspace headings, tabs, and page actions own their spacing, without a second gap from the screen slot.',
+  },
+  {
+    selector: '.ui-workspace-main .ui-screen-stack > .ui-workspace-panel + .ui-workspace-panel, .ui-workspace-main .ui-screen-stack > .ui-columns + .ui-workspace-panel',
+    declarations: ['margin-block-start: var(--ui-space-5);'],
+    why: 'Separate adjacent content panels after the page header and tabs.',
+  },
+  {
     selector: '.ui-workspace-crumbs',
     declarations: ['display: flex;', 'flex-wrap: wrap;', 'align-items: baseline;', 'gap: 0.2rem 0.4rem;', 'list-style: none;',
       'margin: 0 0 0.6rem;', 'padding: 0;', 'font-size: 0.8rem;', 'line-height: normal;', 'color: var(--ui-color-textMuted);', 'overflow-wrap: anywhere;'],
@@ -357,29 +413,34 @@ export const COMPONENT_RULES = [
   },
   {
     selector: '.ui-public-main',
-    declarations: ['max-inline-size: 68rem;', 'margin-inline: auto;', 'padding: 1.25rem 1rem 2.75rem;'],
+    declarations: ['inline-size: min(100% - 2rem, 68rem);', 'margin: 1.25rem auto 2.75rem;'],
     why: 'Use the mockup’s narrower public page measure.',
   },
   {
     selector: '.ui-welcome',
-    declarations: ['padding: clamp(1.1rem, 4%, 3rem);', 'border: 1px solid var(--ui-color-border);',
+    declarations: ['padding: clamp(1.1rem, 4%, 3rem);', 'align-items: center;', 'border: 1px solid var(--ui-color-border);',
       'border-radius: 1.2rem;', 'background: linear-gradient(135deg, var(--ui-color-surface), var(--ui-color-accent-surface));'],
     why: 'Place the public welcome and hosting steps inside the same panel.',
   },
   {
     selector: '.ui-public-intro',
-    declarations: ['min-inline-size: 0;'],
+    declarations: ['min-inline-size: 0;', 'inline-size: 100%;'],
     why: 'Keep the landing page heading and actions together in both layouts.',
   },
   {
     selector: '.ui-public-intro h1',
-    declarations: ['max-inline-size: 14ch;', 'margin: 0;', 'font-size: 2.48rem;', 'line-height: 1.12;', 'letter-spacing: -0.042em;'],
+    declarations: ['max-inline-size: 14ch;', 'margin: 0;', 'font-size: var(--ui-welcome-title-size, 2.48rem);', 'line-height: 1.12;', 'letter-spacing: -0.042em;'],
     why: 'Match the mockup’s landing-page title.',
   },
   {
     selector: '.ui-public-intro p',
     declarations: ['max-inline-size: 62ch;', 'color: var(--ui-color-textMuted);', 'margin-block: 0.45rem 1.35rem;'],
     why: 'Preserve the line measure of the mockup’s introductory copy.',
+  },
+  {
+    selector: '.ui-welcome > .ui-workspace-panel',
+    declarations: ['inline-size: 100%;', 'padding: var(--ui-welcome-panel-padding, 1.05rem);'],
+    why: 'Keep the hosting card the full width of its column.',
   },
   {
     selector: '.ui-hosting-steps',
@@ -397,12 +458,22 @@ export const COMPONENT_RULES = [
     why: 'Separate consecutive steps visually.',
   },
   {
-    selector: '.ui-hosting-steps li p',
-    declarations: ['margin: 0.2rem 0 0;', 'color: var(--ui-color-textMuted);', 'font-size: var(--ui-font-label);'],
+    selector: '.ui-hosting-steps li::marker',
+    declarations: ['color: var(--ui-color-accent);', 'font-weight: 730;'],
+    why: 'Use the mockup’s colored step numbers.',
+  },
+  {
+    selector: '.ui-hosting-steps strong',
+    declarations: ['font-size: 0.92rem;'],
+    why: 'Separate each step’s label from its description.',
+  },
+  {
+    selector: '.ui-workspace-panel .ui-hosting-steps li p',
+    declarations: ['margin: 0.2rem 0 0;', 'color: var(--ui-color-textMuted);', 'font-size: 0.85rem;'],
     why: 'Group each explanation with its step label.',
   },
   {
-    selector: '.ui-workspace-main h1',
+    selector: '.ui-workspace-main h1, .ui-public-main .ui-workspace-page-heading h1',
     declarations: ['margin: 0;', 'font-size: clamp(2.05rem, 3.4cqi, 2.65rem);', 'line-height: 1.12;', 'letter-spacing: -0.042em;', 'overflow-wrap: anywhere;'],
     why: 'Use the mockup’s page heading and weight throughout the workspace.',
   },
@@ -452,6 +523,21 @@ export const COMPONENT_RULES = [
     why: 'Share the mockup’s segmented navigation between account sections and environment controls.',
   },
   {
+    selector: '.ui-account-settings',
+    declarations: ['max-inline-size: 57rem;'],
+    why: 'Keep account settings and the team roster at the mockup’s reading width.',
+  },
+  {
+    selector: '.ui-account-settings > .ui-workspace-segments',
+    declarations: ['padding: 0.22rem;', 'margin-block-end: 1.1rem;'],
+    why: 'Match the account and team sub-tabs’ gap from their related card.',
+  },
+  {
+    selector: '.ui-profile-avatar .ui-workspace-avatar',
+    declarations: ['inline-size: 4.25rem;', 'block-size: 4.25rem;', 'font-size: 1.15rem;'],
+    why: 'Preview the same initials used by the header.',
+  },
+  {
     selector: '.ui-workspace-segments a, .ui-workspace-segments button',
     declarations: ['display: inline-flex;', 'align-items: center;', 'min-block-size: var(--ui-target-primary);', 'padding-inline: 0.62rem;',
       'border: 0;', 'border-radius: var(--ui-space-2);', 'color: var(--ui-color-text);', 'background: transparent;',
@@ -499,9 +585,14 @@ export const COMPONENT_RULES = [
     why: 'Use the mockup’s shared row for links to teams and apps.',
   },
   {
-    selector: '.ui-workspace-resource:hover',
+    selector: '.ui-workspace-resource:is(a):hover',
     declarations: ['background: var(--ui-color-bg);'],
     why: 'Make it clear that the full resource row is a link.',
+  },
+  {
+    selector: '.ui-workspace-resource:has(> .ui-workspace-resource-text:first-child)',
+    declarations: ['grid-template-columns: minmax(0, 1fr) auto auto;'],
+    why: 'Allow the text to wrap first on rows that have a status badge instead of a leading icon.',
   },
   {
     selector: '.ui-workspace-resource-text',

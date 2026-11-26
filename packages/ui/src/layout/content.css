@@ -2,7 +2,7 @@
  * GENERATED FILE -- DO NOT EDIT. The writer is `renderContentCss()` in packages/ui/src/layout/content.ts.
  *
  * Source: packages/ui/src/layout/content.ts
- * Input digest: sha256/280af080737bb096
+ * Input digest: sha256/5ff652db33480c33
  *
  * Reproduce with `pnpm run ui:css`; `pnpm run ui:css:check` fails when this stops matching the table. Gate
  * §9.3 audits this sheet with the other three: `@container` width queries belong to primitives, a width
@@ -47,6 +47,9 @@
     align-items: start;
     gap: var(--ui-space-5);
   }
+  .ui-columns[data-columns="welcome"] {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 @container (min-width: 58rem) {
@@ -55,5 +58,12 @@
   }
   .ui-columns[data-columns="main-context"][data-context-first]:has(> :nth-child(2)) {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1.65fr);
+  }
+  .ui-columns[data-columns="welcome"] {
+    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+    gap: 2.5rem;
+    margin-block-start: 0.75rem;
+    --ui-welcome-title-size: 3.5rem;
+    --ui-welcome-panel-padding: 1.4rem;
   }
 }

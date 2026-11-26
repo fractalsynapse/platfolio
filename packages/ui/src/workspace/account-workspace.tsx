@@ -14,12 +14,14 @@ export function AccountWorkspace({ tab }: { readonly tab: keyof typeof accountTa
   return <>
     <Breadcrumbs items={[{ label: 'Home', href: '/' }, { label: 'Account' }]} />
     <WorkspaceHeading title="Account" />
-    <SectionNav label="Account settings" links={Object.entries(accountTabs).map(([id, item]) => ({ ...item, current: id === tab }))} />
-    {tab === 'notifications' ? <WorkspacePanel title="Notification routing" form>
-      <Stack>
-        <NotificationEmailPreference />
-        <WorkspaceLink href={workspacePaths.notifications} className="ui-workspace-secondary ui-hit-primary">Manage notification rules</WorkspaceLink>
-      </Stack>
-    </WorkspacePanel> : tab === 'password' ? <AccountPassword /> : <AccountIdentity key={tab} tab={tab} />}
+    <div className="ui-account-settings">
+      <SectionNav label="Account settings" links={Object.entries(accountTabs).map(([id, item]) => ({ ...item, current: id === tab }))} />
+      {tab === 'notifications' ? <WorkspacePanel title="Notification routing" form>
+        <Stack>
+          <NotificationEmailPreference />
+          <WorkspaceLink href={workspacePaths.notifications} className="ui-workspace-secondary ui-hit-primary">Manage notification rules</WorkspaceLink>
+        </Stack>
+      </WorkspacePanel> : tab === 'password' ? <AccountPassword /> : <AccountIdentity key={tab} tab={tab} />}
+    </div>
   </>;
 }

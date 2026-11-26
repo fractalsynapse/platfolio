@@ -197,6 +197,10 @@ function scalarDeclarations(indent: string): string {
   lines.push(`${indent}--ui-color-control-border: #a7b5c6;`);
   lines.push(`${indent}--ui-color-template-web-start: #103e34;`);
   lines.push(`${indent}--ui-color-template-web-end: #176951;`);
+  lines.push(`${indent}--ui-color-template-worker-start: #4d2d16;`);
+  lines.push(`${indent}--ui-color-template-worker-end: #835127;`);
+  lines.push(`${indent}--ui-color-template-identity-start: #37234e;`);
+  lines.push(`${indent}--ui-color-template-identity-end: #664589;`);
   lines.push(`${indent}--ui-color-template-ink: #ffffff;`);
   lines.push(`${indent}--ui-panel-shadow: 0 1px 2px #192e4710;`);
   lines.push(`${indent}--ui-menu-shadow: 0 0.5rem 1rem #20354c20;`);

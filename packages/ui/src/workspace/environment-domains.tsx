@@ -4,9 +4,13 @@ import { WorkspacePanel } from './workspace-panel.tsx';
 
 type Environment = SuccessOf<'getInstanceEnvironment'>;
 
-export function EnvironmentDomains({ domains, planned, hosting }: Pick<Environment, 'domains' | 'planned'> & { readonly hosting: Environment['hosting'] }): React.ReactElement {
+export function EnvironmentDomains({ domains, planned, hosting, observation, stale }: Pick<Environment, 'domains' | 'planned'> & {
+  readonly hosting: Environment['hosting'];
+  readonly observation?: string | undefined;
+  readonly stale?: boolean | undefined;
+}): React.ReactElement {
   const running = hosting && hosting.state !== 'paused' && hosting.state !== 'removed';
-  return <WorkspacePanel title="Web addresses">
+  return <WorkspacePanel title="Web addresses" observation={observation} stale={stale}>
     {hosting && <div className="ui-workspace-list">
       <div className="ui-workspace-row">
         {running ? <a href={hosting.origin}>{new URL(hosting.origin).hostname}</a> : <span>{new URL(hosting.origin).hostname}</span>}

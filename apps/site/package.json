@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@astrojs/react": "^6.0.6",
+    "@platfolio/manifest": "workspace:*",
     "@platfolio/ui": "workspace:*",
     "astro": "^6.4.8",
     "react": "^19.3.1",

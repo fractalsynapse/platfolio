@@ -32,11 +32,11 @@ export function AppStatus({ instanceId }: { readonly instanceId: string }) {
   }
   const { checkedAt, updates } = state.data;
   const now = clock();
+  const observation = ageLabel(state.freshness, now.toISOString());
   return <>
-    <WorkspacePanel title="Service checks">
+    <WorkspacePanel title="Service checks" observation={observation.text} stale={observation.mayBeStale}>
       <p><strong>Staging</strong>{' '}<span className="ui-setup-status" data-tone={state.data.state === 'up' ? 'success' : 'attention'}>{labels[state.data.state]}</span></p>
       {checkedAt && <p>Last app check <time dateTime={checkedAt}>{new Date(checkedAt).toLocaleString()}</time></p>}
-      <p className="ui-workspace-meta">{ageLabel(state.freshness, now.toISOString()).text}</p>
     </WorkspacePanel>
     <ActivityFeed title="Status updates" empty="No outages or planned stops have been recorded."
       history={<ActivityHistory timestamps={updates.map(({ at }) => at)} now={now} noun="status updates" tone="attention" />}

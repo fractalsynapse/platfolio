@@ -3,7 +3,7 @@
  * packages/ui/src/components/style.ts and it is the only one.
  *
  * Source: packages/ui/src/components/style.ts
- * Input digest: sha256/da60067cba197b71
+ * Input digest: sha256/49d0a784ddd6089a
  *
  * Reproduce with `pnpm run ui:css`; `pnpm run ui:css:check` fails when this stops matching the module. The
  * numbers in here are not literals: they reference the custom properties in ../tokens.css, which is what makes
@@ -60,7 +60,9 @@
 
 /* Keep the starter details and action on one bordered card. */
 .ui-template-card {
-  max-inline-size: 27rem;
+  display: flex;
+  flex-direction: column;
+  block-size: 100%;
   border: 1px solid var(--ui-color-border);
   border-radius: var(--ui-space-4);
   background: var(--ui-color-surface);
@@ -73,6 +75,16 @@
   padding: 0.9rem 1.1rem 1rem;
   color: var(--ui-color-template-ink);
   background: linear-gradient(125deg, var(--ui-color-template-web-start), var(--ui-color-template-web-end));
+}
+
+/* Use the worker category gradient from the template catalog. */
+.ui-template-card[data-category="background-workers"] header {
+  background: linear-gradient(125deg, var(--ui-color-template-worker-start), var(--ui-color-template-worker-end));
+}
+
+/* Use the sign-in category gradient from the template catalog. */
+.ui-template-card[data-category="identity"] header {
+  background: linear-gradient(125deg, var(--ui-color-template-identity-start), var(--ui-color-template-identity-end));
 }
 
 /* Keep the name directly under the type inside the colored header. */
@@ -105,9 +117,56 @@
   font-size: var(--ui-font-caption);
 }
 
-/* Group the source metadata and launch action below the card title. */
+/* Group the capabilities below the card title and line up action rows. */
 .ui-template-card-body {
+  flex: 1;
   padding: var(--ui-space-5);
+}
+
+/* Group the capabilities with the description they expand. */
+.ui-template-card-body p {
+  margin: 0 0 var(--ui-space-3);
+}
+
+/* Keep catalog cards and their capabilities aligned with their containers. */
+.ui-template-highlights, .ui-template-catalog {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* Show all capabilities on small and large cards. */
+.ui-template-highlights {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ui-space-2);
+}
+
+/* Separate template specifications from the description and actions. */
+.ui-template-card-specs {
+  border-block-start: 1px solid var(--ui-color-border);
+  padding-inline: var(--ui-space-5);
+}
+
+/* Keep the Astro filter hidden until ready and remove unmatched cards from the grid. */
+.ui-template-catalog [hidden], .ui-template-search[hidden] {
+  display: none;
+}
+
+/* Use the design system on the native Astro catalog select and its picker where supported. */
+.ui-template-search .ui-workspace-input {
+  appearance: base-select;
+}
+
+/* Match the catalog picker’s border, font and surface to its trigger. */
+.ui-template-search .ui-workspace-input::picker(select) {
+  appearance: base-select;
+  border: 1px solid var(--ui-color-control-border);
+  border-radius: var(--ui-space-3);
+  background: var(--ui-color-surface);
+  color: var(--ui-color-text);
+  font: inherit;
+  box-shadow: var(--ui-menu-shadow);
 }
 
 /* Keep template details and setup actions in the footer. */
@@ -476,6 +535,16 @@
   outline: none;
 }
 
+/* Let workspace headings, tabs, and page actions own their spacing, without a second gap from the screen slot. */
+.ui-workspace-main .ui-screen-stack {
+  gap: 0;
+}
+
+/* Separate adjacent content panels after the page header and tabs. */
+.ui-workspace-main .ui-screen-stack > .ui-workspace-panel + .ui-workspace-panel, .ui-workspace-main .ui-screen-stack > .ui-columns + .ui-workspace-panel {
+  margin-block-start: var(--ui-space-5);
+}
+
 /* Let shallow breadcrumbs wrap without obscuring the selected context. */
 .ui-workspace-crumbs {
   display: flex;
@@ -513,14 +582,14 @@
 
 /* Use the mockup’s narrower public page measure. */
 .ui-public-main {
-  max-inline-size: 68rem;
-  margin-inline: auto;
-  padding: 1.25rem 1rem 2.75rem;
+  inline-size: min(100% - 2rem, 68rem);
+  margin: 1.25rem auto 2.75rem;
 }
 
 /* Place the public welcome and hosting steps inside the same panel. */
 .ui-welcome {
   padding: clamp(1.1rem, 4%, 3rem);
+  align-items: center;
   border: 1px solid var(--ui-color-border);
   border-radius: 1.2rem;
   background: linear-gradient(135deg, var(--ui-color-surface), var(--ui-color-accent-surface));
@@ -529,13 +598,14 @@
 /* Keep the landing page heading and actions together in both layouts. */
 .ui-public-intro {
   min-inline-size: 0;
+  inline-size: 100%;
 }
 
 /* Match the mockup’s landing-page title. */
 .ui-public-intro h1 {
   max-inline-size: 14ch;
   margin: 0;
-  font-size: 2.48rem;
+  font-size: var(--ui-welcome-title-size, 2.48rem);
   line-height: 1.12;
   letter-spacing: -0.042em;
 }
@@ -545,6 +615,12 @@
   max-inline-size: 62ch;
   color: var(--ui-color-textMuted);
   margin-block: 0.45rem 1.35rem;
+}
+
+/* Keep the hosting card the full width of its column. */
+.ui-welcome > .ui-workspace-panel {
+  inline-size: 100%;
+  padding: var(--ui-welcome-panel-padding, 1.05rem);
 }
 
 /* Display the hosting steps as an ordered list within the card. */
@@ -563,15 +639,26 @@
   border-block-start: 1px solid var(--ui-color-border);
 }
 
+/* Use the mockup’s colored step numbers. */
+.ui-hosting-steps li::marker {
+  color: var(--ui-color-accent);
+  font-weight: 730;
+}
+
+/* Separate each step’s label from its description. */
+.ui-hosting-steps strong {
+  font-size: 0.92rem;
+}
+
 /* Group each explanation with its step label. */
-.ui-hosting-steps li p {
+.ui-workspace-panel .ui-hosting-steps li p {
   margin: 0.2rem 0 0;
   color: var(--ui-color-textMuted);
-  font-size: var(--ui-font-label);
+  font-size: 0.85rem;
 }
 
 /* Use the mockup’s page heading and weight throughout the workspace. */
-.ui-workspace-main h1 {
+.ui-workspace-main h1, .ui-public-main .ui-workspace-page-heading h1 {
   margin: 0;
   font-size: clamp(2.05rem, 3.4cqi, 2.65rem);
   line-height: 1.12;
@@ -646,6 +733,24 @@
   border: 1px solid var(--ui-color-border);
   border-radius: var(--ui-space-3);
   background: var(--ui-color-context);
+}
+
+/* Keep account settings and the team roster at the mockup’s reading width. */
+.ui-account-settings {
+  max-inline-size: 57rem;
+}
+
+/* Match the account and team sub-tabs’ gap from their related card. */
+.ui-account-settings > .ui-workspace-segments {
+  padding: 0.22rem;
+  margin-block-end: 1.1rem;
+}
+
+/* Preview the same initials used by the header. */
+.ui-profile-avatar .ui-workspace-avatar {
+  inline-size: 4.25rem;
+  block-size: 4.25rem;
+  font-size: 1.15rem;
 }
 
 /* Keep nearby tabs readable and easy to tap. */
@@ -731,8 +836,13 @@
 }
 
 /* Make it clear that the full resource row is a link. */
-.ui-workspace-resource:hover {
+.ui-workspace-resource:is(a):hover {
   background: var(--ui-color-bg);
+}
+
+/* Allow the text to wrap first on rows that have a status badge instead of a leading icon. */
+.ui-workspace-resource:has(> .ui-workspace-resource-text:first-child) {
+  grid-template-columns: minmax(0, 1fr) auto auto;
 }
 
 /* Match the two-line mockup row and let long labels wrap. */

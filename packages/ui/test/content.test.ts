@@ -145,5 +145,5 @@ test('apps/site imports the sheet and names the primitives instead of composing 
 
   const landing = fs.readFileSync(path.join(ROOT, 'apps/site/src/pages/index.astro'), 'utf8');
   assert.match(landing, /class="ui-prose ui-public-intro"/, 'the signup introduction does not name the prose primitive');
-  assert.match(landing, /class="ui-columns" data-columns="2"/, 'the welcome panel does not use the two-column primitive');
+  assert.match(landing, /class="ui-columns ui-welcome" data-columns="welcome"/, 'the welcome panel does not use the shared welcome columns');
 });

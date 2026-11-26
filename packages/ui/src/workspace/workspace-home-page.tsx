@@ -26,7 +26,7 @@ export function WorkspaceHomePage(): React.ReactElement {
     counts = new Map();
     for (const { teamId } of instances.state.data) counts.set(teamId, (counts.get(teamId) ?? 0) + 1);
   }
-  return <div>
+  return <>
     <Breadcrumbs items={[{ label: 'Home', href: '/' }, { label: 'Your teams' }]} />
     <WorkspaceHeading title="Your teams"><p>Choose a team to view its platform instances.</p></WorkspaceHeading>
     <div className="ui-workspace-page-actions">
@@ -44,5 +44,5 @@ export function WorkspaceHomePage(): React.ReactElement {
         <WorkspaceLink className="ui-workspace-secondary ui-hit-primary" href={workspacePaths.invitations}>View invitations</WorkspaceLink>
       </WorkspacePanel>}
     </MainContext>
-  </div>;
+  </>;
 }
