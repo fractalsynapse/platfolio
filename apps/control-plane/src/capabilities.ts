@@ -1368,8 +1368,8 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
           const result = await context.store.publishMarketplaceRelease(release);
           if (result === 'conflict') return conflict();
           if (result === 'created') await context.store.appendAudit({
-            actorKind: 'user', actorRef: personId, action: 'marketplace.publish', target: template,
-            detail: { teamId, version, revision, installer },
+            actorKind: 'user', actorRef: personId, action: 'marketplace.publish', target: `${template}@${version}`,
+            detail: { teamId, commit: revision },
           });
           return { status: 204, body: undefined };
         }),
