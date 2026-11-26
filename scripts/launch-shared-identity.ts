@@ -9,8 +9,9 @@ import { customerRailway, removeCustomerApp, type CustomerRailwayGrant } from '.
 
 const { template, version, revision, image } = SHARED_IDENTITY_RELEASE;
 const keycloak = 'keycloak';
-const discoveryPath = '/realms/master/.well-known/openid-configuration';
-const signingKeysPath = '/realms/master/protocol/openid-connect/certs';
+const realmPath = '/realms/master';
+const discoveryPath = realmPath + '/.well-known/openid-configuration';
+const signingKeysPath = realmPath + '/protocol/openid-connect/certs';
 const bootstrapSetting = 'KC_BOOTSTRAP_ADMIN_PASSWORD';
 
 export async function sharedIdentityReady(origin: string): Promise<boolean> {
@@ -20,7 +21,7 @@ export async function sharedIdentityReady(origin: string): Promise<boolean> {
   };
   try {
     const discovery = await read<{ issuer?: string; jwks_uri?: string }>(discoveryPath);
-    if (discovery?.issuer !== origin + '/realms/master' || discovery?.jwks_uri !== origin + signingKeysPath) return false;
+    if (discovery?.issuer !== origin + realmPath || discovery?.jwks_uri !== origin + signingKeysPath) return false;
     const keys = await read<{ keys?: unknown }>(signingKeysPath);
     return Array.isArray(keys?.keys) && keys.keys.some((key: { kid?: string; use?: string }) => key?.kid && key.use === 'sig');
   } catch { return false; }
@@ -64,10 +65,10 @@ export function railwaySharedIdentityHosting(credential: () => Promise<CustomerR
       for (const [name, value] of Object.entries(values)) await rail.setConfig(id, name, value);
       for (const { variable, output } of service.references) await rail.setConfig(id, variable, ['${{', databaseName, '.', output, '}}'].join(''));
       await rail.setConfig(id, bootstrapSetting, bootstrap);
-      // Railway rejects the dot-prefixed .well-known segment as a healthcheckPath.
-      // Use the same standard keys endpoint as the template's Compose probe.
+      // Railway rejected both the discovery and signing-key paths as service health checks.
+      // Its API accepts the realm path. The public launch verification still checks both OIDC endpoints.
       await rail.configure(id, { numReplicas: service.replicas, startCommand: service.start,
-        healthcheckPath: signingKeysPath, healthcheckTimeout: 240 });
+        healthcheckPath: realmPath, healthcheckTimeout: 240 });
       observer.step({ step: 'Start Shared Identity', state: 'WORKING' });
       const deployment = await rail.deployImage(id);
       observer.step({ step: 'Check identity discovery and signing keys', state: 'WORKING', resourceId: deployment });
