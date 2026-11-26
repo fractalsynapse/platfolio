@@ -26,7 +26,7 @@ test('the shipped spec is internally true', () => {
   // The public half declares itself explicitly rather than by omission -- that is what the security check is for.
   const publicOps = ops.filter((o) => Array.isArray(o.security) && o.security.length === 0).map((o) => o.operationId).sort();
   assert.deepEqual(publicOps, ['completeHubInstallationAuthorization', 'completeStarterRailwayAuthorization', 'getHealth', 'getReady', 'getStatus', 'getVersion'], 'only operational probes, build identity and the state-bound OAuth callbacks are unauthenticated');
-  const installationOperations = new Set(['redeemMarketplaceEnrollment', 'claimEnrolledMarketplaceRelease']);
+  const installationOperations = new Set(['redeemMarketplaceEnrollment', 'claimEnrolledMarketplaceRelease', 'getEnrolledMarketplaceCatalog']);
   for (const guarded of ops.filter((o) => !publicOps.includes(o.operationId))) {
     const scheme = installationOperations.has(guarded.operationId) ? 'marketplaceCredential' : 'bearerJwt';
     assert.deepEqual(guarded.security, [scheme], `${guarded.operationId} must declare exactly ${scheme}`);
