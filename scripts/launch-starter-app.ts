@@ -6,7 +6,7 @@ import { GitScm } from '../packages/contracts/src/git-scm.ts';
 import { StarterBrandChangeSchema } from '../packages/contracts/src/starter-brand.ts';
 import { FREE_STARTER_RELEASE, readTemplate, templateCatalogEntry } from '../packages/manifest/src/index.ts';
 import type { SourceReleaseHosting, SourceReleaseObserver, SourceReleaseProgress } from '../packages/contracts/src/source-release-hosting.ts';
-import { customerRailway, type CustomerRailwayGrant } from './customer-railway.ts';
+import { customerRailway, removeCustomerStarter, type CustomerRailwayGrant } from './customer-railway.ts';
 import { validateStarterSource } from '../packages/manifest/src/starter-release.ts';
 
 const listing = FREE_STARTER_RELEASE;
@@ -87,7 +87,7 @@ export function railwayStarterHosting(credential?: () => Promise<CustomerRailway
     async deploy({ projectId, publicLabel }, observer) {
       return launchStarterApp(template, projectId, observer.step, await credential?.(), publicLabel, observer.project);
     },
-    async remove(id, data) { return (await project(id)).remove(data); },
+    async remove(id, data) { return removeCustomerStarter(id, data, await credential?.()); },
     async domains(id, deployId, action, hostname) { return (await project(id)).starterDomains(deployId, action, hostname); },
     publicLabel: readStarterBrand,
   };

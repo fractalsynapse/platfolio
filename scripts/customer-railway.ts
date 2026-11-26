@@ -26,21 +26,38 @@ type Edges<T> = { edges: { node: T }[] };
 type Stage = RailwayProject;
 type Instance = { serviceId: string; serviceName: string; source: { image?: string; repo?: string } | null; startCommand?: string | null; latestDeployment: { id: string; status: string } | null; activeDeployments: { id: string; status: string }[]; domains: { customDomains: { id: string }[]; serviceDomains: { id: string; domain: string }[] } };
 
+function customerWorkspace(grant: CustomerRailwayGrant | undefined, transport: RailwayTransport) {
+  const token = grant?.token ?? process.env.RAILWAY_TOKEN;
+  const workspaceId = grant?.workspaceId ?? process.env.RAILWAY_WORKSPACE_ID;
+  if (!token || !workspaceId) throw new Error('Provide the customer workspace ID and workspace token locally');
+  const credential = { kind: 'workspace' as const, token };
+  const access = { transport, credential };
+  return { workspaceId, access, workspaceProjects: () => listRailwayProjects(access, workspaceId) };
+}
+
+export async function removeCustomerStarter(projectId: string, data: 'keep' | 'wipe', grant?: CustomerRailwayGrant, transport: RailwayTransport = provider) {
+  if (data === 'wipe') {
+    if (grant?.projectId) throw new Error('A project-only connection cannot verify permanent project removal');
+    const { workspaceProjects } = customerWorkspace(grant, transport);
+    // The journal records the exact project ID. A successful workspace read can settle a retry after deletion.
+    if (!(await workspaceProjects()).some(({ id }) => id === projectId)) return { projectId, retainedVolumes: [] };
+  }
+  const target = await customerRailway({ kind: 'app', name: 'starter-web', id: projectId }, undefined, grant, transport);
+  return target.remove(data);
+}
+
 export async function customerRailway(target: CustomerProjectTarget, progress?: RailwayProgress, grant?: CustomerRailwayGrant, transport: RailwayTransport = provider) {
   if (!/^[a-z][a-z0-9-]{1,62}$/.test(target.name) || (target.name === platformProjectName) !== (target.kind === 'installation')) {
     throw new Error('Platfolio must run in the project named platfolio. Every app requires its own project name.');
   }
   const allowed = target.kind === 'installation' ? platformServices : appServices;
   const marker = `Platfolio project role ${target.kind}/${target.name}`;
-  const token = grant?.token ?? process.env.RAILWAY_TOKEN;
-  const workspaceId = grant?.workspaceId ?? process.env.RAILWAY_WORKSPACE_ID;
-  if (!token || !workspaceId) throw new Error('Provide the customer workspace ID and workspace token locally');
-  const credential = { kind: 'workspace' as const, token };
+  const { workspaceId, access, workspaceProjects } = customerWorkspace(grant, transport);
+  const { credential } = access;
+  const { token } = credential;
   const call = <T>(operation: string, query: string, variables: Record<string, unknown>) =>
     transport.graphql<T>({ operation, query, variables, credential });
   const projectFields = 'id name description environments{edges{node{id name}}}';
-  const access = { transport, credential };
-  const workspaceProjects = () => listRailwayProjects(access, workspaceId);
 
   if (grant?.projectId && (target.kind !== 'app' || target.id !== grant.projectId)) throw new Error('The Railway grant is limited to the selected app project');
   const selected = target.id ? (await call<{ project: Stage & { workspaceId: string } }>(

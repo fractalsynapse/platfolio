@@ -1,9 +1,11 @@
+import { setTimeout as delay } from 'node:timers/promises';
 import type { RailwayCredential, RailwayTransport } from './railway-transport.ts';
 
 export type RailwayDeployment = { id: string; status: string };
 export type RailwayRemovalFailure = { step: string; code: string; message: string };
 
 const stopped = new Set(['FAILED', 'CRASHED', 'REMOVED', 'SKIPPED']);
+const wipeReadbackDelays = [0, 1000, 2000, 3000, 4000, 5000, 5000, 5000, 5000];
 
 export async function stopRailwayDeployments(input: {
   transport: RailwayTransport;
@@ -37,7 +39,6 @@ export async function wipeRailwayProject(input: {
   projectId: string;
   projectExists: () => Promise<boolean>;
 }): Promise<RailwayRemovalFailure | undefined> {
-  let accepted: boolean;
   try {
     const result = await input.transport.graphql<{ projectDelete: boolean }>({
       operation: 'projectDelete',
@@ -45,18 +46,25 @@ export async function wipeRailwayProject(input: {
       query: 'mutation ($id: String!) { projectDelete(id: $id) }',
       variables: { id: input.projectId },
     });
-    accepted = result.projectDelete === true;
-  } catch {
-    return { step: 'project', code: 'teardown-unverified', message: 'Railway did not confirm the deletion request' };
-  }
-  if (!accepted) return { step: 'project', code: 'teardown-refused', message: 'Railway refused project deletion' };
-  try {
-    if (await input.projectExists()) {
-      return { step: 'project', code: 'teardown-incomplete', message: 'Railway still lists the project' };
+    if (result.projectDelete !== true) {
+      return { step: 'project', code: 'teardown-refused', message: 'Railway refused project deletion' };
     }
   } catch {
-    return { step: 'project', code: 'teardown-unverified', message: 'Railway project removal could not be verified' };
+    // A lost response can follow a successful delete. Only the workspace read-back can settle it.
   }
+  let stillListed = false;
+  for (const wait of wipeReadbackDelays) {
+    if (wait) await delay(wait);
+    try {
+      stillListed = await input.projectExists();
+      if (!stillListed) return;
+    } catch {
+      stillListed = false;
+    }
+  }
+  return stillListed
+    ? { step: 'project', code: 'teardown-incomplete', message: 'Railway still lists the project' }
+    : { step: 'project', code: 'teardown-unverified', message: 'Railway project removal could not be verified' };
 }
 
 export async function railwayRetainedVolumeIds(
