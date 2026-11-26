@@ -1,5 +1,5 @@
 import * as React from 'react';
-import type { SuccessOf } from '@platfolio/api-contract/generated/types';
+import type { RequestBodyOf, SuccessOf } from '@platfolio/api-contract/generated/types';
 import { ageLabel, useClock } from '../components/freshness.ts';
 import { useCommand, useOperation } from '../sdk/use-operation.ts';
 import { createInstallationOwner } from '../web/installation-owner.ts';
@@ -10,17 +10,23 @@ import { WorkspaceChoice } from './workspace-choice.tsx';
 import { WorkspaceField } from './workspace-field.tsx';
 import { WorkspacePanel } from './workspace-panel.tsx';
 
+type Maintenance = RequestBodyOf<'maintainHubInstallation'>;
+type MaintenanceChoice = Omit<Extract<Maintenance, { action: 'wipe' }>, 'confirmation'> | Extract<Maintenance, { action: 'update' }>;
+
 const environmentChoices = ['staging', 'production'] as const;
 
 export function HubInstallationLaunch({ teamId }: { readonly teamId: string }) {
   const params = React.useMemo(() => ({ teamId }), [teamId]);
   const offer = useOperation('getHubInstallationOffer', { params, key: 'installation-offer-' + teamId });
+  const offeredRevision = offer.state.status === 'loaded' ? offer.state.data.revision : undefined;
   const [activeId, setActiveId] = React.useState('');
   const journals = useOperation('listHubInstallationLaunches', { params, enabled: offer.state.status === 'loaded' });
   const history = journals.state.status === 'loaded' ? journals.state.data : [];
   const selection = history.find(({ id }) => id === activeId);
   const authorize = useCommand('authorizeHubInstallation');
   const start = useCommand('startHubInstallation');
+  const maintain = useCommand('maintainHubInstallation');
+  const [maintenance, setMaintenance] = React.useState<MaintenanceChoice>();
   const [consent, setConsent] = React.useState<SuccessOf<'authorizeHubInstallation'>>();
   const [workspace, setWorkspace] = React.useState('');
   const [credential, setCredential] = React.useState<Awaited<ReturnType<typeof createInstallationOwner>>>();
@@ -40,12 +46,13 @@ export function HubInstallationLaunch({ teamId }: { readonly teamId: string }) {
     finally { setPending(false); }
   }
 
-  async function prepare(installationId?: string) {
+  async function prepare(installationId?: string, operation?: MaintenanceChoice) {
     const result = await authorize({ params, ...(installationId ? { body: { installationId } } : {}) });
     if (!result.ok) { setProblem(result.error.message); return; }
     const url = new URL(result.value.authorizationUrl);
     if (url.protocol !== 'https:' || url.username || url.password) throw new Error('Invalid provider authorization URL');
     setWorkspace('');
+    setMaintenance(operation);
     setCredential(undefined);
     setConsent({ ...result.value, authorizationUrl: url.href });
     setActiveId(result.value.id);
@@ -72,7 +79,23 @@ export function HubInstallationLaunch({ teamId }: { readonly teamId: string }) {
     });
   }
 
-  const completed = report?.state === 'ready' || report?.state === 'failed';
+  async function maintainInstallation(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!maintenance || !selection) return;
+    const fields = new FormData(event.currentTarget);
+    const body: Maintenance = maintenance.action === 'wipe'
+      ? { action: 'wipe', confirmation: String(fields.get('confirmation') ?? '') }
+      : maintenance;
+    await run(async () => {
+      const result = await maintain({ params: launchParams, body });
+      if (!result.ok) { setProblem(result.error.message); return; }
+      setConsent(undefined);
+      progress.acceptConfirmed(result.value);
+      journals.reload();
+    });
+  }
+
+  const completed = report?.state === 'ready' || report?.state === 'failed' || report?.state === 'removed';
   React.useEffect(() => {
     if (completed) journals.reload();
   }, [completed, journals.reload]);
@@ -92,14 +115,20 @@ export function HubInstallationLaunch({ teamId }: { readonly teamId: string }) {
             <div>
               <strong>{row.name}</strong>
               <p className="ui-workspace-meta">
-                {row.verified.length ? row.verified.join(' and ') : 'Setup incomplete'}
+                {row.state === 'removed' ? 'Removed' : row.verified.length ? row.verified.join(' and ') : 'Setup incomplete'}
               </p>
             </div>
             <div className="ui-workspace-links">
-              <WorkspaceAction onClick={() => { setActiveId(row.id); setConsent(undefined); setCredential(undefined); }}>View progress</WorkspaceAction>
-              {row.state === 'failed' && <WorkspaceAction disabled={pending} onClick={() => void run(() => prepare(row.id))}>Resume setup</WorkspaceAction>}
+              <WorkspaceAction onClick={() => { setActiveId(row.id); setConsent(undefined); setCredential(undefined); setMaintenance(undefined); }}>View progress</WorkspaceAction>
+              {row.state === 'failed' && !row.maintenance && <WorkspaceAction disabled={pending} onClick={() => void run(() => prepare(row.id))}>Resume setup</WorkspaceAction>}
               {row.state === 'ready' && row.verified.length < environmentChoices.length &&
                 <WorkspaceAction disabled={pending} onClick={() => void run(() => prepare(row.id))}>Add environment</WorkspaceAction>}
+              {offeredRevision && row.installed?.filter(({ name, revision }) => revision !== offeredRevision &&
+                (row.state === 'ready' || (row.state === 'failed' && row.maintenanceEnvironment === name)))
+                .map(({ name }) => <WorkspaceAction key={name} disabled={pending}
+                  onClick={() => void run(() => prepare(row.id, { action: 'update', environment: name, revision: offeredRevision }))}>Update {name}</WorkspaceAction>)}
+              {row.canRemove && row.state !== 'running' && <WorkspaceAction disabled={pending}
+                onClick={() => void run(() => prepare(row.id, { action: 'wipe' }))}>Remove installation</WorkspaceAction>}
             </div>
           </li>)}
         </ul>}
@@ -110,8 +139,22 @@ export function HubInstallationLaunch({ teamId }: { readonly teamId: string }) {
         </p>}
         {report?.state === 'authorized' && selection && !report.workspaces.some(({ id }) => id === selection.workspaceId) &&
           <p role="status">Authorize the workspace that owns {selection.name}. <WorkspaceAction disabled={pending}
-            onClick={() => void run(() => prepare(selection.id))}>Authorize again</WorkspaceAction></p>}
-        {report?.state === 'authorized' && (!selection || report.workspaces.some(({ id }) => id === selection.workspaceId)) &&
+            onClick={() => void run(() => prepare(selection.id, maintenance))}>Authorize again</WorkspaceAction></p>}
+        {report?.state === 'authorized' && selection && maintenance &&
+          report.workspaces.some(({ id }) => id === selection.workspaceId) &&
+          <form className="ui-workspace-form" onSubmit={(event) => void maintainInstallation(event)}>
+            {maintenance.action === 'wipe' ? <>
+              <p>Remove <strong>{selection.name}</strong>, all its environments, and their stored data. Your apps in separate projects stay in Railway.</p>
+              <WorkspaceField id={fieldId + '-confirmation'} label="Type the project name">
+                <input id={fieldId + '-confirmation'} name="confirmation" autoComplete="off" required maxLength={63} />
+              </WorkspaceField>
+              <WorkspaceAction type="submit" variant="primary" disabled={pending}>Wipe installation data</WorkspaceAction>
+            </> : <>
+              <p>Update <strong>{selection.name}</strong> · {maintenance.environment} to build <code>{maintenance.revision.slice(0, 7)}</code>. Its settings, domains and data stay in place.</p>
+              <WorkspaceAction type="submit" variant="primary" disabled={pending}>Apply update</WorkspaceAction>
+            </>}
+          </form>}
+        {report?.state === 'authorized' && !maintenance && (!selection || report.workspaces.some(({ id }) => id === selection.workspaceId)) &&
           <form className="ui-workspace-form" onSubmit={(event) => void deploy(event)}>
           {selection ? <p>Hosting project <strong>{selection.name}</strong></p> : <>
             <WorkspaceChoice label="Hosting workspace" value={workspace || report.workspaces[0]?.id || ''}
@@ -138,8 +181,11 @@ export function HubInstallationLaunch({ teamId }: { readonly teamId: string }) {
         {credential && <p>Save this one-time password for <code>owner</code> on newly deployed environments. You’ll replace it when you sign in.
           {' '}<a download="platfolio-first-sign-in.txt" href={'data:text/plain;charset=utf-8,' + encodeURIComponent(credential.password)}>Download sign-in password</a></p>}
         {report && <>
-          {report.state === 'running' && <p role="status">Setting up your installation…</p>}
-          {report.state === 'failed' && <p role="status">{selection
+          {report.state === 'running' && <p role="status">Working on your installation…</p>}
+          {report.state === 'removed' && <p role="status">The hosting provider confirmed the installation was removed.</p>}
+          {report.state === 'failed' && <p role="status">{selection?.maintenance || maintenance
+            ? 'Maintenance paused. Review the last step and authorize the workspace again to retry.'
+            : selection
             ? 'Setup paused. Review the last step and resume with a new authorization.'
             : 'Setup did not finish. Check the progress and try a new authorization.'}{' '}
             {!selection && <WorkspaceAction disabled={pending} onClick={() => void run(() => prepare())}>Try again</WorkspaceAction>}</p>}

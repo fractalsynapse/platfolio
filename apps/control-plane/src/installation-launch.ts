@@ -12,6 +12,9 @@ const collection = '/api/v1/teams/{teamId}/marketplace/installation-launches';
 export const installationAuthorizationCallback = '/api/v1/hosting/installation-authorization/callback';
 type Progress = SuccessOf<'getHubInstallationLaunch'>;
 type Input = RequestBodyOf<'startHubInstallation'>;
+type MaintenanceInput = RequestBodyOf<'maintainHubInstallation'>;
+type JournalOperation = (observer: InstallationCheckpointObserver, beforeWrite: () => Promise<void>,
+  checkpoint: (change: (row: InstallationJournal) => Partial<InstallationJournal>) => Promise<void>) => Promise<void>;
 type Session = {
   owner: string;
   team: string;
@@ -23,7 +26,7 @@ type Session = {
 };
 const leaseMs = 120_000;
 const leaseDeadline = () => new Date(Date.now() + leaseMs).toISOString();
-const journalState = (row: InstallationJournal) => row.state === 'running' && Date.parse(row.leaseUntil) <= Date.now() ? 'failed' : row.state;
+const journalState = (row: InstallationJournal) => row.removedAt ? 'removed' : row.state === 'running' && Date.parse(row.leaseUntil) <= Date.now() ? 'failed' : row.state;
 const absent = () => notFound('installation launch', '');
 const conflict = (message: string) => ({ status: 409, body: { error: 'conflict', message } });
 const noCache = { 'cache-control': 'no-store' };
@@ -34,16 +37,17 @@ function projectProgress(row?: InstallationJournal, session?: Session): Progress
     state,
     workspaces: [...session?.grant?.workspaces ?? []],
     events: row?.events ?? [],
-    environments: row?.environments ?? [],
+    environments: row?.environments.map(({ name, origin }) => ({ name, origin })) ?? [],
     ...(row?.projectId ? { projectId: row.projectId } : {}),
   };
 }
 
-function runInstallation(store: Pick<Store, 'saveInstallationJournal'>, initial: InstallationJournal, recover: NonNullable<InstallationAuthorization['recover']>, input: Input,
-  active: Set<() => void>) {
+function runInstallation(store: Pick<Store, 'saveInstallationJournal'>, initial: InstallationJournal,
+  active: Set<() => void>, operation: JournalOperation) {
   let journal = initial;
   let queue = Promise.resolve();
   let stopped = false;
+  let updatedEnvironment: InstallationJournal['requested'][number] | undefined;
   const checkpoint = (change: (row: InstallationJournal) => Partial<InstallationJournal> = () => ({})) => {
     queue = queue.then(async () => {
       if (stopped || Date.parse(journal.leaseUntil) <= Date.now()) throw new Error('Launch lease expired');
@@ -63,10 +67,15 @@ function runInstallation(store: Pick<Store, 'saveInstallationJournal'>, initial:
       return { projectId };
     }),
     environment: (name, origin) => checkpoint((row) => {
-      if (!row.requested.includes(name) || row.environments.some((item) => item.name === name)) {
-        throw new Error('The provider reported an unexpected environment');
+      const previous = row.environments.find((item) => item.name === name);
+      const maintenance = row.maintenance;
+      if (maintenance?.action === 'update') {
+        if (maintenance.environment !== name || previous?.origin !== origin) throw new Error('The environment address changed');
+        updatedEnvironment = name;
+        return {};
       }
-      return { environments: [...row.environments, { name, origin }] };
+      if (!row.requested.includes(name) || previous) throw new Error('The provider reported an unexpected environment');
+      return { environments: [...row.environments, { name, origin, revision: row.revision }] };
     }),
   };
   const heartbeat = setInterval(() => void checkpoint().catch(stop), leaseMs / 4);
@@ -79,18 +88,22 @@ function runInstallation(store: Pick<Store, 'saveInstallationJournal'>, initial:
   active.add(stop);
   void (async () => {
     try {
-      await recover({ ...input, environments: initial.requested }, observer, {
-        id: initial.id,
-        ...(initial.projectId ? { projectId: initial.projectId } : {}),
-        verified: initial.environments.map(({ name }) => name),
-        submitted: initial.submitted,
-        beforeWrite: (name) => checkpoint((row) => name ? { submitted: [...new Set([...row.submitted, name])] } : {}),
-      });
+      await operation(observer, () => checkpoint(), checkpoint);
       await queue;
-      if (!journal.projectId || !journal.requested.every((name) => journal.environments.some((item) => item.name === name))) {
-        throw new Error('Install did not verify every selected environment');
+      if (initial.maintenance?.action === 'wipe') {
+        await checkpoint(() => ({ state: 'ready', removedAt: new Date().toISOString(), maintenance: undefined, environments: [] }));
+      } else {
+        const update = initial.maintenance;
+        if (!journal.projectId || !journal.requested.every((name) => journal.environments.some((item) => item.name === name)) ||
+            (update?.action === 'update' && updatedEnvironment !== update.environment)) {
+          throw new Error('The hosting operation did not verify its target');
+        }
+        await checkpoint((row) => ({
+          state: 'ready', maintenance: undefined,
+          ...(update?.action === 'update' ? { environments: row.environments.map((item) =>
+            item.name === update.environment ? { ...item, revision: update.revision } : item) } : {}),
+        }));
       }
-      await checkpoint(() => ({ state: 'ready' }));
     } catch {
       // A rejected provider result can leave accepted resources. Preserve their checkpoints.
       try {
@@ -121,7 +134,7 @@ export function installationLaunch(scopedRoute: typeof scoped, config?: { provid
   const scopedOwner: typeof scoped = (method, path, operation, action, handler) =>
     scopedRoute(method, path, operation, action, async (scope, request, params) =>
       config ? handler(scope, request, params) : absent());
-  const result = (operation: 'getHubInstallationLaunch' | 'startHubInstallation', status: 200 | 202, progress: Progress) =>
+  const result = (operation: 'getHubInstallationLaunch' | 'startHubInstallation' | 'maintainHubInstallation', status: 200 | 202, progress: Progress) =>
     ({ ...send(operation, status, progress), headers: noCache });
 
   return {
@@ -141,6 +154,10 @@ export function installationLaunch(scopedRoute: typeof scoped, config?: { provid
         return { ...send('listHubInstallationLaunches', 200, journals.map((row) => ({
           id: row.id, name: row.name, workspaceId: row.workspaceId, state: journalState(row),
           requested: row.requested, verified: row.environments.map(({ name }) => name),
+          installed: row.environments.map(({ name, revision }) => ({ name, revision: revision ?? row.revision })),
+          canRemove: Boolean(row.projectId && !row.removedAt),
+          ...(row.maintenance ? { maintenance: row.maintenance.action } : {}),
+          ...(row.maintenance?.action === 'update' ? { maintenanceEnvironment: row.maintenance.environment } : {}),
         }))), headers: noCache };
       }),
       scopedOwner('POST', collection, 'authorizeHubInstallation', 'marketplace.manage', async ({ context, teamId, personId }, request) => {
@@ -150,9 +167,7 @@ export function installationLaunch(scopedRoute: typeof scoped, config?: { provid
         const row = target ? await context.store.getInstallationJournal(teamId, personId, target) : undefined;
         if (target && !row) return absent();
         if (row && journalState(row) === 'running') return conflict('Setup is still running. Check progress before retrying.');
-        if (row && (row.provider !== config!.provider.id || (row.state !== 'ready' && row.revision !== config!.provider.revision))) {
-          return conflict('This setup needs its original installer release. Ask the hub operator to make that release available.');
-        }
+        if (row && (row.provider !== config!.provider.id || row.removedAt)) return absent();
         if (sessions.size >= 500 || (target && sessions.get(target)?.starting)) return conflict('Wait for the active launch before trying again.');
         const id = row?.id ?? randomUUID();
         const pending = config!.provider.authorize();
@@ -183,6 +198,7 @@ export function installationLaunch(scopedRoute: typeof scoped, config?: { provid
             return conflict('Use the original project name and workspace.');
           }
           if (row && journalState(row) === 'running') return conflict('An installation job is already running.');
+          if (row?.maintenance || row?.removedAt) return conflict('Finish the current lifecycle operation from Connections.');
           const verified = row?.environments.map((item) => item.name) ?? [];
           if (row?.state === 'ready' && environments.some((item) => verified.includes(item))) {
             return conflict('Choose only environments that have not been installed.');
@@ -194,7 +210,9 @@ export function installationLaunch(scopedRoute: typeof scoped, config?: { provid
           const journal: InstallationJournal = {
             ...row, id, teamId, personId, workspaceId, name, provider: config!.provider.id, revision: config!.provider.revision,
             requested: [...new Set([...verified, ...environments])], state: 'running',
-            submitted: row?.submitted ?? [], environments: row?.environments ?? [], events: row?.events ?? [],
+            submitted: row?.submitted ?? [],
+            environments: row?.environments.map((entry) => ({ ...entry, revision: entry.revision ?? row.revision })) ?? [],
+            events: row?.events ?? [],
             version: row ? row.version + 1 : 0, leaseUntil: leaseDeadline(),
           };
           const audit = await context.store.appendAudit({ actorKind: 'user', actorRef: personId, action: 'installation.launch.request',
@@ -203,12 +221,72 @@ export function installationLaunch(scopedRoute: typeof scoped, config?: { provid
             return conflict('Platfolio could not reserve this project. Check your existing installations before retrying.');
           }
           sessions.delete(id);
-          runInstallation(context.store, journal, grant.recover, input, active);
+          const recover = grant.recover.bind(grant);
+          runInstallation(context.store, journal, active, (observer, _beforeWrite, checkpoint) =>
+            recover({ ...input, environments: journal.requested }, observer, {
+              id: journal.id,
+              ...(journal.projectId ? { projectId: journal.projectId } : {}),
+              verified: journal.environments.map(({ name }) => name), submitted: journal.submitted,
+              beforeWrite: (environment) => checkpoint((current) => environment
+                ? { submitted: [...new Set([...current.submitted, environment])] } : {}),
+            }));
           return result('startHubInstallation', 202, projectProgress(journal));
         } finally {
           delete session.starting;
         }
       }),
+      scopedOwner('POST', collection + '/{launchId}/maintenance', 'maintainHubInstallation', 'marketplace.manage',
+        async ({ teamId, personId, context }, request, params) => {
+          const id = params.launchId ?? '';
+          const row = await context.store.getInstallationJournal(teamId, personId, id);
+          if (!row || row.removedAt) return absent();
+          if (request.bodyError || !validateRequestBody(spec(), 'maintainHubInstallation', request.body).ok) {
+            return badRequest('Choose an environment to update or confirm the project name.');
+          }
+          const input = request.body as MaintenanceInput;
+          const session = visible(id, teamId, personId);
+          const grant = session?.grant;
+          if (!session || !grant?.maintain || session.starting || grant.expires <= Date.now() ||
+              !grant.workspaces.some(({ id: workspace }) => workspace === row.workspaceId)) {
+            return conflict('Authorize the original hosting workspace before continuing.');
+          }
+          if (!row.projectId || row.provider !== config!.provider.id || journalState(row) === 'running') {
+            return conflict('Wait for the current job or verify the original project first.');
+          }
+          if (input.action === 'wipe' && input.confirmation !== row.name) return badRequest('Type the exact project name to confirm.');
+          const revision = config!.provider.revision;
+          if (input.action === 'update') {
+            if (input.revision !== revision) return conflict('The offered release changed. Refresh Connections and review the new build.');
+            const installed = row.environments.find(({ name }) => name === input.environment);
+            const prior = row.maintenance;
+            if (!installed || (row.state !== 'ready' &&
+              (prior?.action !== 'update' || prior.environment !== input.environment || prior.revision !== revision))) {
+              return conflict('Choose an installed environment or retry its previous update.');
+            }
+            if ((installed.revision ?? row.revision) === revision) return conflict('This environment is already on the offered release.');
+          }
+          session.starting = true;
+          try {
+            const maintenance = input.action === 'update'
+              ? { action: input.action, environment: input.environment, revision }
+              : { action: input.action };
+            const next: InstallationJournal = {
+              ...row, maintenance, state: 'running', version: row.version + 1, leaseUntil: leaseDeadline(),
+            };
+            const audit = await context.store.appendAudit({
+              actorKind: 'user', actorRef: personId, action: 'installation.maintenance.request', target: teamId,
+              detail: { ref: id, action: input.action, ...(input.action === 'update' ? { environment: input.environment, revision } : {}) },
+            });
+            if (!audit.ok || !await context.store.saveInstallationJournal(next)) return conflict('Another operation changed this installation.');
+            sessions.delete(id);
+            const maintain = grant.maintain.bind(grant);
+            const target = { id, name: row.name, projectId: row.projectId, workspaceId: row.workspaceId, requested: row.requested };
+            runInstallation(context.store, next, active, (observer, beforeWrite) => maintain(target, maintenance, observer, beforeWrite));
+            return result('maintainHubInstallation', 202, projectProgress(next));
+          } finally {
+            delete session.starting;
+          }
+        }),
       {
         method: 'GET', path: installationAuthorizationCallback, operationId: 'completeHubInstallationAuthorization',
         async handle(request) {

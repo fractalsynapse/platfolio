@@ -108,6 +108,24 @@ const expectErr = (result: { ok: boolean; value?: unknown } & Partial<StoreError
       : { status: 'fail', detail: 'journal scope, version, or credential rejection differed' };
   });
 
+  await add('verified installation removal frees the workspace name and retains history', async () => {
+    const store = await fresh();
+    const team = mustOk(await store.createTeam({ name: tName('removal-journal') }), 'team');
+    const person = mustOk(await store.resolvePerson({ issuer: 'https://fixture.example.test', subject: team.id }), 'person').person;
+    const row: InstallationJournal = {
+      id: randomUUID(), teamId: team.id, personId: person.id, provider: 'fixture', workspaceId: team.id,
+      name: 'platfolio', revision: 'a'.repeat(40), requested: ['staging'], submitted: ['staging'], events: [],
+      environments: [], state: 'running', projectId: 'isolated-project', version: 0, leaseUntil: new Date().toISOString(),
+    };
+    const created = await store.saveInstallationJournal(row);
+    const removed = await store.saveInstallationJournal({ ...row, state: 'ready', removedAt: new Date().toISOString(), version: 1 });
+    const reused = await store.saveInstallationJournal({ ...row, id: randomUUID() });
+    const history = await store.listInstallationJournals(team.id, person.id);
+    const accepted = created && removed && reused && history.length === 2 && history.some(({ removedAt }) => removedAt !== undefined);
+    return accepted ? { status: 'pass', detail: 'one active reservation with removal history' }
+      : { status: 'fail', detail: 'installation name reservation did not follow removal' };
+  });
+
   await add('marketplace links preserve team scope and remain revoked on connect replay', async () => {
     const store = await fresh();
     const owner = mustOk(await store.createTeam({ name: tName('marketplace-owner') }), 'owner');

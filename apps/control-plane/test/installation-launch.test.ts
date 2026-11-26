@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { test } from 'node:test';
 import { createIdentityFixture, defaultIdentityConfig, signToken } from '@platfolio/contracts';
+import type { SuccessOf } from '@platfolio/api-contract/generated/types';
 import { createKernel, disposeKernel } from '@platfolio/kernel';
 import type { InstallationProvider } from '../../../packages/contracts/src/installation-provider.ts';
 import { buildCapabilities } from '../src/capabilities.ts';
@@ -13,6 +14,7 @@ test('a hub owner launches through the selected plugin without exposing the gran
   const permissions = { issuer: 'https://hosting.example.test', code: 'use-once' };
   let exchanges = 0;
   let executions = 0;
+  let maintenanceCalls = 0;
   let interrupt = true;
   let unblock!: () => void;
   const provisioned = new Promise<void>((resolve) => { unblock = resolve; });
@@ -51,6 +53,18 @@ test('a hub owner launches through the selected plugin without exposing the gran
               await observer.environment('staging', 'https://private.example.test');
             }
             await observer.step('Create project', 'READY');
+          },
+          async maintain(target, action, observer, beforeWrite) {
+            maintenanceCalls++;
+            assert.equal(target.projectId, 'project-id');
+            assert.equal(target.workspaceId, input.workspaceId);
+            assert.deepEqual(target.requested, ['staging', 'production']);
+            await beforeWrite();
+            if (action.action === 'update') {
+              assert.equal(action.environment, 'staging');
+              await observer.environment('staging', 'https://private.example.test');
+            }
+            await observer.step('Verified provider result', 'READY');
           },
         };
       },
@@ -121,7 +135,7 @@ test('a hub owner launches through the selected plugin without exposing the gran
     assert.deepEqual(interrupted.environments, []);
     assert.equal((await call(status, 'PUT', 'owner', input)).status, 409);
     const records = await call(route).then((response) => response.json());
-    assert.deepEqual(records, [{ id, name: input.name, workspaceId: input.workspaceId, state: 'failed', requested: ['staging'], verified: [] }]);
+    assert.deepEqual(records, [{ id, name: input.name, workspaceId: input.workspaceId, state: 'failed', requested: ['staging'], verified: [], installed: [], canRemove: true }]);
     assert.ok(!JSON.stringify(records).includes(input.verifier));
     const owner = await app.store.resolvePerson({ issuer: fixture.issuer, subject: 'owner' });
     assert.ok(owner.ok);
@@ -162,6 +176,23 @@ test('a hub owner launches through the selected plugin without exposing the gran
     assert.equal(expanded.projectId, 'project-id');
     assert.deepEqual(expanded.environments.map(({ name }) => name), ['staging', 'production']);
     assert.equal(executions, 3);
+    const maintenance = status + '/maintenance';
+    assert.equal((await call(maintenance, 'POST', 'member', { action: 'wipe', confirmation: input.name })).status, 403);
+    assert.equal((await call(maintenance, 'POST', 'owner', { action: 'wipe', confirmation: input.name })).status, 409);
+    installationProvider.revision = 'd'.repeat(40);
+    await recovery();
+    const update = { action: 'update', environment: 'staging', revision: installationProvider.revision };
+    assert.equal((await call(maintenance, 'POST', 'owner', { ...update, revision: 'c'.repeat(40) })).status, 409);
+    assert.equal((await call(maintenance, 'POST', 'owner', update)).status, 202);
+    await waitFor('ready');
+    const listed = await call(route).then((response) => response.json()) as SuccessOf<'listHubInstallationLaunches'>;
+    assert.deepEqual(listed[0]?.installed, [{ name: 'staging', revision: 'd'.repeat(40) }, { name: 'production', revision: 'c'.repeat(40) }]);
+    await recovery();
+    assert.equal((await call(maintenance, 'POST', 'owner', { action: 'wipe', confirmation: 'wrong-project' })).status, 400);
+    assert.equal((await call(maintenance, 'POST', 'owner', { action: 'wipe', confirmation: input.name })).status, 202);
+    assert.deepEqual((await waitFor('removed')).environments, []);
+    assert.equal((await call(route, 'POST', 'owner', { installationId: id })).status, 404);
+    assert.equal(maintenanceCalls, 2);
     const audit = await call('/api/v1/teams/' + teamId + '/activity').then((response) => response.text());
     assert.ok(!audit.includes(input.verifier));
   } finally {

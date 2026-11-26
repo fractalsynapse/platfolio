@@ -93,7 +93,7 @@ export class MemoryStore implements Store {
       if (next.version !== current.version + 1 || current.teamId !== next.teamId || current.personId !== next.personId ||
           current.provider !== next.provider || current.name !== next.name || current.workspaceId !== next.workspaceId) return false;
     } else if (next.version !== 0 || !this.teams.has(next.teamId) || !this.persons.has(next.personId) ||
-        [...this.installationJournals.values()].some((row) => row.provider === next.provider && row.workspaceId === next.workspaceId && row.name === next.name)) {
+        [...this.installationJournals.values()].some((row) => !row.removedAt && row.provider === next.provider && row.workspaceId === next.workspaceId && row.name === next.name)) {
       return false;
     }
     this.installationJournals.set(next.id, result.data);

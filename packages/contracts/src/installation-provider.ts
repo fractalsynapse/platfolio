@@ -8,7 +8,19 @@ export interface InstallationAuthorization {
   expires: number;
   launch(input: InstallationLaunchInput, observe: InstallationObserver): Promise<void>;
   recover?(input: InstallationLaunchInput, observe: InstallationCheckpointObserver, recovery: InstallationRecovery): Promise<void>;
+  maintain?(target: InstallationTarget, action: InstallationMaintenance, observe: InstallationCheckpointObserver,
+    beforeWrite: () => Promise<void>): Promise<void>;
 }
+export interface InstallationTarget {
+  id: string;
+  projectId: string;
+  name: string;
+  workspaceId: string;
+  requested: readonly InstallationEnvironment[];
+}
+export type InstallationMaintenance =
+  | { action: 'update'; environment: InstallationEnvironment }
+  | { action: 'wipe' };
 export const InstallationLaunchInputSchema = z.object({
   workspaceId: z.string().min(1).max(128),
   name: z.string().regex(/^[a-z][a-z0-9-]{1,62}$/),

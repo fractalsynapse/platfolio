@@ -537,3 +537,19 @@ gets its own services, domain, database, OpenBao, and first owner sign-in. Previ
 verified environments and their data stay in place. An unfinished launch resumes with
 its original release and environment choices. An expansion uses the current installer
 release for the new environment.
+
+### Update or remove a private installation
+
+An owner reauthorizes the original workspace from Connections for an update or removal.
+An update selects one installed environment and uses the current pinned installer.
+Platfolio replaces the application service images in place, preserving configuration,
+service IDs, domains and storage. Database and OpenBao image changes require their own
+upgrade procedure. An update verifies the new deployments and the build served by the site
+and API before recording the release.
+
+Removal requires typing the exact project name and affects the whole private installation,
+including all of its environments and stored data. Apps in separate projects are managed
+individually from the private installation. Platfolio records the removal only after Railway
+confirms that the original project is absent. The hub retains the history and releases
+the project name for future launches. These operations use the same journal and lease as
+launch, scoped to the owner and bound to the original provider project.

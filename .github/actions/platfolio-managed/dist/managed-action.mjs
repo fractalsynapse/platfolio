@@ -25068,7 +25068,7 @@ function date4(params) {
 }
 
 // packages/contracts/src/generated/contract-version.ts
-var CONTRACT_VERSION = "6.3.0";
+var CONTRACT_VERSION = "6.4.0";
 
 // packages/contracts/src/infra.ts
 var CONTRACT_NAME = "infra.provider";
@@ -27758,7 +27758,7 @@ var InstallationLaunchInputSchema = external_exports.object({
 // packages/contracts/src/installation-journal.ts
 var installationEnvironment2 = InstallationLaunchInputSchema.shape.environments.element;
 var safeId = external_exports.string().min(1).max(128).regex(/^[A-Za-z0-9_/-]+$/);
-var readyEnvironment = external_exports.object({ name: installationEnvironment2, origin: external_exports.url({ protocol: /^https$/ }) }).strict();
+var readyEnvironment = external_exports.object({ name: installationEnvironment2, origin: external_exports.url({ protocol: /^https$/ }), revision: external_exports.string().regex(/^[a-f0-9]{40}$/).optional() }).strict();
 var InstallationJournalSchema = external_exports.object({
   id: external_exports.uuid(),
   teamId: safeId,
@@ -27776,7 +27776,12 @@ var InstallationJournalSchema = external_exports.object({
     step: external_exports.string().min(1).max(120),
     state: external_exports.enum(["WORKING", "READY", "FAILED"])
   }).strict()).max(100),
+  maintenance: external_exports.discriminatedUnion("action", [
+    external_exports.object({ action: external_exports.literal("wipe") }).strict(),
+    external_exports.object({ action: external_exports.literal("update"), environment: installationEnvironment2, revision: external_exports.string().regex(/^[a-f0-9]{40}$/) }).strict()
+  ]).optional(),
   state: external_exports.enum(["running", "failed", "ready"]),
+  removedAt: external_exports.iso.datetime().optional(),
   version: external_exports.number().int().min(0),
   leaseUntil: external_exports.iso.datetime()
 }).strict();
