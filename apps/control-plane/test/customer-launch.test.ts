@@ -88,6 +88,8 @@ test('customer launch is owner scoped and passes only the intended fields to a p
       error: 'marketplace-claim-required', message: 'Go to Connections → Marketplace to claim Starter Web, then launch again.',
     });
     const shared = path + '?template=shared-identity';
+    assert.equal((await fetch(path + '?template=unknown', { method: 'POST', headers: headers('owner') })).status, 400);
+    assert.equal((await fetch(shared + '&template=shared-identity', { headers: headers('owner') })).status, 400);
     assert.equal((await fetch(shared, { method: 'POST', headers: headers('owner') })).status, 400);
     const bootstrap = 'A'.repeat(512);
     const sharedLaunch = (actor: string) => fetch(shared, {

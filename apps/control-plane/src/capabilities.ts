@@ -1454,6 +1454,15 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
     return unavailable();
   }
   const launchPath = '/api/v1/teams/{teamId}/starter-launch';
+  type LaunchTemplate = typeof SHARED_IDENTITY_RELEASE.template | typeof FREE_STARTER_RELEASE.template;
+  const scopedLaunch = (method: string, suffix: string, operation: string,
+    handle: (scope: Scope, request: Request, template: LaunchTemplate) => Promise<Response_>) =>
+    scoped(method, launchPath + suffix, operation, 'marketplace.manage', async (scope, request) => {
+      const selected = request.query.getAll('template');
+      if (selected.length === 0) return handle(scope, request, FREE_STARTER_RELEASE.template);
+      if (selected.length !== 1 || selected[0] !== SHARED_IDENTITY_RELEASE.template) return badRequest('Choose an installable template.');
+      return handle(scope, request, selected[0]);
+    });
   const brandPath = '/api/v1/instances/{instanceId}/environments/{environment}/configuration/starter-brand';
   async function hostedBrand({ context, teamId, personId }: Scope, request: Request, params: Record<string, string>,
     operation: 'getHostedStarterBrand' | 'updateHostedStarterBrand'): Promise<Response_> {
@@ -1513,8 +1522,8 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
         if (!requested.ok) return unavailable();
         return send('redeployHostedStarter', 202, { state: 'requested' });
       }),
-      scoped('GET', launchPath, 'getStarterLaunch', 'marketplace.manage', async ({ teamId, context }, request) => {
-        const shared = request.query.get('template') === SHARED_IDENTITY_RELEASE.template;
+      scopedLaunch('GET', '', 'getStarterLaunch', async ({ teamId, context }, _request, template) => {
+        const shared = template === SHARED_IDENTITY_RELEASE.template;
         if (!shared && deps.starterLaunch?.teamId === teamId) return send('getStarterLaunch', 200, await deps.starterLaunch.read());
         if (!customer || customer.teamId !== teamId) return notFound('launch', 'starter');
         const report = shared ? await customer.call('template-report', { template: SHARED_IDENTITY_RELEASE.template })
@@ -1523,8 +1532,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
         const link = await hostedStarterLink(context.store, teamId, report.body);
         return send('getStarterLaunch', 200, { ...(report.body as object), removedProjectId: undefined, ...link });
       }),
-      scoped('POST', launchPath, 'startStarterLaunch', 'marketplace.manage', async ({ teamId }, request) => {
-        const template = request.query.get('template');
+      scopedLaunch('POST', '', 'startStarterLaunch', async ({ teamId }, request, template) => {
         if (template === SHARED_IDENTITY_RELEASE.template) {
           if (customer?.teamId !== teamId) return notFound('launch', '');
           const body = bodyOf<{ bootstrap?: string }>(request);
@@ -1535,9 +1543,8 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
         return deps.starterLaunch?.teamId === teamId
           ? send('startStarterLaunch', 200, await deps.starterLaunch.start()) : relay(teamId, 'startStarterLaunch', 'start');
       }),
-      scoped('POST', launchPath + '/remove', 'removeStarterLaunch', 'marketplace.manage', async ({ teamId, context }, request) => {
-        const shared = request.query.get('template') === SHARED_IDENTITY_RELEASE.template;
-        const template = shared ? SHARED_IDENTITY_RELEASE.template : FREE_STARTER_RELEASE.template;
+      scopedLaunch('POST', '/remove', 'removeStarterLaunch', async ({ teamId, context }, request, template) => {
+        const shared = template === SHARED_IDENTITY_RELEASE.template;
         if (customer?.teamId !== teamId && (shared || deps.starterLaunch?.teamId !== teamId)) return notFound('launch', '');
         const body = bodyOf<{ data: 'keep' | 'wipe'; confirmation?: string }>(request);
         if (!body.ok || !body.value || !['keep', 'wipe'].includes(body.value.data)) return badRequest('Select keep data or wipe data');

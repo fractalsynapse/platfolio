@@ -4,7 +4,7 @@
  * hand, because every line reproduces from the specification.
  *
  * Source: apps/control-plane/openapi.yaml (OpenAPI 3.1.0, info.version 0.1.0)
- * Input digest: sha256/ef2f0bb07b649546
+ * Input digest: sha256/ddfc59651d6374a1
  *
  * Reproduce it with `pnpm run api:types`. `pnpm run api:types:check` fails when this file stops matching
  * what the committed spec produces, which is the only way a generated type deserves to be trusted.
@@ -1392,6 +1392,7 @@ export interface ApiResponses {
         detail?: string;
       }>;
     };
+    '400': Error;
     '401': Error;
     '403': Error;
     '404': Error;
