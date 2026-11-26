@@ -1108,7 +1108,8 @@ paths:
       - { name: environment, in: path, required: true, schema: { type: string } }
     post:
       operationId: redeployHostedStarter
-      summary: Rebuild the verified pinned Starter Web release in its existing staging project
+      summary: Redeploy an installed marketplace release at its saved pin in the existing staging project
+      description: The private hosting plugin reuses the recorded project and storage. Follow app setup for provider verification.
       security: [{ bearerJwt: [] }]
       responses:
         '202':
@@ -2973,7 +2974,7 @@ paths:
               additionalProperties: false
               properties:
                 release: { $ref: '#/components/schemas/MarketplaceReleaseSelection' }
-                bootstrap: { type: string, pattern: '^[A-Za-z0-9+/]{512}$', description: Owner bootstrap material encrypted to the private worker. }
+                bootstrap: { type: string, pattern: '^[A-Za-z0-9+/]{512}$', description: Shared Identity bootstrap material encrypted to the private worker for first setup. Restoring a verified installation uses its existing database and credentials. }
       responses:
         '200': *starter-launch-response
         '400': { $ref: '#/components/responses/BadRequest' }

@@ -165,11 +165,12 @@ export async function customerRailway(target: CustomerProjectTarget, progress?: 
     await deployRailwayService(access, placement(serviceId));
     return wait(serviceId, undefined, current?.latestDeployment?.id);
   }
-  async function publicOrigin(serviceId: string, port: number) {
+  async function publicOrigin(serviceId: string, port: number, options: { existingOnly?: boolean } = {}) {
     const service = (await instances()).find((item) => item.serviceId === serviceId);
     if (!service) throw new Error('Railway service is outside the staging placement');
-    const domain = service.domains.serviceDomains[0]?.domain ??
-      await createRailwayServiceDomain(access, placement(serviceId), port);
+    const existing = service.domains.serviceDomains[0]?.domain;
+    if (!existing && options.existingOnly) throw new Error('Railway no longer reports the original service address');
+    const domain = existing ?? await createRailwayServiceDomain(access, placement(serviceId), port);
     if (!/^[a-z0-9-]+\.up\.railway\.app$/.test(domain)) throw new Error('Unexpected Railway ingress hostname');
     return `https://${domain}`;
   }
@@ -216,10 +217,13 @@ export async function customerRailway(target: CustomerProjectTarget, progress?: 
     if (!attached) throw new Error('Railway did not confirm the requested domain');
     return { outcome: 'attached' as const, domain: readRailwayCustomDomain(attached) };
   }
-  async function privatePostgres(name: string) {
+  async function privatePostgres(name: string, options: { existingOnly?: boolean } = {}) {
     if (!allowed.has(name)) throw new Error('Database is outside the approved platform project');
     let database = (await instances()).find((item) => item.serviceName === name);
     const existingDatabase = Boolean(database);
+    if (options.existingOnly && (!database || !(await railwayRetainedVolumeIds(access, scope.environmentId)).length)) {
+      throw new Error('The retained PostgreSQL service and storage must both be present');
+    }
     if (!database) {
       const { id: templateId, serializedConfig } = await readRailwayTemplate(access, 'postgresql');
       const entries = Object.entries(serializedConfig?.services ?? {});

@@ -44,6 +44,7 @@ function LaunchPanel({ teamId, teamName, managedProjectId, template, release }: 
   const [pending, setPending] = React.useState(false);
   const [problem, setProblem] = React.useState('');
   const report = isLoaded(launch.state) ? launch.state.data : null;
+  const needsIdentityBootstrap = identity && report?.state !== 'kept';
   const now = useClock();
   const newInstall = report?.state === 'idle' || report?.state === 'wiped';
   const catalog = useOperation('listInstallableTemplates', { params: noParams, enabled: newInstall && !release && !local });
@@ -57,7 +58,7 @@ function LaunchPanel({ teamId, teamName, managedProjectId, template, release }: 
     setProblem('');
     setPending(true);
     try {
-      const bootstrap = action === 'start' && identity && setup.state.status === 'loaded'
+      const bootstrap = action === 'start' && needsIdentityBootstrap && setup.state.status === 'loaded'
         ? await sealOwnerRecovery(setup.state.data.workerKey, new TextEncoder().encode(password)) : undefined;
       const body = { ...(bootstrap ? { bootstrap } : {}), ...(approved ? { release: approved } : {}) };
       const result = action === 'start' ? await start({ params: selected, body })
@@ -110,8 +111,8 @@ function LaunchPanel({ teamId, teamName, managedProjectId, template, release }: 
           ? 'Restore the app and reconnect its retained data in Railway.'
           : worker ? 'Launch a background worker in its own Railway staging project with persistent storage. It has no public address.'
             : 'Use your connected Railway workspace. This creates a dedicated staging project and database. Anyone with the generated app link can open it. Railway charges apply to the resources you use.'}</p>
-        {identity && <IdentityAdminCredential password={password} change={setPassword} />}
-        <WorkspaceAction variant="primary" disabled={pending || newInstall && !local && !approved || identity && !/^[A-Za-z0-9_-]{32,64}$/.test(password)}
+        {needsIdentityBootstrap && <IdentityAdminCredential password={password} change={setPassword} />}
+        <WorkspaceAction variant="primary" disabled={pending || newInstall && !local && !approved || needsIdentityBootstrap && !/^[A-Za-z0-9_-]{32,64}$/.test(password)}
           onClick={() => void act('start')}>{report.state === 'kept' ? 'Restore app' : report.state === 'failed' ? 'Resume setup' : template ? title : 'Launch starter'}</WorkspaceAction>
       </>}
       {report.state === 'ready' && <p className="ui-workspace-links">

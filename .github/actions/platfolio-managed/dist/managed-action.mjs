@@ -25068,7 +25068,7 @@ function date4(params) {
 }
 
 // packages/contracts/src/generated/contract-version.ts
-var CONTRACT_VERSION = "7.2.0";
+var CONTRACT_VERSION = "7.3.0";
 
 // packages/contracts/src/infra.ts
 var CONTRACT_NAME = "infra.provider";
@@ -27944,8 +27944,9 @@ var CustomerHostingCommandSchema = external_exports.discriminatedUnion("action",
     external_exports.object({ template: external_exports.literal("shared-identity"), bootstrap: encoded.length(512), ...selectedRelease }).strict(),
     external_exports.object({ template: external_exports.literal("starter-worker"), ...selectedRelease }).strict()
   ])),
+  command("template-restore", external_exports.object({ template: PrivateLaunchTemplateSchema }).strict()),
   command("template-remove", HostingRemovalSchema.extend({ template: PrivateLaunchTemplateSchema }).strict()),
-  command("template-redeploy", target.extend({ template: external_exports.literal("starter-worker") })),
+  command("template-redeploy", target.extend({ template: PrivateLaunchTemplateSchema })),
   command("authorize", empty),
   command("initialize", external_exports.object({ publicKey: encoded.min(500).max(1024) }).strict()),
   command("unlock", external_exports.object({ recovery: encoded.min(500).max(640) }).strict()),

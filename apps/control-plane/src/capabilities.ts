@@ -1426,7 +1426,9 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
       return { status: 409, body: { error: 'marketplace-release-unavailable',
         message: 'Check Marketplace in Connections, then open Choose template and select an available release.' } };
     }
-    if (!output.ok && output.status === 400 && action === 'template-start') return badRequest('Generate a new encrypted admin credential and try again.');
+    if (!output.ok && output.status === 400 && (action === 'template-start' || action === 'template-restore')) {
+      return badRequest('Generate a new encrypted admin credential if this app has not finished its first launch.');
+    }
     if (!output.ok) return unavailable();
     return action === 'unlock' ? { status: 204, body: null } : send(operation, 200, output.body);
   };
@@ -1542,31 +1544,6 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
         hostedDomains(scope, params, 'attachHostedCustomDomain')),
       scoped('DELETE', domainPath + '/{hostname}', 'detachHostedCustomDomain', 'marketplace.manage', (scope, _request, params) =>
         hostedDomains(scope, params, 'detachHostedCustomDomain')),
-      scoped('POST', '/api/v1/instances/{instanceId}/environments/{environment}/deployments', 'redeployHostedStarter', 'marketplace.manage', async ({ teamId, context }, _request, params) => {
-        const instanceId = params.instanceId ?? '';
-        if (!customer || customer.teamId !== teamId || params.environment !== 'staging') return notFound('hosted deployment', instanceId);
-        const instance = await context.store.getInstance(instanceId);
-        if (!instance.ok || (instance.value.template !== STARTER_WORKER_RELEASE.template &&
-            instance.value.template !== FREE_STARTER_RELEASE.template)) return notFound('hosted deployment', instanceId);
-        const worker = instance.value.template === STARTER_WORKER_RELEASE.template;
-        const hosting = await context.store.getHostedStarter(instanceId);
-        if (!hosting.ok) return notFound('hosted deployment', instanceId);
-        if (hosting.value.state !== 'live') {
-          return { status: 409, body: { error: 'conflict', message: 'Restore this app before requesting another deployment.' } };
-        }
-        const target = { projectId: hosting.value.projectId, deploymentId: hosting.value.deploymentId };
-        const template = STARTER_WORKER_RELEASE.template;
-        const current = worker ? await customer.call('template-report', { template }) : await customer.call('report');
-        if (!current.ok) return unavailable();
-        const observed = current.body as { state?: unknown; projectId?: unknown; deploymentId?: unknown } | null;
-        if (!observed || !['ready', 'running'].includes(String(observed.state)) || observed.projectId !== hosting.value.projectId ||
-            observed.deploymentId !== hosting.value.deploymentId) {
-          return { status: 409, body: { error: 'conflict', message: 'Finish the current setup or refresh the app before trying again.' } };
-        }
-        const requested = worker ? await customer.call('template-redeploy', { template, ...target }) : await customer.call('redeploy', target);
-        if (!requested.ok) return unavailable();
-        return send('redeployHostedStarter', 202, { state: 'requested' });
-      }),
       scopedLaunch('GET', '', 'getStarterLaunch', async ({ teamId, context }, _request, template) => {
         const extraTemplate = template !== FREE_STARTER_RELEASE.template;
         if (!extraTemplate && deps.starterLaunch?.teamId === teamId) return send('getStarterLaunch', 200, await deps.starterLaunch.read());
@@ -1586,6 +1563,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
         if (template === SHARED_IDENTITY_RELEASE.template) {
           if (customer?.teamId !== teamId) return notFound('launch', '');
           const bootstrap = body.value?.bootstrap;
+          if (bootstrap === undefined && selection === undefined) return relay(teamId, 'startStarterLaunch', 'template-restore', { template });
           if (!bootstrap || !/^[A-Za-z0-9+/]{512}$/.test(bootstrap)) return badRequest('Generate and save the Shared Identity admin credential.');
           return relay(teamId, 'startStarterLaunch', 'template-start', { template, bootstrap, ...pin });
         }

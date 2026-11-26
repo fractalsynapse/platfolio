@@ -30,7 +30,7 @@ export function railwaySharedIdentityHosting(credential: () => Promise<CustomerR
     async deploy({ projectId, bootstrap, release = SHARED_IDENTITY_RELEASE }, observer) {
       const { version, revision, image } = release;
       if (!image) throw new Error('The pinned identity release needs an image digest');
-      if (!bootstrap) throw new Error('A Keycloak bootstrap password is required');
+      if (!projectId && !bootstrap) throw new Error('A Keycloak bootstrap password is required to create the project');
       observer.step({ step: 'Read the pinned release', state: 'WORKING' });
       const scm = new GitScm();
       const source = await readTemplate((request) => scm.readRepositoryFile(request), templateCatalogEntry(template), revision);
@@ -40,19 +40,25 @@ export function railwaySharedIdentityHosting(credential: () => Promise<CustomerR
       const rail = await customerRailway({ name: template, kind: 'app', ...(projectId ? { id: projectId } : { create: true }) }, observer.step, grant);
       observer.project(rail.project.id);
       const databaseName = database.name + '-staging';
+      const serviceName = keycloak + '-staging';
+      const existing = bootstrap ? undefined : (await rail.instances()).find(({ serviceName: name }) => name === serviceName);
+      if (!bootstrap && (!existing || existing.source?.image !== image)) {
+        throw new Error('The existing Keycloak service must match the installed image pin');
+      }
       observer.step({ step: 'Prepare the database', state: 'WORKING' });
-      await rail.privatePostgres(databaseName);
+      await rail.privatePostgres(databaseName, { existingOnly: !bootstrap });
       observer.step({ step: 'Prepare the database', state: 'READY' });
-      const id = await rail.ensureService(keycloak + '-staging', image);
-      const origin = await rail.publicOrigin(id, service.port);
-      const values = { ...service.env, ...service.environmentValues.production, PORT: String(service.port), KC_HOSTNAME: origin };
-      for (const [name, value] of Object.entries(values)) await rail.setConfig(id, name, value);
-      for (const { variable, output } of service.references) await rail.setConfig(id, variable, ['${{', databaseName, '.', output, '}}'].join(''));
-      await rail.setConfig(id, bootstrapSetting, bootstrap);
-      // Railway rejected both the discovery and signing-key paths as service health checks.
-      // Its API accepts the realm path. The public launch verification still checks both OIDC endpoints.
-      await rail.configure(id, { numReplicas: service.replicas, startCommand: service.start,
-        healthcheckPath: realmPath, healthcheckTimeout: 240 });
+      const id = existing?.serviceId ?? await rail.ensureService(serviceName, image);
+      const origin = await rail.publicOrigin(id, service.port, { existingOnly: !bootstrap });
+      if (bootstrap) {
+        const values = { ...service.env, ...service.environmentValues.production, PORT: String(service.port), KC_HOSTNAME: origin };
+        for (const [name, value] of Object.entries(values)) await rail.setConfig(id, name, value);
+        for (const { variable, output } of service.references) await rail.setConfig(id, variable, ['${{', databaseName, '.', output, '}}'].join(''));
+        await rail.setConfig(id, bootstrapSetting, bootstrap);
+        // Railway accepts the realm path. Public launch verification also checks both OIDC endpoints.
+        await rail.configure(id, { numReplicas: service.replicas, startCommand: service.start,
+          healthcheckPath: realmPath, healthcheckTimeout: 240 });
+      }
       observer.step({ step: 'Start Shared Identity', state: 'WORKING' });
       const deployment = await rail.deployImage(id);
       observer.step({ step: 'Check identity discovery and signing keys', state: 'WORKING', resourceId: deployment });

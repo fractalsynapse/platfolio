@@ -9,7 +9,7 @@ import { EnvironmentDeployments } from './environment-deployments.tsx';
 import { EnvironmentDomains } from './environment-domains.tsx';
 import { HostedCustomDomains } from './hosted-custom-domains.tsx';
 import { HostedStarterBrand } from './hosted-starter-brand.tsx';
-import { StarterRedeploy } from './starter-redeploy.tsx';
+import { HostedRedeploy } from './hosted-redeploy.tsx';
 import { ServiceSecretPresence } from './service-secret-presence.tsx';
 import { environmentTabs, workspacePaths, type EnvironmentTab, type WorkspaceRoute } from './routes.ts';
 import { WorkspaceLink } from './workspace-link.tsx';
@@ -70,8 +70,8 @@ export function EnvironmentWorkspace({ instanceId, canManage, isStarterWeb, isSt
         {state.data.hosting && <WorkspacePanel title="Railway deployment" context>
           <p>Deployment <code>{state.data.hosting.deploymentId.slice(0, 12)}</code></p>
           <p>Project <code>{state.data.hosting.projectId.slice(0, 12)}</code></p>
-          {canManage && (isStarterWeb || isStarterWorker) && state.data.hosting.state !== 'paused' && state.data.hosting.state !== 'removed' &&
-            <StarterRedeploy key={state.data.hosting.deploymentId} params={params} progressPath={workspacePaths.instanceSetup(route.team, route.instance)} />}
+          {canManage && route.environment === 'staging' && state.data.hosting.state !== 'paused' && state.data.hosting.state !== 'removed' &&
+            <HostedRedeploy key={state.data.hosting.deploymentId} params={params} progressPath={workspacePaths.instanceSetup(route.team, route.instance)} />}
           {canManage && <p><WorkspaceLink href={workspacePaths.instanceSetup(route.team, route.instance)}>Open app setup</WorkspaceLink></p>}
         </WorkspacePanel>}
       </MainContext>}
