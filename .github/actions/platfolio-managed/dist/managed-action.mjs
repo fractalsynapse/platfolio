@@ -25068,7 +25068,7 @@ function date4(params) {
 }
 
 // packages/contracts/src/generated/contract-version.ts
-var CONTRACT_VERSION = "7.0.0";
+var CONTRACT_VERSION = "7.1.0";
 
 // packages/contracts/src/infra.ts
 var CONTRACT_NAME = "infra.provider";
@@ -27791,6 +27791,22 @@ var InstallationJournalSchema = external_exports.object({
   leaseUntil: external_exports.iso.datetime()
 }).strict();
 
+// packages/contracts/src/marketplace-release.ts
+var MarketplaceReleaseSelectionSchema = external_exports.object({
+  version: external_exports.string().max(64).regex(/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/),
+  revision: external_exports.string().regex(/^[a-f0-9]{40}$/)
+}).strict();
+var MarketplaceReleasePublicationSchema = MarketplaceReleaseSelectionSchema.extend({
+  template: external_exports.enum(["starter-web", "starter-worker", "shared-identity"]),
+  installer: external_exports.string().max(64).regex(/^[a-z0-9-]+@[0-9]+$/),
+  image: external_exports.string().max(192).regex(/^keycloak\/keycloak:[a-zA-Z0-9._-]+@sha256:[a-f0-9]{64}$/).optional()
+});
+var MarketplaceReleaseSchema = MarketplaceReleasePublicationSchema.extend({
+  repo: external_exports.string(),
+  priceMinor: external_exports.literal(0),
+  installable: external_exports.boolean()
+});
+
 // node_modules/.pnpm/pg@8.23.1/node_modules/pg/esm/index.mjs
 var import_lib = __toESM(require_lib2(), 1);
 var Client = import_lib.default.Client;
@@ -27907,6 +27923,7 @@ var HostingTargetSchema = external_exports.object({
   teamId: external_exports.string().min(1).max(128),
   provider: HostingProviderIdSchema
 }).strict();
+var selectedRelease = { release: MarketplaceReleaseSelectionSchema.optional() };
 var empty = external_exports.object({}).strict().optional();
 var target = external_exports.object({ projectId: external_exports.string().min(1), deploymentId: external_exports.string().min(1) }).strict();
 var PrivateLaunchTemplateSchema = external_exports.enum(["shared-identity", "starter-worker"]);
@@ -27921,11 +27938,11 @@ var command = (action, body) => external_exports.object({ action: external_expor
 var CustomerHostingCommandSchema = external_exports.discriminatedUnion("action", [
   command("report", empty),
   command("setup", empty),
-  command("start", empty),
+  command("start", external_exports.object(selectedRelease).strict().optional()),
   command("template-report", external_exports.object({ template: PrivateLaunchTemplateSchema }).strict()),
   command("template-start", external_exports.discriminatedUnion("template", [
-    external_exports.object({ template: external_exports.literal("shared-identity"), bootstrap: encoded.length(512) }).strict(),
-    external_exports.object({ template: external_exports.literal("starter-worker") }).strict()
+    external_exports.object({ template: external_exports.literal("shared-identity"), bootstrap: encoded.length(512), ...selectedRelease }).strict(),
+    external_exports.object({ template: external_exports.literal("starter-worker"), ...selectedRelease }).strict()
   ])),
   command("template-remove", HostingRemovalSchema.extend({ template: PrivateLaunchTemplateSchema }).strict()),
   command("template-redeploy", target.extend({ template: external_exports.literal("starter-worker") })),

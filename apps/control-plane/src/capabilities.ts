@@ -1,11 +1,11 @@
 import { createHash, randomBytes } from 'node:crypto';
 import {
-  AttestationSchema, NotificationRuleSchema, StarterBrandChangeSchema, checkBindingPolicy, CONTRACT_NAME, CONTRACT_VERSION, DispatchIntentSchema, HostingProviderIdSchema, InstanceSchema, PrivateLaunchTemplateSchema, type PrivateLaunchTemplate, RAILWAY_AUTHORIZATION_CALLBACK,
+  AttestationSchema, GitScm, MarketplaceReleasePublicationSchema, MarketplaceReleaseSelectionSchema, NotificationRuleSchema, StarterBrandChangeSchema, checkBindingPolicy, CONTRACT_NAME, CONTRACT_VERSION, DispatchIntentSchema, HostingProviderIdSchema, InstanceSchema, PrivateLaunchTemplateSchema, type PrivateLaunchTemplate, RAILWAY_AUTHORIZATION_CALLBACK,
   reasonOf, decide, checkInvitationAcceptance, bindingImpact, normaliseName, rollupState, type BindingRecord, type CapabilityOffer, type PolicyAction, type VerifiedClaims,
 } from '@platfolio/contracts';
 import { RepositoryReadError } from '@platfolio/contracts';
 import { ScmNotConfiguredError } from '@platfolio/kernel';
-import { buildPlan, enabledEnvironments, FREE_STARTER_RELEASE, MARKETPLACE_RELEASES, SHARED_IDENTITY_RELEASE, STARTER_WORKER_RELEASE, parseCompose, templateCatalogEntry } from '@platfolio/manifest';
+import { buildPlan, enabledEnvironments, FREE_STARTER_RELEASE, MARKETPLACE_RELEASES, SHARED_IDENTITY_RELEASE, STARTER_WORKER_RELEASE, marketplaceCatalog, marketplaceInstaller, parseCompose, readTemplate, templateCatalogEntry, validateIdentitySource, validateStarterSource, validateWorkerSource } from '@platfolio/manifest';
 import type { RequestBodyOf } from '@platfolio/api-contract/generated/types';
 import type { ExtensionDescriptor, KernelContext, Request, Response_, RouteDefinition } from '@platfolio/kernel';
 import { ArtifactRecordSchema, InfraPlanSchema, secretWriteScope } from '@platfolio/contracts';
@@ -39,6 +39,7 @@ export interface CapabilityDeps {
   now?: () => Date;
   dispatchTtlMs?: number;
   marketplaceEnabled?: boolean;
+  marketplacePublisherTeam?: string;
   installation?: Parameters<typeof installationLaunch>[1];
   invitationOrigin?: string;
   accountIssuer?: AccountIssuer;
@@ -1335,6 +1336,43 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
     id: 'marketplace',
     requires: ['identity', 'store'],
     routes: [
+      scoped('POST', '/api/v1/teams/{teamId}/marketplace/releases', 'publishMarketplaceRelease', 'marketplace.manage',
+        async ({ context, teamId, personId }, request) => {
+          if (!deps.marketplaceEnabled || teamId !== deps.marketplacePublisherTeam) return notFound('marketplace publisher', '');
+          const parsed = MarketplaceReleasePublicationSchema.safeParse(request.body);
+          if (request.bodyError || !parsed.success) return badRequest('Supply a template, stable version, installer and full source commit.');
+          const release = parsed.data;
+          const { template, version, revision, installer, image } = release;
+          if (installer !== marketplaceInstaller(template) || (template === 'shared-identity') !== (image !== undefined)) {
+            return badRequest('Choose a supported installer and include an image digest for Shared Identity.');
+          }
+          const conflict = () => ({ status: 409, body: { error: 'release-already-published', message: 'This version has a different pin. Publish a new version.' } });
+          const existing = [...MARKETPLACE_RELEASES, ...await context.store.listMarketplaceReleases()]
+            .find((entry) => entry.template === template && entry.version === version);
+          if (existing) return existing.revision === revision && existing.installer === installer && existing.image === image
+            ? { status: 204, body: undefined } : conflict();
+          const scm = new GitScm();
+          let source;
+          try {
+            source = await readTemplate((target) => scm.readRepositoryFile(target), templateCatalogEntry(template), revision);
+          } catch {
+            return { status: 503, body: { error: 'release-source-unavailable', message: 'Verify the commit is available in the public template repository and try again.' } };
+          }
+          try {
+            if (template === 'starter-web') validateStarterSource(source.compose, source.inventory, version);
+            else if (template === 'starter-worker') validateWorkerSource(source.compose, source.inventory ?? '', version);
+            else validateIdentitySource(source, version, image!);
+          } catch {
+            return badRequest('The pinned source does not match the version or the supported installer topology.');
+          }
+          const result = await context.store.publishMarketplaceRelease(release);
+          if (result === 'conflict') return conflict();
+          if (result === 'created') await context.store.appendAudit({
+            actorKind: 'user', actorRef: personId, action: 'marketplace.publish', target: template,
+            detail: { teamId, version, revision, installer },
+          });
+          return { status: 204, body: undefined };
+        }),
       scoped('GET', marketplaceCollection, 'listMarketplaceInstallations', 'marketplace.manage', async ({ context, teamId }) =>
         deps.marketplaceEnabled ? send('listMarketplaceInstallations', 200, await context.store.listMarketplaceInstallations(teamId))
           : notFound('marketplace installations', '')),
@@ -1366,9 +1404,11 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
         return await context.store.redeemMarketplaceEnrollment(id, enrollmentDigest, registryDigest, nowOf(deps).toISOString())
           ? { status: 204, body: undefined } : notFound('marketplace installation', '');
       }),
-      registryRoute(`${registryPath}/catalog`, 'getEnrolledMarketplaceCatalog', async (context, _request, id, registryDigest) => {
+      registryRoute(`${registryPath}/catalog`, 'getEnrolledMarketplaceCatalog', async (context, request, id, registryDigest) => {
         if (!await context.store.verifyMarketplaceCredential(id, registryDigest)) return notFound('marketplace installation', '');
-        return send('getEnrolledMarketplaceCatalog', 200, MARKETPLACE_RELEASES);
+        const entries = request.query.get('format') === 'releases'
+          ? marketplaceCatalog(await context.store.listMarketplaceReleases()) : MARKETPLACE_RELEASES;
+        return { ...send('getEnrolledMarketplaceCatalog', 200, entries), headers: { 'cache-control': 'no-store' } };
       }),
       registryRoute(`${registryPath}/claim`, 'claimEnrolledMarketplaceRelease', async (context, _request, id, registryDigest) => {
         if (!await context.store.verifyMarketplaceCredential(id, registryDigest)) return notFound('marketplace installation', '');
@@ -1382,11 +1422,9 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
   const relay = async (teamId: string, operation: string, action: Parameters<NonNullable<typeof customer>['call']>[0], body?: object) => {
     if (!customer || customer.teamId !== teamId) return notFound('launch', 'starter');
     const output = await customer.call(action, body);
-    if (!output.ok && output.status === 409 && action === 'start') {
-      return { status: 409, body: { error: 'marketplace-claim-required', message: 'Go to Connections → Marketplace to claim Starter Web, then launch again.' } };
-    }
-    if (!output.ok && output.status === 409 && action === 'template-start') {
-      return { status: 409, body: { error: 'marketplace-connection-required', message: 'Connect to Marketplace in Connections before launching this template.' } };
+    if (!output.ok && output.status === 409 && (action === 'start' || action === 'template-start')) {
+      return { status: 409, body: { error: 'marketplace-release-unavailable',
+        message: 'Check Marketplace in Connections, then open Choose template and select an available release.' } };
     }
     if (!output.ok && output.status === 400 && action === 'template-start') return badRequest('Generate a new encrypted admin credential and try again.');
     if (!output.ok) return unavailable();
@@ -1540,16 +1578,20 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
         return send('getStarterLaunch', 200, { ...(report.body as object), removedProjectId: undefined, ...link });
       }),
       scopedLaunch('POST', '', 'startStarterLaunch', async ({ teamId }, request, template) => {
+        const body = bodyOf<RequestBodyOf<'startStarterLaunch'>>(request);
+        if (!body.ok || request.bodyError) return badRequest('Choose an available template release.');
+        const selection = body.value?.release;
+        if (selection !== undefined && !MarketplaceReleaseSelectionSchema.safeParse(selection).success) return badRequest('Choose an available template release.');
+        const pin = selection === undefined ? {} : { release: selection };
         if (template === SHARED_IDENTITY_RELEASE.template) {
           if (customer?.teamId !== teamId) return notFound('launch', '');
-          const body = bodyOf<{ bootstrap?: string }>(request);
-          const bootstrap = body.ok ? body.value?.bootstrap : undefined;
+          const bootstrap = body.value?.bootstrap;
           if (!bootstrap || !/^[A-Za-z0-9+/]{512}$/.test(bootstrap)) return badRequest('Generate and save the Shared Identity admin credential.');
-          return relay(teamId, 'startStarterLaunch', 'template-start', { template, bootstrap });
+          return relay(teamId, 'startStarterLaunch', 'template-start', { template, bootstrap, ...pin });
         }
-        if (template === STARTER_WORKER_RELEASE.template) return relay(teamId, 'startStarterLaunch', 'template-start', { template });
+        if (template === STARTER_WORKER_RELEASE.template) return relay(teamId, 'startStarterLaunch', 'template-start', { template, ...pin });
         return deps.starterLaunch?.teamId === teamId
-          ? send('startStarterLaunch', 200, await deps.starterLaunch.start()) : relay(teamId, 'startStarterLaunch', 'start');
+          ? send('startStarterLaunch', 200, await deps.starterLaunch.start()) : relay(teamId, 'startStarterLaunch', 'start', selection === undefined ? undefined : pin);
       }),
       scopedLaunch('POST', '/remove', 'removeStarterLaunch', async ({ teamId, context }, request, template) => {
         const extraTemplate = template !== FREE_STARTER_RELEASE.template;
@@ -1648,15 +1690,18 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
 
   const catalog: ExtensionDescriptor = {
     id: 'template-catalog',
-    requires: ['identity'],
+    requires: ['identity', 'store'],
     routes: [{
       method: 'GET', path: '/api/v1/templates', operationId: 'listInstallableTemplates',
       async handle(request, _params, context) {
         const auth = await authorize(context, request);
         if (!auth.ok) return auth.response;
-        if (!customer) return send('listInstallableTemplates', 200, MARKETPLACE_RELEASES);
-        const result = await customer.call('marketplace-catalog');
-        return result.ok ? send('listInstallableTemplates', 200, result.body) : marketplaceUnavailable();
+        const result = customer ? await customer.call('marketplace-catalog') : {
+          ok: true, body: deps.marketplaceEnabled
+            ? marketplaceCatalog(await context.store.listMarketplaceReleases()) : MARKETPLACE_RELEASES,
+        };
+        return result.ok ? { ...send('listInstallableTemplates', 200, result.body), headers: { 'cache-control': 'no-store' } }
+          : marketplaceUnavailable();
       },
     }],
   };

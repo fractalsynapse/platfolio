@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MarketplaceReleaseSelectionSchema } from './marketplace-release.ts';
 import { HostingProviderIdSchema, HostingRemovalSchema, InfraPlanSchema } from './infra.ts';
 
 export const RAILWAY_AUTHORIZATION_CALLBACK = '/api/v1/railway/callback';
@@ -11,6 +12,7 @@ export const HostingTargetSchema = z.object({
 }).strict();
 export type HostingTarget = z.infer<typeof HostingTargetSchema>;
 
+const selectedRelease = { release: MarketplaceReleaseSelectionSchema.optional() };
 const empty = z.object({}).strict().optional();
 const target = z.object({ projectId: z.string().min(1), deploymentId: z.string().min(1) }).strict();
 export const PrivateLaunchTemplateSchema = z.enum(['shared-identity', 'starter-worker']);
@@ -29,11 +31,11 @@ const command = <const Action extends string, Body extends z.ZodType>(action: Ac
 export const CustomerHostingCommandSchema = z.discriminatedUnion('action', [
   command('report', empty),
   command('setup', empty),
-  command('start', empty),
+  command('start', z.object(selectedRelease).strict().optional()),
   command('template-report', z.object({ template: PrivateLaunchTemplateSchema }).strict()),
   command('template-start', z.discriminatedUnion('template', [
-    z.object({ template: z.literal('shared-identity'), bootstrap: encoded.length(512) }).strict(),
-    z.object({ template: z.literal('starter-worker') }).strict(),
+    z.object({ template: z.literal('shared-identity'), bootstrap: encoded.length(512), ...selectedRelease }).strict(),
+    z.object({ template: z.literal('starter-worker'), ...selectedRelease }).strict(),
   ])),
   command('template-remove', HostingRemovalSchema.extend({ template: PrivateLaunchTemplateSchema }).strict()),
   command('template-redeploy', target.extend({ template: z.literal('starter-worker') })),

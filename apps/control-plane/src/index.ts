@@ -19,6 +19,7 @@ export interface BootConfig {
   issuer: string;
   audience: string;
   marketplaceEnabled?: boolean;
+  marketplacePublisherTeam?: string;
   installation?: { configuration: RailwayInstallationConfig; returnTo: string };
   installationProvider?: { provider: InstallationProvider; returnTo: string };
   starterLaunch?: StarterLaunch;
@@ -101,6 +102,7 @@ export function configFromEnv(env: NodeJS.ProcessEnv): BootConfig {
     issuer: env.PLATFOLIO_IDENTITY_ISSUER as string,
     audience: env.PLATFOLIO_IDENTITY_AUDIENCE as string,
     marketplaceEnabled: env.PLATFOLIO_MARKETPLACE_ENABLED === 'true',
+    ...(env.PLATFOLIO_MARKETPLACE_PUBLISHER_TEAM ? { marketplacePublisherTeam: env.PLATFOLIO_MARKETPLACE_PUBLISHER_TEAM } : {}),
     ...(launcher ? { customerLaunch: launcher } : {}),
     ...(installation ? { installation } : {}),
     ...(notificationClient && notificationSecret ? { notificationDirectory: { client: notificationClient, secret: notificationSecret } } : {}),
@@ -284,6 +286,7 @@ export async function boot(config: BootConfig, fetchImpl: typeof fetch = fetch) 
       ...buildCapabilities({
         build: config.build,
         marketplaceEnabled: config.marketplaceEnabled ?? false,
+        ...(config.marketplacePublisherTeam ? { marketplacePublisherTeam: config.marketplacePublisherTeam } : {}),
         ...(config.marketplaceEnabled && installation ? { installation } : {}),
         accountIssuer: { issuer: config.issuer, request: fetchImpl },
         ...(config.notificationDirectory ? { notificationDirectory: keycloakNotificationDirectory(config.issuer,

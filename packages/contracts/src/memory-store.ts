@@ -1,3 +1,4 @@
+import type { MarketplaceReleasePublication } from './marketplace-release.ts';
 import { InstallationJournalSchema, type InstallationJournal } from './installation-journal.ts';
 import { z } from 'zod';
 import type { Attestation } from './attestation.ts';
@@ -165,6 +166,21 @@ export class MemoryStore implements Store {
     return true;
   }
 
+  private readonly marketplaceReleases = new Map<string, MarketplaceReleasePublication>();
+
+  async listMarketplaceReleases() {
+    return [...this.marketplaceReleases.values()].map((release) => ({ ...release }));
+  }
+
+  async publishMarketplaceRelease(release: MarketplaceReleasePublication) {
+    const key = `${release.template}:${release.version}`;
+    const existing = this.marketplaceReleases.get(key);
+    if (existing) return existing.revision === release.revision && existing.installer === release.installer &&
+      existing.image === release.image ? 'existing' : 'conflict';
+    this.marketplaceReleases.set(key, { ...release });
+    return 'created';
+  }
+
   async verifyMarketplaceCredential(installationId: string, registryDigest: string): Promise<boolean> {
     const found = this.marketplaceLinks.get(installationId);
     return !this.closed && !!found && !found.disconnected && found.registryDigest === registryDigest;
@@ -233,7 +249,8 @@ export class MemoryStore implements Store {
     if (input.state !== 'live' && !current) return err({ code: 'not-found', what: 'hosted starter', id: input.name });
     const replacement = input.state === 'live' && current?.state === 'removed';
     if (existing && (!current || (!replacement && current.projectId !== input.projectId) || existing.template !== input.template ||
-        existing.templateRef?.commitSha !== input.templateRef.commitSha || existing.templateRef.repo !== input.templateRef.repo)) {
+        (!replacement && existing.templateRef?.commitSha !== input.templateRef.commitSha) ||
+        existing.templateRef?.repo !== input.templateRef.repo)) {
       return err({ code: 'conflict', reason: 'This name already belongs to a different instance' });
     }
     if ([...this.hostedStarters.values()].some((item) => item.projectId === input.projectId && item.instanceId !== existing?.id)) {

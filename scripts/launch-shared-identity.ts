@@ -1,18 +1,15 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import { GitScm } from '../packages/contracts/src/git-scm.ts';
 import type { SourceReleaseHosting } from '../packages/contracts/src/source-release-hosting.ts';
-import {
-  applyInventory, parseCompose, parseInventory, readTemplate, renderProdOverlay, SHARED_IDENTITY_RELEASE,
-  templateCatalogEntry, validateInventory,
-} from '../packages/manifest/src/index.ts';
+import { readTemplate, SHARED_IDENTITY_RELEASE, templateCatalogEntry } from '../packages/manifest/src/index.ts';
+import { identityBootstrapSetting as bootstrapSetting, validateIdentitySource } from '../packages/manifest/src/shared-identity-release.ts';
 import { customerRailway, removeCustomerApp, type CustomerRailwayGrant } from './customer-railway.ts';
 
-const { template, version, revision, image } = SHARED_IDENTITY_RELEASE;
+const { template } = SHARED_IDENTITY_RELEASE;
 const keycloak = 'keycloak';
 const realmPath = '/realms/master';
 const discoveryPath = realmPath + '/.well-known/openid-configuration';
 const signingKeysPath = realmPath + '/protocol/openid-connect/certs';
-const bootstrapSetting = 'KC_BOOTSTRAP_ADMIN_PASSWORD';
 
 export async function sharedIdentityReady(origin: string): Promise<boolean> {
   const read = async <T>(path: string): Promise<T | undefined> => {
@@ -29,28 +26,15 @@ export async function sharedIdentityReady(origin: string): Promise<boolean> {
 
 export function railwaySharedIdentityHosting(credential: () => Promise<CustomerRailwayGrant>): SourceReleaseHosting {
   return {
-    template, revision,
-    async deploy({ projectId, bootstrap }, observer) {
+    template, revision: SHARED_IDENTITY_RELEASE.revision,
+    async deploy({ projectId, bootstrap, release = SHARED_IDENTITY_RELEASE }, observer) {
+      const { version, revision, image } = release;
+      if (!image) throw new Error('The pinned identity release needs an image digest');
       if (!bootstrap) throw new Error('A Keycloak bootstrap password is required');
       observer.step({ step: 'Read the pinned release', state: 'WORKING' });
       const scm = new GitScm();
       const source = await readTemplate((request) => scm.readRepositoryFile(request), templateCatalogEntry(template), revision);
-      const [taggedImage, digest] = image.split('@') as [string, string];
-      const [repository, tag] = taggedImage.split(':') as [string, string];
-      const parsed = parseCompose([source.compose, renderProdOverlay(source.compose, { [keycloak]: { image: repository, tag, digest } })]);
-      const inventory = parseInventory(source.inventory ?? '');
-      if (!parsed.manifest || parsed.issues.length || inventory.issues.length || validateInventory(inventory.entries, parsed.manifest).length) {
-        throw new Error('The pinned identity release has an invalid platform manifest');
-      }
-      const manifest = applyInventory(parsed.manifest, inventory.entries);
-      const database = manifest.spec.resources.database;
-      const service = manifest.spec.services[keycloak];
-      if (manifest.metadata.name !== template || manifest.metadata.version !== version || manifest.metadata.mode !== 'hosted' ||
-          !service?.public || service.image !== taggedImage || service.digest !== digest || !service.start || database?.kind !== 'postgres' ||
-          service.references.some((ref) => ref.database !== database.name || !ref.output) ||
-          !service.secrets.some(({ name }) => name === bootstrapSetting)) {
-        throw new Error('Unexpected identity release topology');
-      }
+      const { database, service } = validateIdentitySource(source, version, image);
       const grant = await credential();
       if (grant.projectId) throw new Error('A workspace grant is required');
       const rail = await customerRailway({ name: template, kind: 'app', ...(projectId ? { id: projectId } : { create: true }) }, observer.step, grant);

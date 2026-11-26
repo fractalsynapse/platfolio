@@ -9,3 +9,6 @@ export * from './build-plan.ts';
 export { InventoryEntrySchema, parseInventory, validateInventory, deriveObligations, applyInventory, type InventoryEntry, type InventoryObligations, type ParsedInventory } from './inventory.ts';
 export * from './template-catalog.ts';
 export { checkRegistryObligations, type RegistryRow } from './registry-obligations.ts';
+export { validateStarterSource } from './starter-release.ts';
+export { validateWorkerSource } from './starter-worker-release.ts';
+export { validateIdentitySource } from './shared-identity-release.ts';

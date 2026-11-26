@@ -6,16 +6,17 @@ import { customerRailway, removeCustomerApp, type CustomerRailwayGrant } from '.
 import { validateWorkerSource } from '../packages/manifest/src/starter-worker-release.ts';
 import { withReleaseSource } from './source-release-upload.ts';
 
-const { template, revision } = STARTER_WORKER_RELEASE;
+const { template } = STARTER_WORKER_RELEASE;
 
 export function railwayStarterWorkerHosting(credential: () => Promise<CustomerRailwayGrant>): SourceReleaseHosting {
   return {
-    template, revision,
-    async deploy({ projectId }, observer) {
+    template, revision: STARTER_WORKER_RELEASE.revision,
+    async deploy({ projectId, release = STARTER_WORKER_RELEASE }, observer) {
+      const { version, revision } = release;
       observer.step({ step: 'Read the pinned release', state: 'WORKING' });
       const scm = new GitScm();
       const source = await readTemplate((request) => scm.readRepositoryFile(request), templateCatalogEntry(template), revision);
-      const { service, volume, healthPath, port, environment, inventory } = validateWorkerSource(source.compose, source.inventory ?? '');
+      const { service, volume, healthPath, port, environment, inventory } = validateWorkerSource(source.compose, source.inventory ?? '', version);
       const grant = await credential();
       if (grant.projectId) throw new Error('A workspace grant is required for the worker’s own project');
       const rail = await customerRailway({ name: template, kind: 'app', ...(projectId ? { id: projectId } : { create: true }) }, observer.step, grant);

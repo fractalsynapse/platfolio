@@ -442,6 +442,12 @@ variables:
     environments: all
     deployedTo: railway:variable
     note: "Enables hub-only free-template enrollment and claims. Enabled for the staging hub and the local hub proof."
+  - name: PLATFOLIO_MARKETPLACE_PUBLISHER_TEAM
+    kind: value
+    secret: false
+    environments: all
+    deployedTo: railway:variable
+    note: "Hub team ID whose owners may publish marketplace releases. Publishing is disabled if unset."
   - name: PLATFOLIO_REGISTRY_ORIGIN
     kind: value
     secret: false

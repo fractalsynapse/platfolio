@@ -17,15 +17,17 @@ import { sealOwnerRecovery } from './launch-recovery.ts';
 import { IdentityAdminCredential } from '../workspace/identity-admin-credential.tsx';
 
 type Launch = SuccessOf<'getStarterLaunch'>;
+const noParams = {};
 const headings: Record<Launch['state'], string> = {
   idle: 'Ready to set up', running: 'Setting up your app', ready: 'Your app is ready',
   failed: 'Setup needs attention', removing: 'Removing your app', kept: 'App removed. Data kept.', wiped: 'App removed. Data scheduled for deletion.',
 };
 const props = z.object({ teamId: z.string().min(1), teamName: z.string().min(1).optional(),
+  release: z.object({ version: z.string().max(64), revision: z.string().regex(/^[a-f0-9]{40}$/) }).strict().optional(),
   managedProjectId: z.string().min(1).optional(), template: z.enum(privateLaunchTemplates).optional(),
 }).strict();
 
-function LaunchPanel({ teamId, teamName, managedProjectId, template }: z.infer<typeof props>) {
+function LaunchPanel({ teamId, teamName, managedProjectId, template, release }: z.infer<typeof props>) {
   const params = React.useMemo(() => ({ teamId }), [teamId]);
   const selected = React.useMemo(() => ({ teamId, ...(template ? { template } : {}) }), [teamId, template]);
   const launch = useOperation('getStarterLaunch', { params: selected, key: `starter-${teamId}-${template ?? 'starter-web'}` });
@@ -43,6 +45,13 @@ function LaunchPanel({ teamId, teamName, managedProjectId, template }: z.infer<t
   const [problem, setProblem] = React.useState('');
   const report = isLoaded(launch.state) ? launch.state.data : null;
   const now = useClock();
+  const newInstall = report?.state === 'idle' || report?.state === 'wiped';
+  const catalog = useOperation('listInstallableTemplates', { params: noParams, enabled: newInstall && !release && !local });
+  const latest = isLoaded(catalog.state)
+    ? catalog.state.data.find((item) => item.template === (template ?? 'starter-web') && item.installable) : undefined;
+  const approved = newInstall ? release ?? (latest && { version: latest.version, revision: latest.revision }) : undefined;
+  const version = newInstall && !approved && !local ? undefined : approved?.version ?? report?.version;
+  const revision = approved?.revision ?? report?.revision;
 
   async function act(action: 'start' | 'keep' | 'wipe', confirmation?: string) {
     setProblem('');
@@ -50,7 +59,8 @@ function LaunchPanel({ teamId, teamName, managedProjectId, template }: z.infer<t
     try {
       const bootstrap = action === 'start' && identity && setup.state.status === 'loaded'
         ? await sealOwnerRecovery(setup.state.data.workerKey, new TextEncoder().encode(password)) : undefined;
-      const result = action === 'start' ? await start({ params: selected, ...(bootstrap ? { body: { bootstrap } } : {}) })
+      const body = { ...(bootstrap ? { bootstrap } : {}), ...(approved ? { release: approved } : {}) };
+      const result = action === 'start' ? await start({ params: selected, body })
         : await remove({ params: selected, body: { data: action, ...(confirmation === undefined ? {} : { confirmation }) } });
       if (!result.ok) setProblem([400, 409].includes(result.error.status) ? result.error.message : 'Platfolio could not accept that action. Try again.');
       if (result.ok) setPassword('');
@@ -92,13 +102,16 @@ function LaunchPanel({ teamId, teamName, managedProjectId, template }: z.infer<t
     {report && <>
       <p role="status" aria-label="Launch status"><strong>{headings[report.state]}</strong></p>
       {launch.state.status === 'loaded' && <small>{ageLabel(launch.state.freshness, now().toISOString()).text}</small>}
+      {version && revision && <p><strong>Release {version}</strong>{' · '}<code title={revision}>{revision.slice(0, 7)}</code></p>}
+      {ready && newInstall && !local && !approved && teamName &&
+        <p>Select an available release in <WorkspaceLink href={workspacePaths.templates(teamName)}>Choose template</WorkspaceLink>.</p>}
       {ready && (managedProjectId ? report.state === 'kept' : ['idle', 'failed', 'kept', 'wiped'].includes(report.state)) && <>
         <p>{report.state === 'kept'
           ? 'Restore the app and reconnect its retained data in Railway.'
           : worker ? 'Launch a background worker in its own Railway staging project with persistent storage. It has no public address.'
             : 'Use your connected Railway workspace. This creates a dedicated staging project and database. Anyone with the generated app link can open it. Railway charges apply to the resources you use.'}</p>
         {identity && <IdentityAdminCredential password={password} change={setPassword} />}
-        <WorkspaceAction variant="primary" disabled={pending || identity && !/^[A-Za-z0-9_-]{32,64}$/.test(password)}
+        <WorkspaceAction variant="primary" disabled={pending || newInstall && !local && !approved || identity && !/^[A-Za-z0-9_-]{32,64}$/.test(password)}
           onClick={() => void act('start')}>{report.state === 'kept' ? 'Restore app' : report.state === 'failed' ? 'Resume setup' : template ? title : 'Launch starter'}</WorkspaceAction>
       </>}
       {report.state === 'ready' && <p className="ui-workspace-links">
@@ -121,6 +134,6 @@ function LaunchPanel({ teamId, teamName, managedProjectId, template }: z.infer<t
 }
 
 export const starterLaunch = defineComponent({
-  id: 'launch.starter', props, reads: ['getStarterLaunch', 'startStarterLaunch', 'removeStarterLaunch', 'getStarterLaunchSetup', 'initializeStarterOpenBao', 'unlockStarterOpenBao', 'beginStarterRailwayAuthorization'],
+  id: 'launch.starter', props, reads: ['getStarterLaunch', 'listInstallableTemplates', 'startStarterLaunch', 'removeStarterLaunch', 'getStarterLaunchSetup', 'initializeStarterOpenBao', 'unlockStarterOpenBao', 'beginStarterRailwayAuthorization'],
   slots: ['full-page'], render: LaunchPanel,
 });

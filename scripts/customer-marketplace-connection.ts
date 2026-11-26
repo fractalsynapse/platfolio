@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { FREE_STARTER_RELEASE, MARKETPLACE_RELEASES, templateCatalogEntry } from '../packages/manifest/src/template-catalog.ts';
+import { FREE_STARTER_RELEASE, MARKETPLACE_RELEASES, readMarketplaceListing, templateCatalogEntry } from '../packages/manifest/src/template-catalog.ts';
 import type { customerOpenBao, MarketplaceGrant } from './customer-openbao.ts';
 
 const { template, version, revision } = FREE_STARTER_RELEASE;
@@ -24,7 +24,9 @@ export function customerMarketplaceConnection(hub: string | undefined, bao: Vaul
 
   function call(grant: MarketplaceGrant, endpoint: 'claim' | 'enrollment' | 'catalog', bearer: string, body?: object) {
     if (!hub || grant.hub !== hub) throw new Error('Marketplace origin changed');
-    return request(new URL(`/api/v1/marketplace/installations/${encodeURIComponent(grant.installationId)}/${endpoint}`, hub), {
+    const url = new URL(`/api/v1/marketplace/installations/${encodeURIComponent(grant.installationId)}/${endpoint}`, hub);
+    if (endpoint === 'catalog') url.searchParams.set('format', 'releases');
+    return request(url, {
       method: 'POST', redirect: 'error', signal: AbortSignal.timeout(4_000),
       headers: { authorization: `Bearer ${bearer}`, 'content-type': 'application/json' },
       ...(body ? { body: JSON.stringify(body) } : {}),
@@ -104,11 +106,9 @@ export function customerMarketplaceConnection(hub: string | undefined, bao: Vaul
     if (response.status !== 200) throw new Error('Marketplace catalog unavailable');
     const entries = await response.json();
     if (!Array.isArray(entries)) throw new Error('Invalid marketplace catalog');
-    // Admit only exact locally reviewed coordinates. The hub cannot supply an executable or mutable reference.
-    return MARKETPLACE_RELEASES.flatMap((release) => {
-      const listed = entries.find((entry) => entry?.template === release.template);
-      return listed && (['repo', 'version', 'revision', 'priceMinor'] as const).every((key) => listed[key] === release[key])
-        ? [{ ...release, installable: release.installable && listed.installable === true }] : [];
+    return entries.flatMap((entry) => {
+      const release = readMarketplaceListing(entry);
+      return release ? [release] : [];
     });
   }
 

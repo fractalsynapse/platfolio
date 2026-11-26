@@ -1,3 +1,4 @@
+import type { MarketplaceReleasePublication } from './marketplace-release.ts';
 import type { InstallationJournal } from './installation-journal.ts';
 import { z } from 'zod';
 import { AttestationSchema, type Attestation } from './attestation.ts';
@@ -546,6 +547,8 @@ export interface Store {
   disconnectMarketplaceInstallation(teamId: string, installationId: string): Promise<boolean>;
   issueMarketplaceEnrollment(teamId: string, installationId: string, enrollmentDigest: string, expiresAt: string): Promise<boolean>;
   redeemMarketplaceEnrollment(installationId: string, enrollmentDigest: string, registryDigest: string, now: string): Promise<boolean>;
+  listMarketplaceReleases(): Promise<MarketplaceReleasePublication[]>;
+  publishMarketplaceRelease(release: MarketplaceReleasePublication): Promise<'created' | 'existing' | 'conflict'>;
   verifyMarketplaceCredential(installationId: string, registryDigest: string): Promise<boolean>;
 
   createTeam(input: NewTeam): Promise<StoreResult<Team>>;

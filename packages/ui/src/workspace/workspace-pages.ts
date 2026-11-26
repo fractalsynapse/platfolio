@@ -18,7 +18,7 @@ import { WORKSPACE_READS } from './workspace-model.ts';
 import type { WorkspaceRoute } from './routes.ts';
 
 const props = z.object({}).strict();
-const starterReads = ['getStarterLaunch', 'startStarterLaunch', 'removeStarterLaunch'] as const;
+const starterReads = ['getStarterLaunch', 'listInstallableTemplates', 'startStarterLaunch', 'removeStarterLaunch'] as const;
 const setupReads = ['getStarterLaunchSetup', 'initializeStarterOpenBao', 'unlockStarterOpenBao', 'beginStarterRailwayAuthorization'] as const;
 const instanceReads = ['listInstances'] as const;
 const environmentReads = [...instanceReads, 'getInstanceEnvironment'] as const;
