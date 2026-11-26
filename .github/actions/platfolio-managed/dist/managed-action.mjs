@@ -25068,7 +25068,7 @@ function date4(params) {
 }
 
 // packages/contracts/src/generated/contract-version.ts
-var CONTRACT_VERSION = "6.4.0";
+var CONTRACT_VERSION = "6.5.0";
 
 // packages/contracts/src/infra.ts
 var CONTRACT_NAME = "infra.provider";
@@ -27921,6 +27921,9 @@ var CustomerHostingCommandSchema = external_exports.discriminatedUnion("action",
   command("report", empty),
   command("setup", empty),
   command("start", empty),
+  command("template-report", external_exports.object({ template: external_exports.literal("shared-identity") }).strict()),
+  command("template-start", external_exports.object({ template: external_exports.literal("shared-identity"), bootstrap: encoded.length(512) }).strict()),
+  command("template-remove", HostingRemovalSchema.extend({ template: external_exports.literal("shared-identity") }).strict()),
   command("authorize", empty),
   command("initialize", external_exports.object({ publicKey: encoded.min(500).max(1024) }).strict()),
   command("unlock", external_exports.object({ recovery: encoded.min(500).max(640) }).strict()),
@@ -27933,6 +27936,7 @@ var CustomerHostingCommandSchema = external_exports.discriminatedUnion("action",
   command("redeploy", target),
   command("remove", HostingRemovalSchema),
   command("marketplace-status", empty),
+  command("marketplace-catalog", empty),
   command("marketplace-enroll", external_exports.object({ handoff: external_exports.string().regex(/^[0-9a-f-]{36}:[A-Za-z0-9_-]{43}$/) }).strict()),
   command("domains-list", target),
   command("domain-attach", domain2),

@@ -38,10 +38,11 @@ export function FreeTemplatePicker({ team }: { readonly team: string }): React.R
       </WorkspacePanel>
       <p className="ui-workspace-meta"><span role="status">{matches.length} {matches.length === 1 ? 'template' : 'templates'}</span>
         {' · '}{ageLabel(state.freshness, clock().toISOString()).text}</p>
-      {matches.length === 0 ? <p className="ui-workspace-empty">{state.data.length ? 'No templates match your search.' : 'No templates are available to install.'}</p> : <div className="ui-columns">
-        {matches.map(({ template, repo, version, priceMinor }) => <TemplateCard key={template} name={template} repo={repo} version={version} free={priceMinor === 0}>
+      {matches.length === 0 ? <p className="ui-workspace-empty">{state.data.length ? 'No templates match your search.' : <>No templates are available. <WorkspaceLink href={workspacePaths.teamConnections(team)}>Check Marketplace in Connections</WorkspaceLink>.</>}</p> : <div className="ui-columns">
+        {matches.map(({ template, repo, version, priceMinor, installable }) => <TemplateCard key={template} name={template} repo={repo} version={version} free={priceMinor === 0}>
           <a className="ui-workspace-secondary ui-hit-primary" href={templatePaths.details(template)}>View details</a>
-          <WorkspaceLink className="ui-workspace-primary ui-hit-primary" href={workspacePaths.launchForTeam(team)}>Use template</WorkspaceLink>
+          {installable === false ? <span>Registered · Installer unavailable</span> :
+            <WorkspaceLink className="ui-workspace-primary ui-hit-primary" href={workspacePaths.launchForTeam(team, template)}>Use template</WorkspaceLink>}
         </TemplateCard>)}
       </div>}
     </>}

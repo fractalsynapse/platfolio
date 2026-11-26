@@ -3,6 +3,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { createIdentityFixture, defaultIdentityConfig, signToken } from '@platfolio/contracts';
 import { createKernel, disposeKernel, type KernelContext } from '@platfolio/kernel';
+import { MARKETPLACE_RELEASES } from '@platfolio/manifest';
 import { buildCapabilities } from '../src/capabilities.ts';
 
 test('a private installation can exchange an owner’s code for registry access only', async () => {
@@ -76,10 +77,14 @@ test('a private installation can exchange an owner’s code for registry access 
     assert.equal((await call('/api/v1/templates', registry, 'GET')).status, 401);
     const catalog = await call('/api/v1/templates', owner, 'GET');
     assert.equal(catalog.status, 200);
-    const { installationId: _scope, ...release } = receipt;
-    assert.deepEqual(await catalog.json(), [release]);
+    assert.deepEqual(await catalog.json(), MARKETPLACE_RELEASES);
+    assert.equal((await call(`${registryPath}/catalog`, enrollmentCode)).status, 404);
+    const registryCatalog = await call(`${registryPath}/catalog`, registry);
+    assert.equal(registryCatalog.status, 200);
+    assert.deepEqual(await registryCatalog.json(), MARKETPLACE_RELEASES);
     assert.equal((await call(teamPath, owner, 'DELETE')).status, 204);
     assert.equal((await call(`${registryPath}/claim`, registry)).status, 404);
+    assert.equal((await call(`${registryPath}/catalog`, registry)).status, 404);
     assert.deepEqual(await connections(), [{ installationId, state: 'disconnected' }]);
   } finally {
     await disposeKernel(app);

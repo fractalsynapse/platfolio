@@ -45,6 +45,7 @@ export function customerOpenBao(origin: string, secretId: string, directory: str
   const request = privateOpenBaoRequest(origin);
   const keys = generateKeyPairSync('rsa', { modulusLength: 3072 });
   const publicKey = keys.publicKey.export({ format: 'der', type: 'spki' }).toString('base64');
+  const openEnvelope = (value: string) => privateDecrypt({ key: keys.privateKey, ...settings }, Buffer.from(value, 'base64')).toString();
   const receipt = join(directory, 'encrypted-recovery.json');
   let changing = false;
 
@@ -123,7 +124,7 @@ export function customerOpenBao(origin: string, secretId: string, directory: str
     if (changing) throw new Error('The worker is completing setup');
     changing = true;
     try {
-      const data = JSON.parse(privateDecrypt({ key: keys.privateKey, ...settings }, Buffer.from(envelope, 'base64')).toString()) as Recovery;
+      const data = JSON.parse(openEnvelope(envelope)) as Recovery;
       if (!Array.isArray(data.shares) || data.shares.length !== 3 || data.shares.some((key) => typeof key !== 'string' || !/^[a-zA-Z0-9+/=]{40,64}$/.test(key)) ||
           typeof data.bootstrap !== 'string' || data.bootstrap.length > 100) throw new Error('Invalid recovery envelope');
       if ((await health())?.sealed) {
@@ -158,7 +159,7 @@ export function customerOpenBao(origin: string, secretId: string, directory: str
   }
 
   return {
-    publicKey, status, initialize, unlock,
+    publicKey, status, initialize, unlock, openEnvelope,
     readGrant: () => read<RailwayGrant>(path),
     writeGrant: (grant: RailwayGrant, version: number) => write(path, grant, version),
     readRailwayClient: () => read<RailwayOAuthClient>(clientPath),

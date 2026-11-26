@@ -42,7 +42,7 @@ COPY packages/kernel ./packages/kernel
 COPY packages/api-contract ./packages/api-contract
 COPY packages/manifest ./packages/manifest
 COPY apps/control-plane ./apps/control-plane
-COPY scripts/customer-installation-worker.ts scripts/customer-launch-run.ts scripts/customer-openbao.ts scripts/customer-railway-oauth.ts scripts/customer-railway.ts scripts/launch-starter-app.ts ./scripts/
+COPY scripts/customer-installation-worker.ts scripts/customer-launch-run.ts scripts/customer-openbao.ts scripts/customer-railway-oauth.ts scripts/customer-railway.ts scripts/launch-starter-app.ts scripts/launch-shared-identity.ts ./scripts/
 COPY scripts/customer-marketplace-connection.ts scripts/customer-installation-topology.ts ./scripts/
 # CI records the commit and build time; a verified release tag is supplied at deployment.
 # Defaults that satisfy the published schema. The inherited values here were `unknown`, copied from the

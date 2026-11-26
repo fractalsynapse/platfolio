@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { FREE_STARTER_RELEASE, templateCatalogEntry } from '../packages/manifest/src/template-catalog.ts';
+import { FREE_STARTER_RELEASE, MARKETPLACE_RELEASES, templateCatalogEntry } from '../packages/manifest/src/template-catalog.ts';
 import type { customerOpenBao, MarketplaceGrant } from './customer-openbao.ts';
 
 const { template, version, revision } = FREE_STARTER_RELEASE;
@@ -22,7 +22,7 @@ export function privateMarketplaceOrigin(raw: string | undefined): string | unde
 export function customerMarketplaceConnection(hub: string | undefined, bao: Vault, request: typeof fetch = fetch) {
   let enrolling = false;
 
-  function call(grant: MarketplaceGrant, endpoint: 'claim' | 'enrollment', bearer: string, body?: object) {
+  function call(grant: MarketplaceGrant, endpoint: 'claim' | 'enrollment' | 'catalog', bearer: string, body?: object) {
     if (!hub || grant.hub !== hub) throw new Error('Marketplace origin changed');
     return request(new URL(`/api/v1/marketplace/installations/${encodeURIComponent(grant.installationId)}/${endpoint}`, hub), {
       method: 'POST', redirect: 'error', signal: AbortSignal.timeout(4_000),
@@ -94,5 +94,23 @@ export function customerMarketplaceConnection(hub: string | undefined, bao: Vaul
     return !hub || (await bao.readMarketplaceGrant()).grant?.claimed === true;
   }
 
-  return { connection, enroll, canLaunchStarter };
+  async function catalog() {
+    if (!hub) return MARKETPLACE_RELEASES;
+    if (await bao.status() !== 'ready') return [];
+    const saved = (await bao.readMarketplaceGrant()).grant;
+    if (!saved?.claimed) return [];
+    const response = await call(saved, 'catalog', saved.credential);
+    if (response.status === 404) return [];
+    if (response.status !== 200) throw new Error('Marketplace catalog unavailable');
+    const entries = await response.json();
+    if (!Array.isArray(entries)) throw new Error('Invalid marketplace catalog');
+    // Admit only exact locally reviewed coordinates. The hub cannot supply an executable or mutable reference.
+    return MARKETPLACE_RELEASES.flatMap((release) => {
+      const listed = entries.find((entry) => entry?.template === release.template);
+      return listed && (['repo', 'version', 'revision', 'priceMinor'] as const).every((key) => listed[key] === release[key])
+        ? [{ ...release, installable: release.installable && listed.installable === true }] : [];
+    });
+  }
+
+  return { connection, enroll, canLaunchStarter, catalog };
 }

@@ -3,6 +3,7 @@ import type { StarterLaunch, StarterLaunchEvent, StarterLaunchReport, StarterRem
 import type { SourceReleaseHosting } from '../packages/contracts/src/source-release-hosting.ts';
 
 export function customerLaunchRun(teamId: string, journalPath: string, provider: SourceReleaseHosting): StarterLaunch & {
+  startWithBootstrap: (bootstrap: string) => StarterLaunchReport;
   redeploy: () => StarterLaunchReport;
   changeBrand: (value: string) => StarterLaunchReport;
 } {
@@ -26,7 +27,7 @@ export function customerLaunchRun(teamId: string, journalPath: string, provider:
     report.state = 'failed';
     event({ step: 'Resume setup', state: 'FAILED', detail: 'The runner restarted. Resume the previous operation.' });
   }
-  function start(redeploy = false, brand?: string) {
+  function start(redeploy = false, brand?: string, bootstrap?: string) {
     if (redeploy ? report.state !== 'ready' : ['running', 'removing', 'ready'].includes(report.state)) return report;
     if (brand !== undefined) publicBrand = brand;
     report.state = 'running';
@@ -36,6 +37,7 @@ export function customerLaunchRun(teamId: string, journalPath: string, provider:
     void (async () => {
       try {
         const installed = await provider.deploy({
+          ...(bootstrap === undefined ? {} : { bootstrap }),
           ...(report.projectId ? { projectId: report.projectId } : {}),
           ...(publicBrand === undefined ? {} : { publicLabel: publicBrand }),
         }, {
@@ -78,5 +80,5 @@ export function customerLaunchRun(teamId: string, journalPath: string, provider:
     })();
     return report;
   }
-  return { teamId, read: () => report, start: () => start(), redeploy: () => start(true), changeBrand: (value) => start(true, value), remove };
+  return { teamId, read: () => report, start: () => start(), startWithBootstrap: (bootstrap) => start(false, undefined, bootstrap), redeploy: () => start(true), changeBrand: (value) => start(true, value), remove };
 }
