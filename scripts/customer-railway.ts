@@ -17,7 +17,10 @@ const installationNames = customerInstallationNames('staging');
 const { vault: baoService, worker: workerService } = installationNames;
 const platformProjectName = 'platfolio';
 const platformServices = new Set<string>(Object.values(installationNames));
-const appServices = new Set(['web-staging', 'app-db-staging']);
+const appServices: Readonly<Record<string, ReadonlySet<string>>> = {
+  'starter-web': new Set(['web-staging', 'app-db-staging']),
+  'shared-identity': new Set(['keycloak-staging', 'keycloak-db-staging']),
+};
 export type CustomerProjectTarget = { name: string; kind: 'installation' | 'app'; id?: string; create?: boolean };
 export type CustomerRailwayGrant = { token: string; workspaceId: string; projectId?: string };
 type RailwayProgress = (event: SourceReleaseProgress) => void;
@@ -35,14 +38,18 @@ function customerWorkspace(grant: CustomerRailwayGrant | undefined, transport: R
   return { workspaceId, access, workspaceProjects: () => listRailwayProjects(access, workspaceId) };
 }
 
-export async function removeCustomerStarter(projectId: string, data: 'keep' | 'wipe', grant?: CustomerRailwayGrant, transport: RailwayTransport = provider) {
+export function removeCustomerStarter(projectId: string, data: 'keep' | 'wipe', grant?: CustomerRailwayGrant, transport: RailwayTransport = provider) {
+  return removeCustomerApp('starter-web', projectId, data, grant, transport);
+}
+
+export async function removeCustomerApp(name: string, projectId: string, data: 'keep' | 'wipe', grant?: CustomerRailwayGrant, transport: RailwayTransport = provider) {
   if (data === 'wipe') {
     if (grant?.projectId) throw new Error('A project-only connection cannot verify permanent project removal');
     const { workspaceProjects } = customerWorkspace(grant, transport);
     // The journal records the exact project ID. A successful workspace read can settle a retry after deletion.
     if (!(await workspaceProjects()).some(({ id }) => id === projectId)) return { projectId, retainedVolumes: [] };
   }
-  const target = await customerRailway({ kind: 'app', name: 'starter-web', id: projectId }, undefined, grant, transport);
+  const target = await customerRailway({ kind: 'app', name, id: projectId }, undefined, grant, transport);
   return target.remove(data);
 }
 
@@ -50,7 +57,9 @@ export async function customerRailway(target: CustomerProjectTarget, progress?: 
   if (!/^[a-z][a-z0-9-]{1,62}$/.test(target.name) || (target.name === platformProjectName) !== (target.kind === 'installation')) {
     throw new Error('Platfolio must run in the project named platfolio. Every app requires its own project name.');
   }
-  const allowed = target.kind === 'installation' ? platformServices : appServices;
+  const selectedServices = target.kind === 'installation' ? platformServices : appServices[target.name];
+  if (!selectedServices) throw new Error('No staging service inventory is registered for this template');
+  const allowed: ReadonlySet<string> = selectedServices;
   const marker = `Platfolio project role ${target.kind}/${target.name}`;
   const { workspaceId, access, workspaceProjects } = customerWorkspace(grant, transport);
   const { credential } = access;

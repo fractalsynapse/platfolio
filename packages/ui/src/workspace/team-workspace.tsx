@@ -87,7 +87,7 @@ export function TeamWorkspace(): React.ReactElement {
       {environment.environment === 'production' && <p>The version people use.</p>}
     </WorkspaceHeading>
     <TeamTabs team={team} />
-    <EnvironmentWorkspace key={`${app.id}-${environment.environment}`} instanceId={app.id} canManage={team.role === 'owner'}
+    <EnvironmentWorkspace key={`${app.id}-${environment.environment}`} instanceId={app.id} isStarterWeb={app.template === "starter-web"} canManage={team.role === 'owner'}
       environment={environment} targets={app.environments.map(({ environment }) => environment)} route={route} freshness={state.freshness} now={now} />
   </>;
 }

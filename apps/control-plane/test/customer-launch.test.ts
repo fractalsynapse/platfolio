@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { createIdentityFixture, defaultIdentityConfig, signToken } from '@platfolio/contracts';
 import { createKernel, disposeKernel } from '@platfolio/kernel';
-import { FREE_STARTER_RELEASE } from '@platfolio/manifest';
+import { FREE_STARTER_RELEASE, SHARED_IDENTITY_RELEASE } from '@platfolio/manifest';
 import { buildCapabilities } from '../src/capabilities.ts';
 import { customerLaunch, customerLaunchConfig } from '../src/customer-launch.ts';
 
@@ -32,6 +32,9 @@ test('customer launch is owner scoped and passes only the intended fields to a p
     assert.equal(init?.redirect, 'error');
     last = JSON.parse(String(init?.body)) as typeof last;
     if (last?.action === 'report') return Response.json(workerReport);
+    if (last?.action === 'template-start') return Response.json({
+      template: SHARED_IDENTITY_RELEASE.template, revision: SHARED_IDENTITY_RELEASE.revision, state: 'running', events: [], retainedVolumes: [],
+    });
     if (last?.action === 'redeploy') return Response.json({ state: 'running' });
     if (last?.action === 'marketplace-status') return Response.json({ state: 'disconnected' });
     if (last?.action === 'marketplace-enroll') return Response.json('enrolled');
@@ -84,6 +87,17 @@ test('customer launch is owner scoped and passes only the intended fields to a p
     assert.deepEqual(await launch.json(), {
       error: 'marketplace-claim-required', message: 'Go to Connections → Marketplace to claim Starter Web, then launch again.',
     });
+    const shared = path + '?template=shared-identity';
+    assert.equal((await fetch(path + '?template=unknown', { method: 'POST', headers: headers('owner') })).status, 400);
+    assert.equal((await fetch(shared + '&template=shared-identity', { headers: headers('owner') })).status, 400);
+    assert.equal((await fetch(shared, { method: 'POST', headers: headers('owner') })).status, 400);
+    const bootstrap = 'A'.repeat(512);
+    const sharedLaunch = (actor: string) => fetch(shared, {
+      method: 'POST', headers: headers(actor), body: JSON.stringify({ bootstrap }),
+    });
+    assert.equal((await sharedLaunch('other')).status, 404);
+    assert.equal((await sharedLaunch('owner')).status, 200);
+    assert.deepEqual(last, { action: 'template-start', body: { template: 'shared-identity', bootstrap } });
     const response = await fetch(api + '/railway/callback?state=' + 'a'.repeat(43) + '&code=local-test', { redirect: 'manual' });
     assert.equal(response.status, 303);
     assert.equal(response.headers.get('location'), siteOrigin + '/dashboard/launch?railway=retry');

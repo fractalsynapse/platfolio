@@ -1,6 +1,6 @@
 ---
 import type { InferGetStaticPropsType } from 'astro';
-import { FREE_STARTER_RELEASE, TEMPLATE_CATALOG } from '@platfolio/manifest';
+import { MARKETPLACE_RELEASES, TEMPLATE_CATALOG } from '@platfolio/manifest';
 import { Breadcrumbs, MainContext, WorkspaceHeading, WorkspacePanel, describeTemplate, templatePaths, workspacePaths } from '@platfolio/ui';
 import Page from '../../layouts/page.astro';
 
@@ -12,7 +12,7 @@ type Props = InferGetStaticPropsType<typeof getStaticPaths>;
 
 const { entry } = Astro.props;
 const display = describeTemplate(entry.name);
-const release = entry.name === FREE_STARTER_RELEASE.template ? FREE_STARTER_RELEASE : undefined;
+const release = MARKETPLACE_RELEASES.find(({ template }) => template === entry.name);
 const source = `https://github.com/${entry.repo}`;
 const ref = release?.revision ?? entry.ref;
 ---
@@ -20,7 +20,7 @@ const ref = release?.revision ?? entry.ref;
   <Breadcrumbs items={[{ label: 'Home', href: '/' }, { label: 'Templates', href: templatePaths.catalog }, { label: display.title }]} />
   <WorkspaceHeading title={display.title}><p>{display.summary}</p></WorkspaceHeading>
   <div class="ui-workspace-page-actions">
-    {release && <a class="ui-workspace-primary ui-hit-primary" href={workspacePaths.home}>Choose a team to install</a>}
+    {release?.installable && <a class="ui-workspace-primary ui-hit-primary" href={workspacePaths.home}>Choose a team to install</a>}
     <a class="ui-workspace-secondary ui-hit-primary" href={templatePaths.catalog}>All templates</a>
   </div>
   <MainContext>

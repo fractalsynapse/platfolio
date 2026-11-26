@@ -13,24 +13,29 @@ import { workspacePaths } from '../workspace/routes.ts';
 import { StarterLaunchSetup } from './starter-launch-setup.tsx';
 import type { SuccessOf } from '@platfolio/api-contract/generated/types';
 
+import { sealOwnerRecovery } from './launch-recovery.ts';
+import { IdentityAdminCredential } from '../workspace/identity-admin-credential.tsx';
+
 type Launch = SuccessOf<'getStarterLaunch'>;
 const headings: Record<Launch['state'], string> = {
   idle: 'Ready to set up', running: 'Setting up your app', ready: 'Your app is ready',
   failed: 'Setup needs attention', removing: 'Removing your app', kept: 'App removed. Data kept.', wiped: 'App removed. Data scheduled for deletion.',
 };
 const props = z.object({ teamId: z.string().min(1), teamName: z.string().min(1).optional(),
-  managedProjectId: z.string().min(1).optional(),
+  managedProjectId: z.string().min(1).optional(), template: z.literal('shared-identity').optional(),
 }).strict();
 
-function LaunchPanel({ teamId, teamName, managedProjectId }: z.infer<typeof props>) {
+function LaunchPanel({ teamId, teamName, managedProjectId, template }: z.infer<typeof props>) {
   const params = React.useMemo(() => ({ teamId }), [teamId]);
-  const launch = useOperation('getStarterLaunch', { params, key: `starter-${teamId}` });
+  const selected = React.useMemo(() => ({ teamId, ...(template ? { template } : {}) }), [teamId, template]);
+  const launch = useOperation('getStarterLaunch', { params: selected, key: `starter-${teamId}-${template ?? 'starter-web'}` });
   const setup = useOperation('getStarterLaunchSetup', { params, key: `starter-setup-${teamId}` });
   const local = setup.state.status === 'failed' && setup.state.error.status === 404;
-  const ready = local || setup.state.status === 'loaded' && setup.state.data.openBao === 'ready' && setup.state.data.railway === 'connected';
+  const ready = (!template && local) || setup.state.status === 'loaded' && setup.state.data.openBao === 'ready' && setup.state.data.railway === 'connected';
   const canWipeData = local || setup.state.status === 'loaded' && setup.state.data.canWipeData === true;
   const start = useCommand('startStarterLaunch');
   const remove = useCommand('removeStarterLaunch');
+  const [password, setPassword] = React.useState('');
   const [pending, setPending] = React.useState(false);
   const [problem, setProblem] = React.useState('');
   const report = isLoaded(launch.state) ? launch.state.data : null;
@@ -40,10 +45,16 @@ function LaunchPanel({ teamId, teamName, managedProjectId }: z.infer<typeof prop
     setProblem('');
     setPending(true);
     try {
-      const result = action === 'start' ? await start({ params })
-        : await remove({ params, body: { data: action, ...(confirmation === undefined ? {} : { confirmation }) } });
+      const bootstrap = action === 'start' && template && setup.state.status === 'loaded'
+        ? await sealOwnerRecovery(setup.state.data.workerKey, new TextEncoder().encode(password)) : undefined;
+      const result = action === 'start' ? await start({ params: selected, ...(bootstrap ? { body: { bootstrap } } : {}) })
+        : await remove({ params: selected, body: { data: action, ...(confirmation === undefined ? {} : { confirmation }) } });
       if (!result.ok) setProblem([400, 409].includes(result.error.status) ? result.error.message : 'Platfolio could not accept that action. Try again.');
+      if (result.ok) setPassword('');
       return result.ok;
+    } catch {
+      setProblem('Could not prepare the request. Refresh the page and try again.');
+      return false;
     } finally {
       launch.reload();
       setPending(false);
@@ -63,7 +74,7 @@ function LaunchPanel({ teamId, teamName, managedProjectId }: z.infer<typeof prop
     </WorkspacePanel>;
   }
 
-  return <WorkspacePanel title={managedProjectId ? 'Hosting' : 'Launch Starter Web'}>
+  return <WorkspacePanel title={managedProjectId ? 'Hosting' : template ? 'Launch Shared Identity' : 'Launch Starter Web'}>
     {launch.state.status === 'pending' && <p role="status">Checking your launch setup…</p>}
     {launch.state.status === 'failed' && <p role="status">{launch.state.error.status === 404
       ? 'This team needs a connected Railway launcher.' : `Could not check launch setup. Try again. (${launch.state.error.code})`}</p>}
@@ -80,14 +91,16 @@ function LaunchPanel({ teamId, teamName, managedProjectId }: z.infer<typeof prop
         <p>{report.state === 'kept'
           ? 'Restore the app and reconnect its retained data in Railway.'
           : 'Use your connected Railway workspace. This creates a dedicated staging project and database. Anyone with the generated app link can open it. Railway charges apply to the resources you use.'}</p>
-        <WorkspaceAction variant="primary" disabled={pending} onClick={() => void act('start')}>{report.state === 'kept' ? 'Restore app' : report.state === 'failed' ? 'Resume setup' : 'Launch starter'}</WorkspaceAction>
+        {template && <IdentityAdminCredential password={password} change={setPassword} />}
+        <WorkspaceAction variant="primary" disabled={pending || !!template && !/^[A-Za-z0-9_-]{32,64}$/.test(password)}
+          onClick={() => void act('start')}>{report.state === 'kept' ? 'Restore app' : report.state === 'failed' ? 'Resume setup' : template ? 'Launch Shared Identity' : 'Launch starter'}</WorkspaceAction>
       </>}
       {report.state === 'ready' && <p className="ui-workspace-links">
         {report.origin && <a href={report.origin}>Open app</a>}
       </p>}
       {report.registration === 'pending' && <p role="status">Adding this app to Team workspace…</p>}
       {report.registration === 'conflict' && <p role="status">Another instance uses this name. Its settings have been preserved.</p>}
-      <p>Starter Web uses a generated database connection.</p>
+      <p>{template ? 'Shared Identity uses a private PostgreSQL database. Create your own realm in Keycloak for your apps.' : 'Starter Web uses a generated database connection.'}</p>
       <LaunchProgress report={report} />
       {ready && report.projectId && ['ready', 'kept', 'failed'].includes(report.state) &&
         <HostingRemoval name={report.instanceName ?? report.template} pending={pending} canWipe={canWipeData}

@@ -5,7 +5,7 @@ import {
 } from '@platfolio/contracts';
 import { RepositoryReadError } from '@platfolio/contracts';
 import { ScmNotConfiguredError } from '@platfolio/kernel';
-import { buildPlan, enabledEnvironments, FREE_STARTER_RELEASE, parseCompose, templateCatalogEntry } from '@platfolio/manifest';
+import { buildPlan, enabledEnvironments, FREE_STARTER_RELEASE, MARKETPLACE_RELEASES, SHARED_IDENTITY_RELEASE, parseCompose, templateCatalogEntry } from '@platfolio/manifest';
 import type { RequestBodyOf } from '@platfolio/api-contract/generated/types';
 import type { ExtensionDescriptor, KernelContext, Request, Response_, RouteDefinition } from '@platfolio/kernel';
 import { ArtifactRecordSchema, InfraPlanSchema, secretWriteScope } from '@platfolio/contracts';
@@ -819,12 +819,19 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
         if (running) return;
         running = true;
         try {
-          const launch = deps.customerLaunch?.teamId ? await deps.customerLaunch.call('report') : undefined;
-          const observation = launch?.ok && deps.customerLaunch && hostedStarterObservation(deps.customerLaunch.teamId, launch.body);
-          if (observation) {
-            const stored = await context.store.recordHostedStarter(observation);
-            if (stored.ok && observation.state === 'live') {
-              await checkHostedApp(context.store, stored.value.id, observation, () => nowOf(deps));
+          const launcher = deps.customerLaunch;
+          if (launcher?.teamId) {
+            const reports = await Promise.all([
+              launcher.call('report'),
+              launcher.call('template-report', { template: SHARED_IDENTITY_RELEASE.template }),
+            ]);
+            for (const launch of reports) {
+              const observation = launch.ok && hostedStarterObservation(launcher.teamId, launch.body);
+              if (!observation) continue;
+              const stored = await context.store.recordHostedStarter(observation);
+              if (stored.ok && observation.state === 'live' && observation.template === FREE_STARTER_RELEASE.template) {
+                await checkHostedApp(context.store, stored.value.id, observation, () => nowOf(deps));
+              }
             }
           }
           const instances = await context.store.listInstances();
@@ -1359,6 +1366,10 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
         return await context.store.redeemMarketplaceEnrollment(id, enrollmentDigest, registryDigest, nowOf(deps).toISOString())
           ? { status: 204, body: undefined } : notFound('marketplace installation', '');
       }),
+      registryRoute(`${registryPath}/catalog`, 'getEnrolledMarketplaceCatalog', async (context, _request, id, registryDigest) => {
+        if (!await context.store.verifyMarketplaceCredential(id, registryDigest)) return notFound('marketplace installation', '');
+        return send('getEnrolledMarketplaceCatalog', 200, MARKETPLACE_RELEASES);
+      }),
       registryRoute(`${registryPath}/claim`, 'claimEnrolledMarketplaceRelease', async (context, _request, id, registryDigest) => {
         if (!await context.store.verifyMarketplaceCredential(id, registryDigest)) return notFound('marketplace installation', '');
         return send('claimEnrolledMarketplaceRelease', 200, claim(id));
@@ -1374,6 +1385,10 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
     if (!output.ok && output.status === 409 && action === 'start') {
       return { status: 409, body: { error: 'marketplace-claim-required', message: 'Go to Connections → Marketplace to claim Starter Web, then launch again.' } };
     }
+    if (!output.ok && output.status === 409 && action === 'template-start') {
+      return { status: 409, body: { error: 'marketplace-connection-required', message: 'Connect to Marketplace in Connections before launching this template.' } };
+    }
+    if (!output.ok && output.status === 400 && action === 'template-start') return badRequest('Generate a new encrypted admin credential and try again.');
     if (!output.ok) return unavailable();
     return action === 'unlock' ? { status: 204, body: null } : send(operation, 200, output.body);
   };
@@ -1439,6 +1454,15 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
     return unavailable();
   }
   const launchPath = '/api/v1/teams/{teamId}/starter-launch';
+  type LaunchTemplate = typeof SHARED_IDENTITY_RELEASE.template | typeof FREE_STARTER_RELEASE.template;
+  const scopedLaunch = (method: string, suffix: string, operation: string,
+    handle: (scope: Scope, request: Request, template: LaunchTemplate) => Promise<Response_>) =>
+    scoped(method, launchPath + suffix, operation, 'marketplace.manage', async (scope, request) => {
+      const selected = request.query.getAll('template');
+      if (selected.length === 0) return handle(scope, request, FREE_STARTER_RELEASE.template);
+      if (selected.length !== 1 || selected[0] !== SHARED_IDENTITY_RELEASE.template) return badRequest('Choose an installable template.');
+      return handle(scope, request, selected[0]);
+    });
   const brandPath = '/api/v1/instances/{instanceId}/environments/{environment}/configuration/starter-brand';
   async function hostedBrand({ context, teamId, personId }: Scope, request: Request, params: Record<string, string>,
     operation: 'getHostedStarterBrand' | 'updateHostedStarterBrand'): Promise<Response_> {
@@ -1498,28 +1522,40 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
         if (!requested.ok) return unavailable();
         return send('redeployHostedStarter', 202, { state: 'requested' });
       }),
-      scoped('GET', launchPath, 'getStarterLaunch', 'marketplace.manage', async ({ teamId, context }) => {
-        if (deps.starterLaunch?.teamId === teamId) return send('getStarterLaunch', 200, await deps.starterLaunch.read());
+      scopedLaunch('GET', '', 'getStarterLaunch', async ({ teamId, context }, _request, template) => {
+        const shared = template === SHARED_IDENTITY_RELEASE.template;
+        if (!shared && deps.starterLaunch?.teamId === teamId) return send('getStarterLaunch', 200, await deps.starterLaunch.read());
         if (!customer || customer.teamId !== teamId) return notFound('launch', 'starter');
-        const report = await customer.call('report');
+        const report = shared ? await customer.call('template-report', { template: SHARED_IDENTITY_RELEASE.template })
+          : await customer.call('report');
         if (!report.ok) return unavailable();
         const link = await hostedStarterLink(context.store, teamId, report.body);
         return send('getStarterLaunch', 200, { ...(report.body as object), removedProjectId: undefined, ...link });
       }),
-      scoped('POST', launchPath, 'startStarterLaunch', 'marketplace.manage', async ({ teamId }) =>
-        deps.starterLaunch?.teamId === teamId
-          ? send('startStarterLaunch', 200, await deps.starterLaunch.start()) : relay(teamId, 'startStarterLaunch', 'start')),
-      scoped('POST', launchPath + '/remove', 'removeStarterLaunch', 'marketplace.manage', async ({ teamId, context }, request) => {
-        if (deps.starterLaunch?.teamId !== teamId && customer?.teamId !== teamId) return notFound('launch', 'starter');
+      scopedLaunch('POST', '', 'startStarterLaunch', async ({ teamId }, request, template) => {
+        if (template === SHARED_IDENTITY_RELEASE.template) {
+          if (customer?.teamId !== teamId) return notFound('launch', '');
+          const body = bodyOf<{ bootstrap?: string }>(request);
+          const bootstrap = body.ok ? body.value?.bootstrap : undefined;
+          if (!bootstrap || !/^[A-Za-z0-9+/]{512}$/.test(bootstrap)) return badRequest('Generate and save the Shared Identity admin credential.');
+          return relay(teamId, 'startStarterLaunch', 'template-start', { template, bootstrap });
+        }
+        return deps.starterLaunch?.teamId === teamId
+          ? send('startStarterLaunch', 200, await deps.starterLaunch.start()) : relay(teamId, 'startStarterLaunch', 'start');
+      }),
+      scopedLaunch('POST', '/remove', 'removeStarterLaunch', async ({ teamId, context }, request, template) => {
+        const shared = template === SHARED_IDENTITY_RELEASE.template;
+        if (customer?.teamId !== teamId && (shared || deps.starterLaunch?.teamId !== teamId)) return notFound('launch', '');
         const body = bodyOf<{ data: 'keep' | 'wipe'; confirmation?: string }>(request);
         if (!body.ok || !body.value || !['keep', 'wipe'].includes(body.value.data)) return badRequest('Select keep data or wipe data');
-        if (body.value.data === 'wipe' && body.value.confirmation !== 'starter-web') return badRequest('Type starter-web to confirm deletion of its data');
-        const instance = (await context.store.listInstances(teamId)).find(({ name }) => name === FREE_STARTER_RELEASE.template);
+        if (body.value.data === 'wipe' && body.value.confirmation !== template) return badRequest(`Type ${template} to confirm deletion of its data`);
+        const instance = (await context.store.listInstances(teamId)).find(({ name }) => name === template);
         const hosting = instance && await context.store.getHostedStarter(instance.id);
         if (instance && hosting?.ok) {
           const consumers = await context.store.listConsumers(instance.id);
           if (consumers.length) return { status: 409, body: { error: 'conflict', message: `Removing this app would strand: ${bindingImpact(consumers).join('; ')}` } };
         }
+        if (shared) return relay(teamId, 'removeStarterLaunch', 'template-remove', { template, data: body.value.data });
         return deps.starterLaunch?.teamId === teamId
           ? send('removeStarterLaunch', 200, await deps.starterLaunch.remove(body.value.data))
           : relay(teamId, 'removeStarterLaunch', 'remove', { data: body.value.data });
@@ -1610,8 +1646,9 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
       async handle(request, _params, context) {
         const auth = await authorize(context, request);
         if (!auth.ok) return auth.response;
-        const release = FREE_STARTER_RELEASE;
-        return send('listInstallableTemplates', 200, [{ ...release, repo: templateCatalogEntry(release.template).repo }]);
+        if (!customer) return send('listInstallableTemplates', 200, MARKETPLACE_RELEASES);
+        const result = await customer.call('marketplace-catalog');
+        return result.ok ? send('listInstallableTemplates', 200, result.body) : marketplaceUnavailable();
       },
     }],
   };

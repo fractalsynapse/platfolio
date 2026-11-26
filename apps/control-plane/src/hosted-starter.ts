@@ -1,18 +1,19 @@
 import { HostedStarterSchema, type NewHostedStarter, type Store } from '@platfolio/contracts';
 import type { SuccessOf } from '@platfolio/api-contract/generated/types';
-import { FREE_STARTER_RELEASE, templateCatalogEntry } from '@platfolio/manifest';
+import { MARKETPLACE_RELEASES } from '@platfolio/manifest';
 
 type Report = SuccessOf<'getStarterLaunch'>;
-const release = FREE_STARTER_RELEASE;
 
 export function hostedStarterObservation(teamId: string, data: unknown): NewHostedStarter | undefined {
   if (!data || typeof data !== 'object') return;
   const report = data as Partial<Report>;
-  if (report.template !== release.template || report.revision !== release.revision || !Array.isArray(report.events)) return;
+  const release = MARKETPLACE_RELEASES.find(({ template, revision, installable }) =>
+    installable && template === report.template && revision === report.revision);
+  if (!release || !Array.isArray(report.events)) return;
   const last = report.events.at(-1);
   const common = {
     teamId, name: release.template, template: release.template,
-    templateRef: { repo: templateCatalogEntry(release.template).repo, commitSha: release.revision },
+    templateRef: { repo: release.repo, commitSha: release.revision },
   };
   if (last?.state !== 'READY') return;
   if (last.step === 'Removal complete' && (report.state === 'kept' || report.state === 'wiped')) {

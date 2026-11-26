@@ -4,7 +4,7 @@
  * hand, because every line reproduces from the specification.
  *
  * Source: apps/control-plane/openapi.yaml (OpenAPI 3.1.0, info.version 0.1.0)
- * Input digest: sha256/d926cc29e04f0510
+ * Input digest: sha256/ddfc59651d6374a1
  *
  * Reproduce it with `pnpm run api:types`. `pnpm run api:types:check` fails when this file stops matching
  * what the committed spec produces, which is the only way a generated type deserves to be trusted.
@@ -569,6 +569,10 @@ export interface ApiParameters {
     instanceId: string;
     dispatchId: string;
   };
+  /** POST /api/v1/marketplace/installations/{installationId}/catalog */
+  getEnrolledMarketplaceCatalog: {
+    installationId: string;
+  };
   /** GET /healthz */
   getHealth: Record<string, never>;
   /** GET /api/v1/instances/{instanceId}/status */
@@ -617,6 +621,7 @@ export interface ApiParameters {
   /** GET /api/v1/teams/{teamId}/starter-launch */
   getStarterLaunch: {
     teamId: string;
+    template?: 'shared-identity';
   };
   /** GET /api/v1/teams/{teamId}/starter-launch/setup */
   getStarterLaunchSetup: {
@@ -738,6 +743,7 @@ export interface ApiParameters {
   /** POST /api/v1/teams/{teamId}/starter-launch/remove */
   removeStarterLaunch: {
     teamId: string;
+    template?: 'shared-identity';
   };
   /** DELETE /api/v1/teams/{teamId}/members/{personId} */
   removeTeamMember: {
@@ -772,6 +778,7 @@ export interface ApiParameters {
   /** POST /api/v1/teams/{teamId}/starter-launch */
   startStarterLaunch: {
     teamId: string;
+    template?: 'shared-identity';
   };
   /** POST /api/v1/instances/{instanceId}/dispatches/{dispatchId}/trigger */
   triggerDispatch: {
@@ -949,6 +956,11 @@ export interface ApiRequestBodies {
   };
   /** PUT /api/v1/teams/{teamId}/marketplace/installation-launches/{launchId} */
   startHubInstallation: InstallationLaunchInput;
+  /** POST /api/v1/teams/{teamId}/starter-launch */
+  startStarterLaunch: {
+    /** Owner bootstrap material encrypted to the private worker. */
+    bootstrap: string;
+  };
   /** POST /api/v1/instances/{instanceId}/dispatches/{dispatchId}/trigger */
   triggerDispatch: {
     /** Branch or tag GitHub should run on. Not the plan's commit: a workflow run belongs to a branch, and the digest it must satisfy travels as an input. */
@@ -1220,6 +1232,19 @@ export interface ApiResponses {
     '404': Error;
     '409': Error;
   };
+  /** POST /api/v1/marketplace/installations/{installationId}/catalog */
+  getEnrolledMarketplaceCatalog: {
+    '200': Array<{
+      template: string;
+      repo: string;
+      version: string;
+      revision: string;
+      priceMinor: 0;
+      installable?: boolean;
+    }>;
+    '400': Error;
+    '404': Error;
+  };
   /** GET /healthz */
   getHealth: {
     '200': Health;
@@ -1367,6 +1392,7 @@ export interface ApiResponses {
         detail?: string;
       }>;
     };
+    '400': Error;
     '401': Error;
     '403': Error;
     '404': Error;
@@ -1470,9 +1496,11 @@ export interface ApiResponses {
       version: string;
       revision: string;
       priceMinor: 0;
+      installable?: boolean;
     }>;
     '401': Error;
     '403': Error;
+    '503': Error;
   };
   /** GET /api/v1/instances */
   listInstances: {
@@ -1803,6 +1831,7 @@ export interface ApiResponses {
         detail?: string;
       }>;
     };
+    '400': Error;
     '401': Error;
     '403': Error;
     '404': Error;
@@ -1993,6 +2022,8 @@ export const ENDPOINTS = {
   getCurrentPerson: { method: 'get', path: '/api/v1/me' },
   /** GET /api/v1/instances/{instanceId}/dispatches/{dispatchId} */
   getDispatchPlan: { method: 'get', path: '/api/v1/instances/{instanceId}/dispatches/{dispatchId}' },
+  /** POST /api/v1/marketplace/installations/{installationId}/catalog */
+  getEnrolledMarketplaceCatalog: { method: 'post', path: '/api/v1/marketplace/installations/{installationId}/catalog' },
   /** GET /healthz */
   getHealth: { method: 'get', path: '/healthz' },
   /** GET /api/v1/instances/{instanceId}/status */

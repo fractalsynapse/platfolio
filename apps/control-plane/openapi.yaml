@@ -565,14 +565,14 @@ paths:
   /api/v1/templates:
     get:
       operationId: listInstallableTemplates
-      summary: List pinned free templates supported by the current installer
+      summary: List pinned free releases and installer availability
       security: [{ bearerJwt: [] }]
       responses:
         '200':
           description: Installable public templates and their pinned source coordinates.
           content:
             application/json:
-              schema:
+              schema: &marketplace-catalog
                 type: array
                 items:
                   type: object
@@ -584,8 +584,14 @@ paths:
                     version: { type: string }
                     revision: { type: string, pattern: '^[a-f0-9]{40}$' }
                     priceMinor: { type: integer, enum: [0] }
+                    installable: { type: boolean }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '503':
+          description: The private marketplace connection could not be reached.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /api/v1/teams/{teamId}/members:
     parameters:
@@ -2660,6 +2666,22 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /api/v1/marketplace/installations/{installationId}/catalog:
+    parameters:
+      - { name: installationId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: getEnrolledMarketplaceCatalog
+      summary: Read the pinned registry catalog using an installation grant
+      security: [{ marketplaceCredential: [] }]
+      responses:
+        '200':
+          description: Registered releases and their availability in the installer.
+          content:
+            application/json:
+              schema: *marketplace-catalog
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   /api/v1/teams/{teamId}/marketplace/connection:
     parameters:
       - { name: teamId, in: path, required: true, schema: { type: string } }
@@ -2854,6 +2876,7 @@ paths:
   /api/v1/teams/{teamId}/starter-launch:
     parameters:
       - { name: teamId, in: path, required: true, schema: { type: string } }
+      - { name: template, in: query, schema: { type: string, enum: [shared-identity] } }
     get:
       operationId: getStarterLaunch
       summary: Read the deployment timeline and troubleshooting evidence
@@ -2893,6 +2916,7 @@ paths:
                         state: { type: string }
                         resourceId: { type: string }
                         detail: { type: string }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -2902,8 +2926,18 @@ paths:
       summary: Launch or resume the free starter using the connected customer runner
       description: A new private launch configured for the marketplace requires a saved release claim. Restores use the release already acquired.
       security: [{ bearerJwt: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [bootstrap]
+              properties:
+                bootstrap: { type: string, pattern: '^[A-Za-z0-9+/]{512}$', description: Owner bootstrap material encrypted to the private worker. }
       responses:
         '200': *starter-launch-response
+        '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -2916,6 +2950,7 @@ paths:
   /api/v1/teams/{teamId}/starter-launch/remove:
     parameters:
       - { name: teamId, in: path, required: true, schema: { type: string } }
+      - { name: template, in: query, schema: { type: string, enum: [shared-identity] } }
     post:
       operationId: removeStarterLaunch
       summary: Remove this starter using the explicitly selected storage policy

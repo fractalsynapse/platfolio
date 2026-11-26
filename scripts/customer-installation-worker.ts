@@ -8,6 +8,7 @@ import { customerOpenBao } from './customer-openbao.ts';
 import { customerMarketplaceConnection, privateMarketplaceOrigin } from './customer-marketplace-connection.ts';
 import { customerRailwayOAuth } from './customer-railway-oauth.ts';
 import { StarterBrandChangeSchema } from '../packages/contracts/src/starter-brand.ts';
+import { railwaySharedIdentityHosting } from './launch-shared-identity.ts';
 import { railwayStarterHosting } from './launch-starter-app.ts';
 import { CustomerHostingCommandSchema } from '../packages/contracts/src/customer-hosting-commands.ts';
 import { privateRailwayExecution } from '../apps/control-plane/src/private-railway-execution.ts';
@@ -31,6 +32,7 @@ const marketplace = customerMarketplaceConnection(privateMarketplaceOrigin(proce
 const oauth = customerRailwayOAuth({ callback, workspaceId: workspace, ...(client ? { clientId: client } : {}), ...(project ? { projectId: project } : {}) }, bao);
 const sourceHosting = railwayStarterHosting(oauth.credential);
 const launch = customerLaunchRun(team, join(directory, 'launch.json'), sourceHosting);
+const identity = customerLaunchRun(team, join(directory, 'shared-identity.json'), railwaySharedIdentityHosting(oauth.credential));
 const execution = await createKernel({ provider: 'railway', infrastructure: [privateRailwayExecution(team, async () => {
   if (await bao.status() !== 'ready') throw new Error('Unlock OpenBao before managing a project');
   return oauth.credential();
@@ -66,6 +68,23 @@ const server = createServer({ requestTimeout: 10000 }, (request, response) => {
     switch (command.action) {
       case 'marketplace-status': reply(200, await marketplace.connection()); return;
       case 'marketplace-enroll': reply(200, await marketplace.enroll(command.body.handoff)); return;
+      case 'marketplace-catalog': reply(200, await marketplace.catalog()); return;
+      case 'template-report': reply(200, await identity.read()); return;
+      case 'template-start':
+      case 'template-remove': {
+        if (project || await bao.status() !== 'ready' || !(await bao.readGrant()).grant) { reply(503, replyError); return; }
+        if (command.action === 'template-remove') { reply(200, await identity.remove(command.body.data)); return; }
+        const current = await identity.read();
+        // An existing install can be recovered even if its marketplace connection changes.
+        if (!current.projectId && !(await marketplace.catalog()).some(({ template, installable }) => template === command.body.template && installable)) {
+          reply(409, { error: 'marketplace-connection-required' });
+          return;
+        }
+        const bootstrap = bao.openEnvelope(command.body.bootstrap);
+        if (!/^[A-Za-z0-9_-]{32,64}$/.test(bootstrap)) { reply(400, null); return; }
+        reply(200, identity.startWithBootstrap(bootstrap));
+        return;
+      }
       case 'report': reply(200, await launch.read()); return;
       case 'setup': {
         const openBao = await bao.status();

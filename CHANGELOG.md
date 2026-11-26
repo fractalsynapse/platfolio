@@ -5,6 +5,8 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+- Private installations discover the hub’s three pinned templates and can deploy Shared Identity with Keycloak and private PostgreSQL in a dedicated Railway staging project (#288).
+
 - Show Starter Web’s verified wipe receipt directly on Manage app (#288).
 
 - Confirm Starter Web removal after Railway stops listing the project. Retrying a wipe can confirm an earlier deletion without sending it again (#288).
