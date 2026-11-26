@@ -518,9 +518,11 @@ until those values are configured. Existing installations can continue to sign i
 their apps.
 
 Staging can use its reviewed installer artifact with an owned, unpublished Railway template.
-Set `PLATFOLIO_RAILWAY_INSTALL_CONFIG_JSON` to the renderer's JSON output. The hub checks
-the artifact's revision and digest before serving it to Railway through the template deployment
-API. Never put a password or token in the installer artifact.
+Set `PLATFOLIO_RAILWAY_INSTALL_CONFIG_JSON` from the renderer's output file. The file
+escapes dollar signs so Railway preserves the service references until it provisions the
+private installation. Pass the file directly to Railway without parsing and reformatting
+it. The hub checks the decoded artifact's revision and digest before using it. The installer
+artifact contains no passwords or tokens.
 
 The hub keeps a credential-free installation journal. Team owners can reopen the launch
 from Connections, reauthorize the original workspace, and continue. The provider binds
@@ -535,3 +537,19 @@ gets its own services, domain, database, OpenBao, and first owner sign-in. Previ
 verified environments and their data stay in place. An unfinished launch resumes with
 its original release and environment choices. An expansion uses the current installer
 release for the new environment.
+
+### Update or remove a private installation
+
+An owner reauthorizes the original workspace from Connections for an update or removal.
+An update selects one installed environment and uses the current pinned installer.
+Platfolio replaces the application service images in place, preserving configuration,
+service IDs, domains and storage. Database and OpenBao image changes require their own
+upgrade procedure. An update verifies the new deployments and the build served by the site
+and API before recording the release.
+
+Removal requires typing the exact project name and affects the whole private installation,
+including all of its environments and stored data. Apps in separate projects are managed
+individually from the private installation. Platfolio records the removal only after Railway
+confirms that the original project is absent. The hub retains the history and releases
+the project name for future launches. These operations use the same journal and lease as
+launch, scoped to the owner and bound to the original provider project.

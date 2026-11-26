@@ -1,9 +1,11 @@
 import { setTimeout as delay } from 'node:timers/promises';
-import type { InstallationCheckpointObserver, InstallationEnvironment, InstallationLaunchInput, InstallationObserver, InstallationProvider, InstallationRecovery } from './installation-provider.ts';
+import type { InstallationCheckpointObserver, InstallationEnvironment, InstallationLaunchInput, InstallationObserver, InstallationProvider, InstallationRecovery, InstallationTarget, InstallationMaintenance } from './installation-provider.ts';
 import { exchangeRailwayCode, railwayAuthorization, railwayAuthorizedWorkspaces } from './railway-oauth.ts';
 import { createRailwayEnvironment, createRailwayProject, listRailwayProjects } from './railway-project.ts';
 import { customerInstallationNames, customerInstallationServices as services, installationWorkerReadiness } from './customer-installation-services.ts';
 import { deployRailwayTemplate, railwayTemplateDigest, readRailwayTemplate, type RailwayAccess, type RailwayTemplateConfig } from './railway-template.ts';
+import { configureRailwayService, deployRailwayService } from './railway-service.ts';
+import { wipeRailwayProject } from './railway-removal.ts';
 import { HttpRailwayTransport } from './railway-transport.ts';
 
 const scope = 'workspace:admin';
@@ -19,7 +21,7 @@ export interface RailwayInstallationConfig {
   installer?: RailwayTemplateConfig;
 }
 
-function forEnvironment(config: RailwayTemplateConfig, input: InstallationLaunchInput, environment: InstallationEnvironment) {
+function forEnvironment(config: RailwayTemplateConfig, environment: InstallationEnvironment, input?: InstallationLaunchInput) {
   const names = customerInstallationNames(environment);
   const staging = customerInstallationNames('staging');
   const source = config.services ?? {};
@@ -48,13 +50,13 @@ function forEnvironment(config: RailwayTemplateConfig, input: InstallationLaunch
         (logical === 'worker' && placed.deploy?.healthcheckPath !== installationWorkerReadiness)) throw new Error('The installer service layout is invalid');
     const variables = placed.variables ??= {};
     const set = (key: string, defaultValue: string) => { variables[key] = { defaultValue }; };
-    if (logical === 'identity') {
+    if (input && logical === 'identity') {
       delete variables.PLATFOLIO_INSTALL_OWNER_PASSWORD;
       set('PLATFOLIO_INSTALL_OWNER_EMAIL', input.ownerEmail);
       set('PLATFOLIO_INSTALL_OWNER_VERIFIER', input.verifier);
       set('PLATFOLIO_INSTALL_OWNER_SALT', input.salt);
     }
-    if (logical === 'worker') {
+    if (input && logical === 'worker') {
       set('RAILWAY_WORKSPACE_ID', input.workspaceId);
       delete variables.PLATFOLIO_LAUNCH_APP_PROJECT;
     }
@@ -68,20 +70,23 @@ type Service = {
   serviceName: string;
   source: { image?: string } | null;
   activeDeployments: { status: string }[];
+  latestDeployment?: { id: string; status: string };
   domains: { serviceDomains: { domain: string }[]; customDomains: { id: string }[] };
 };
 
 async function readServices(access: RailwayAccess, projectId: string, environmentId: string): Promise<Service[]> {
-  const { environment: observed } = await access.transport.graphql<{ environment: { serviceInstances: { edges: { node: Service }[] } } }>({
+  type Instances = { edges: { node: Service }[]; pageInfo: { hasNextPage: boolean } };
+  const { environment: observed } = await access.transport.graphql<{ environment: { serviceInstances: Instances } }>({
     ...access, operation: 'installationServices',
-    query: 'query ($projectId: String!, $environmentId: String!) { environment(projectId: $projectId, id: $environmentId) { serviceInstances(first: 100) { edges { node { serviceId serviceName source { image } activeDeployments { status } domains { serviceDomains { domain } customDomains { id } } } } } } }',
+    query: 'query ($projectId: String!, $environmentId: String!) { environment(projectId: $projectId, id: $environmentId) { serviceInstances(first: 100) { edges { node { serviceId serviceName source { image } latestDeployment { id status } activeDeployments { status } domains { serviceDomains { domain } customDomains { id } } } } pageInfo { hasNextPage } } } }',
     variables: { projectId, environmentId },
   });
+  if (observed.serviceInstances.pageInfo.hasNextPage) throw new Error('The environment has more services than the installer can verify');
   return observed.serviceInstances.edges.map(({ node }) => node);
 }
 
 async function readyOrigin(access: RailwayAccess, projectId: string, environmentId: string, environment: InstallationEnvironment,
-  config: ReturnType<typeof forEnvironment>, request: typeof fetch, sleep: (ms: number) => Promise<unknown>) {
+  config: ReturnType<typeof forEnvironment>, request: typeof fetch, sleep: (ms: number) => Promise<unknown>, revision?: string) {
   const names = customerInstallationNames(environment);
   for (let attempt = 0; attempt < 84; attempt++) {
     const entries = await readServices(access, projectId, environmentId);
@@ -102,7 +107,18 @@ async function readyOrigin(access: RailwayAccess, projectId: string, environment
         const domain = entries.find(({ serviceName }) => serviceName === names[logical])?.domains.serviceDomains[0]?.domain;
         if (!domain || !/^[a-z0-9-]+\.up\.railway\.app$/.test(domain)) return;
         const origin = 'https://' + domain;
-        const healthy = await request(origin + path, { redirect: 'error', signal: AbortSignal.timeout(5000) }).then((response) => response.ok, () => false);
+        const probe = (route: string) => request(origin + route, { redirect: 'error', signal: AbortSignal.timeout(5000) });
+        const healthy = await probe(path)
+          .then(async (response) => {
+            if (!response.ok) return false;
+            if (logical === 'api') {
+              const ready = await response.json() as { checks?: { name: string; status: string }[] };
+              if (!ready.checks?.some(({ name, status }) => name === 'database' && status === 'ok')) return false;
+            }
+            if (!revision || logical === 'identity') return true;
+            const build = await probe(logical === 'site' ? '/version.json' : '/version');
+            return build.ok && (await build.json() as { commit?: string }).commit === revision;
+          }).catch(() => false);
         return healthy ? { logical, origin } : undefined;
       }));
       if (origins.every(Boolean)) return origins.find((result) => result?.logical === 'site')!.origin;
@@ -139,7 +155,15 @@ export function railwayInstallationProvider(config: RailwayInstallationConfig, r
               active.delete(key);
             }
           }
-          return { expires, workspaces, launch, recover: launch };
+          return {
+            expires, workspaces, launch, recover: launch,
+            async maintain(target, action, observe, beforeWrite) {
+              if (expires <= Date.now() || !workspaces.some(({ id }) => id === target.workspaceId)) {
+                throw new Error('The original workspace was not authorized');
+              }
+              await maintainInstallation(access, config, target, action, observe, beforeWrite, request, sleep);
+            },
+          };
         },
       };
     },
@@ -150,12 +174,9 @@ async function createInstallation(access: RailwayAccess, config: RailwayInstalla
   request: typeof fetch, sleep: (ms: number) => Promise<unknown>, recovery?: InstallationRecovery) {
   const { step, project, environment } = observe;
   await step('Verify the pinned installer', 'WORKING');
-  const template = await readRailwayTemplate(access, config.templateCode);
-  const { id: templateId } = template;
-  const serializedConfig = config.installer ?? template.serializedConfig;
-  if (!templateId || !serializedConfig || railwayTemplateDigest(serializedConfig) !== config.templateDigest) throw new Error('The published installer changed');
+  const { templateId, serializedConfig } = await pinnedInstaller(access, config);
   const plans = input.environments.filter((name) => !recovery?.verified.includes(name))
-    .map((name) => ({ name, config: forEnvironment(serializedConfig, input, name) }));
+    .map((name) => ({ name, config: forEnvironment(serializedConfig, name, input) }));
   await step('Verify the pinned installer', 'READY');
 
   const { name, workspaceId } = input;
@@ -206,4 +227,92 @@ async function createInstallation(access: RailwayAccess, config: RailwayInstalla
     await environment(plan.name, origin);
     await step(label, 'READY');
   }
+}
+async function pinnedInstaller(access: RailwayAccess, config: RailwayInstallationConfig) {
+  const { id: templateId, serializedConfig: saved } = await readRailwayTemplate(access, config.templateCode);
+  const serializedConfig = config.installer ?? saved;
+  if (!templateId || !serializedConfig || railwayTemplateDigest(serializedConfig) !== config.templateDigest) {
+    throw new Error('The published installer changed');
+  }
+  return { templateId, serializedConfig };
+}
+
+async function maintainInstallation(access: RailwayAccess, config: RailwayInstallationConfig, target: InstallationTarget,
+  action: InstallationMaintenance, observe: InstallationCheckpointObserver, beforeWrite: () => Promise<void>,
+  request: typeof fetch, sleep: (ms: number) => Promise<unknown>) {
+  const projects = () => listRailwayProjects(access, target.workspaceId);
+  const project = (await projects()).find(({ id }) => id === target.projectId);
+  if (!project && action.action === 'wipe') {
+    await observe.step('Verify the hosting project is gone', 'READY');
+    return;
+  }
+  if (!project || project.workspaceId !== target.workspaceId || project.name !== target.name ||
+      project.description !== `Platfolio installation ${target.id}`) {
+    throw new Error('The original project could not be verified');
+  }
+  const placements = project.environments.edges.map(({ node }) => node);
+  if (!placements.length || placements.some(({ name }) => !target.requested.some((expected) => expected === name))) {
+    throw new Error('The project contains an unexpected environment');
+  }
+  if (action.action === 'wipe') {
+    for (const placement of placements) {
+      const expected = Object.values(customerInstallationNames(placement.name as InstallationEnvironment));
+      if ((await readServices(access, project.id, placement.id)).some(({ serviceName }) => !expected.includes(serviceName))) {
+        throw new Error('The project contains an unexpected service');
+      }
+    }
+    await observe.step('Remove the hosting project and its storage', 'WORKING');
+    await beforeWrite();
+    const failure = await wipeRailwayProject({
+      ...access, projectId: project.id,
+      projectExists: async () => (await projects()).some(({ id }) => id === project.id),
+    });
+    if (failure) throw new Error(failure.message);
+    await observe.step('Verify the hosting project is gone', 'READY');
+    return;
+  }
+
+  const placement = placements.find(({ name }) => name === action.environment);
+  if (!placement) throw new Error('The requested environment does not exist');
+  const { serializedConfig } = await pinnedInstaller(access, config);
+  const plan = forEnvironment(serializedConfig, action.environment);
+  const desired = Object.values(plan.services);
+  const existing = await readServices(access, project.id, placement.id);
+  if (existing.length !== desired.length || desired.some(({ name }) => !existing.some((row) => row.serviceName === name))) {
+    throw new Error('The environment contains a different service layout');
+  }
+  const names = customerInstallationNames(action.environment);
+  const upgrade = new Set<string>([names.identity, names.api, names.worker, names.site]);
+  for (const item of desired) {
+    const source = existing.find(({ serviceName }) => serviceName === item.name)?.source?.image;
+    if (!source || !/@sha256:[a-f0-9]{64}$/.test(source) || (!upgrade.has(item.name) && source !== item.source?.image)) {
+      throw new Error('The database or secret storage requires a separate upgrade procedure');
+    }
+  }
+  // Leave all configuration, service identities, storage and networking in place.
+  for (const name of upgrade) {
+    const current = existing.find(({ serviceName }) => serviceName === name)!;
+    const image = desired.find((item) => item.name === name)!.source!.image!;
+    const scope = { environmentId: placement.id, serviceId: current.serviceId };
+    const label = `Update ${name}`;
+    await observe.step(label, 'WORKING');
+    await beforeWrite();
+    if (current.source?.image !== image) await configureRailwayService(access, scope, { source: { image } });
+    await beforeWrite();
+    await deployRailwayService(access, scope);
+    let verified = false;
+    for (let attempt = 0; attempt < 84; attempt++) {
+      const result = (await readServices(access, project.id, placement.id)).find(({ serviceId }) => serviceId === current.serviceId);
+      const next = result?.latestDeployment;
+      if (next && next.id !== current.latestDeployment?.id && result?.source?.image === image) {
+        if (next.status === 'SUCCESS') { verified = true; break; }
+        if (['FAILED', 'CRASHED', 'REMOVED'].includes(next.status)) break;
+      }
+      await sleep(5000);
+    }
+    if (!verified) throw new Error('The new deployment could not be verified');
+    await observe.step(label, 'READY');
+  }
+  const origin = await readyOrigin(access, project.id, placement.id, action.environment, plan, request, sleep, config.revision);
+  await observe.environment(action.environment, origin);
 }

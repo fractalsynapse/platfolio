@@ -3,7 +3,7 @@ import { InstallationLaunchInputSchema } from './installation-provider.ts';
 
 const installationEnvironment = InstallationLaunchInputSchema.shape.environments.element;
 const safeId = z.string().min(1).max(128).regex(/^[A-Za-z0-9_/-]+$/);
-const readyEnvironment = z.object({ name: installationEnvironment, origin: z.url({ protocol: /^https$/ }) }).strict();
+const readyEnvironment = z.object({ name: installationEnvironment, origin: z.url({ protocol: /^https$/ }), revision: z.string().regex(/^[a-f0-9]{40}$/).optional() }).strict();
 
 export const InstallationJournalSchema = z.object({
   id: z.uuid(),
@@ -22,7 +22,12 @@ export const InstallationJournalSchema = z.object({
     step: z.string().min(1).max(120),
     state: z.enum(['WORKING', 'READY', 'FAILED']),
   }).strict()).max(100),
+  maintenance: z.discriminatedUnion('action', [
+    z.object({ action: z.literal('wipe') }).strict(),
+    z.object({ action: z.literal('update'), environment: installationEnvironment, revision: z.string().regex(/^[a-f0-9]{40}$/) }).strict(),
+  ]).optional(),
   state: z.enum(['running', 'failed', 'ready']),
+  removedAt: z.iso.datetime().optional(),
   version: z.number().int().min(0),
   leaseUntil: z.iso.datetime(),
 }).strict();

@@ -2471,6 +2471,45 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
 
+  /api/v1/teams/{teamId}/marketplace/installation-launches/{launchId}/maintenance:
+    parameters:
+      - { name: teamId, in: path, required: true, schema: { type: string, minLength: 1 } }
+      - { name: launchId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: maintainHubInstallation
+      summary: Update one installed environment or remove the recorded installation and its storage
+      security: [{ bearerJwt: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  additionalProperties: false
+                  required: [action, environment, revision]
+                  properties:
+                    action: { type: string, enum: [update] }
+                    environment: { type: string, enum: [staging, production] }
+                    revision: { type: string, pattern: '^[0-9a-f]{40}$' }
+                - type: object
+                  additionalProperties: false
+                  required: [action, confirmation]
+                  properties:
+                    action: { type: string, enum: [wipe] }
+                    confirmation: { type: string, minLength: 2, maxLength: 63 }
+      responses:
+        '202':
+          description: The operation was accepted for execution. Read the journal for the verified outcome.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HubInstallationLaunch' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
   /api/v1/hosting/installation-authorization/callback:
     get:
       operationId: completeHubInstallationAuthorization
@@ -2988,7 +3027,19 @@ components:
         id: { type: string, format: uuid }
         name: { type: string }
         workspaceId: { type: string }
-        state: { type: string, enum: [running, failed, ready] }
+        state: { type: string, enum: [running, failed, ready, removed] }
+        maintenance: { type: string, enum: [update, wipe] }
+        maintenanceEnvironment: { type: string, enum: [staging, production] }
+        canRemove: { type: boolean }
+        installed:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [name, revision]
+            properties:
+              name: { type: string, enum: [staging, production] }
+              revision: { type: string, pattern: '^[a-f0-9]{40}$' }
         requested:
           type: array
           items: { type: string, enum: [staging, production] }
@@ -3000,7 +3051,7 @@ components:
       additionalProperties: false
       required: [state, workspaces, events, environments]
       properties:
-        state: { type: string, enum: [authorizing, authorized, running, ready, failed] }
+        state: { type: string, enum: [authorizing, authorized, running, ready, failed, removed] }
         projectId: { type: string }
         workspaces:
           type: array

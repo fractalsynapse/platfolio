@@ -4,7 +4,7 @@
  * hand, because every line reproduces from the specification.
  *
  * Source: apps/control-plane/openapi.yaml (OpenAPI 3.1.0, info.version 0.1.0)
- * Input digest: sha256/84e3342ba5bba6a0
+ * Input digest: sha256/0cc80b16f3ef6f1c
  *
  * Reproduce it with `pnpm run api:types`. `pnpm run api:types:check` fails when this file stops matching
  * what the committed spec produces, which is the only way a generated type deserves to be trusted.
@@ -244,13 +244,20 @@ export interface HubInstallationJournal {
   id: string;
   name: string;
   workspaceId: string;
-  state: 'running' | 'failed' | 'ready';
+  state: 'running' | 'failed' | 'ready' | 'removed';
+  maintenance?: 'update' | 'wipe';
+  maintenanceEnvironment?: 'staging' | 'production';
+  canRemove?: boolean;
+  installed?: Array<{
+    name: 'staging' | 'production';
+    revision: string;
+  }>;
   requested: ('staging' | 'production')[];
   verified: ('staging' | 'production')[];
 }
 
 export interface HubInstallationLaunch {
-  state: 'authorizing' | 'authorized' | 'running' | 'ready' | 'failed';
+  state: 'authorizing' | 'authorized' | 'running' | 'ready' | 'failed' | 'removed';
   projectId?: string;
   workspaces: Array<{
     id: string;
@@ -687,6 +694,11 @@ export interface ApiParameters {
   };
   /** GET /api/v1/teams */
   listTeams: Record<string, never>;
+  /** POST /api/v1/teams/{teamId}/marketplace/installation-launches/{launchId}/maintenance */
+  maintainHubInstallation: {
+    teamId: string;
+    launchId: string;
+  };
   /** POST /api/v1/attestations */
   postAttestation: Record<string, never>;
   /** POST /api/v1/instances/{instanceId}/capability */
@@ -859,6 +871,15 @@ export interface ApiRequestBodies {
   initializeStarterOpenBao: {
     publicKey: string;
   };
+  /** POST /api/v1/teams/{teamId}/marketplace/installation-launches/{launchId}/maintenance */
+  maintainHubInstallation: ({
+    action: 'update';
+    environment: 'staging' | 'production';
+    revision: string;
+  } | {
+    action: 'wipe';
+    confirmation: string;
+  });
   /** POST /api/v1/attestations */
   postAttestation: Attestation;
   /** POST /api/v1/instances/{instanceId}/capability */
@@ -1537,6 +1558,15 @@ export interface ApiResponses {
     }>;
     '401': Error;
   };
+  /** POST /api/v1/teams/{teamId}/marketplace/installation-launches/{launchId}/maintenance */
+  maintainHubInstallation: {
+    '202': HubInstallationLaunch;
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '409': Error;
+  };
   /** POST /api/v1/attestations */
   postAttestation: {
     '202': {
@@ -2027,6 +2057,8 @@ export const ENDPOINTS = {
   listTeamMembers: { method: 'get', path: '/api/v1/teams/{teamId}/members' },
   /** GET /api/v1/teams */
   listTeams: { method: 'get', path: '/api/v1/teams' },
+  /** POST /api/v1/teams/{teamId}/marketplace/installation-launches/{launchId}/maintenance */
+  maintainHubInstallation: { method: 'post', path: '/api/v1/teams/{teamId}/marketplace/installation-launches/{launchId}/maintenance' },
   /** POST /api/v1/attestations */
   postAttestation: { method: 'post', path: '/api/v1/attestations' },
   /** POST /api/v1/instances/{instanceId}/capability */

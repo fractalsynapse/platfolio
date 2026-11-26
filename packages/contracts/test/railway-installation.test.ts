@@ -28,6 +28,7 @@ function fixture(change: 'none' | 'drift' | 'conflict' | 'public-vault' | 'after
   let created: object | undefined;
   let challenge = '';
   let interrupted = false;
+  const revisions = new Map<string, number>();
   const request: typeof fetch = async (url, options) => {
     if (url === railwayIssuer + '/oauth/token') {
       const body = new URLSearchParams(String(options?.body));
@@ -35,10 +36,11 @@ function fixture(change: 'none' | 'drift' | 'conflict' | 'public-vault' | 'after
       assert.equal(createHash('sha256').update(body.get('code_verifier') ?? '').digest('base64url'), challenge);
       return Response.json({ access_token: 'fixture-oauth-grant', expires_in: 3600, scope: 'openid workspace:admin' });
     }
-    assert.match(String(url), /^https:\/\/[a-z-]+\.up\.railway\.app\/(status|readyz|realms\/platfolio)$/);
+    assert.match(String(url), /^https:\/\/[a-z-]+\.up\.railway\.app\/(status|readyz|version(?:\.json)?|realms\/platfolio)$/);
     assert.equal(options?.redirect, 'error');
     assert.equal(options?.headers, undefined);
-    return new Response(null, { status: 200 });
+    if (/\/version(?:\.json)?$/.test(String(url))) return Response.json({ commit: 'a'.repeat(40) });
+    return String(url).endsWith('/readyz') ? Response.json({ checks: [{ name: 'database', status: 'ok' }] }) : new Response(null, { status: 200 });
   };
   const transport: RailwayTransport = {
     async graphql<T>({ operation, variables, credential }: Parameters<RailwayTransport['graphql']>[0]): Promise<T> {
@@ -84,15 +86,34 @@ function fixture(change: 'none' | 'drift' | 'conflict' | 'public-vault' | 'after
           }
           return { templateDeployV2: { operationId: 'op-' + body.environmentId } } as T;
         }
+        case 'serviceInstanceUpdate': {
+          const config = deployments.get(String(variables?.environmentId));
+          const service = Object.values(config?.services ?? {}).find(({ name }) => name === variables?.serviceId);
+          assert.ok(service?.source);
+          const { source } = variables?.input as { source: { image: string } };
+          Object.assign(service.source, source);
+          return { serviceInstanceUpdate: true } as T;
+        }
+        case 'serviceInstanceDeploy': {
+          const name = String(variables?.serviceId);
+          revisions.set(name, (revisions.get(name) ?? 0) + 1);
+          return { serviceInstanceDeploy: true } as T;
+        }
+        case 'projectDelete': {
+          assert.equal(variables?.id, projectId);
+          created = undefined;
+          return { projectDelete: true } as T;
+        }
         case 'installationServices': {
           assert.equal(variables?.projectId, projectId);
           const config = deployments.get(String(variables?.environmentId));
           const edges = Object.values(config?.services ?? {}).map((service) => ({ node: {
             serviceId: service.name, serviceName: service.name, source: service.source, activeDeployments: [{ status: 'SUCCESS' }],
+            latestDeployment: { id: service.name + '-' + (revisions.get(String(service.name)) ?? 0), status: 'SUCCESS' },
             domains: { customDomains: [], serviceDomains: service.networking || change === 'public-vault' && String(service.name).startsWith('openbao')
               ? [{ domain: service.name + '.up.railway.app' }] : [] },
           } }));
-          return { environment: { serviceInstances: { edges } } } as T;
+          return { environment: { serviceInstances: { edges, pageInfo: { hasNextPage: false } } } } as T;
         }
         case 'installationTcpIngress': return { tcpProxies: [] } as T;
         default: throw new Error('Unexpected Railway operation ' + operation);
@@ -182,4 +203,41 @@ test('recovery observes the existing deployment and expansion deploys only the n
   assert.equal(run.deployments.get('env-staging'), staging);
   assert.equal(run.calls.filter((operation) => operation === 'templateDeployV2').length, 2);
   assert.equal(run.calls.filter((operation) => operation === 'projectCreate').length, 1);
+});
+
+
+test('maintenance updates the installed environment in place and wipes only the verified project', async () => {
+  const run = fixture();
+  const grant = await run.grant;
+  assert.ok(grant.recover && grant.maintain);
+  const observe = {
+    async step() {},
+    async project(id: string) { run.observer.project(id); },
+    async environment(name: InstallationEnvironment, origin: string) { run.observer.environment(name, origin); },
+  };
+  await grant.recover({ ...input, environments: ['staging', 'production'] }, observe,
+    { id: 'marked-launch', verified: [], submitted: [], async beforeWrite() {} });
+  const staging = run.deployments.get('env-staging');
+  const production = structuredClone(run.deployments.get('env-production'));
+  const site = Object.values(staging?.services ?? {}).find(({ name }) => name === 'private-site-staging');
+  assert.ok(site?.source);
+  const installedSource = site.source as { image: string };
+  installedSource.image = 'example.test/prior@sha256:' + 'a'.repeat(64);
+  const existingVault = structuredClone(Object.values(staging?.services ?? {}).find(({ name }) => name === 'openbao-staging'));
+  const target = { id: 'marked-launch', projectId, workspaceId, name: input.name, requested: ['staging', 'production'] as const };
+  await assert.rejects(grant.maintain({ ...target, id: 'another-launch' }, { action: 'wipe' }, observe, async () => {}), /not be verified/);
+  assert.ok(staging?.services);
+  const stagingServices: NonNullable<RailwayTemplateConfig['services']> = staging.services;
+  stagingServices.unmanaged = { name: 'unmanaged', source: { image } };
+  await assert.rejects(grant.maintain(target, { action: 'wipe' }, observe, async () => {}), /unexpected service/);
+  delete stagingServices.unmanaged;
+  assert.ok(!run.calls.includes('projectDelete'));
+  await grant.maintain(target, { action: 'update', environment: 'staging' }, observe, async () => {});
+  assert.equal(installedSource.image, image);
+  assert.deepEqual(run.deployments.get('env-production'), production);
+  assert.deepEqual(Object.values(staging?.services ?? {}).find(({ name }) => name === 'openbao-staging'), existingVault);
+  assert.equal(run.calls.filter((name) => name === 'templateDeployV2').length, 2);
+  await grant.maintain(target, { action: 'wipe' }, observe, async () => {});
+  await grant.maintain(target, { action: 'wipe' }, observe, async () => { throw new Error('Already removed'); });
+  assert.equal(run.calls.filter((name) => name === 'projectDelete').length, 1);
 });
