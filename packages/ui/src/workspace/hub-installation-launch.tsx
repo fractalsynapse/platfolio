@@ -56,6 +56,7 @@ export function HubInstallationLaunch({ teamId }: { readonly teamId: string }) {
     setCredential(undefined);
     setConsent({ ...result.value, authorizationUrl: url.href });
     setActiveId(result.value.id);
+    if (result.value.id === activeId) progress.reload();
   }
 
   async function deploy(event: React.FormEvent<HTMLFormElement>) {
