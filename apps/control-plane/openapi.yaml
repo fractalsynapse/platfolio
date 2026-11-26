@@ -2874,6 +2874,10 @@ paths:
                   registration: { type: string, enum: [pending, recorded, conflict] }
                   instanceName: { type: string }
                   projectId: { type: string }
+                  removedProjectId:
+                    type: string
+                    format: uuid
+                    description: The project identified by the verified permanent removal receipt.
                   deploymentId: { type: string }
                   origin: { type: string, format: uri }
                   retainedVolumes: { type: array, items: { type: string } }
