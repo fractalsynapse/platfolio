@@ -26,7 +26,7 @@ export function TeamConnections({ teamId, teamName }: { readonly teamId: string;
       </p>)}
     {setup.state.status === 'loaded' && <>
       <h2>Set up Platfolio</h2>
-      <p>Set up secret storage, connect Railway, then connect the marketplace to install Starter Web.</p>
+      <p>Set up secret storage, connect Railway, then connect to the marketplace to install templates.</p>
       <p className="ui-workspace-meta">{ageLabel(setup.state.freshness, clock().toISOString()).text}</p>
       <div className="ui-setup-steps" aria-label="Installation setup">
         <StarterLaunchSetup teamId={teamId} setup={setup.state.data} refresh={setup.reload} />
