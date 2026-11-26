@@ -1,8 +1,11 @@
 import { WorkspaceAction } from './workspace-action.tsx';
 import * as React from 'react';
 import type { TeamWithRole } from '@platfolio/api-contract/generated/types';
+import { BrandLabel } from './brand-label.tsx';
 import { teamSectionLinks, workspacePaths } from './routes.ts';
 import { WorkspaceLink } from './workspace-link.tsx';
+import { templatePaths } from './template-presentation.ts';
+import { WorkspaceAvatar } from './workspace-avatar.tsx';
 import { WorkspaceMenu } from './workspace-menu.tsx';
 
 interface WorkspaceHeaderProps {
@@ -14,12 +17,12 @@ interface WorkspaceHeaderProps {
 }
 
 export function WorkspaceHeader({ teams, team, invitationCount, displayName, signOut }: WorkspaceHeaderProps): React.ReactElement {
-  const initials = displayName?.trim().split(/\s+/).slice(0, 2).map((word) => Array.from(word)[0]).join('').toUpperCase();
   const active = teams.find(({ name }) => name === team) ?? teams[0];
   return <header className="ui-workspace-header">
     <div className="ui-workspace-header-inner">
-    <WorkspaceMenu kind="wordmark" label="Platfolio navigation" trigger={<><span className="ui-workspace-mark" aria-hidden="true">P</span>Platfolio</>}>
+    <WorkspaceMenu kind="wordmark" label="Platfolio navigation" trigger={<BrandLabel />}>
       <a className="ui-workspace-item ui-hit-primary" href="/">Home</a>
+      <a className="ui-workspace-item ui-hit-primary" href={templatePaths.catalog}>Templates</a>
       {active && <div className="ui-workspace-menu-section">
         {teamSectionLinks(active, undefined, true).map(({ href, label }) =>
           <WorkspaceLink key={href} className="ui-workspace-item ui-hit-primary" href={href}>{label}</WorkspaceLink>)}
@@ -31,7 +34,7 @@ export function WorkspaceHeader({ teams, team, invitationCount, displayName, sig
           className="ui-workspace-item ui-hit-primary" aria-current={active?.name === item.name ? 'true' : undefined}>{item.name}</WorkspaceLink>)
           : <span className="ui-workspace-item">No teams available</span>}
       </WorkspaceMenu>
-      <WorkspaceMenu kind="avatar" align="end" hover label="Account menu" trigger={<span className="ui-workspace-avatar" aria-hidden="true">{initials || <><span className="ui-workspace-avatar-head" /><span className="ui-workspace-avatar-body" /></>}</span>}>
+      <WorkspaceMenu kind="avatar" align="end" hover label="Account menu" trigger={<WorkspaceAvatar name={displayName} />}>
         <WorkspaceLink className="ui-workspace-item ui-hit-primary" href={workspacePaths.account}>Account</WorkspaceLink>
         <WorkspaceLink className="ui-workspace-item ui-hit-primary" href={workspacePaths.notifications}>Notifications</WorkspaceLink>
         <WorkspaceLink className="ui-workspace-item ui-hit-primary" href={workspacePaths.home}>Your teams</WorkspaceLink>

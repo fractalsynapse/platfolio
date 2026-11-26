@@ -143,7 +143,6 @@ export const workspaceFixtureRoutes = (() => {
     'workspace.account-notifications': workspacePaths.accountNotifications,
     'workspace.templates': workspacePaths.templates(team),
     'workspace.team-launch': workspacePaths.launchForTeam(team),
-    'workspace.launch': workspacePaths.launch,
     'workspace.team-members': workspacePaths.teamMembers(team),
     'workspace.team-invitations': workspacePaths.teamInvitations(team),
     'workspace.team-connections': workspacePaths.teamConnections(team),

@@ -13,7 +13,9 @@ export function TeamMembershipPage(): React.ReactElement {
   return <>
     <WorkspaceHeading title="Members" />
     <TeamTabs team={team} current="members" />
-    <TeamMemberTabs team={team.name} current={roster ? 'roster' : 'invitations'} />
-    {roster ? <TeamRoster key={team.teamId} teamId={team.teamId} /> : <TeamInvitations key={team.teamId} teamId={team.teamId} />}
+    <div className="ui-account-settings">
+      <TeamMemberTabs team={team.name} current={roster ? 'roster' : 'invitations'} />
+      {roster ? <TeamRoster key={team.teamId} teamId={team.teamId} /> : <TeamInvitations key={team.teamId} teamId={team.teamId} />}
+    </div>
   </>;
 }

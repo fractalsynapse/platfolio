@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
+import { TEMPLATE_CATALOG } from '@platfolio/manifest';
 
 const ROOT = path.resolve(import.meta.dirname, '../../..');
 const SITE = path.join(ROOT, 'apps/site');
@@ -84,6 +85,18 @@ test('the landing page emits no client JavaScript at all', () => {
   assert.ok(!html.includes('modulepreload'));
   assert.ok(html.includes('<style>') || /<link rel="stylesheet"/.test(html), 'the page must still be styled -- tokens travel in CSS, not JS');
   assert.match(html, /<title>Platfolio\b[^<]*<\/title>/, 'the HTML names the product in the browser title');
+});
+
+test('the public template catalog and details are prerendered without React hydration', () => {
+  const catalog = readPage('/templates');
+  assert.match(catalog, /<h1>Templates<\/h1>/);
+  for (const { name, repo } of TEMPLATE_CATALOG) {
+    assert.ok(catalog.includes(`href="/templates/${name}"`), `The catalog should link to ${name}`);
+    const detail = readPage(`/templates/${name}`);
+    assert.ok(detail.includes(`href="https://github.com/${repo}"`), `Missing canonical source link for ${name}`);
+    assert.doesNotMatch(detail, /<script[\s>]|<astro-island[\s>]/);
+  }
+  assert.doesNotMatch(catalog, /<astro-island[\s>]/);
 });
 
 test('the dashboard hydrates exactly one island, and the callback exactly one', () => {

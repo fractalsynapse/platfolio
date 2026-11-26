@@ -4,6 +4,8 @@ import type { InstanceResponse, SuccessOf, TeamWithRole } from '@platfolio/api-c
 import { ageLabel, useClock } from '../components/freshness.ts';
 import { useOperation } from '../sdk/use-operation.ts';
 import { ActivityFeed, type ActivityEntry } from './activity-feed.tsx';
+import { ActivityHistory } from './activity-history.tsx';
+import { WorkspaceLink } from './workspace-link.tsx';
 import { workspacePaths } from './routes.ts';
 
 type Audit = SuccessOf<'listTeamActivity'>[number];
@@ -37,6 +39,9 @@ function entryFor(event: Audit, team: string, apps: readonly InstanceResponse[])
   const detail = [app?.name, environment, result].filter(Boolean).join(' · ');
   return {
     id: event.id, at: event.at, title: titleByAction[event.action] ?? 'Hosting change recorded',
+    label: deploymentActions.has(event.action) ? 'Deployment' : 'Activity',
+    ...(event.action === 'hosting.verified' ? { outcome: { label: 'Passed', tone: 'success' } as const }
+      : result ? { outcome: { label: result } } : {}),
     ...(url ? { href: url } : {}), ...(detail ? { detail } : {}),
   };
 }
@@ -54,14 +59,19 @@ export function TeamActivity({ team, apps, summary }: {
     <WorkspaceAction type="button" onClick={activity.reload}>Try again</WorkspaceAction>
   </p>;
   const events = activity.state.data;
+  const now = clock();
+  const observation = ageLabel(activity.state.freshness, now.toISOString());
+  const timeline = summary ? events.slice(0, 5) : events;
   return <>
-    <p className="ui-workspace-meta">{ageLabel(activity.state.freshness, clock().toISOString()).text}</p>
-    {summary ? <>
-      <ActivityFeed title="Recent deployments" empty="No deployments have been verified or reported yet."
-        entries={events.filter(({ action }) => deploymentActions.has(action)).slice(0, 5).map((event) => entryFor(event, team.name, apps))} />
-      <ActivityFeed title="Recent activity" empty="No team activity has been recorded yet."
-        entries={events.filter(({ action }) => !deploymentActions.has(action)).slice(0, 5).map((event) => entryFor(event, team.name, apps))} />
-    </> : <ActivityFeed title="Hosting timeline" empty="No team activity has been recorded yet."
-      entries={events.map((event) => entryFor(event, team.name, apps))} />}
+    {summary && <ActivityFeed title="Deployment activity" empty="No deployments have been verified or reported yet." presentation="rows" observation={observation.text} stale={observation.mayBeStale}
+      history={<ActivityHistory timestamps={events.filter(({ action }) => action === 'hosting.verified').map(({ at }) => at)}
+        now={now} noun="deployments verified" tone="success" />}
+      entries={events.filter(({ action }) => deploymentActions.has(action)).slice(0, 5).map((event) => entryFor(event, team.name, apps))} />}
+    <ActivityFeed title="Activity log" empty="No team activity has been recorded yet." observation={summary ? undefined : observation.text}
+      stale={observation.mayBeStale} entries={timeline.map((event) => entryFor(event, team.name, apps))}>
+      {summary && timeline.length < events.length && <div className="ui-workspace-links">
+        <WorkspaceLink className="ui-workspace-secondary ui-hit-primary" href={workspacePaths.teamActivity(team.name)}>All activity</WorkspaceLink>
+      </div>}
+    </ActivityFeed>
   </>;
 }

@@ -107,8 +107,9 @@ test('the floor is one column and the wide case adds tracks, never capability', 
   // The threshold is data, and the sheet's query is the only place it is spelled.
   const css = renderContentCss(SHEET_DIGEST);
   const blocks = [...css.matchAll(/@container \(min-width: ([\d.]+)rem\)/g)].map((m) => m[1]);
-  assert.deepEqual(blocks, ['48'], 'the content breakpoint set drifted from CONTENT_TABLE');
+  assert.deepEqual(blocks, ['48', '58'], 'the content breakpoint set drifted from CONTENT_TABLE');
   assert.equal(CONTENT_TABLE.columns.wideFromRem, 48);
+  assert.equal(CONTENT_TABLE.columns.contextWideFromRem, 58);
 });
 
 test('a class the table does not declare is refused, so a page cannot invent a fourth primitive', () => {
@@ -144,5 +145,5 @@ test('apps/site imports the sheet and names the primitives instead of composing 
 
   const landing = fs.readFileSync(path.join(ROOT, 'apps/site/src/pages/index.astro'), 'utf8');
   assert.match(landing, /class="ui-prose ui-public-intro"/, 'the signup introduction does not name the prose primitive');
-  assert.match(landing, /class="ui-columns" data-columns="2"/, 'the welcome panel does not use the two-column primitive');
+  assert.match(landing, /class="ui-columns ui-welcome" data-columns="welcome"/, 'the welcome panel does not use the shared welcome columns');
 });

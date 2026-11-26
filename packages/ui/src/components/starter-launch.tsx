@@ -4,6 +4,7 @@ import { ageLabel, useClock } from './freshness.ts';
 import { defineComponent } from '../contract.ts';
 import { useCommand, useOperation } from '../sdk/use-operation.ts';
 import { isLoaded } from '../sdk/transport.ts';
+import { WorkspacePanel } from '../workspace/workspace-panel.tsx';
 import { WorkspaceLink } from '../workspace/workspace-link.tsx';
 import { HostingRemoval } from '../workspace/hosting-removal.tsx';
 import { WorkspaceAction } from '../workspace/workspace-action.tsx';
@@ -17,9 +18,11 @@ const headings: Record<Launch['state'], string> = {
   idle: 'Ready to set up', running: 'Setting up your app', ready: 'Your app is ready',
   failed: 'Setup needs attention', removing: 'Removing your app', kept: 'App removed. Data kept.', wiped: 'App removed. Data scheduled for deletion.',
 };
-const props = z.object({ teamId: z.string().min(1), teamName: z.string().min(1).optional() }).strict();
+const props = z.object({ teamId: z.string().min(1), teamName: z.string().min(1).optional(),
+  managedProjectId: z.string().min(1).optional(),
+}).strict();
 
-function LaunchPanel({ teamId, teamName }: z.infer<typeof props>) {
+function LaunchPanel({ teamId, teamName, managedProjectId }: z.infer<typeof props>) {
   const params = React.useMemo(() => ({ teamId }), [teamId]);
   const launch = useOperation('getStarterLaunch', { params, key: `starter-${teamId}` });
   const setup = useOperation('getStarterLaunchSetup', { params, key: `starter-setup-${teamId}` });
@@ -47,12 +50,23 @@ function LaunchPanel({ teamId, teamName }: z.infer<typeof props>) {
     }
   }
 
-  return <section aria-label="Starter launch">
-    <h2>Launch Starter Web</h2>
+  if (managedProjectId && report?.projectId !== managedProjectId && launch.state.status === 'loaded') {
+    return <WorkspacePanel title="Hosting">Platfolio couldn’t match this app’s Railway project to the saved launch.</WorkspacePanel>;
+  }
+  if (!managedProjectId && report?.registration === 'recorded' && report.instanceName && teamName) {
+    return <WorkspacePanel title="Your app is ready">
+      <div className="ui-workspace-links">
+        <WorkspaceLink className="ui-workspace-primary ui-hit-primary" href={workspacePaths.instanceSetup(teamName, report.instanceName)}>Manage app</WorkspaceLink>
+        {report.origin && <a className="ui-workspace-secondary ui-hit-primary" href={report.origin}>Open app</a>}
+      </div>
+    </WorkspacePanel>;
+  }
+
+  return <WorkspacePanel title={managedProjectId ? 'Hosting' : 'Launch Starter Web'}>
     {launch.state.status === 'pending' && <p role="status">Checking your launch setup…</p>}
     {launch.state.status === 'failed' && <p role="status">{launch.state.error.status === 404
       ? 'This team needs a connected Railway launcher.' : `Could not check launch setup. Try again. (${launch.state.error.code})`}</p>}
-    {setup.state.status === 'loaded' && <>
+    {setup.state.status === 'loaded' && !managedProjectId && <>
       <div className="ui-setup-steps" aria-label="Installation setup">
         <StarterLaunchSetup teamId={teamId} setup={setup.state.data} refresh={setup.reload} />
       </div>
@@ -61,12 +75,13 @@ function LaunchPanel({ teamId, teamName }: z.infer<typeof props>) {
     {report && <>
       <p role="status" aria-label="Launch status"><strong>{headings[report.state]}</strong></p>
       {launch.state.status === 'loaded' && <small>{ageLabel(launch.state.freshness, now().toISOString()).text}</small>}
-      {ready && ['idle', 'failed', 'kept', 'wiped'].includes(report.state) && <>
-        <p>Use your connected Railway workspace. This creates a dedicated staging project and database. Anyone with the generated app link can open it. Railway charges apply to the resources you use.</p>
+      {ready && (managedProjectId ? report.state === 'kept' : ['idle', 'failed', 'kept', 'wiped'].includes(report.state)) && <>
+        <p>{report.state === 'kept'
+          ? 'Restore the app and reconnect its retained data in Railway.'
+          : 'Use your connected Railway workspace. This creates a dedicated staging project and database. Anyone with the generated app link can open it. Railway charges apply to the resources you use.'}</p>
         <WorkspaceAction variant="primary" disabled={pending} onClick={() => void act('start')}>{report.state === 'kept' ? 'Restore app' : report.state === 'failed' ? 'Resume setup' : 'Launch starter'}</WorkspaceAction>
       </>}
       {report.state === 'ready' && <p className="ui-workspace-links">
-        {report.instanceName && teamName && <WorkspaceLink href={workspacePaths.instance(teamName, report.instanceName)}>Manage app</WorkspaceLink>}
         {report.origin && <a href={report.origin}>Open app</a>}
       </p>}
       {report.registration === 'pending' && <p role="status">Adding this app to Team workspace…</p>}
@@ -78,7 +93,8 @@ function LaunchPanel({ teamId, teamName }: z.infer<typeof props>) {
           onRemove={({ data, confirmation }) => act(data, confirmation)} />}
     </>}
     {problem && <p role="alert">{problem}</p>}
-  </section>;
+    {managedProjectId && !ready && teamName && <WorkspaceLink href={workspacePaths.teamConnections(teamName)}>Check team connections</WorkspaceLink>}
+  </WorkspacePanel>;
 }
 
 export const starterLaunch = defineComponent({

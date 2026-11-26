@@ -237,3 +237,8 @@ test('workspace deep links each reach their own checked page document', () => {
   assert.ok(reachableOperations(workspacePages['workspace.account-profile'].screen, 'floor').includes('updateAccountProfile'));
   assert.ok(!reachableOperations(workspacePages['workspace.account-emails'].screen, 'floor').includes('updateAccountProfile'));
 });
+
+test('the legacy Railway callback and team link use one launch screen', () => {
+  assert.equal(workspacePageId(matchWorkspaceRoute('/dashboard/launch')),
+    workspacePageId(matchWorkspaceRoute(workspaceFixtureRoutes['workspace.team-launch'])));
+});

@@ -1,0 +1,95 @@
+---
+import { FREE_STARTER_RELEASE, TEMPLATE_CATALOG } from '@platfolio/manifest';
+import { Breadcrumbs, TEMPLATE_CATEGORIES, TemplateCard, WorkspaceHeading, describeTemplate, templatePaths } from '@platfolio/ui';
+import Page from '../../layouts/page.astro';
+
+const entries = TEMPLATE_CATALOG.map((entry) => ({ ...entry, display: describeTemplate(entry.name) }))
+  .sort((first, second) => first.display.title.localeCompare(second.display.title));
+const modes = [...new Set(entries.map(({ display }) => display.mode))];
+const description = 'Find a starting point for your next platform.';
+---
+<Page title="Templates — Platfolio" description={description}>
+  <Breadcrumbs items={[{ label: 'Home', href: '/' }, { label: 'Templates' }]} />
+  <WorkspaceHeading title="Templates"><p>{description}</p></WorkspaceHeading>
+  <section aria-label="Template catalog" data-template-catalog>
+    <form class="ui-workspace-panel ui-workspace-form ui-template-search" role="search" aria-label="Search and filter templates" data-template-filters hidden>
+      <div class="ui-columns">
+        <div>
+          <label for="template-query">Search templates</label>
+          <input id="template-query" name="q" type="search" placeholder="Name, publisher, or capability" maxlength="100" />
+        </div>
+        <div>
+          <label for="template-category">Category</label>
+          <select class="ui-workspace-input" id="template-category" name="category">
+            <option value="">All categories</option>
+            {Object.entries(TEMPLATE_CATEGORIES).map(([value, label]) => <option value={value}>{label}</option>)}
+          </select>
+        </div>
+        <div>
+          <label for="template-mode">Operating mode</label>
+          <select class="ui-workspace-input" id="template-mode" name="mode">
+            <option value="">All modes</option>
+            {modes.map((mode) => <option value={mode}>{mode}</option>)}
+          </select>
+        </div>
+      </div>
+      <div><button class="ui-workspace-secondary ui-hit-primary" type="reset">Clear filters</button></div>
+    </form>
+    <p class="ui-workspace-meta" role="status" data-template-count>{entries.length} templates</p>
+    <ul class="ui-columns ui-template-catalog" role="list">
+      {entries.map(({ name, repo, ref, display }) => <li data-template={name} data-repo={repo} data-category={display.category} data-mode={display.mode}>
+        <TemplateCard name={name} repo={repo} ref={ref} {...(name === FREE_STARTER_RELEASE.template ? { version: FREE_STARTER_RELEASE.version, free: FREE_STARTER_RELEASE.priceMinor === 0 } : {})}>
+          <a class="ui-workspace-secondary ui-hit-primary" href={templatePaths.details(name)} aria-label={`View template for ${display.title}`}>View template</a>
+        </TemplateCard>
+      </li>)}
+    </ul>
+    <p class="ui-workspace-empty" data-template-empty hidden>No matching templates. Try another search or clear the filters.</p>
+  </section>
+</Page>
+
+<script>
+  const catalog = document.querySelector('[data-template-catalog]');
+  const filters = catalog?.querySelector<HTMLFormElement>('[data-template-filters]');
+  const count = catalog?.querySelector('[data-template-count]');
+  const entries = catalog?.querySelectorAll<HTMLLIElement>('[data-template]');
+  const empty = catalog?.querySelector<HTMLElement>('[data-template-empty]');
+
+  if (filters && count && entries && empty) {
+    const parameters = new URLSearchParams(location.search);
+    const fields = filters.querySelectorAll<HTMLInputElement | HTMLSelectElement>('[name]');
+    for (const input of fields) {
+      input.value = parameters.get(input.name)?.slice(0, 100) ?? '';
+    }
+    const update = () => {
+      const values = new FormData(filters);
+      const query = String(values.get('q') ?? '').trim();
+      const terms = query.toLocaleLowerCase().split(/\s+/);
+      const mode = values.get('mode');
+      const category = values.get('category');
+      let visible = 0;
+      for (const entry of entries) {
+        const text = [entry.dataset.template, entry.dataset.repo, entry.textContent].join(' ').toLocaleLowerCase();
+        entry.hidden = Boolean((mode && entry.dataset.mode !== mode) ||
+          (category && entry.dataset.category !== category) || !terms.every((term) => text.includes(term)));
+        if (!entry.hidden) visible++;
+      }
+      count.textContent = `${visible} ${visible === 1 ? 'template' : 'templates'}`;
+      empty.hidden = visible !== 0;
+      const url = new URL(location.href);
+      for (const [key, value] of [['q', query], ['mode', mode], ['category', category]] as const) {
+        if (typeof value === 'string' && value) url.searchParams.set(key, value);
+        else url.searchParams.delete(key);
+      }
+      history.replaceState(history.state, '', url);
+    };
+    filters.hidden = false;
+    filters.addEventListener('input', update);
+    filters.addEventListener('submit', (event) => { event.preventDefault(); update(); });
+    filters.addEventListener('reset', (event) => {
+      event.preventDefault();
+      for (const input of fields) input.value = '';
+      update();
+    });
+    update();
+  }
+</script>

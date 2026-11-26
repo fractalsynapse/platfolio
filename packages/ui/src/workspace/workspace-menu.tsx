@@ -34,6 +34,7 @@ export function WorkspaceMenu({ label, trigger, children, align, hover, kind }: 
     }}
     onKeyDown={(event) => {
       if (event.key === 'Escape' && open) {
+        event.preventDefault();
         event.stopPropagation();
         close();
         button.current?.focus();
@@ -43,7 +44,7 @@ export function WorkspaceMenu({ label, trigger, children, align, hover, kind }: 
       type="button" onClick={() => { if (pinned.current) close(); else { pinned.current = true; setOpen(true); } }}>
       {trigger}
     </WorkspaceAction>
-    {open && <div id={id} className={align === 'end' ? 'ui-workspace-popover ui-workspace-popover-end' : 'ui-workspace-popover'}
+    {open && <div id={id} data-kind={kind} className={align === 'end' ? 'ui-workspace-popover ui-workspace-popover-end' : 'ui-workspace-popover'}
       onClick={(event) => { if (event.target instanceof Element && event.target.closest('a, button')) close(); }}>
       {children}
     </div>}
