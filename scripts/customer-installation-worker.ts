@@ -93,23 +93,37 @@ const server = createServer({ requestTimeout: 10000 }, (request, response) => {
       case 'marketplace-catalog': reply(200, await marketplace.catalog()); return;
       case 'marketplace-public-catalog': reply(200, await marketplace.publicCatalog()); return;
       case 'template-report': reply(200, privateRun(command.body.template).read()); return;
-      case 'template-start':
-      case 'template-remove':
+      case 'redeploy':
       case 'template-redeploy': {
+        if (await bao.status() !== 'ready' || !(await bao.readGrant()).grant) { reply(503, replyError); return; }
+        const extra = command.action === 'template-redeploy';
+        if (extra ? project : changingDomain) { reply(409, null); return; }
+        const runner = extra ? privateRun(command.body.template) : launch;
+        const current = runner.read();
+        if (current.projectId !== command.body.projectId || current.deploymentId !== command.body.deploymentId ||
+            !['ready', 'running'].includes(current.state)) { reply(409, null); return; }
+        reply(200, runner.redeploy());
+        return;
+      }
+      case 'template-start':
+      case 'template-restore':
+      case 'template-remove': {
         if (project || await bao.status() !== 'ready' || !(await bao.readGrant()).grant) { reply(503, replyError); return; }
         const runner = privateRun(command.body.template);
         if (command.action === 'template-remove') { reply(200, runner.remove(command.body.data)); return; }
         const current = runner.read();
-        if (command.action === 'template-redeploy') {
-          if (current.projectId !== command.body.projectId || current.deploymentId !== command.body.deploymentId ||
-              !['ready', 'running'].includes(current.state)) { reply(409, null); return; }
-          reply(200, runner.redeploy());
+        if (command.action === 'template-restore') {
+          if (current.state !== 'kept' || !current.projectId) { reply(400, null); return; }
+          reply(200, runner.startWithRelease());
           return;
         }
         const pin = await selectedRelease(runner, command.body.release);
         if (pin === null || (pin && !runner.needsRelease() && runner.read().revision !== pin.revision)) { reply(409, null); return; }
-        const bootstrap = command.body.template === 'shared-identity' ? bao.openEnvelope(command.body.bootstrap) : undefined;
-        if (bootstrap !== undefined && !/^[A-Za-z0-9_-]{32,64}$/.test(bootstrap)) { reply(400, null); return; }
+        let bootstrap: string | undefined;
+        if (command.body.template === 'shared-identity' && current.state !== 'kept') {
+          bootstrap = command.body.bootstrap && bao.openEnvelope(command.body.bootstrap);
+          if (!bootstrap || !/^[A-Za-z0-9_-]{32,64}$/.test(bootstrap)) { reply(400, null); return; }
+        }
         reply(200, runner.startWithRelease(pin, bootstrap));
         return;
       }
@@ -170,7 +184,6 @@ const server = createServer({ requestTimeout: 10000 }, (request, response) => {
         return;
       }
       case 'start':
-      case 'redeploy':
       case 'remove':
         if (await bao.status() !== 'ready' || !(await bao.readGrant()).grant) { reply(503, replyError); return; }
         if (changingDomain) { reply(409, null); return; }
@@ -183,13 +196,7 @@ const server = createServer({ requestTimeout: 10000 }, (request, response) => {
           }
           reply(200, launch.startWithRelease(pin));
         }
-        else if (command.action === 'redeploy') {
-          const current = await launch.read();
-          if (typeof command.body.projectId !== 'string' || typeof command.body.deploymentId !== 'string' ||
-              current.projectId !== command.body.projectId || current.deploymentId !== command.body.deploymentId ||
-              !['ready', 'running'].includes(current.state)) { reply(409, null); return; }
-          reply(200, await launch.redeploy());
-        } else if (command.body.data === 'keep' || !project) reply(200, await launch.remove(command.body.data));
+        else if (command.body.data === 'keep' || !project) reply(200, await launch.remove(command.body.data));
         else reply(400, null);
         return;
       case 'hosting-apply':

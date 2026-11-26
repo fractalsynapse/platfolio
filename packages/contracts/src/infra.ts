@@ -255,6 +255,7 @@ export const ApplyResultSchema = z.object({
 });
 
 export const KEEP_DATA_FEATURE = 'keep-data-on-removal';
+export const PINNED_RELEASE_REDEPLOY_FEATURE = 'redeploy-pinned-release';
 
 export const HostingRemovalSchema = z.object({ data: z.enum(['keep', 'wipe']) }).strict();
 export type DeleteOptions = z.infer<typeof HostingRemovalSchema>;
@@ -370,7 +371,7 @@ export interface InfraProvider {
    * holding an old value. This operation is how those cases are closed: not by detecting the change, but by
    * letting whoever knows about it ask for the restart.
    */
-  redeploy?(input: { instanceId: string; environment: string; service?: string }): Promise<RedeployResult>;
+  redeploy?(input: { instanceId: string; environment: string; service?: string; expectedDeployment?: { projectId: string; deploymentId: string } }): Promise<RedeployResult>;
 }
 
 export type SecretWriteResult =

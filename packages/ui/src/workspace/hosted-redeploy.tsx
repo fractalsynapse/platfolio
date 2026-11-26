@@ -4,7 +4,7 @@ import type { ParamsOf } from '@platfolio/api-contract/generated/types';
 import { useCommand } from '../sdk/use-operation.ts';
 import { WorkspaceLink } from './workspace-link.tsx';
 
-export function StarterRedeploy({ params, progressPath }: {
+export function HostedRedeploy({ params, progressPath }: {
   readonly params: ParamsOf<'redeployHostedStarter'>;
   readonly progressPath: string;
 }) {
@@ -25,7 +25,7 @@ export function StarterRedeploy({ params, progressPath }: {
 
   return <section aria-label="Deploy pinned release">
     <h2>Deploy pinned release</h2>
-    <p>Rebuild this release in the existing staging project. The database and storage stay in place.</p>
+    <p>Deploy the installed release again in the existing staging project. Its data stays in place.</p>
     <WorkspaceAction variant="primary" type="button" disabled={pending}
       onClick={() => void requestDeployment()}>{pending ? 'Requesting deployment…' : 'Deploy again'}</WorkspaceAction>
     {feedback && <p role={feedback.error ? 'alert' : 'status'}>{feedback.message}{' '}

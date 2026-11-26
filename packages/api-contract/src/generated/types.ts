@@ -4,7 +4,7 @@
  * hand, because every line reproduces from the specification.
  *
  * Source: apps/control-plane/openapi.yaml (OpenAPI 3.1.0, info.version 0.1.0)
- * Input digest: sha256/de17652c586e83ae
+ * Input digest: sha256/def1709db8f89b11
  *
  * Reproduce it with `pnpm run api:types`. `pnpm run api:types:check` fails when this file stops matching
  * what the committed spec produces, which is the only way a generated type deserves to be trusted.
@@ -992,7 +992,7 @@ export interface ApiRequestBodies {
   /** POST /api/v1/teams/{teamId}/starter-launch */
   startStarterLaunch: {
     release?: MarketplaceReleaseSelection;
-    /** Owner bootstrap material encrypted to the private worker. */
+    /** Shared Identity bootstrap material encrypted to the private worker for first setup. Restoring a verified installation uses its existing database and credentials. */
     bootstrap?: string;
   };
   /** POST /api/v1/instances/{instanceId}/dispatches/{dispatchId}/trigger */

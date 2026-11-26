@@ -8,7 +8,7 @@
  * surface, so every version bump would classify as a REMOVED declaration and the drift gate would
  * demand a breaking ack for its own arithmetic.
  *
- * Derived from the baseline digest `222e36226250c28a`.
- * MINOR 7.1.0 -> 7.2.0 (surface diff: 0 removed, 0 widened, 1 added, 0 reordered)
+ * Derived from the baseline digest `300f9a0ee715bc55`.
+ * MINOR 7.2.0 -> 7.3.0 (surface diff: 0 removed, 0 widened, 5 added, 0 reordered)
  */
-export const CONTRACT_VERSION: string = '7.2.0';
+export const CONTRACT_VERSION: string = '7.3.0';

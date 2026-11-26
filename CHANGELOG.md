@@ -5,6 +5,8 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+- Redeploy Shared Identity at its installed release from the staging Deployments page, and restore it without replacing its Keycloak credentials or database (#288).
+
 - Public template pages show the latest published versions and source pins from the hub catalog (#288).
 
 - The hub can publish new versions of its free templates without a Platfolio release. Connected private installations refresh the catalog and keep the release approved for each app when resuming, restoring, or redeploying it (#288).

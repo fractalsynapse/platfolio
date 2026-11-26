@@ -1,5 +1,5 @@
-import { ApplyResultSchema, CONTRACT_VERSION, KEEP_DATA_FEATURE, CustomerHostingCommandSchema, DeleteResultSchema, RAILWAY_AUTHORIZATION_CALLBACK,
-  RedeployResultSchema, StateSnapshotSchema, planIssues, type CustomerHostingCommand, type HostingTarget } from '@platfolio/contracts';
+import { ApplyResultSchema, CONTRACT_VERSION, KEEP_DATA_FEATURE, PINNED_RELEASE_REDEPLOY_FEATURE, CustomerHostingCommandSchema, DeleteResultSchema, RAILWAY_AUTHORIZATION_CALLBACK,
+  PrivateLaunchTemplateSchema, RedeployResultSchema, StateSnapshotSchema, planIssues, type CustomerHostingCommand, type HostingTarget } from '@platfolio/contracts';
 import type { HostingPlugin } from '@platfolio/kernel';
 
 export interface CustomerLaunchConfig {
@@ -57,7 +57,7 @@ export function privateHostingPlugin(launch: ReturnType<typeof customerLaunch>):
   const info = () => ({
     provider: 'railway', contract: CONTRACT_VERSION,
     operations: ['describe', 'validatePlan', 'applyPlan', 'readState', 'deleteInstance', 'redeploy'] as const,
-    features: [KEEP_DATA_FEATURE, 'volumes'],
+    features: [KEEP_DATA_FEATURE, 'volumes', PINNED_RELEASE_REDEPLOY_FEATURE],
   });
   const refuse = async (): Promise<never> => { throw new Error('Hosting operations require a bound instance'); };
   async function call(action: CustomerHostingCommand['action'], body: object) {
@@ -84,8 +84,18 @@ export function privateHostingPlugin(launch: ReturnType<typeof customerLaunch>):
           if (target.id !== id) throw new Error('Hosting instance did not match the bound target');
           return DeleteResultSchema.parse(await call('hosting-remove', { target, options }));
         },
-        redeploy: async ({ instanceId, ...input }) => {
+        redeploy: async ({ instanceId, expectedDeployment, ...input }) => {
           if (target.id !== instanceId) throw new Error('Hosting instance did not match the bound target');
+          if (expectedDeployment) {
+            if (input.environment !== 'staging' || input.service) throw new Error('The pinned release has one staging target');
+            const template = PrivateLaunchTemplateSchema.safeParse(target.name);
+            const outcome = template.success
+              ? await launch.call('template-redeploy', { template: template.data, ...expectedDeployment })
+              : target.name === 'starter-web' ? await launch.call('redeploy', expectedDeployment) : undefined;
+            if (!outcome || !outcome.ok && outcome.status !== 409) throw new Error('The private worker could not request redeployment');
+            return { instanceId, environment: input.environment, services: [], budgetSkipped: [], verified: false,
+              refused: outcome.ok ? [] : [{ service: target.name, code: 'operation-conflict', reason: 'Finish the current setup or refresh the app before trying again.' }] };
+          }
           return RedeployResultSchema.parse(await call('hosting-redeploy', { target, ...input }));
         },
       };

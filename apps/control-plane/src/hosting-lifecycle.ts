@@ -1,4 +1,4 @@
-import { HostingRemovalRequestSchema, InfraPlanSchema, KEEP_DATA_FEATURE, bindingImpact } from '@platfolio/contracts';
+import { HostingRemovalRequestSchema, InfraPlanSchema, KEEP_DATA_FEATURE, PINNED_RELEASE_REDEPLOY_FEATURE, bindingImpact } from '@platfolio/contracts';
 import type { ExtensionDescriptor, Response_ } from '@platfolio/kernel';
 import type { scoped as scopedRoute } from './capabilities.ts';
 import { badRequest, notFound, send } from './respond.ts';
@@ -23,6 +23,24 @@ export function hostingLifecycle(scoped: typeof scopedRoute): ExtensionDescripto
         if (!provider?.describe().operations.includes('readState')) return providerUnavailable();
         try { return send('getInstanceHostingState', 200, await provider.readState(id)); }
         catch { return providerUnavailable(); }
+      }),
+      scoped('POST', '/api/v1/instances/{instanceId}/environments/{environment}/deployments', 'redeployHostedStarter', 'marketplace.manage', async (scope, _request, params) => {
+        const id = params.instanceId ?? '';
+        if (params.environment !== 'staging') return notFound('hosted deployment', id);
+        const { store, infra } = scope.context;
+        const instance = await store.getInstance(id);
+        if (!instance.ok) return notFound('hosted deployment', id);
+        const hosting = await store.getHostedStarter(id);
+        if (!hosting.ok) return notFound('hosted deployment', id);
+        if (hosting.value.state !== 'live') return operationConflict('Restore this app before requesting another deployment.');
+        const provider = infra.forInstance(instance.value);
+        if (!provider?.redeploy || !provider.describe().features.includes(PINNED_RELEASE_REDEPLOY_FEATURE)) return providerUnavailable();
+        const { projectId, deploymentId } = hosting.value;
+        try {
+          const result = await provider.redeploy({ instanceId: id, environment: params.environment, expectedDeployment: { projectId, deploymentId } });
+          if (result.refused.length) return operationConflict(result.refused[0]!.reason);
+          return send('redeployHostedStarter', 202, { state: 'requested' });
+        } catch { return providerUnavailable(); }
       }),
       scoped('POST', '/api/v1/instances/{instanceId}/hosting/apply', 'applyInstanceHostingPlan', 'instance.dispatch', async (scope, _request, params) => {
         const id = params.instanceId ?? '';

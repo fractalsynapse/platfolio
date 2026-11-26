@@ -6,7 +6,7 @@ import { createKernel, disposeKernel } from '@platfolio/kernel';
 import { FREE_STARTER_RELEASE, SHARED_IDENTITY_RELEASE, STARTER_WORKER_RELEASE } from '@platfolio/manifest';
 import { hostedStarterObservation } from '../src/hosted-starter.ts';
 import { buildCapabilities } from '../src/capabilities.ts';
-import { customerLaunch, customerLaunchConfig } from '../src/customer-launch.ts';
+import { customerLaunch, customerLaunchConfig, privateHostingPlugin } from '../src/customer-launch.ts';
 
 test('customer launch is owner scoped and passes only the intended fields to a private worker', async () => {
   const identity = createIdentityFixture();
@@ -39,7 +39,16 @@ test('customer launch is owner scoped and passes only the intended fields to a p
         template: release.template, revision: release.revision, state: 'running', events: [], retainedVolumes: [],
       });
     }
-    if (last?.action === 'redeploy') return Response.json({ state: 'running' });
+    if (last?.action === 'template-restore') return workerReport && 'state' in workerReport && workerReport.state === 'kept'
+      ? Response.json({ template: SHARED_IDENTITY_RELEASE.template, revision: SHARED_IDENTITY_RELEASE.revision, state: 'running', events: [], retainedVolumes: [] })
+      : Response.json(null, { status: 400 });
+    if (last?.action === 'redeploy' || last?.action === 'template-redeploy') {
+      const target = last.body as typeof ids;
+      if (!workerReport || !('state' in workerReport) || !('projectId' in workerReport) || !('deploymentId' in workerReport) ||
+          workerReport.state !== 'ready' || target.projectId !== workerReport.projectId ||
+          target.deploymentId !== workerReport.deploymentId) return Response.json(null, { status: 409 });
+      return Response.json({ state: 'running' });
+    }
     if (last?.action === 'marketplace-status') return Response.json({ state: 'disconnected' });
     if (last?.action === 'marketplace-enroll') return Response.json('enrolled');
     if (last?.action === 'start') return Response.json({ error: 'marketplace-claim-required' }, { status: 409 });
@@ -50,15 +59,14 @@ test('customer launch is owner scoped and passes only the intended fields to a p
     if (last?.action === 'brand-apply') return Response.json({ outcome: brandOutcome });
     return Response.json(last?.action === 'setup' ? { openBao: 'sealed', railway: 'connect', workerKey: 'public' } : false);
   };
+  const customer = { ...customerLaunch(config, request), get teamId() { return teamId; } };
   const kernel = await createKernel({
-    identity: defaultIdentityConfig(identity), identityKeys: [identity.jwk], provider: 'fake', custody: 'strict',
+    identity: defaultIdentityConfig(identity), identityKeys: [identity.jwk], provider: 'railway', custody: 'strict',
+    infrastructure: [privateHostingPlugin(customer)],
     server: { port: 0 }, store: { driver: 'memory' }, requiredServices: ['identity', 'server', 'store', 'extensions'],
     extensions: buildCapabilities({
       build: { version: null, commit: 'a'.repeat(40), buildTime: '2026-11-24T00:00:00Z' },
-      customerLaunch: {
-        ...customerLaunch(config, request),
-        get teamId() { return teamId; },
-      },
+      customerLaunch: customer,
     }),
   });
   try {
@@ -158,8 +166,8 @@ test('customer launch is owner scoped and passes only the intended fields to a p
     assert.deepEqual(audit.find(({ action }) => action === 'configuration.request')?.detail, { name: 'UI_BRAND', environment: 'staging' });
     brandOutcome = 'conflict';
     assert.equal((await changeBrand({ value: 'Another label' })).status, 409);
-    const operation = (environment: string) => api + '/instances/' + managed.value.id + '/environments/' + environment + '/deployments';
-    const deploy = (environment: string, actor = 'owner') => fetch(operation(environment), { method: 'POST', headers: headers(actor) });
+    const deploy = (environment: string, actor = 'owner', instanceId = managed.value.id) =>
+      fetch(api + '/instances/' + instanceId + '/environments/' + environment + '/deployments', { method: 'POST', headers: headers(actor) });
     assert.equal((await deploy('staging', 'other')).status, 404);
     assert.equal((await deploy('production')).status, 404);
     workerReport = { ...ids, state: 'removing' };
@@ -169,6 +177,27 @@ test('customer launch is owner scoped and passes only the intended fields to a p
     assert.equal(deployed.status, 202);
     assert.deepEqual(await deployed.json(), { state: 'requested' });
     assert.deepEqual(last, { action: 'redeploy', body: ids });
+
+    const identityIds = { projectId: randomUUID(), deploymentId: randomUUID() };
+    const installedIdentity = await kernel.store.recordHostedStarter({
+      ...identityIds, teamId, name: 'shared-identity', template: 'shared-identity', state: 'live',
+      templateRef: { repo: 'platfolio-fixtures/shared-identity', commitSha: SHARED_IDENTITY_RELEASE.revision },
+      origin: 'https://identity.example.test', observedAt: '2026-11-24T00:00:00.000Z',
+    });
+    assert.ok(installedIdentity.ok);
+    assert.equal((await deploy('staging', 'member', installedIdentity.value.id)).status, 403);
+    assert.equal((await deploy('staging', 'other', installedIdentity.value.id)).status, 404);
+    assert.equal((await deploy('staging', 'owner', installedIdentity.value.id)).status, 409);
+    workerReport = { ...identityIds, state: 'ready' };
+    const redeployedIdentity = await deploy('staging', 'owner', installedIdentity.value.id);
+    assert.equal(redeployedIdentity.status, 202);
+    assert.deepEqual(await redeployedIdentity.json(), { state: 'requested' });
+    assert.deepEqual(last, { action: 'template-redeploy', body: { template: 'shared-identity', ...identityIds } });
+    workerReport = { ...identityIds, state: 'kept' };
+    assert.equal((await deploy('staging', 'owner', installedIdentity.value.id)).status, 409);
+    const restoredIdentity = await fetch(shared, { method: 'POST', headers: headers('owner') });
+    assert.equal(restoredIdentity.status, 200);
+    assert.deepEqual(last, { action: 'template-restore', body: { template: 'shared-identity' } });
 
     const at = '2026-11-24T00:00:00.000Z';
     const receipt = {
