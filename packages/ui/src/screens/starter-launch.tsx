@@ -1,6 +1,7 @@
 import * as React from 'react';
 import type { TeamWithRole } from '@platfolio/api-contract/generated/types';
 import { useOperation, isLoaded } from '../sdk/use-operation.ts';
+import type { PrivateLaunchTemplate } from '../workspace/routes.ts';
 import { WorkspaceChoice } from '../workspace/workspace-choice.tsx';
 import { renderScreen, type ScreenDocument } from './screen.ts';
 
@@ -12,7 +13,7 @@ export function StarterLaunchScreen({ selectedTeamId, teams, managedProjectId, t
   readonly selectedTeamId?: string;
   readonly teams?: readonly TeamWithRole[];
   readonly managedProjectId?: string;
-  readonly template?: 'shared-identity' | undefined;
+  readonly template?: PrivateLaunchTemplate | undefined;
 } = {}) {
   const params = React.useMemo(() => ({}), []);
   const lookup = useOperation('listTeams', { params, enabled: teams === undefined });

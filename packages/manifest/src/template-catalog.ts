@@ -102,6 +102,10 @@ export const FREE_STARTER_RELEASE = {
   template: 'starter-web', version: '0.1.0', revision: 'f2a095711f98696a98ed1711a87ed288ef034bf4', priceMinor: 0,
 } as const;
 
+export const STARTER_WORKER_RELEASE = {
+  template: 'starter-worker', version: '0.1.1', revision: '8d68d1999cd17440b4713cc549058669fe49774f', priceMinor: 0,
+} as const;
+
 export const SHARED_IDENTITY_RELEASE = {
   template: 'shared-identity', version: '0.1.1', revision: 'f67f3e5d4eb440ccb695dc3cd2d3207cd69aff7e', priceMinor: 0,
   image: 'keycloak/keycloak:26.8.2@sha256:c126f032d43b941ed7c5ccca7d6571596d8eab84d748afd7c86989e48ef07b8f',
@@ -109,7 +113,7 @@ export const SHARED_IDENTITY_RELEASE = {
 
 export const MARKETPLACE_RELEASES = [
   { ...FREE_STARTER_RELEASE, installable: true },
-  { template: 'starter-worker', version: '0.1.0', revision: 'd270cd25777c030a4035fbce38793f83b73cadd2', priceMinor: 0, installable: false },
+  { ...STARTER_WORKER_RELEASE, installable: true },
   { template: SHARED_IDENTITY_RELEASE.template, version: SHARED_IDENTITY_RELEASE.version,
     revision: SHARED_IDENTITY_RELEASE.revision, priceMinor: 0, installable: true },
 ].map((release) => ({ ...release, repo: templateCatalogEntry(release.template).repo }));

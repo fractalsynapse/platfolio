@@ -22,6 +22,7 @@ interface EnvironmentWorkspaceProps {
   readonly instanceId: string;
   readonly canManage: boolean;
   readonly isStarterWeb: boolean;
+  readonly isStarterWorker: boolean;
   readonly environment: InstanceResponse['environments'][number];
   readonly targets: readonly string[];
   readonly route: Extract<WorkspaceRoute, { kind: 'environment' }>;
@@ -29,7 +30,7 @@ interface EnvironmentWorkspaceProps {
   readonly now: string;
 }
 
-export function EnvironmentWorkspace({ instanceId, canManage, isStarterWeb, environment, targets, route, freshness, now }: EnvironmentWorkspaceProps): React.ReactElement {
+export function EnvironmentWorkspace({ instanceId, canManage, isStarterWeb, isStarterWorker, environment, targets, route, freshness, now }: EnvironmentWorkspaceProps): React.ReactElement {
   const params = React.useMemo(() => ({ instanceId, environment: route.environment }), [instanceId, route.environment]);
   const { state, reload } = useOperation('getInstanceEnvironment', { params, key: `environment-${instanceId}-${route.environment}` });
   const clock = useClock();
@@ -55,7 +56,8 @@ export function EnvironmentWorkspace({ instanceId, canManage, isStarterWeb, envi
             className="ui-workspace-secondary ui-hit-primary">View deployments</WorkspaceLink>
         </WorkspacePanel>
         <WorkspacePanel title="App addresses" context>
-          {state.data.hosting && state.data.hosting.state !== 'paused' && state.data.hosting.state !== 'removed' &&
+          {state.data.hosting && !state.data.hosting.origin && <p>This worker has no public address.</p>}
+          {state.data.hosting?.origin && state.data.hosting.state !== 'paused' && state.data.hosting.state !== 'removed' &&
             <p><a href={state.data.hosting.origin}>{new URL(state.data.hosting.origin).hostname}</a></p>}
           {state.data.domains.length > 0 && <ul className="ui-workspace-list">{state.data.domains.map(({ host, service }) =>
             <li key={host} className="ui-workspace-row"><span>{host}</span><small>Planned for {service}</small></li>)}</ul>}
@@ -68,7 +70,7 @@ export function EnvironmentWorkspace({ instanceId, canManage, isStarterWeb, envi
         {state.data.hosting && <WorkspacePanel title="Railway deployment" context>
           <p>Deployment <code>{state.data.hosting.deploymentId.slice(0, 12)}</code></p>
           <p>Project <code>{state.data.hosting.projectId.slice(0, 12)}</code></p>
-          {canManage && isStarterWeb && state.data.hosting.state !== 'paused' && state.data.hosting.state !== 'removed' &&
+          {canManage && (isStarterWeb || isStarterWorker) && state.data.hosting.state !== 'paused' && state.data.hosting.state !== 'removed' &&
             <StarterRedeploy key={state.data.hosting.deploymentId} params={params} progressPath={workspacePaths.instanceSetup(route.team, route.instance)} />}
           {canManage && <p><WorkspaceLink href={workspacePaths.instanceSetup(route.team, route.instance)}>Open app setup</WorkspaceLink></p>}
         </WorkspacePanel>}
@@ -80,7 +82,7 @@ export function EnvironmentWorkspace({ instanceId, canManage, isStarterWeb, envi
           <HostedCustomDomains params={params} canManage={canManage} />}
       </MainContext>}
       {route.tab === 'configuration' && <MainContext><WorkspacePanel title="Passwords and keys" observation={observation?.text} stale={observation?.mayBeStale}>
-        {!state.data.planned && (state.data.hosting ? <p>This app uses a private database connection generated in Railway.</p>
+        {!state.data.planned && (state.data.hosting ? <p>{isStarterWorker ? 'This worker stores its job history on an attached volume.' : 'This app uses a private database connection generated in Railway.'}</p>
           : <p>Register a deployment plan to check this environment’s settings.</p>)}
         {state.data.planned && state.data.services.every(({ secrets }) => secrets.length === 0) && <p>No app secrets are declared for this environment.</p>}
         {state.data.services.filter(({ secrets }) => secrets.length > 0).map(({ name, secrets }) =>

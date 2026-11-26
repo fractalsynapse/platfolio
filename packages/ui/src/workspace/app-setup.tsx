@@ -1,5 +1,6 @@
 import { WorkspaceAction } from './workspace-action.tsx';
 import type { InstanceResponse } from '@platfolio/api-contract/generated/types';
+import { isPrivateLaunchTemplate } from './routes.ts';
 import { InstanceHosting } from './instance-hosting.tsx';
 import { useWorkspaceModel } from './workspace-model.ts';
 import * as React from 'react';
@@ -20,5 +21,5 @@ export function AppSetup({ app, teamId }: { readonly app: InstanceResponse; read
   if (staged.state.status !== 'loaded' || !staged.state.data.hosting) {
     return <InstanceHosting app={app} />;
   }
-  return <StarterLaunchScreen teams={teams.data} selectedTeamId={teamId} template={app.template === "shared-identity" ? app.template : undefined} managedProjectId={staged.state.data.hosting.projectId} />;
+  return <StarterLaunchScreen teams={teams.data} selectedTeamId={teamId} template={isPrivateLaunchTemplate(app.template) ? app.template : undefined} managedProjectId={staged.state.data.hosting.projectId} />;
 }

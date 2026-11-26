@@ -9,7 +9,7 @@ import { WorkspaceLink } from '../workspace/workspace-link.tsx';
 import { HostingRemoval } from '../workspace/hosting-removal.tsx';
 import { WorkspaceAction } from '../workspace/workspace-action.tsx';
 import { LaunchProgress } from '../workspace/launch-progress.tsx';
-import { workspacePaths } from '../workspace/routes.ts';
+import { privateLaunchTemplates, workspacePaths } from '../workspace/routes.ts';
 import { StarterLaunchSetup } from './starter-launch-setup.tsx';
 import type { SuccessOf } from '@platfolio/api-contract/generated/types';
 
@@ -22,7 +22,7 @@ const headings: Record<Launch['state'], string> = {
   failed: 'Setup needs attention', removing: 'Removing your app', kept: 'App removed. Data kept.', wiped: 'App removed. Data scheduled for deletion.',
 };
 const props = z.object({ teamId: z.string().min(1), teamName: z.string().min(1).optional(),
-  managedProjectId: z.string().min(1).optional(), template: z.literal('shared-identity').optional(),
+  managedProjectId: z.string().min(1).optional(), template: z.enum(privateLaunchTemplates).optional(),
 }).strict();
 
 function LaunchPanel({ teamId, teamName, managedProjectId, template }: z.infer<typeof props>) {
@@ -30,8 +30,11 @@ function LaunchPanel({ teamId, teamName, managedProjectId, template }: z.infer<t
   const selected = React.useMemo(() => ({ teamId, ...(template ? { template } : {}) }), [teamId, template]);
   const launch = useOperation('getStarterLaunch', { params: selected, key: `starter-${teamId}-${template ?? 'starter-web'}` });
   const setup = useOperation('getStarterLaunchSetup', { params, key: `starter-setup-${teamId}` });
+  const worker = template === 'starter-worker';
+  const identity = template === 'shared-identity';
+  const title = worker ? 'Launch Starter Worker' : identity ? 'Launch Shared Identity' : 'Launch Starter Web';
   const local = setup.state.status === 'failed' && setup.state.error.status === 404;
-  const ready = (!template && local) || setup.state.status === 'loaded' && setup.state.data.openBao === 'ready' && setup.state.data.railway === 'connected';
+  const ready = (!template && local) || setup.state.status === 'loaded' && setup.state.data.openBao === 'ready' && setup.state.data.railway === 'connected' && (!template || setup.state.data.canWipeData === true);
   const canWipeData = local || setup.state.status === 'loaded' && setup.state.data.canWipeData === true;
   const start = useCommand('startStarterLaunch');
   const remove = useCommand('removeStarterLaunch');
@@ -45,7 +48,7 @@ function LaunchPanel({ teamId, teamName, managedProjectId, template }: z.infer<t
     setProblem('');
     setPending(true);
     try {
-      const bootstrap = action === 'start' && template && setup.state.status === 'loaded'
+      const bootstrap = action === 'start' && identity && setup.state.status === 'loaded'
         ? await sealOwnerRecovery(setup.state.data.workerKey, new TextEncoder().encode(password)) : undefined;
       const result = action === 'start' ? await start({ params: selected, ...(bootstrap ? { body: { bootstrap } } : {}) })
         : await remove({ params: selected, body: { data: action, ...(confirmation === undefined ? {} : { confirmation }) } });
@@ -74,7 +77,7 @@ function LaunchPanel({ teamId, teamName, managedProjectId, template }: z.infer<t
     </WorkspacePanel>;
   }
 
-  return <WorkspacePanel title={managedProjectId ? 'Hosting' : template ? 'Launch Shared Identity' : 'Launch Starter Web'}>
+  return <WorkspacePanel title={managedProjectId ? 'Hosting' : title}>
     {launch.state.status === 'pending' && <p role="status">Checking your launch setup…</p>}
     {launch.state.status === 'failed' && <p role="status">{launch.state.error.status === 404
       ? 'This team needs a connected Railway launcher.' : `Could not check launch setup. Try again. (${launch.state.error.code})`}</p>}
@@ -84,23 +87,28 @@ function LaunchPanel({ teamId, teamName, managedProjectId, template }: z.infer<t
       </div>
       <small>{ageLabel(setup.state.freshness, now().toISOString()).text}</small>
     </>}
+    {template && setup.state.status === 'loaded' && setup.state.data.railway === 'connected' &&
+      setup.state.data.canWipeData !== true && <p>Connect a Railway workspace to create a project for this template.</p>}
     {report && <>
       <p role="status" aria-label="Launch status"><strong>{headings[report.state]}</strong></p>
       {launch.state.status === 'loaded' && <small>{ageLabel(launch.state.freshness, now().toISOString()).text}</small>}
       {ready && (managedProjectId ? report.state === 'kept' : ['idle', 'failed', 'kept', 'wiped'].includes(report.state)) && <>
         <p>{report.state === 'kept'
           ? 'Restore the app and reconnect its retained data in Railway.'
-          : 'Use your connected Railway workspace. This creates a dedicated staging project and database. Anyone with the generated app link can open it. Railway charges apply to the resources you use.'}</p>
-        {template && <IdentityAdminCredential password={password} change={setPassword} />}
-        <WorkspaceAction variant="primary" disabled={pending || !!template && !/^[A-Za-z0-9_-]{32,64}$/.test(password)}
-          onClick={() => void act('start')}>{report.state === 'kept' ? 'Restore app' : report.state === 'failed' ? 'Resume setup' : template ? 'Launch Shared Identity' : 'Launch starter'}</WorkspaceAction>
+          : worker ? 'Launch a background worker in its own Railway staging project with persistent storage. It has no public address.'
+            : 'Use your connected Railway workspace. This creates a dedicated staging project and database. Anyone with the generated app link can open it. Railway charges apply to the resources you use.'}</p>
+        {identity && <IdentityAdminCredential password={password} change={setPassword} />}
+        <WorkspaceAction variant="primary" disabled={pending || identity && !/^[A-Za-z0-9_-]{32,64}$/.test(password)}
+          onClick={() => void act('start')}>{report.state === 'kept' ? 'Restore app' : report.state === 'failed' ? 'Resume setup' : template ? title : 'Launch starter'}</WorkspaceAction>
       </>}
       {report.state === 'ready' && <p className="ui-workspace-links">
         {report.origin && <a href={report.origin}>Open app</a>}
       </p>}
       {report.registration === 'pending' && <p role="status">Adding this app to Team workspace…</p>}
       {report.registration === 'conflict' && <p role="status">Another instance uses this name. Its settings have been preserved.</p>}
-      <p>{template ? 'Shared Identity uses a private PostgreSQL database. Create your own realm in Keycloak for your apps.' : 'Starter Web uses a generated database connection.'}</p>
+      <p>{worker ? 'The worker keeps its job history on an attached volume.' :
+        identity ? 'Shared Identity uses a private PostgreSQL database. Create your own realm in Keycloak for your apps.'
+          : 'Starter Web uses a generated database connection.'}</p>
       <LaunchProgress report={report} />
       {ready && report.projectId && ['ready', 'kept', 'failed'].includes(report.state) &&
         <HostingRemoval name={report.instanceName ?? report.template} pending={pending} canWipe={canWipeData}

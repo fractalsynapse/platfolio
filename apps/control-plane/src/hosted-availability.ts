@@ -14,6 +14,7 @@ export async function checkHostedApp(
   now: () => Date,
   request: typeof fetch = fetch,
 ): Promise<void> {
+  if (!observation.origin) return;
   const response = await request(observation.origin + '/healthz', {
     redirect: 'manual', signal: AbortSignal.timeout(4500),
   }).catch(() => undefined);
@@ -28,7 +29,7 @@ export async function hostedAppStatus(
   instanceId: string,
 ) {
   const hosting = await store.getHostedStarter(instanceId);
-  if (!hosting.ok) return;
+  if (!hosting.ok || !hosting.value.origin) return;
   const [check, events] = await Promise.all([store.getHostedAppCheck(instanceId), store.recentAuditForTargets([instanceId], 200)]);
   const current = hosting.value.state === 'live' && check?.deploymentId === hosting.value.deploymentId ? check : undefined;
   const state = hosting.value.state === 'live' ? current?.state ?? 'checking' : hosting.value.state;

@@ -1,11 +1,11 @@
 import { createHash, randomBytes } from 'node:crypto';
 import {
-  AttestationSchema, NotificationRuleSchema, StarterBrandChangeSchema, checkBindingPolicy, CONTRACT_NAME, CONTRACT_VERSION, DispatchIntentSchema, HostingProviderIdSchema, InstanceSchema, RAILWAY_AUTHORIZATION_CALLBACK,
+  AttestationSchema, NotificationRuleSchema, StarterBrandChangeSchema, checkBindingPolicy, CONTRACT_NAME, CONTRACT_VERSION, DispatchIntentSchema, HostingProviderIdSchema, InstanceSchema, PrivateLaunchTemplateSchema, type PrivateLaunchTemplate, RAILWAY_AUTHORIZATION_CALLBACK,
   reasonOf, decide, checkInvitationAcceptance, bindingImpact, normaliseName, rollupState, type BindingRecord, type CapabilityOffer, type PolicyAction, type VerifiedClaims,
 } from '@platfolio/contracts';
 import { RepositoryReadError } from '@platfolio/contracts';
 import { ScmNotConfiguredError } from '@platfolio/kernel';
-import { buildPlan, enabledEnvironments, FREE_STARTER_RELEASE, MARKETPLACE_RELEASES, SHARED_IDENTITY_RELEASE, parseCompose, templateCatalogEntry } from '@platfolio/manifest';
+import { buildPlan, enabledEnvironments, FREE_STARTER_RELEASE, MARKETPLACE_RELEASES, SHARED_IDENTITY_RELEASE, STARTER_WORKER_RELEASE, parseCompose, templateCatalogEntry } from '@platfolio/manifest';
 import type { RequestBodyOf } from '@platfolio/api-contract/generated/types';
 import type { ExtensionDescriptor, KernelContext, Request, Response_, RouteDefinition } from '@platfolio/kernel';
 import { ArtifactRecordSchema, InfraPlanSchema, secretWriteScope } from '@platfolio/contracts';
@@ -823,7 +823,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
           if (launcher?.teamId) {
             const reports = await Promise.all([
               launcher.call('report'),
-              launcher.call('template-report', { template: SHARED_IDENTITY_RELEASE.template }),
+              ...PrivateLaunchTemplateSchema.options.map((template) => launcher.call('template-report', { template })),
             ]);
             for (const launch of reports) {
               const observation = launch.ok && hostedStarterObservation(launcher.teamId, launch.body);
@@ -1426,7 +1426,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
     const instanceId = params.instanceId ?? '';
     if (!customer || customer.teamId !== teamId || params.environment !== 'staging') return notFound('hosted domains', instanceId);
     const hosting = await context.store.getHostedStarter(instanceId);
-    if (!hosting.ok) return notFound('hosted domains', instanceId);
+    if (!hosting.ok || !hosting.value.origin) return notFound('hosted domains', instanceId);
     if (hosting.value.state !== 'live') return domainConflict('Restore the app before managing its public address.');
     const action = operation === 'listHostedCustomDomains' ? 'domains-list' :
       operation === 'attachHostedCustomDomain' ? 'domain-attach' : 'domain-detach';
@@ -1454,14 +1454,15 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
     return unavailable();
   }
   const launchPath = '/api/v1/teams/{teamId}/starter-launch';
-  type LaunchTemplate = typeof SHARED_IDENTITY_RELEASE.template | typeof FREE_STARTER_RELEASE.template;
+  type LaunchTemplate = PrivateLaunchTemplate | typeof FREE_STARTER_RELEASE.template;
   const scopedLaunch = (method: string, suffix: string, operation: string,
     handle: (scope: Scope, request: Request, template: LaunchTemplate) => Promise<Response_>) =>
     scoped(method, launchPath + suffix, operation, 'marketplace.manage', async (scope, request) => {
       const selected = request.query.getAll('template');
       if (selected.length === 0) return handle(scope, request, FREE_STARTER_RELEASE.template);
-      if (selected.length !== 1 || selected[0] !== SHARED_IDENTITY_RELEASE.template) return badRequest('Choose an installable template.');
-      return handle(scope, request, selected[0]);
+      const template = PrivateLaunchTemplateSchema.safeParse(selected[0]);
+      if (selected.length !== 1 || !template.success) return badRequest('Choose an installable template.');
+      return handle(scope, request, template.data);
     });
   const brandPath = '/api/v1/instances/{instanceId}/environments/{environment}/configuration/starter-brand';
   async function hostedBrand({ context, teamId, personId }: Scope, request: Request, params: Record<string, string>,
@@ -1506,27 +1507,33 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
       scoped('POST', '/api/v1/instances/{instanceId}/environments/{environment}/deployments', 'redeployHostedStarter', 'marketplace.manage', async ({ teamId, context }, _request, params) => {
         const instanceId = params.instanceId ?? '';
         if (!customer || customer.teamId !== teamId || params.environment !== 'staging') return notFound('hosted deployment', instanceId);
+        const instance = await context.store.getInstance(instanceId);
+        if (!instance.ok || (instance.value.template !== STARTER_WORKER_RELEASE.template &&
+            instance.value.template !== FREE_STARTER_RELEASE.template)) return notFound('hosted deployment', instanceId);
+        const worker = instance.value.template === STARTER_WORKER_RELEASE.template;
         const hosting = await context.store.getHostedStarter(instanceId);
         if (!hosting.ok) return notFound('hosted deployment', instanceId);
         if (hosting.value.state !== 'live') {
           return { status: 409, body: { error: 'conflict', message: 'Restore this app before requesting another deployment.' } };
         }
-        const current = await customer.call('report');
+        const target = { projectId: hosting.value.projectId, deploymentId: hosting.value.deploymentId };
+        const template = STARTER_WORKER_RELEASE.template;
+        const current = worker ? await customer.call('template-report', { template }) : await customer.call('report');
         if (!current.ok) return unavailable();
         const observed = current.body as { state?: unknown; projectId?: unknown; deploymentId?: unknown } | null;
         if (!observed || !['ready', 'running'].includes(String(observed.state)) || observed.projectId !== hosting.value.projectId ||
             observed.deploymentId !== hosting.value.deploymentId) {
           return { status: 409, body: { error: 'conflict', message: 'Finish the current setup or refresh the app before trying again.' } };
         }
-        const requested = await customer.call('redeploy', { projectId: hosting.value.projectId, deploymentId: hosting.value.deploymentId });
+        const requested = worker ? await customer.call('template-redeploy', { template, ...target }) : await customer.call('redeploy', target);
         if (!requested.ok) return unavailable();
         return send('redeployHostedStarter', 202, { state: 'requested' });
       }),
       scopedLaunch('GET', '', 'getStarterLaunch', async ({ teamId, context }, _request, template) => {
-        const shared = template === SHARED_IDENTITY_RELEASE.template;
-        if (!shared && deps.starterLaunch?.teamId === teamId) return send('getStarterLaunch', 200, await deps.starterLaunch.read());
+        const extraTemplate = template !== FREE_STARTER_RELEASE.template;
+        if (!extraTemplate && deps.starterLaunch?.teamId === teamId) return send('getStarterLaunch', 200, await deps.starterLaunch.read());
         if (!customer || customer.teamId !== teamId) return notFound('launch', 'starter');
-        const report = shared ? await customer.call('template-report', { template: SHARED_IDENTITY_RELEASE.template })
+        const report = extraTemplate ? await customer.call('template-report', { template })
           : await customer.call('report');
         if (!report.ok) return unavailable();
         const link = await hostedStarterLink(context.store, teamId, report.body);
@@ -1540,12 +1547,13 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
           if (!bootstrap || !/^[A-Za-z0-9+/]{512}$/.test(bootstrap)) return badRequest('Generate and save the Shared Identity admin credential.');
           return relay(teamId, 'startStarterLaunch', 'template-start', { template, bootstrap });
         }
+        if (template === STARTER_WORKER_RELEASE.template) return relay(teamId, 'startStarterLaunch', 'template-start', { template });
         return deps.starterLaunch?.teamId === teamId
           ? send('startStarterLaunch', 200, await deps.starterLaunch.start()) : relay(teamId, 'startStarterLaunch', 'start');
       }),
       scopedLaunch('POST', '/remove', 'removeStarterLaunch', async ({ teamId, context }, request, template) => {
-        const shared = template === SHARED_IDENTITY_RELEASE.template;
-        if (customer?.teamId !== teamId && (shared || deps.starterLaunch?.teamId !== teamId)) return notFound('launch', '');
+        const extraTemplate = template !== FREE_STARTER_RELEASE.template;
+        if (customer?.teamId !== teamId && (extraTemplate || deps.starterLaunch?.teamId !== teamId)) return notFound('launch', '');
         const body = bodyOf<{ data: 'keep' | 'wipe'; confirmation?: string }>(request);
         if (!body.ok || !body.value || !['keep', 'wipe'].includes(body.value.data)) return badRequest('Select keep data or wipe data');
         if (body.value.data === 'wipe' && body.value.confirmation !== template) return badRequest(`Type ${template} to confirm deletion of its data`);
@@ -1555,7 +1563,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
           const consumers = await context.store.listConsumers(instance.id);
           if (consumers.length) return { status: 409, body: { error: 'conflict', message: `Removing this app would strand: ${bindingImpact(consumers).join('; ')}` } };
         }
-        if (shared) return relay(teamId, 'removeStarterLaunch', 'template-remove', { template, data: body.value.data });
+        if (extraTemplate) return relay(teamId, 'removeStarterLaunch', 'template-remove', { template, data: body.value.data });
         return deps.starterLaunch?.teamId === teamId
           ? send('removeStarterLaunch', 200, await deps.starterLaunch.remove(body.value.data))
           : relay(teamId, 'removeStarterLaunch', 'remove', { data: body.value.data });
