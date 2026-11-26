@@ -4,7 +4,7 @@
  * hand, because every line reproduces from the specification.
  *
  * Source: apps/control-plane/openapi.yaml (OpenAPI 3.1.0, info.version 0.1.0)
- * Input digest: sha256/ddfc59651d6374a1
+ * Input digest: sha256/c36f1e4b948bc5f5
  *
  * Reproduce it with `pnpm run api:types`. `pnpm run api:types:check` fails when this file stops matching
  * what the committed spec produces, which is the only way a generated type deserves to be trusted.
@@ -231,7 +231,7 @@ export interface HostedStarter {
   projectId: string;
   deploymentId: string;
   state: 'live' | 'paused' | 'removed';
-  origin: string;
+  origin?: string;
   observedAt: string;
 }
 
@@ -621,7 +621,7 @@ export interface ApiParameters {
   /** GET /api/v1/teams/{teamId}/starter-launch */
   getStarterLaunch: {
     teamId: string;
-    template?: 'shared-identity';
+    template?: 'shared-identity' | 'starter-worker';
   };
   /** GET /api/v1/teams/{teamId}/starter-launch/setup */
   getStarterLaunchSetup: {
@@ -743,7 +743,7 @@ export interface ApiParameters {
   /** POST /api/v1/teams/{teamId}/starter-launch/remove */
   removeStarterLaunch: {
     teamId: string;
-    template?: 'shared-identity';
+    template?: 'shared-identity' | 'starter-worker';
   };
   /** DELETE /api/v1/teams/{teamId}/members/{personId} */
   removeTeamMember: {
@@ -778,7 +778,7 @@ export interface ApiParameters {
   /** POST /api/v1/teams/{teamId}/starter-launch */
   startStarterLaunch: {
     teamId: string;
-    template?: 'shared-identity';
+    template?: 'shared-identity' | 'starter-worker';
   };
   /** POST /api/v1/instances/{instanceId}/dispatches/{dispatchId}/trigger */
   triggerDispatch: {

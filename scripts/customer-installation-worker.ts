@@ -8,9 +8,10 @@ import { customerOpenBao } from './customer-openbao.ts';
 import { customerMarketplaceConnection, privateMarketplaceOrigin } from './customer-marketplace-connection.ts';
 import { customerRailwayOAuth } from './customer-railway-oauth.ts';
 import { StarterBrandChangeSchema } from '../packages/contracts/src/starter-brand.ts';
+import { railwayStarterWorkerHosting } from './launch-starter-worker.ts';
 import { railwaySharedIdentityHosting } from './launch-shared-identity.ts';
 import { railwayStarterHosting } from './launch-starter-app.ts';
-import { CustomerHostingCommandSchema } from '../packages/contracts/src/customer-hosting-commands.ts';
+import { CustomerHostingCommandSchema, type PrivateLaunchTemplate } from '../packages/contracts/src/customer-hosting-commands.ts';
 import { privateRailwayExecution } from '../apps/control-plane/src/private-railway-execution.ts';
 import { createKernel } from '../packages/kernel/src/index.ts';
 
@@ -32,7 +33,18 @@ const marketplace = customerMarketplaceConnection(privateMarketplaceOrigin(proce
 const oauth = customerRailwayOAuth({ callback, workspaceId: workspace, ...(client ? { clientId: client } : {}), ...(project ? { projectId: project } : {}) }, bao);
 const sourceHosting = railwayStarterHosting(oauth.credential);
 const launch = customerLaunchRun(team, join(directory, 'launch.json'), sourceHosting);
-const identity = customerLaunchRun(team, join(directory, 'shared-identity.json'), railwaySharedIdentityHosting(oauth.credential));
+const privateProviders = {
+  'shared-identity': railwaySharedIdentityHosting(oauth.credential),
+  'starter-worker': railwayStarterWorkerHosting(oauth.credential),
+} satisfies Record<PrivateLaunchTemplate, ReturnType<typeof railwayStarterWorkerHosting>>;
+const privateRuns = new Map<PrivateLaunchTemplate, ReturnType<typeof customerLaunchRun>>();
+function privateRun(template: PrivateLaunchTemplate) {
+  const existing = privateRuns.get(template);
+  if (existing) return existing;
+  const initialized = customerLaunchRun(team!, join(directory!, template + '.json'), privateProviders[template]);
+  privateRuns.set(template, initialized);
+  return initialized;
+}
 const execution = await createKernel({ provider: 'railway', infrastructure: [privateRailwayExecution(team, async () => {
   if (await bao.status() !== 'ready') throw new Error('Unlock OpenBao before managing a project');
   return oauth.credential();
@@ -69,20 +81,29 @@ const server = createServer({ requestTimeout: 10000 }, (request, response) => {
       case 'marketplace-status': reply(200, await marketplace.connection()); return;
       case 'marketplace-enroll': reply(200, await marketplace.enroll(command.body.handoff)); return;
       case 'marketplace-catalog': reply(200, await marketplace.catalog()); return;
-      case 'template-report': reply(200, await identity.read()); return;
+      case 'template-report': reply(200, privateRun(command.body.template).read()); return;
       case 'template-start':
-      case 'template-remove': {
+      case 'template-remove':
+      case 'template-redeploy': {
         if (project || await bao.status() !== 'ready' || !(await bao.readGrant()).grant) { reply(503, replyError); return; }
-        if (command.action === 'template-remove') { reply(200, await identity.remove(command.body.data)); return; }
-        const current = await identity.read();
+        const runner = privateRun(command.body.template);
+        if (command.action === 'template-remove') { reply(200, runner.remove(command.body.data)); return; }
+        const current = runner.read();
+        if (command.action === 'template-redeploy') {
+          if (current.projectId !== command.body.projectId || current.deploymentId !== command.body.deploymentId ||
+              !['ready', 'running'].includes(current.state)) { reply(409, null); return; }
+          reply(200, runner.redeploy());
+          return;
+        }
         // An existing install can be recovered even if its marketplace connection changes.
         if (!current.projectId && !(await marketplace.catalog()).some(({ template, installable }) => template === command.body.template && installable)) {
           reply(409, { error: 'marketplace-connection-required' });
           return;
         }
+        if (command.body.template === 'starter-worker') { reply(200, runner.start()); return; }
         const bootstrap = bao.openEnvelope(command.body.bootstrap);
         if (!/^[A-Za-z0-9_-]{32,64}$/.test(bootstrap)) { reply(400, null); return; }
-        reply(200, identity.startWithBootstrap(bootstrap));
+        reply(200, runner.startWithBootstrap(bootstrap));
         return;
       }
       case 'report': reply(200, await launch.read()); return;

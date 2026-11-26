@@ -13,6 +13,8 @@ export type HostingTarget = z.infer<typeof HostingTargetSchema>;
 
 const empty = z.object({}).strict().optional();
 const target = z.object({ projectId: z.string().min(1), deploymentId: z.string().min(1) }).strict();
+export const PrivateLaunchTemplateSchema = z.enum(['shared-identity', 'starter-worker']);
+export type PrivateLaunchTemplate = z.infer<typeof PrivateLaunchTemplateSchema>;
 const domain = target.extend({ hostname: z.string().min(1).max(253) });
 const encoded = z.string().regex(/^[a-zA-Z0-9+/=]+$/);
 const boundEnvironment = z.object({
@@ -28,9 +30,13 @@ export const CustomerHostingCommandSchema = z.discriminatedUnion('action', [
   command('report', empty),
   command('setup', empty),
   command('start', empty),
-  command('template-report', z.object({ template: z.literal('shared-identity') }).strict()),
-  command('template-start', z.object({ template: z.literal('shared-identity'), bootstrap: encoded.length(512) }).strict()),
-  command('template-remove', HostingRemovalSchema.extend({ template: z.literal('shared-identity') }).strict()),
+  command('template-report', z.object({ template: PrivateLaunchTemplateSchema }).strict()),
+  command('template-start', z.discriminatedUnion('template', [
+    z.object({ template: z.literal('shared-identity'), bootstrap: encoded.length(512) }).strict(),
+    z.object({ template: z.literal('starter-worker') }).strict(),
+  ])),
+  command('template-remove', HostingRemovalSchema.extend({ template: PrivateLaunchTemplateSchema }).strict()),
+  command('template-redeploy', target.extend({ template: z.literal('starter-worker') })),
   command('authorize', empty),
   command('initialize', z.object({ publicKey: encoded.min(500).max(1024) }).strict()),
   command('unlock', z.object({ recovery: encoded.min(500).max(640) }).strict()),

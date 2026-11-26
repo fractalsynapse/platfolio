@@ -1,12 +1,10 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
-import { dirname, join } from 'node:path';
 import { GitScm } from '../packages/contracts/src/git-scm.ts';
 import { StarterBrandChangeSchema } from '../packages/contracts/src/starter-brand.ts';
 import { FREE_STARTER_RELEASE, readTemplate, templateCatalogEntry } from '../packages/manifest/src/index.ts';
 import type { SourceReleaseHosting, SourceReleaseObserver, SourceReleaseProgress } from '../packages/contracts/src/source-release-hosting.ts';
 import { customerRailway, removeCustomerStarter, type CustomerRailwayGrant } from './customer-railway.ts';
+import { withReleaseSource } from './source-release-upload.ts';
 import { validateStarterSource } from '../packages/manifest/src/starter-release.ts';
 
 const listing = FREE_STARTER_RELEASE;
@@ -49,13 +47,7 @@ export async function launchStarterApp(app: string, project?: string, progress?:
   await rail.setConfig(web, 'DATABASE_URL', '${{app-db-staging.DATABASE_URL}}');
   if (brand !== undefined) await rail.setConfig(web, brandSetting, brand);
   await rail.configure(web, { numReplicas: 1, healthcheckPath: '/healthz', healthcheckTimeout: 120 });
-  const archive = await mkdtemp(join(tmpdir(), 'platfolio-starter-build-'));
-  try {
-    for (const [path, content] of Object.entries(source.sources)) {
-      const target = join(archive, path);
-      await mkdir(dirname(target), { recursive: true });
-      await writeFile(target, content);
-    }
+  return withReleaseSource(source.sources, async (archive) => {
     const deployment = await rail.upload(web, archive, `Marketplace ${listing.template} at ${listing.revision}`);
     await rail.wait(web, deployment);
     const origin = await rail.publicOrigin(web, 8080);
@@ -71,9 +63,7 @@ export async function launchStarterApp(app: string, project?: string, progress?:
     if (!ready) throw new Error('The starter is deployed but its launch check failed');
     progress?.({ step: 'Check the app', state: 'READY', resourceId: deployment });
     return { project: rail.project.id, service: web, deployment, template: listing.template, revision: listing.revision, blobs: source.blobs, origin };
-  } finally {
-    await rm(archive, { recursive: true, force: true });
-  }
+  });
 }
 
 export function railwayStarterHosting(credential?: () => Promise<CustomerRailwayGrant>): SourceReleaseHosting {

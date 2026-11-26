@@ -1,0 +1,1 @@
+ALTER TABLE hosted_starters ALTER COLUMN origin DROP NOT NULL;

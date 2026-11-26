@@ -1,6 +1,6 @@
 import { HostedStarterSchema, type NewHostedStarter, type Store } from '@platfolio/contracts';
 import type { SuccessOf } from '@platfolio/api-contract/generated/types';
-import { MARKETPLACE_RELEASES } from '@platfolio/manifest';
+import { MARKETPLACE_RELEASES, STARTER_WORKER_RELEASE } from '@platfolio/manifest';
 
 type Report = SuccessOf<'getStarterLaunch'>;
 
@@ -26,7 +26,10 @@ export function hostedStarterObservation(teamId: string, data: unknown): NewHost
     if (parsed.success) return { ...common, ...parsed.data, state: report.state === 'kept' ? 'paused' : 'removed' };
     return;
   }
-  if (report.state !== 'ready' || last.step !== 'Open your app' || typeof report.origin !== 'string' ||
+  if (report.state !== 'ready') return;
+  if (release.template === STARTER_WORKER_RELEASE.template) {
+    if (last.step !== 'Worker is ready' || report.origin !== undefined) return;
+  } else if (last.step !== 'Open your app' || typeof report.origin !== 'string' ||
       !/^https:\/\/[a-z0-9-]+\.up\.railway\.app$/.test(report.origin)) return;
   const parsed = HostedStarterSchema.omit({ instanceId: true }).safeParse({
     projectId: report.projectId, deploymentId: report.deploymentId, state: 'live', origin: report.origin, observedAt: last.at,

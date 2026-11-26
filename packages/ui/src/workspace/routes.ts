@@ -1,3 +1,12 @@
+import type { ParamsOf } from '@platfolio/api-contract/generated/types';
+
+export type PrivateLaunchTemplate = NonNullable<ParamsOf<'getStarterLaunch'>['template']>;
+export const privateLaunchTemplates = ['shared-identity', 'starter-worker'] as const satisfies readonly PrivateLaunchTemplate[];
+
+export function isPrivateLaunchTemplate(template: unknown): template is PrivateLaunchTemplate {
+  return privateLaunchTemplates.some((name) => name === template);
+}
+
 const slug = '[a-z0-9](?:[a-z0-9-]*[a-z0-9])?';
 export const environmentTabs = {
   overview: 'Overview', deployments: 'Deployments', configuration: 'Configuration', domains: 'Domains',
@@ -21,7 +30,7 @@ export const workspacePaths = {
   teamInvitations: (team: string) => `/dashboard/teams/${team}/members/invitations`,
   templates: (team: string) => `/dashboard/teams/${team}/create-instance`,
   launchForTeam: (team: string, template?: string) =>
-    `/dashboard/teams/${team}/create-instance/launch${template === 'shared-identity' ? '/' + template : ''}`,
+    `/dashboard/teams/${team}/create-instance/launch${isPrivateLaunchTemplate(template) ? '/' + template : ''}`,
   instanceStatus: (team: string, instance: string) => `/dashboard/teams/${team}/instances/${instance}/status`,
   instanceSetup: (team: string, instance: string) => `/dashboard/teams/${team}/instances/${instance}/setup`,
   instance: (team: string, instance: string) => `/dashboard/teams/${team}/instances/${instance}`,
@@ -58,7 +67,7 @@ export type WorkspaceRoute =
   | { kind: 'team-invitations'; team: string }
   | { kind: 'team-connections'; team: string }
   | { kind: 'templates'; team: string }
-  | { kind: 'team-launch'; team: string; template?: 'shared-identity' }
+  | { kind: 'team-launch'; team: string; template?: PrivateLaunchTemplate }
   | { kind: 'instance'; team: string; instance: string }
   | { kind: 'instance-setup'; team: string; instance: string }
   | { kind: 'instance-status'; team: string; instance: string }
@@ -82,7 +91,7 @@ function routePatterns<K extends string>(routes: Record<K, (...segments: string[
   return (Object.keys(routes) as K[]).map((kind) => [kind, pathPattern(routes[kind](...params))]);
 }
 
-const sharedIdentityLaunch = pathPattern(workspacePaths.launchForTeam(oneSegment, 'shared-identity'));
+const privateLaunch = pathPattern(workspacePaths.launchForTeam(oneSegment) + '/(' + privateLaunchTemplates.join('|') + ')');
 const teamPatterns = routePatterns(teamRoutes, [oneSegment]);
 const instancePatterns = routePatterns(instanceRoutes, [oneSegment, oneSegment]);
 const environmentSuffixes = Object.keys(environmentTabs).filter((tab) => tab !== 'overview').join('|');
@@ -96,8 +105,8 @@ export function matchWorkspaceRoute(path: string): WorkspaceRoute {
   for (const tab of Object.keys(accountTabs) as (keyof typeof accountTabs)[]) {
     if (pathname === accountTabs[tab].href) return { kind: 'account', tab };
   }
-  const sharedIdentityTeam = sharedIdentityLaunch.exec(pathname)?.[1];
-  if (sharedIdentityTeam) return { kind: 'team-launch', team: sharedIdentityTeam, template: 'shared-identity' };
+  const [, launchTeam, template] = privateLaunch.exec(pathname) ?? [];
+  if (launchTeam && isPrivateLaunchTemplate(template)) return { kind: 'team-launch', team: launchTeam, template };
   for (const [kind, pattern] of teamPatterns) {
     const team = pattern.exec(pathname)?.[1];
     if (team) return { kind, team };

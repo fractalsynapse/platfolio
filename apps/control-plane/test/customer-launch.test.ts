@@ -3,7 +3,8 @@ import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { createIdentityFixture, defaultIdentityConfig, signToken } from '@platfolio/contracts';
 import { createKernel, disposeKernel } from '@platfolio/kernel';
-import { FREE_STARTER_RELEASE, SHARED_IDENTITY_RELEASE } from '@platfolio/manifest';
+import { FREE_STARTER_RELEASE, SHARED_IDENTITY_RELEASE, STARTER_WORKER_RELEASE } from '@platfolio/manifest';
+import { hostedStarterObservation } from '../src/hosted-starter.ts';
 import { buildCapabilities } from '../src/capabilities.ts';
 import { customerLaunch, customerLaunchConfig } from '../src/customer-launch.ts';
 
@@ -32,9 +33,12 @@ test('customer launch is owner scoped and passes only the intended fields to a p
     assert.equal(init?.redirect, 'error');
     last = JSON.parse(String(init?.body)) as typeof last;
     if (last?.action === 'report') return Response.json(workerReport);
-    if (last?.action === 'template-start') return Response.json({
-      template: SHARED_IDENTITY_RELEASE.template, revision: SHARED_IDENTITY_RELEASE.revision, state: 'running', events: [], retainedVolumes: [],
-    });
+    if (last?.action === 'template-start') {
+      const release = (last.body as { template: string }).template === 'starter-worker' ? STARTER_WORKER_RELEASE : SHARED_IDENTITY_RELEASE;
+      return Response.json({
+        template: release.template, revision: release.revision, state: 'running', events: [], retainedVolumes: [],
+      });
+    }
     if (last?.action === 'redeploy') return Response.json({ state: 'running' });
     if (last?.action === 'marketplace-status') return Response.json({ state: 'disconnected' });
     if (last?.action === 'marketplace-enroll') return Response.json('enrolled');
@@ -98,6 +102,12 @@ test('customer launch is owner scoped and passes only the intended fields to a p
     assert.equal((await sharedLaunch('other')).status, 404);
     assert.equal((await sharedLaunch('owner')).status, 200);
     assert.deepEqual(last, { action: 'template-start', body: { template: 'shared-identity', bootstrap } });
+    const worker = path + '?template=starter-worker';
+    assert.equal((await fetch(worker, { method: 'POST', headers: headers('other') })).status, 404);
+    const launchWorker = await fetch(worker, { method: 'POST', headers: headers('owner') });
+    assert.equal(launchWorker.status, 200);
+    assert.deepEqual(last, { action: 'template-start', body: { template: 'starter-worker' } });
+    assert.equal((await launchWorker.json() as { origin?: string }).origin, undefined);
     const response = await fetch(api + '/railway/callback?state=' + 'a'.repeat(43) + '&code=local-test', { redirect: 'manual' });
     assert.equal(response.status, 303);
     assert.equal(response.headers.get('location'), siteOrigin + '/dashboard/launch?railway=retry');
@@ -186,4 +196,23 @@ test('a hub or an external worker origin cannot configure customer launch', () =
   };
   assert.throws(() => customerLaunchConfig(env, ['https://private.example.test']), /private network/);
   assert.throws(() => customerLaunchConfig({ ...env, PLATFOLIO_LAUNCH_WORKER_URL: 'http://worker.railway.internal', PLATFOLIO_MARKETPLACE_ENABLED: 'true' }, ['https://private.example.test']));
+});
+
+
+test('a private worker can be recorded ready only with verified deployment coordinates and no public address', () => {
+  const team = 'team-1';
+  const projectId = randomUUID();
+  const deploymentId = randomUUID();
+  const report = {
+    template: STARTER_WORKER_RELEASE.template, revision: STARTER_WORKER_RELEASE.revision,
+    state: 'ready', projectId, deploymentId,
+    events: [{ step: 'Worker is ready', state: 'READY', at: '2026-11-26T15:00:00Z' }],
+  };
+  const observed = hostedStarterObservation(team, report);
+  assert.equal(observed?.state, 'live');
+  assert.equal(observed?.projectId, projectId);
+  assert.equal(observed?.state === 'live' && observed.deploymentId, deploymentId);
+  assert.equal(hostedStarterObservation(team, { ...report, origin: 'https://worker.up.railway.app' }), undefined);
+  assert.equal(hostedStarterObservation(team, { ...report, deploymentId: undefined }), undefined);
+  assert.equal(hostedStarterObservation(team, { ...report, template: FREE_STARTER_RELEASE.template, revision: FREE_STARTER_RELEASE.revision }), undefined);
 });

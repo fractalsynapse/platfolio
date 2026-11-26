@@ -25068,7 +25068,7 @@ function date4(params) {
 }
 
 // packages/contracts/src/generated/contract-version.ts
-var CONTRACT_VERSION = "6.5.0";
+var CONTRACT_VERSION = "7.0.0";
 
 // packages/contracts/src/infra.ts
 var CONTRACT_NAME = "infra.provider";
@@ -27585,7 +27585,7 @@ var HostedStarterSchema = external_exports.object({
   projectId: external_exports.uuid(),
   deploymentId: external_exports.uuid(),
   state: external_exports.enum(["live", "paused", "removed"]),
-  origin: external_exports.url({ protocol: /^https$/ }).max(240),
+  origin: external_exports.url({ protocol: /^https$/ }).max(240).optional(),
   observedAt: external_exports.iso.datetime()
 }).strict();
 var NotificationRuleSchema = external_exports.object({
@@ -27909,6 +27909,7 @@ var HostingTargetSchema = external_exports.object({
 }).strict();
 var empty = external_exports.object({}).strict().optional();
 var target = external_exports.object({ projectId: external_exports.string().min(1), deploymentId: external_exports.string().min(1) }).strict();
+var PrivateLaunchTemplateSchema = external_exports.enum(["shared-identity", "starter-worker"]);
 var domain2 = target.extend({ hostname: external_exports.string().min(1).max(253) });
 var encoded = external_exports.string().regex(/^[a-zA-Z0-9+/=]+$/);
 var boundEnvironment = external_exports.object({
@@ -27921,9 +27922,13 @@ var CustomerHostingCommandSchema = external_exports.discriminatedUnion("action",
   command("report", empty),
   command("setup", empty),
   command("start", empty),
-  command("template-report", external_exports.object({ template: external_exports.literal("shared-identity") }).strict()),
-  command("template-start", external_exports.object({ template: external_exports.literal("shared-identity"), bootstrap: encoded.length(512) }).strict()),
-  command("template-remove", HostingRemovalSchema.extend({ template: external_exports.literal("shared-identity") }).strict()),
+  command("template-report", external_exports.object({ template: PrivateLaunchTemplateSchema }).strict()),
+  command("template-start", external_exports.discriminatedUnion("template", [
+    external_exports.object({ template: external_exports.literal("shared-identity"), bootstrap: encoded.length(512) }).strict(),
+    external_exports.object({ template: external_exports.literal("starter-worker") }).strict()
+  ])),
+  command("template-remove", HostingRemovalSchema.extend({ template: PrivateLaunchTemplateSchema }).strict()),
+  command("template-redeploy", target.extend({ template: external_exports.literal("starter-worker") })),
   command("authorize", empty),
   command("initialize", external_exports.object({ publicKey: encoded.min(500).max(1024) }).strict()),
   command("unlock", external_exports.object({ recovery: encoded.min(500).max(640) }).strict()),

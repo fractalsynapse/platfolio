@@ -191,41 +191,43 @@ const expectErr = (result: { ok: boolean; value?: unknown } & Partial<StoreError
     return { status: 'pass', detail: 'owner checked at write, concurrent demotion leaves an owner, access revoked on removal' };
   });
 
-  await add('verified hosted starter updates are ordered, team-scoped and durable', async () => {
-    const { store, team, instance: unrelated } = await seed();
-    const peer = mustOk(await store.createTeam({ name: tName('starter-peer') }), 'peer team');
-    const registration = {
-      teamId: team.id, name: 'starter-web', template: 'starter-web',
-      templateRef: { repo: 'platfolio-fixtures/starter-web', commitSha: 'e'.repeat(40) },
-      state: 'live' as const, projectId: randomUUID(), deploymentId: randomUUID(),
-      origin: 'https://starter.up.railway.app', observedAt: '2026-11-24T00:00:00.000Z',
-    };
-    const [first, replay] = (await Promise.all([
-      store.recordHostedStarter(registration), store.recordHostedStarter(registration),
-    ])).map((result) => mustOk(result, 'register'));
-    if (!first || first.id !== replay?.id) throw new Error('The same deployment acquired multiple instances');
-    if ((await store.recordHostedStarter({ ...registration, teamId: peer.id })).ok ||
-        (await store.recordHostedStarter({ ...registration, name: unrelated.name })).ok ||
-        (await store.listInstances(peer.id)).length) throw new Error('Registration adopted a different app or team');
-    const idle = mustOk(await store.recordHostedStarter({ ...registration, state: 'paused', observedAt: '2026-11-24T00:00:01.000Z' }), 'keep');
-    await store.recordHostedStarter(registration);
-    const paused = mustOk(await store.getInstanceEnvironment(first.id, 'staging'), 'staging state');
-    if (idle.state !== 'paused' || paused.state !== 'paused' || (await store.getInstanceEnvironment(first.id, 'production')).ok) {
-      throw new Error('A stale report or extra environment changed the result');
-    }
-    const restored = mustOk(await store.recordHostedStarter({
-      ...registration, deploymentId: randomUUID(), observedAt: '2026-11-24T00:00:02.000Z',
-    }), 'restore');
-    const hosting = mustOk(await store.getHostedStarter(first.id), 'read hosting');
-    if (restored.id !== first.id || restored.state !== 'live' || hosting.deploymentId === registration.deploymentId) {
-      throw new Error('Restore lost the instance or its new deployment');
-    }
-    const activity = await store.recentAuditForTargets([first.id], 3);
-    if (activity.map(({ action }) => action).join(',') !== 'hosting.verified,hosting.paused,hosting.verified') {
-      throw new Error('Verified transitions did not appear once each in the app audit');
-    }
-    return { status: 'pass', detail: 'one app, isolated scope, ordered retain and restore' };
-  });
+  for (const template of ['starter-web', 'starter-worker'] as const) {
+    await add(`verified ${template} updates are ordered, team-scoped and durable`, async () => {
+      const { store, team, instance: unrelated } = await seed();
+      const peer = mustOk(await store.createTeam({ name: tName('starter-peer') }), 'peer team');
+      const registration = {
+        teamId: team.id, name: template, template,
+        templateRef: { repo: `platfolio-fixtures/${template}`, commitSha: 'e'.repeat(40) },
+        state: 'live' as const, projectId: randomUUID(), deploymentId: randomUUID(),
+        ...(template === 'starter-web' ? { origin: 'https://starter.up.railway.app' } : {}), observedAt: '2026-11-24T00:00:00.000Z',
+      };
+      const [first, replay] = (await Promise.all([
+        store.recordHostedStarter(registration), store.recordHostedStarter(registration),
+      ])).map((result) => mustOk(result, 'register'));
+      if (!first || first.id !== replay?.id) throw new Error('The same deployment acquired multiple instances');
+      if ((await store.recordHostedStarter({ ...registration, teamId: peer.id })).ok ||
+          (await store.recordHostedStarter({ ...registration, name: unrelated.name })).ok ||
+          (await store.listInstances(peer.id)).length) throw new Error('Registration adopted a different app or team');
+      const idle = mustOk(await store.recordHostedStarter({ ...registration, state: 'paused', observedAt: '2026-11-24T00:00:01.000Z' }), 'keep');
+      await store.recordHostedStarter(registration);
+      const paused = mustOk(await store.getInstanceEnvironment(first.id, 'staging'), 'staging state');
+      if (idle.state !== 'paused' || paused.state !== 'paused' || (await store.getInstanceEnvironment(first.id, 'production')).ok) {
+        throw new Error('A stale report or extra environment changed the result');
+      }
+      const restored = mustOk(await store.recordHostedStarter({
+        ...registration, deploymentId: randomUUID(), observedAt: '2026-11-24T00:00:02.000Z',
+      }), 'restore');
+      const hosting = mustOk(await store.getHostedStarter(first.id), 'read hosting');
+      if (restored.id !== first.id || restored.state !== 'live' || hosting.deploymentId === registration.deploymentId || hosting.origin !== registration.origin) {
+        throw new Error('Restore lost the instance or its new deployment');
+      }
+      const activity = await store.recentAuditForTargets([first.id], 3);
+      if (activity.map(({ action }) => action).join(',') !== 'hosting.verified,hosting.paused,hosting.verified') {
+        throw new Error('Verified transitions did not appear once each in the app audit');
+      }
+      return { status: 'pass', detail: 'one app, isolated scope, ordered retain and restore' };
+    });
+  }
 
   await add('hosted availability records confirmed outages and ignores stale deployments', async () => {
     const { store, team } = await seed();

@@ -32,8 +32,8 @@ export function customerLaunchRun(teamId: string, journalPath: string, provider:
     if (brand !== undefined) publicBrand = brand;
     report.state = 'running';
     event(redeploy ? { step: brand === undefined ? 'Redeploy the pinned release' : 'Publish the app header label',
-      state: 'WORKING', detail: 'The project and its database stay in place.' }
-      : { step: 'Launch approved', state: 'READY', detail: 'One staging project, one database and one public HTTPS link.' });
+      state: 'WORKING', detail: 'The project and its storage stay in place.' }
+      : { step: 'Launch approved', state: 'READY', detail: 'A dedicated staging project for this template.' });
     void (async () => {
       try {
         const installed = await provider.deploy({
@@ -44,8 +44,10 @@ export function customerLaunchRun(teamId: string, journalPath: string, provider:
           step: event,
           project(id) { report.projectId = id; save(); },
         });
-        report = { ...report, state: 'ready', projectId: installed.project, deploymentId: installed.deployment, origin: installed.origin };
-        event({ step: 'Open your app', state: 'READY' });
+        report = { ...report, state: 'ready', projectId: installed.project, deploymentId: installed.deployment };
+        if (installed.origin) report.origin = installed.origin;
+        else delete report.origin;
+        event({ step: installed.origin ? 'Open your app' : 'Worker is ready', state: 'READY' });
       } catch {
         report.state = 'failed';
         event({ step: 'Resume setup', state: 'FAILED', detail: 'Hosting setup did not finish. Check the last completed step and resume to reuse its resources.' });
@@ -71,7 +73,7 @@ export function customerLaunchRun(teamId: string, journalPath: string, provider:
           event({ step: 'Removal complete', state: 'READY', detail: 'The hosting provider confirmed the app project is gone. Stored data follows the provider’s deletion policy.' });
         } else {
           report.state = 'kept';
-          event({ step: 'Removal complete', state: 'READY', detail: 'App and database deployments stopped. Storage remains attached for recovery and may incur storage charges.' });
+          event({ step: 'Removal complete', state: 'READY', detail: 'App deployments stopped. Storage remains attached for recovery and may incur storage charges.' });
         }
       } catch {
         report.state = 'failed';

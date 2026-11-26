@@ -18,6 +18,7 @@ const { vault: baoService, worker: workerService } = installationNames;
 const platformProjectName = 'platfolio';
 const platformServices = new Set<string>(Object.values(installationNames));
 const appServices: Readonly<Record<string, ReadonlySet<string>>> = {
+  'starter-worker': new Set(['queue-staging']),
   'starter-web': new Set(['web-staging', 'app-db-staging']),
   'shared-identity': new Set(['keycloak-staging', 'keycloak-db-staging']),
 };
@@ -248,12 +249,23 @@ export async function customerRailway(target: CustomerProjectTarget, progress?: 
     }
     throw new Error('The worker did not verify a private OpenBao health response');
   }
+  async function mountedVolume(serviceId: string, mountPath: string) {
+    const { environment } = await call<{ environment: { volumeInstances: Edges<{ volumeId: string; serviceId: string; mountPath: string }> & {
+      pageInfo: { hasNextPage: boolean };
+    } } }>('stage storage placement',
+      'query($environmentId:String!){environment(id:$environmentId){volumeInstances(first:100){edges{node{volumeId serviceId mountPath}} pageInfo{hasNextPage}}}}', { environmentId: scope.environmentId });
+    if (environment.volumeInstances.pageInfo.hasNextPage) throw new Error('Could not verify all staging volume placements');
+    const mounted = environment.volumeInstances.edges.map(({ node }) => node).filter((node) => node.serviceId === serviceId);
+    if (mounted.length > 1 || (mounted.length === 1 && mounted[0]?.mountPath !== mountPath)) {
+      throw new Error('The service already has a different storage placement');
+    }
+    return mounted[0]?.volumeId;
+  }
+
   async function ensureVolume(serviceId: string, mountPath: string) {
-    const volumes = await call<{ environment: { volumeInstances: Edges<{ serviceId: string; mountPath: string }> } }>('stage storage placement',
-      'query($environmentId:String!){environment(id:$environmentId){volumeInstances(first:100){edges{node{serviceId mountPath}}}}}', { environmentId: scope.environmentId });
-    const mounted = volumes.environment.volumeInstances.edges.some(({ node }) => node.serviceId === serviceId && node.mountPath === mountPath);
+    const mounted = await mountedVolume(serviceId, mountPath);
     if (!mounted) await call('stage volume create', 'mutation($input:VolumeCreateInput!){volumeCreate(input:$input){id}}', { input: { ...scope, serviceId, mountPath } });
-    return mounted;
+    return !!mounted;
   }
 
   async function deployOpenBao() {
@@ -297,7 +309,7 @@ export async function customerRailway(target: CustomerProjectTarget, progress?: 
 
   await instances();
   progress?.({ step: 'Railway project', state: 'CONNECTED', resourceId: project.id });
-  return { project, scope, instances, ensureService, assertPrivate, setConfig, configure, upload, wait, deployImage, privatePostgres, publicOrigin, starterDomains, remove,
+  return { project, scope, instances, ensureService, assertPrivate, ensureVolume, mountedVolume, setConfig, configure, upload, wait, deployImage, privatePostgres, publicOrigin, starterDomains, remove,
   async installLaunchWorker(image: string, config: {
     team: string; workerKey: string; openBaoSecret: string; client?: string; callback: string; appProject?: string; registryOrigin?: string;
   }) {

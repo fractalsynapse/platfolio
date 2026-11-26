@@ -104,7 +104,7 @@ export const HostedStarterSchema = z.object({
   projectId: z.uuid(),
   deploymentId: z.uuid(),
   state: z.enum(['live', 'paused', 'removed']),
-  origin: z.url({ protocol: /^https$/ }).max(240),
+  origin: z.url({ protocol: /^https$/ }).max(240).optional(),
   observedAt: z.iso.datetime(),
 }).strict();
 export type HostedStarter = z.infer<typeof HostedStarterSchema>;

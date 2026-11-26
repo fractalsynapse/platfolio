@@ -339,7 +339,7 @@ export class PostgresStore implements Store {
       const observation = admit(HostedStarterSchema, {
         instanceId, projectId: input.projectId, state: input.state, observedAt: input.observedAt,
         deploymentId: input.state === 'live' ? input.deploymentId : current?.deployment_id,
-        origin: input.state === 'live' ? input.origin : current?.origin,
+        origin: input.state === 'live' ? input.origin : current?.origin ?? undefined,
       }, 'hosted starter');
       if (!observation.accepted) return err({ code: 'conflict', reason: observation.reason });
       if (existing) {
@@ -356,7 +356,7 @@ export class PostgresStore implements Store {
          VALUES ($1,$2,$3,$4,$5,$6)
          ON CONFLICT (instance_id) DO UPDATE SET project_id = EXCLUDED.project_id, deployment_id = EXCLUDED.deployment_id,
            origin = EXCLUDED.origin, state = EXCLUDED.state, observed_at = EXCLUDED.observed_at`,
-        [instanceId, input.projectId, observation.value.deploymentId, observation.value.origin, input.state, input.observedAt],
+        [instanceId, input.projectId, observation.value.deploymentId, observation.value.origin ?? null, input.state, input.observedAt],
       );
       await client.query(
         `INSERT INTO ${this.q('instance_environments')} (instance_id, environment, state, updated_at)
@@ -385,7 +385,7 @@ export class PostgresStore implements Store {
     const row = (await this.pool.query(`SELECT * FROM ${this.q('hosted_starters')} WHERE instance_id = $1`, [instanceId])).rows[0] as Row | undefined;
     if (!row) return err({ code: 'not-found', what: 'hosted starter', id: instanceId });
     const parsed = admit(HostedStarterSchema, {
-      instanceId, projectId: row.project_id, deploymentId: row.deployment_id, origin: row.origin, state: row.state, observedAt: iso(row.observed_at),
+      instanceId, projectId: row.project_id, deploymentId: row.deployment_id, origin: row.origin ?? undefined, state: row.state, observedAt: iso(row.observed_at),
     }, 'hosted starter row');
     return parsed.accepted ? ok(parsed.value) : err({ code: 'conflict', reason: parsed.reason });
   }
