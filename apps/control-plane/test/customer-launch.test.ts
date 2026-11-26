@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { createIdentityFixture, defaultIdentityConfig, signToken } from '@platfolio/contracts';
 import { createKernel, disposeKernel } from '@platfolio/kernel';
+import { FREE_STARTER_RELEASE } from '@platfolio/manifest';
 import { buildCapabilities } from '../src/capabilities.ts';
 import { customerLaunch, customerLaunchConfig } from '../src/customer-launch.ts';
 
@@ -143,6 +144,22 @@ test('customer launch is owner scoped and passes only the intended fields to a p
     assert.equal(deployed.status, 202);
     assert.deepEqual(await deployed.json(), { state: 'requested' });
     assert.deepEqual(last, { action: 'redeploy', body: ids });
+
+    const at = '2026-11-24T00:00:00.000Z';
+    const receipt = {
+      state: 'wiped', template: FREE_STARTER_RELEASE.template, revision: FREE_STARTER_RELEASE.revision, retainedVolumes: [],
+      events: [{ at, step: 'Remove and wipe data', state: 'WORKING', resourceId: ids.projectId },
+        { at, step: 'Removal complete', state: 'READY' }],
+    };
+    const readLaunch = () => fetch(path, { headers: headers('owner') });
+    workerReport = receipt;
+    const removed = await readLaunch();
+    assert.equal(removed.status, 200);
+    assert.deepEqual(await removed.json(), { ...receipt, removedProjectId: ids.projectId });
+    workerReport = { ...receipt, events: receipt.events.slice(0, 1), removedProjectId: ids.projectId };
+    const unverified = await readLaunch();
+    assert.equal(unverified.status, 200);
+    assert.deepEqual(await unverified.json(), { ...receipt, events: receipt.events.slice(0, 1) });
   } finally { await disposeKernel(kernel); }
 });
 

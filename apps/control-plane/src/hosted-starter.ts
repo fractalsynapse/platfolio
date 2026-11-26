@@ -36,6 +36,7 @@ export function hostedStarterObservation(teamId: string, data: unknown): NewHost
 
 export async function hostedStarterLink(store: Pick<Store, 'listInstances' | 'getHostedStarter'>, teamId: string, report: unknown) {
   const observation = hostedStarterObservation(teamId, report);
+  if (observation?.state === 'removed') return { removedProjectId: observation.projectId };
   if (observation?.state !== 'live') return {};
   const instance = (await store.listInstances(teamId)).find(({ name }) => name === observation.name);
   if (!instance) return { registration: 'pending' as const };

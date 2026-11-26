@@ -1504,7 +1504,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
         const report = await customer.call('report');
         if (!report.ok) return unavailable();
         const link = await hostedStarterLink(context.store, teamId, report.body);
-        return send('getStarterLaunch', 200, { ...(report.body as object), ...link });
+        return send('getStarterLaunch', 200, { ...(report.body as object), removedProjectId: undefined, ...link });
       }),
       scoped('POST', launchPath, 'startStarterLaunch', 'marketplace.manage', async ({ teamId }) =>
         deps.starterLaunch?.teamId === teamId

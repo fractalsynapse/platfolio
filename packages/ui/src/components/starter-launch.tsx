@@ -50,7 +50,8 @@ function LaunchPanel({ teamId, teamName, managedProjectId }: z.infer<typeof prop
     }
   }
 
-  if (managedProjectId && report?.projectId !== managedProjectId && launch.state.status === 'loaded') {
+  const reportedProjectId = report?.state === 'wiped' ? report.removedProjectId : report?.projectId;
+  if (managedProjectId && reportedProjectId !== managedProjectId && launch.state.status === 'loaded') {
     return <WorkspacePanel title="Hosting">Platfolio couldn’t match this app’s Railway project to the saved launch.</WorkspacePanel>;
   }
   if (!managedProjectId && report?.registration === 'recorded' && report.instanceName && teamName) {
@@ -93,7 +94,8 @@ function LaunchPanel({ teamId, teamName, managedProjectId }: z.infer<typeof prop
           onRemove={({ data, confirmation }) => act(data, confirmation)} />}
     </>}
     {problem && <p role="alert">{problem}</p>}
-    {managedProjectId && !ready && teamName && <WorkspaceLink href={workspacePaths.teamConnections(teamName)}>Check team connections</WorkspaceLink>}
+    {managedProjectId && report?.state !== 'wiped' && !ready && teamName &&
+      <WorkspaceLink href={workspacePaths.teamConnections(teamName)}>Check team connections</WorkspaceLink>}
   </WorkspacePanel>;
 }
 
