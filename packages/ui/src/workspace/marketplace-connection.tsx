@@ -43,7 +43,7 @@ export function MarketplaceConnection({ teamId }: { readonly teamId: string }) {
       <h3 id="setup-marketplace-title">Marketplace</h3>
       <span className="ui-setup-status">{state === 'connected' ? 'Connected' : state === 'unavailable' ? 'Needs attention' : 'Connection required'}</span>
     </div>
-    <p>Use a one-time code from your hub team to get a saved copy of the Starter Web release.</p>
+    <p>Use a one-time code from your hub team to browse pinned template releases.</p>
     <p className="ui-workspace-meta">{ageLabel(connection.state.freshness, clock().toISOString()).text}</p>
     {state === 'connected' && <p>Connected. Your marketplace team can revoke access without stopping your apps.</p>}
     {state === 'openbao-required' && <p>Unlock OpenBao to check this connection.</p>}
