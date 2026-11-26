@@ -275,7 +275,7 @@ export function installationLaunch(scopedRoute: typeof scoped, config?: { provid
             };
             const audit = await context.store.appendAudit({
               actorKind: 'user', actorRef: personId, action: 'installation.maintenance.request', target: teamId,
-              detail: { ref: id, action: input.action, ...(input.action === 'update' ? { environment: input.environment, revision } : {}) },
+              detail: { ref: id, action: input.action, ...(input.action === 'update' ? { environment: input.environment, commit: revision } : {}) },
             });
             if (!audit.ok || !await context.store.saveInstallationJournal(next)) return conflict('Another operation changed this installation.');
             sessions.delete(id);
