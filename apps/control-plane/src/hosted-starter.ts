@@ -1,19 +1,20 @@
 import { HostedStarterSchema, type NewHostedStarter, type Store } from '@platfolio/contracts';
 import type { SuccessOf } from '@platfolio/api-contract/generated/types';
-import { MARKETPLACE_RELEASES, STARTER_WORKER_RELEASE } from '@platfolio/manifest';
+import { TEMPLATE_CATALOG, STARTER_WORKER_RELEASE } from '@platfolio/manifest';
 
 type Report = SuccessOf<'getStarterLaunch'>;
 
 export function hostedStarterObservation(teamId: string, data: unknown): NewHostedStarter | undefined {
   if (!data || typeof data !== 'object') return;
   const report = data as Partial<Report>;
-  const release = MARKETPLACE_RELEASES.find(({ template, revision, installable }) =>
-    installable && template === report.template && revision === report.revision);
-  if (!release || !Array.isArray(report.events)) return;
+  const entry = TEMPLATE_CATALOG.find(({ name }) => name === report.template);
+  // This report comes from the installation's authenticated worker, which verifies and saves the pin.
+  if (!entry || typeof report.revision !== 'string' || !/^[a-f0-9]{40}$/.test(report.revision) ||
+      !Array.isArray(report.events)) return;
   const last = report.events.at(-1);
   const common = {
-    teamId, name: release.template, template: release.template,
-    templateRef: { repo: release.repo, commitSha: release.revision },
+    teamId, name: entry.name, template: entry.name,
+    templateRef: { repo: entry.repo, commitSha: report.revision },
   };
   if (last?.state !== 'READY') return;
   if (last.step === 'Removal complete' && (report.state === 'kept' || report.state === 'wiped')) {
@@ -27,7 +28,7 @@ export function hostedStarterObservation(teamId: string, data: unknown): NewHost
     return;
   }
   if (report.state !== 'ready') return;
-  if (release.template === STARTER_WORKER_RELEASE.template) {
+  if (entry.name === STARTER_WORKER_RELEASE.template) {
     if (last.step !== 'Worker is ready' || report.origin !== undefined) return;
   } else if (last.step !== 'Open your app' || typeof report.origin !== 'string' ||
       !/^https:\/\/[a-z0-9-]+\.up\.railway\.app$/.test(report.origin)) return;

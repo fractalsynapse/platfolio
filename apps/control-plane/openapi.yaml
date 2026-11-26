@@ -574,17 +574,7 @@ paths:
             application/json:
               schema: &marketplace-catalog
                 type: array
-                items:
-                  type: object
-                  additionalProperties: false
-                  required: [template, repo, version, revision, priceMinor]
-                  properties:
-                    template: { type: string }
-                    repo: { type: string }
-                    version: { type: string }
-                    revision: { type: string, pattern: '^[a-f0-9]{40}$' }
-                    priceMinor: { type: integer, enum: [0] }
-                    installable: { type: boolean }
+                items: { $ref: '#/components/schemas/MarketplaceRelease' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '503':
@@ -2531,6 +2521,36 @@ paths:
           description: Return to the configured Platfolio site without forwarding authorization data.
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /api/v1/teams/{teamId}/marketplace/releases:
+    parameters:
+      - { name: teamId, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: publishMarketplaceRelease
+      summary: Publish an immutable free template release on the hub
+      description: Restricted to owners of the configured hub publisher team. Repeating the same publication is idempotent.
+      security: [{ bearerJwt: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MarketplaceReleasePublication'
+      responses:
+        '204': { description: The release is published. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: This version has already been published with a different pin.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '503':
+          description: The source repository could not be read.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
   /api/v1/teams/{teamId}/marketplace/installations:
     parameters:
       - { name: teamId, in: path, required: true, schema: { type: string } }
@@ -2669,6 +2689,7 @@ paths:
   /api/v1/marketplace/installations/{installationId}/catalog:
     parameters:
       - { name: installationId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: format, in: query, schema: { type: string, enum: [releases] }, description: Send releases to include versions published after the bundled catalog. }
     post:
       operationId: getEnrolledMarketplaceCatalog
       summary: Read the pinned registry catalog using an installation grant
@@ -2894,6 +2915,7 @@ paths:
                   state: { type: string, enum: [idle, running, ready, failed, removing, kept, wiped] }
                   template: { type: string }
                   revision: { type: string }
+                  version: { type: string }
                   registration: { type: string, enum: [pending, recorded, conflict] }
                   instanceName: { type: string }
                   projectId: { type: string }
@@ -2924,7 +2946,7 @@ paths:
     post:
       operationId: startStarterLaunch
       summary: Launch or resume a pinned template using the connected customer runner
-      description: Shared Identity and Starter Worker use the connected marketplace for new installs. Starter Web uses its saved release claim. Restores use the release already acquired.
+      description: A fresh install uses the selected release from the connected hub. Resuming setup or restoring uses the release already recorded in the private installation.
       security: [{ bearerJwt: [] }]
       requestBody:
         content:
@@ -2932,8 +2954,8 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [bootstrap]
               properties:
+                release: { $ref: '#/components/schemas/MarketplaceReleaseSelection' }
                 bootstrap: { type: string, pattern: '^[A-Za-z0-9+/]{512}$', description: Owner bootstrap material encrypted to the private worker. }
       responses:
         '200': *starter-launch-response
@@ -2942,7 +2964,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409':
-          description: A new launch needs a free Starter Web claim from the marketplace.
+          description: The selected marketplace release is unavailable or conflicts with the existing install.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -3041,6 +3063,39 @@ components:
           example: 'Bearer realm="platfolio", error="invalid_token"'
 
   schemas:
+    MarketplaceReleaseSelection:
+      # GENERATED by scripts/gen-api-spec.ts from MarketplaceReleaseSelectionSchema (packages/contracts). Do not hand-edit: pnpm run spec:check fails on a difference, and the prose lives in packages/api-contract/src/spec-annotations.ts.
+      type: object
+      required: [version, revision]
+      properties:
+        version: { type: string, pattern: '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$', maxLength: 64 }
+        revision: { type: string, pattern: '^[a-f0-9]{40}$' }
+      additionalProperties: false
+    MarketplaceReleasePublication:
+      # GENERATED by scripts/gen-api-spec.ts from MarketplaceReleasePublicationSchema (packages/contracts). Do not hand-edit: pnpm run spec:check fails on a difference, and the prose lives in packages/api-contract/src/spec-annotations.ts.
+      type: object
+      required: [version, revision, template, installer]
+      properties:
+        version: { type: string, pattern: '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$', maxLength: 64 }
+        revision: { type: string, pattern: '^[a-f0-9]{40}$' }
+        template: { type: string, enum: [starter-web, starter-worker, shared-identity] }
+        installer: { type: string, pattern: '^[a-z0-9-]+@[0-9]+$', maxLength: 64 }
+        image: { type: string, pattern: '^keycloak\/keycloak:[a-zA-Z0-9._-]+@sha256:[a-f0-9]{64}$', maxLength: 192 }
+      additionalProperties: false
+    MarketplaceRelease:
+      # GENERATED by scripts/gen-api-spec.ts from MarketplaceReleaseSchema (packages/contracts). Do not hand-edit: pnpm run spec:check fails on a difference, and the prose lives in packages/api-contract/src/spec-annotations.ts.
+      type: object
+      required: [version, revision, template, installer, repo, priceMinor, installable]
+      properties:
+        version: { type: string, pattern: '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$', maxLength: 64 }
+        revision: { type: string, pattern: '^[a-f0-9]{40}$' }
+        template: { type: string, enum: [starter-web, starter-worker, shared-identity] }
+        installer: { type: string, pattern: '^[a-z0-9-]+@[0-9]+$', maxLength: 64 }
+        image: { type: string, pattern: '^keycloak\/keycloak:[a-zA-Z0-9._-]+@sha256:[a-f0-9]{64}$', maxLength: 192 }
+        repo: { type: string }
+        priceMinor: { type: number, const: 0 }
+        installable: { type: boolean }
+      additionalProperties: false
     InstallationLaunchInput:
       # GENERATED by scripts/gen-api-spec.ts from InstallationLaunchInputSchema (packages/contracts). Do not hand-edit: pnpm run spec:check fails on a difference, and the prose lives in packages/api-contract/src/spec-annotations.ts.
       type: object

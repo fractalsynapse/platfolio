@@ -4,7 +4,7 @@
  * hand, because every line reproduces from the specification.
  *
  * Source: apps/control-plane/openapi.yaml (OpenAPI 3.1.0, info.version 0.1.0)
- * Input digest: sha256/c36f1e4b948bc5f5
+ * Input digest: sha256/d06807d9aef5ed93
  *
  * Reproduce it with `pnpm run api:types`. `pnpm run api:types:check` fails when this file stops matching
  * what the committed spec produces, which is the only way a generated type deserves to be trusted.
@@ -359,6 +359,30 @@ export interface MarketplaceInstallation {
   state: 'pending' | 'connected' | 'linked' | 'disconnected';
 }
 
+export interface MarketplaceRelease {
+  version: string;
+  revision: string;
+  template: 'starter-web' | 'starter-worker' | 'shared-identity';
+  installer: string;
+  image?: string;
+  repo: string;
+  priceMinor: 0;
+  installable: boolean;
+}
+
+export interface MarketplaceReleasePublication {
+  version: string;
+  revision: string;
+  template: 'starter-web' | 'starter-worker' | 'shared-identity';
+  installer: string;
+  image?: string;
+}
+
+export interface MarketplaceReleaseSelection {
+  version: string;
+  revision: string;
+}
+
 export interface NotificationRule {
   id: string;
   instanceId: string;
@@ -572,6 +596,7 @@ export interface ApiParameters {
   /** POST /api/v1/marketplace/installations/{installationId}/catalog */
   getEnrolledMarketplaceCatalog: {
     installationId: string;
+    format?: 'releases';
   };
   /** GET /healthz */
   getHealth: Record<string, never>;
@@ -709,6 +734,10 @@ export interface ApiParameters {
   /** POST /api/v1/instances/{instanceId}/capability */
   publishCapability: {
     instanceId: string;
+  };
+  /** POST /api/v1/teams/{teamId}/marketplace/releases */
+  publishMarketplaceRelease: {
+    teamId: string;
   };
   /** PUT /api/v1/instances/{instanceId}/plan */
   putPlan: {
@@ -898,6 +927,8 @@ export interface ApiRequestBodies {
       state?: 'not-issued' | 'issued-and-placed' | 'placement-unknown' | 're-issue-required';
     }>;
   };
+  /** POST /api/v1/teams/{teamId}/marketplace/releases */
+  publishMarketplaceRelease: MarketplaceReleasePublication;
   /** PUT /api/v1/instances/{instanceId}/plan */
   putPlan: {
     /** An InfraPlan, whose own `planHash` is the authority. Carries topology and digests; never a credential value (D4). */
@@ -958,8 +989,9 @@ export interface ApiRequestBodies {
   startHubInstallation: InstallationLaunchInput;
   /** POST /api/v1/teams/{teamId}/starter-launch */
   startStarterLaunch: {
+    release?: MarketplaceReleaseSelection;
     /** Owner bootstrap material encrypted to the private worker. */
-    bootstrap: string;
+    bootstrap?: string;
   };
   /** POST /api/v1/instances/{instanceId}/dispatches/{dispatchId}/trigger */
   triggerDispatch: {
@@ -1234,14 +1266,7 @@ export interface ApiResponses {
   };
   /** POST /api/v1/marketplace/installations/{installationId}/catalog */
   getEnrolledMarketplaceCatalog: {
-    '200': Array<{
-      template: string;
-      repo: string;
-      version: string;
-      revision: string;
-      priceMinor: 0;
-      installable?: boolean;
-    }>;
+    '200': MarketplaceRelease[];
     '400': Error;
     '404': Error;
   };
@@ -1376,6 +1401,7 @@ export interface ApiResponses {
       state: 'idle' | 'running' | 'ready' | 'failed' | 'removing' | 'kept' | 'wiped';
       template: string;
       revision: string;
+      version?: string;
       registration?: 'pending' | 'recorded' | 'conflict';
       instanceName?: string;
       projectId?: string;
@@ -1490,14 +1516,7 @@ export interface ApiResponses {
   };
   /** GET /api/v1/templates */
   listInstallableTemplates: {
-    '200': Array<{
-      template: string;
-      repo: string;
-      version: string;
-      revision: string;
-      priceMinor: 0;
-      installable?: boolean;
-    }>;
+    '200': MarketplaceRelease[];
     '401': Error;
     '403': Error;
     '503': Error;
@@ -1615,6 +1634,16 @@ export interface ApiResponses {
     '401': Error;
     '404': Error;
   };
+  /** POST /api/v1/teams/{teamId}/marketplace/releases */
+  publishMarketplaceRelease: {
+    '204': void;
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '409': Error;
+    '503': Error;
+  };
   /** PUT /api/v1/instances/{instanceId}/plan */
   putPlan: {
     '200': {
@@ -1729,6 +1758,7 @@ export interface ApiResponses {
       state: 'idle' | 'running' | 'ready' | 'failed' | 'removing' | 'kept' | 'wiped';
       template: string;
       revision: string;
+      version?: string;
       registration?: 'pending' | 'recorded' | 'conflict';
       instanceName?: string;
       projectId?: string;
@@ -1815,6 +1845,7 @@ export interface ApiResponses {
       state: 'idle' | 'running' | 'ready' | 'failed' | 'removing' | 'kept' | 'wiped';
       template: string;
       revision: string;
+      version?: string;
       registration?: 'pending' | 'recorded' | 'conflict';
       instanceName?: string;
       projectId?: string;
@@ -2100,6 +2131,8 @@ export const ENDPOINTS = {
   postAttestation: { method: 'post', path: '/api/v1/attestations' },
   /** POST /api/v1/instances/{instanceId}/capability */
   publishCapability: { method: 'post', path: '/api/v1/instances/{instanceId}/capability' },
+  /** POST /api/v1/teams/{teamId}/marketplace/releases */
+  publishMarketplaceRelease: { method: 'post', path: '/api/v1/teams/{teamId}/marketplace/releases' },
   /** PUT /api/v1/instances/{instanceId}/plan */
   putPlan: { method: 'put', path: '/api/v1/instances/{instanceId}/plan' },
   /** PUT /api/v1/instances/{instanceId}/secrets/{name} */

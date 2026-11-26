@@ -1,22 +1,33 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import type { StarterLaunch, StarterLaunchEvent, StarterLaunchReport, StarterRemoval } from '../apps/control-plane/src/starter-launch.ts';
+import { MARKETPLACE_RELEASES, readMarketplaceListing } from '../packages/manifest/src/template-catalog.ts';
+import type { MarketplaceRelease } from '../packages/contracts/src/marketplace-release.ts';
 import type { SourceReleaseHosting } from '../packages/contracts/src/source-release-hosting.ts';
 
 export function customerLaunchRun(teamId: string, journalPath: string, provider: SourceReleaseHosting): StarterLaunch & {
-  startWithBootstrap: (bootstrap: string) => StarterLaunchReport;
+  startWithRelease: (release?: MarketplaceRelease, bootstrap?: string) => StarterLaunchReport;
+  needsRelease: () => boolean;
   redeploy: () => StarterLaunchReport;
   changeBrand: (value: string) => StarterLaunchReport;
 } {
-  const journal: StarterLaunchReport & { publicBrand?: string } = existsSync(journalPath)
+  const journal: StarterLaunchReport & { publicBrand?: string; pinnedRelease?: unknown } = existsSync(journalPath)
     ? JSON.parse(readFileSync(journalPath, 'utf8'))
     : { state: 'idle', events: [], template: provider.template, revision: provider.revision, retainedVolumes: [] };
   if (journal.template !== provider.template) {
     throw new Error('The launch journal belongs to a different template');
   }
-  let { publicBrand, ...report } = journal;
+  const baseline = MARKETPLACE_RELEASES.find(({ template, revision }) => template === journal.template && revision === journal.revision);
+  let { publicBrand, pinnedRelease: savedRelease, ...report } = journal;
+  let pinnedRelease = savedRelease === undefined ? undefined : readMarketplaceListing(savedRelease);
+  if (savedRelease !== undefined && (!pinnedRelease || pinnedRelease.template !== report.template ||
+      pinnedRelease.revision !== report.revision || pinnedRelease.version !== report.version)) {
+    throw new Error('The launch journal has an invalid release pin');
+  }
+  if (!report.version && baseline) report.version = baseline.version;
+  const needsRelease = () => report.state === 'idle' || report.state === 'wiped';
   function save() {
     const pending = `${journalPath}.tmp`;
-    writeFileSync(pending, JSON.stringify({ ...report, publicBrand }, null, 2) + '\n', { mode: 0o600 });
+    writeFileSync(pending, JSON.stringify({ ...report, publicBrand, pinnedRelease }, null, 2) + '\n', { mode: 0o600 });
     renameSync(pending, journalPath);
   }
   function event(data: Omit<StarterLaunchEvent, 'at'>) {
@@ -27,8 +38,13 @@ export function customerLaunchRun(teamId: string, journalPath: string, provider:
     report.state = 'failed';
     event({ step: 'Resume setup', state: 'FAILED', detail: 'The runner restarted. Resume the previous operation.' });
   }
-  function start(redeploy = false, brand?: string, bootstrap?: string) {
+  function start(redeploy = false, brand?: string, bootstrap?: string, release?: MarketplaceRelease) {
     if (redeploy ? report.state !== 'ready' : ['running', 'removing', 'ready'].includes(report.state)) return report;
+    if (release && needsRelease()) {
+      pinnedRelease = release;
+      report.revision = release.revision;
+      report.version = release.version;
+    }
     if (brand !== undefined) publicBrand = brand;
     report.state = 'running';
     event(redeploy ? { step: brand === undefined ? 'Redeploy the pinned release' : 'Publish the app header label',
@@ -36,7 +52,9 @@ export function customerLaunchRun(teamId: string, journalPath: string, provider:
       : { step: 'Launch approved', state: 'READY', detail: 'A dedicated staging project for this template.' });
     void (async () => {
       try {
+        const pin = pinnedRelease ?? baseline;
         const installed = await provider.deploy({
+          ...(pin === undefined ? {} : { release: pin }),
           ...(bootstrap === undefined ? {} : { bootstrap }),
           ...(report.projectId ? { projectId: report.projectId } : {}),
           ...(publicBrand === undefined ? {} : { publicLabel: publicBrand }),
@@ -82,5 +100,5 @@ export function customerLaunchRun(teamId: string, journalPath: string, provider:
     })();
     return report;
   }
-  return { teamId, read: () => report, start: () => start(), startWithBootstrap: (bootstrap) => start(false, undefined, bootstrap), redeploy: () => start(true), changeBrand: (value) => start(true, value), remove };
+  return { teamId, read: () => report, start: () => start(), startWithRelease: (release, bootstrap) => start(false, undefined, bootstrap, release), needsRelease, redeploy: () => start(true), changeBrand: (value) => start(true, value), remove };
 }

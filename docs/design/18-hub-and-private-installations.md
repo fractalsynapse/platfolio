@@ -423,6 +423,25 @@ The private app status page uses the team activity timeline component. The contr
 keeps the observations and outage transitions within the installation. Publishing status
 to the public site requires an explicit production environment and a separate owner action.
 
+### Template release publishing
+
+The hub registry is the source of marketplace versions (D75). On a hub configured with
+`PLATFOLIO_MARKETPLACE_PUBLISHER_TEAM`, an owner of that team can call
+`POST /api/v1/teams/{teamId}/marketplace/releases`. Supply the template, stable SemVer,
+full Git commit, and installer identifier (for example, `starter-worker@1`). Shared
+Identity also requires the Keycloak image with its SHA-256 digest. The hub reads
+the template's public repository at that commit and validates it against the installer.
+Repeating the same release succeeds without changing it. Changing a published version's
+pin is refused. Staging and production use their own registry databases.
+
+A connected private installation reads releases from the hub using its installation
+grant. It accepts the configured repository and installer for each supported template.
+Choose template shows the newest compatible release and links to its exact version and commit.
+The owner approves that pin on the launch screen. The worker saves it before touching
+Railway and uses it for retries, restore, and redeployment even if the hub cannot be
+reached. A source build pins the Git input. Its build dependencies must also be
+immutable to reproduce the same image bytes. Shared Identity pins the image itself.
+
 ### Private marketplace connection
 
 Set the installation worker's hub with the launcher's `--registry-origin` option.
@@ -439,9 +458,9 @@ acquired. Retrying after an interrupted exchange uses the same saved credential.
 The browser gets connection state and release metadata. A hub owner can revoke the
 connection with the existing marketplace disconnect operation. The private worker
 keeps the acquired release metadata and local apps continue running.
-For a new install configured with a registry the worker checks for a saved claim before
-it deploys Starter Web. The check reads OpenBao and can succeed while the hub is offline.
-An existing deployment can also be restored without contacting the hub.
+A new install with a configured registry checks the live catalog for the approved release.
+Starter Web also checks the saved enrollment claim in OpenBao. An existing deployment
+can be restored without contacting the hub.
 
 New worker policies include the exact OpenBao path
 `customer-launch/data/marketplace`. For an installation initialized before this

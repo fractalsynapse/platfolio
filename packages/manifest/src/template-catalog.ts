@@ -38,6 +38,7 @@
  *    green check actually look at" stays answerable after the fact.
  */
 import { parse as parseYaml } from 'yaml';
+import { MarketplaceReleasePublicationSchema, type MarketplaceRelease, type MarketplaceReleasePublication } from '@platfolio/contracts';
 
 /** A published template, as the catalog names it (D45: `Instance.template` holds `name`). */
 export interface TemplateCatalogEntry {
@@ -111,12 +112,50 @@ export const SHARED_IDENTITY_RELEASE = {
   image: 'keycloak/keycloak:26.8.2@sha256:c126f032d43b941ed7c5ccca7d6571596d8eab84d748afd7c86989e48ef07b8f',
 } as const;
 
-export const MARKETPLACE_RELEASES = [
-  { ...FREE_STARTER_RELEASE, installable: true },
-  { ...STARTER_WORKER_RELEASE, installable: true },
-  { template: SHARED_IDENTITY_RELEASE.template, version: SHARED_IDENTITY_RELEASE.version,
-    revision: SHARED_IDENTITY_RELEASE.revision, priceMinor: 0, installable: true },
-].map((release) => ({ ...release, repo: templateCatalogEntry(release.template).repo }));
+export function marketplaceInstaller(template: MarketplaceReleasePublication['template']) {
+  return `${template}@1`;
+}
+
+function listing(release: MarketplaceReleasePublication): MarketplaceRelease {
+  return {
+    ...release, repo: templateCatalogEntry(release.template).repo, priceMinor: 0,
+    installable: release.installer === marketplaceInstaller(release.template),
+  };
+}
+
+export const MARKETPLACE_RELEASES = [FREE_STARTER_RELEASE, STARTER_WORKER_RELEASE, SHARED_IDENTITY_RELEASE]
+  .map(({ priceMinor: _, ...release }) => listing({ ...release, installer: marketplaceInstaller(release.template) }));
+
+export function marketplaceCatalog(published: readonly MarketplaceReleasePublication[]) {
+  return [...MARKETPLACE_RELEASES, ...published.map(listing)].sort((a, b) => {
+    const byTemplate = TEMPLATE_CATALOG.findIndex(({ name }) => a.template === name) -
+      TEMPLATE_CATALOG.findIndex(({ name }) => b.template === name);
+    if (byTemplate) return byTemplate;
+    const first = a.version.split('.').map(BigInt);
+    const second = b.version.split('.').map(BigInt);
+    for (const [index, value] of first.entries()) {
+      if (value !== second[index]) return value > second[index]! ? -1 : 1;
+    }
+    return 0;
+  });
+}
+
+/** Accept the hub's release data only within the private build's trusted repository and installer boundary. */
+export function readMarketplaceListing(raw: unknown): MarketplaceRelease | undefined {
+  if (!raw || typeof raw !== 'object') return;
+  const { repo, priceMinor, installable, ...publication } = raw as Record<string, unknown>;
+  const baseline = MARKETPLACE_RELEASES.find((entry) => entry.template === publication.template &&
+    entry.version === publication.version && entry.revision === publication.revision);
+  const candidate = publication.installer === undefined && baseline
+    ? { ...publication, installer: baseline.installer, ...(baseline.image ? { image: baseline.image } : {}) }
+    : publication;
+  const parsed = MarketplaceReleasePublicationSchema.safeParse(candidate);
+  if (!parsed.success || repo !== templateCatalogEntry(parsed.data.template).repo || priceMinor !== 0 ||
+      (parsed.data.template === 'shared-identity') !== (parsed.data.image !== undefined)) return;
+  const release = listing(parsed.data);
+  if (baseline && (release.image !== baseline.image || release.installer !== baseline.installer)) return;
+  return { ...release, installable: release.installable && installable === true };
+}
 
 /** Every repository the catalog names. `check-project.ts` compares this against what the tree is allowed to name. */
 export const TEMPLATE_REPOSITORIES: readonly string[] = TEMPLATE_CATALOG.map((t) => t.repo);

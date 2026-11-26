@@ -11,6 +11,7 @@ import { StarterBrandChangeSchema } from '../packages/contracts/src/starter-bran
 import { railwayStarterWorkerHosting } from './launch-starter-worker.ts';
 import { railwaySharedIdentityHosting } from './launch-shared-identity.ts';
 import { railwayStarterHosting } from './launch-starter-app.ts';
+import type { MarketplaceReleaseSelection } from '../packages/contracts/src/marketplace-release.ts';
 import { CustomerHostingCommandSchema, type PrivateLaunchTemplate } from '../packages/contracts/src/customer-hosting-commands.ts';
 import { privateRailwayExecution } from '../apps/control-plane/src/private-railway-execution.ts';
 import { createKernel } from '../packages/kernel/src/index.ts';
@@ -29,7 +30,8 @@ if (!directory || !workerKey || workerKey.length < 32 || !team || !callback || !
 }
 mkdirSync(directory, { recursive: true, mode: 0o700 });
 const bao = customerOpenBao(baoOrigin, baoSecret, directory);
-const marketplace = customerMarketplaceConnection(privateMarketplaceOrigin(process.env.PLATFOLIO_REGISTRY_ORIGIN), bao);
+const registryOrigin = privateMarketplaceOrigin(process.env.PLATFOLIO_REGISTRY_ORIGIN);
+const marketplace = customerMarketplaceConnection(registryOrigin, bao);
 const oauth = customerRailwayOAuth({ callback, workspaceId: workspace, ...(client ? { clientId: client } : {}), ...(project ? { projectId: project } : {}) }, bao);
 const sourceHosting = railwayStarterHosting(oauth.credential);
 const launch = customerLaunchRun(team, join(directory, 'launch.json'), sourceHosting);
@@ -52,6 +54,14 @@ const execution = await createKernel({ provider: 'railway', infrastructure: [pri
 const expected = Buffer.from('Bearer ' + workerKey);
 const replyError = { error: 'launcher-setup-unavailable', message: 'Check OpenBao and Railway connection, then try again.' };
 let changingDomain = false;
+
+async function selectedRelease(runner: ReturnType<typeof customerLaunchRun>, selection: MarketplaceReleaseSelection | undefined) {
+  if (!runner.needsRelease()) return;
+  if (!selection) return registryOrigin ? null : undefined;
+  const template = runner.read().template;
+  return (await marketplace.catalog()).find((release) => release.template === template && release.installable &&
+    release.version === selection.version && release.revision === selection.revision) ?? null;
+}
 
 const server = createServer({ requestTimeout: 10000 }, (request, response) => {
   const reply = (status: number, body: unknown) => {
@@ -95,15 +105,11 @@ const server = createServer({ requestTimeout: 10000 }, (request, response) => {
           reply(200, runner.redeploy());
           return;
         }
-        // An existing install can be recovered even if its marketplace connection changes.
-        if (!current.projectId && !(await marketplace.catalog()).some(({ template, installable }) => template === command.body.template && installable)) {
-          reply(409, { error: 'marketplace-connection-required' });
-          return;
-        }
-        if (command.body.template === 'starter-worker') { reply(200, runner.start()); return; }
-        const bootstrap = bao.openEnvelope(command.body.bootstrap);
-        if (!/^[A-Za-z0-9_-]{32,64}$/.test(bootstrap)) { reply(400, null); return; }
-        reply(200, runner.startWithBootstrap(bootstrap));
+        const pin = await selectedRelease(runner, command.body.release);
+        if (pin === null || (pin && !runner.needsRelease() && runner.read().revision !== pin.revision)) { reply(409, null); return; }
+        const bootstrap = command.body.template === 'shared-identity' ? bao.openEnvelope(command.body.bootstrap) : undefined;
+        if (bootstrap !== undefined && !/^[A-Za-z0-9_-]{32,64}$/.test(bootstrap)) { reply(400, null); return; }
+        reply(200, runner.startWithRelease(pin, bootstrap));
         return;
       }
       case 'report': reply(200, await launch.read()); return;
@@ -168,12 +174,13 @@ const server = createServer({ requestTimeout: 10000 }, (request, response) => {
         if (await bao.status() !== 'ready' || !(await bao.readGrant()).grant) { reply(503, replyError); return; }
         if (changingDomain) { reply(409, null); return; }
         if (command.action === 'start') {
-          const current = await launch.read();
-          if (!current.deploymentId && !await marketplace.canLaunchStarter()) {
-            reply(409, { error: 'marketplace-claim-required' });
+          const pin = await selectedRelease(launch, command.body?.release);
+          if (pin === null || (launch.needsRelease() && !await marketplace.canLaunchStarter()) ||
+              (pin && !launch.needsRelease() && launch.read().revision !== pin.revision)) {
+            reply(409, null);
             return;
           }
-          reply(200, await launch.start());
+          reply(200, launch.startWithRelease(pin));
         }
         else if (command.action === 'redeploy') {
           const current = await launch.read();

@@ -89,7 +89,7 @@ test('customer launch is owner scoped and passes only the intended fields to a p
     const launch = await fetch(path, { method: 'POST', headers: headers('owner') });
     assert.equal(launch.status, 409);
     assert.deepEqual(await launch.json(), {
-      error: 'marketplace-claim-required', message: 'Go to Connections → Marketplace to claim Starter Web, then launch again.',
+      error: 'marketplace-release-unavailable', message: 'Check Marketplace in Connections, then open Choose template and select an available release.',
     });
     const shared = path + '?template=shared-identity';
     assert.equal((await fetch(path + '?template=unknown', { method: 'POST', headers: headers('owner') })).status, 400);
@@ -104,9 +104,10 @@ test('customer launch is owner scoped and passes only the intended fields to a p
     assert.deepEqual(last, { action: 'template-start', body: { template: 'shared-identity', bootstrap } });
     const worker = path + '?template=starter-worker';
     assert.equal((await fetch(worker, { method: 'POST', headers: headers('other') })).status, 404);
-    const launchWorker = await fetch(worker, { method: 'POST', headers: headers('owner') });
+    const selection = { version: '0.1.2', revision: '1'.repeat(40) };
+    const launchWorker = await fetch(worker, { method: 'POST', headers: headers('owner'), body: JSON.stringify({ release: selection }) });
     assert.equal(launchWorker.status, 200);
-    assert.deepEqual(last, { action: 'template-start', body: { template: 'starter-worker' } });
+    assert.deepEqual(last, { action: 'template-start', body: { template: 'starter-worker', release: selection } });
     assert.equal((await launchWorker.json() as { origin?: string }).origin, undefined);
     const response = await fetch(api + '/railway/callback?state=' + 'a'.repeat(43) + '&code=local-test', { redirect: 'manual' });
     assert.equal(response.status, 303);

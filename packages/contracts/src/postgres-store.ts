@@ -1,3 +1,4 @@
+import { MarketplaceReleasePublicationSchema, type MarketplaceReleasePublication } from './marketplace-release.ts';
 import { InstallationJournalSchema, type InstallationJournal } from './installation-journal.ts';
 import { z } from 'zod';
 import { Pool, type PoolClient } from 'pg';
@@ -213,6 +214,31 @@ export class PostgresStore implements Store {
     return result.rowCount === 1;
   }
 
+  async listMarketplaceReleases() {
+    const result = await this.pool.query(
+      `SELECT template, version, revision, installer, image FROM ${this.q('marketplace_releases')}`,
+    );
+    return result.rows.map(({ image, ...release }) => MarketplaceReleasePublicationSchema.parse({
+      ...release, ...(image === null ? {} : { image }),
+    }));
+  }
+
+  async publishMarketplaceRelease(release: MarketplaceReleasePublication) {
+    const { template, version, revision, installer, image } = release;
+    const result = await this.pool.query(
+      `INSERT INTO ${this.q('marketplace_releases')} (template, version, revision, installer, image)
+       VALUES ($1, $2, $3, $4, $5) ON CONFLICT (template, version) DO NOTHING`,
+      [template, version, revision, installer, image ?? null],
+    );
+    if (result.rowCount === 1) return 'created';
+    const existing = await this.pool.query(
+      `SELECT 1 FROM ${this.q('marketplace_releases')}
+       WHERE template = $1 AND version = $2 AND revision = $3 AND installer = $4 AND image IS NOT DISTINCT FROM $5::text`,
+      [template, version, revision, installer, image ?? null],
+    );
+    return existing.rowCount === 1 ? 'existing' : 'conflict';
+  }
+
   async verifyMarketplaceCredential(installationId: string, registryDigest: string): Promise<boolean> {
     const result = await this.pool.query(
       `SELECT installation_id FROM ${this.q('marketplace_links')}
@@ -316,7 +342,7 @@ export class PostgresStore implements Store {
       if (input.state !== 'live' && !current) return err({ code: 'not-found', what: 'hosted starter', id: input.name });
       const replacement = input.state === 'live' && current?.state === 'removed';
       if (existing && (!current || (!replacement && current.project_id !== input.projectId) || existing.template !== input.template ||
-          existing.template_commit !== input.templateRef.commitSha || existing.template_repo !== input.templateRef.repo)) {
+          (!replacement && existing.template_commit !== input.templateRef.commitSha) || existing.template_repo !== input.templateRef.repo)) {
         return err({ code: 'conflict', reason: 'This name already belongs to a different instance' });
       }
       if (existing && current && Date.parse(iso(current.observed_at)) >= Date.parse(input.observedAt)) {
@@ -343,7 +369,10 @@ export class PostgresStore implements Store {
       }, 'hosted starter');
       if (!observation.accepted) return err({ code: 'conflict', reason: observation.reason });
       if (existing) {
-        await client.query(`UPDATE ${this.q('instances')} SET state = $2, updated_at = $3 WHERE id = $1`, [instanceId, state, now]);
+        await client.query(
+          `UPDATE ${this.q('instances')} SET state = $2, updated_at = $3, template_commit = $4 WHERE id = $1`,
+          [instanceId, state, now, input.templateRef.commitSha],
+        );
       } else {
         await client.query(
           `INSERT INTO ${this.q('instances')} (id, team_id, name, template, template_repo, template_commit, state, provider, created_at, updated_at)

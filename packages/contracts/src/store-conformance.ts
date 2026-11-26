@@ -357,6 +357,22 @@ const expectErr = (result: { ok: boolean; value?: unknown } & Partial<StoreError
       : { status: 'fail', detail: 'marketplace enrollment or machine authorization differed' };
   });
 
+  await add('marketplace release versions are immutable under concurrent publication', async () => {
+    const store = await fresh();
+    const release = { template: 'starter-worker', version: '2.0.0', installer: 'starter-worker@1',
+      revision: '1'.repeat(40) } as const;
+    const changed = { ...release, revision: '2'.repeat(40) };
+    const alternatives = [release, changed];
+    const results = await Promise.all(alternatives.map((item) => store.publishMarketplaceRelease(item)));
+    const winner = alternatives[results.indexOf('created')];
+    const list = await store.listMarketplaceReleases();
+    const valid = winner && results.includes('conflict') && list.length === 1 && list[0]?.revision === winner.revision &&
+      await store.publishMarketplaceRelease(winner) === 'existing' &&
+      await store.publishMarketplaceRelease({ ...changed, version: '2.0.1' }) === 'created';
+    return valid ? { status: 'pass', detail: 'version pin is write-once and a retry is safe' }
+      : { status: 'fail', detail: 'publication changed or duplicated an existing version' };
+  });
+
   await add('team and instance round-trip, ids assigned by the store', async () => {
     const { store, team, instance } = await seed();
     const readBack = await store.getInstance(instance.id);

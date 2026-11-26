@@ -1,7 +1,7 @@
 import * as React from 'react';
 import type { TeamWithRole } from '@platfolio/api-contract/generated/types';
 import { useOperation, isLoaded } from '../sdk/use-operation.ts';
-import type { PrivateLaunchTemplate } from '../workspace/routes.ts';
+import type { PrivateLaunchTemplate, TemplateReleaseSelection } from '../workspace/routes.ts';
 import { WorkspaceChoice } from '../workspace/workspace-choice.tsx';
 import { renderScreen, type ScreenDocument } from './screen.ts';
 
@@ -9,10 +9,11 @@ export const STARTER_LAUNCH_SCREEN: ScreenDocument = {
   id: 'screen.starter-launch', title: 'Launch a starter', root: { slot: 'full-page', components: ['launch.starter'] },
 };
 
-export function StarterLaunchScreen({ selectedTeamId, teams, managedProjectId, template }: {
+export function StarterLaunchScreen({ selectedTeamId, teams, managedProjectId, template, release }: {
   readonly selectedTeamId?: string;
   readonly teams?: readonly TeamWithRole[];
   readonly managedProjectId?: string;
+  readonly release?: TemplateReleaseSelection | undefined;
   readonly template?: PrivateLaunchTemplate | undefined;
 } = {}) {
   const params = React.useMemo(() => ({}), []);
@@ -28,7 +29,7 @@ export function StarterLaunchScreen({ selectedTeamId, teams, managedProjectId, t
     {!selectedTeamId && owners.length > 1 && <WorkspaceChoice label="Launch for" value={teamId} onChange={setChoice}
       options={owners.map(({ teamId, name }) => ({ value: teamId, label: name }))} />}
     <React.Fragment key={`${teamId}-${template ?? "starter-web"}`}>{renderScreen(STARTER_LAUNCH_SCREEN, () => ({
-      teamId, teamName: selected.name, ...(template ? { template } : {}), ...(managedProjectId ? { managedProjectId } : {}),
+      teamId, teamName: selected.name, ...(template ? { template } : {}), ...(release ? { release } : {}), ...(managedProjectId ? { managedProjectId } : {}),
     }))}</React.Fragment>
   </>;
 }

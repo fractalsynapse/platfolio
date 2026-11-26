@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { customerLaunchRun } from '../../../scripts/customer-launch-run.ts';
 import { removeCustomerStarter } from '../../../scripts/customer-railway.ts';
-import { FREE_STARTER_RELEASE as release } from '@platfolio/manifest';
+import { FREE_STARTER_RELEASE as release, MARKETPLACE_RELEASES } from '@platfolio/manifest';
 import type { RailwayTransport } from '@platfolio/contracts';
 
 const project = {
@@ -68,4 +68,44 @@ test('a wipe retry settles the recorded ID even when a replacement project has t
   assert.deepEqual(await removeCustomerStarter(project.id, 'wipe', grant, transport), { projectId: project.id, retainedVolumes: [] });
   await assert.rejects(removeCustomerStarter(project.id, 'wipe', { ...grant, projectId: project.id }, transport), /project-only/);
   await assert.rejects(removeCustomerStarter(project.id, 'wipe', grant, { async graphql() { throw new Error('Not Authorized'); } }), /Not Authorized/);
+});
+
+
+test('the journal saves the selected release before provisioning and redeploys it after restart', async (context) => {
+  const directory = mkdtempSync(join(tmpdir(), 'platfolio-pin-'));
+  context.after(() => rmSync(directory, { recursive: true }));
+  const journal = join(directory, 'worker.json');
+  const baseline = MARKETPLACE_RELEASES.find(({ template }) => template === 'starter-worker')!;
+  const selected = { ...baseline, version: '0.1.2', revision: '1'.repeat(40) };
+  const newer = { ...selected, version: '0.1.3', revision: '2'.repeat(40) };
+  const deployments: string[] = [];
+  const provider = {
+    template: baseline.template, revision: baseline.revision,
+    async deploy(input: Parameters<import('@platfolio/contracts').SourceReleaseHosting['deploy']>[0]) {
+      const saved = JSON.parse(readFileSync(journal, 'utf8'));
+      assert.equal(saved.state, 'running');
+      assert.deepEqual(saved.pinnedRelease, input.release);
+      assert.ok(input.release);
+      deployments.push(input.release.revision);
+      return { project: project.id, deployment: 'deployment-' + deployments.length };
+    },
+    async remove() { return { retainedVolumes: [] }; },
+    async domains() { return { outcome: 'not-available' as const }; },
+    async publicLabel() { return null; },
+  };
+  const ready = async (run: ReturnType<typeof customerLaunchRun>) => {
+    for (let attempt = 0; attempt < 40 && run.read().state === 'running'; attempt++) await delay(10);
+    assert.equal(run.read().state, 'ready');
+  };
+
+  const first = customerLaunchRun('test-team', journal, provider);
+  assert.equal(first.startWithRelease(selected).revision, selected.revision);
+  await ready(first);
+  const restarted = customerLaunchRun('test-team', journal, { ...provider, revision: newer.revision });
+  assert.equal(restarted.needsRelease(), false);
+  assert.equal(restarted.redeploy().revision, selected.revision);
+  await ready(restarted);
+  assert.deepEqual(deployments, [selected.revision, selected.revision]);
+  assert.equal(restarted.read().version, selected.version);
+  assert.equal(restarted.read().deploymentId, 'deployment-2');
 });

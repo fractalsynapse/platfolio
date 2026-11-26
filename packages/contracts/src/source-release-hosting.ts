@@ -1,3 +1,4 @@
+import type { MarketplaceReleaseSelection } from './marketplace-release.ts';
 import type { HostedCustomDomain } from './infra.ts';
 
 export interface SourceReleaseProgress {
@@ -20,7 +21,7 @@ export interface SourceReleaseObserver {
 export interface SourceReleaseHosting {
   readonly template: string;
   readonly revision: string;
-  deploy(input: { projectId?: string; publicLabel?: string; bootstrap?: string }, observer: SourceReleaseObserver):
+  deploy(input: { release?: MarketplaceReleaseSelection & { image?: string | undefined }; projectId?: string; publicLabel?: string; bootstrap?: string }, observer: SourceReleaseObserver):
     Promise<{ project: string; deployment: string; origin?: string }>;
   remove(projectId: string, data: 'keep' | 'wipe'): Promise<{ retainedVolumes: string[] }>;
   domains(projectId: string, deploymentId: string, action: 'list' | 'attach' | 'detach', hostname?: string): Promise<SourceReleaseDomainResult>;

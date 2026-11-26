@@ -23,11 +23,11 @@ export async function readStarterBrand(origin: string): Promise<string | null> {
   } catch { return null; }
 }
 
-export async function launchStarterApp(app: string, project?: string, progress?: (event: SourceReleaseProgress) => void, grant?: CustomerRailwayGrant, brand?: string, observedProject?: SourceReleaseObserver['project']) {
+export async function launchStarterApp(app: string, project?: string, progress?: (event: SourceReleaseProgress) => void, grant?: CustomerRailwayGrant, brand?: string, observedProject?: SourceReleaseObserver['project'], release: { revision: string; version: string } = listing) {
   const scm = new GitScm();
   progress?.({ step: 'Read the pinned release', state: 'WORKING' });
-  const source = await readTemplate((request) => scm.readRepositoryFile(request), entry, listing.revision);
-  const inventory = validateStarterSource(source.compose, source.inventory);
+  const source = await readTemplate((request) => scm.readRepositoryFile(request), entry, release.revision);
+  const inventory = validateStarterSource(source.compose, source.inventory, release.version);
   if (brand !== undefined) {
     const declaration = inventory.find(({ name }) => name === brandSetting);
     if (declaration?.kind !== 'value' || declaration.service !== 'web' ||
@@ -48,7 +48,7 @@ export async function launchStarterApp(app: string, project?: string, progress?:
   if (brand !== undefined) await rail.setConfig(web, brandSetting, brand);
   await rail.configure(web, { numReplicas: 1, healthcheckPath: '/healthz', healthcheckTimeout: 120 });
   return withReleaseSource(source.sources, async (archive) => {
-    const deployment = await rail.upload(web, archive, `Marketplace ${listing.template} at ${listing.revision}`);
+    const deployment = await rail.upload(web, archive, `Marketplace ${listing.template} at ${release.revision}`);
     await rail.wait(web, deployment);
     const origin = await rail.publicOrigin(web, 8080);
     progress?.({ step: 'Check the app', state: 'WORKING', resourceId: deployment });
@@ -62,7 +62,7 @@ export async function launchStarterApp(app: string, project?: string, progress?:
     }
     if (!ready) throw new Error('The starter is deployed but its launch check failed');
     progress?.({ step: 'Check the app', state: 'READY', resourceId: deployment });
-    return { project: rail.project.id, service: web, deployment, template: listing.template, revision: listing.revision, blobs: source.blobs, origin };
+    return { project: rail.project.id, service: web, deployment, template: listing.template, revision: release.revision, blobs: source.blobs, origin };
   });
 }
 
@@ -74,8 +74,8 @@ export function railwayStarterHosting(credential?: () => Promise<CustomerRailway
 
   return {
     template, revision,
-    async deploy({ projectId, publicLabel }, observer) {
-      return launchStarterApp(template, projectId, observer.step, await credential?.(), publicLabel, observer.project);
+    async deploy({ projectId, publicLabel, release }, observer) {
+      return launchStarterApp(template, projectId, observer.step, await credential?.(), publicLabel, observer.project, release);
     },
     async remove(id, data) { return removeCustomerStarter(id, data, await credential?.()); },
     async domains(id, deployId, action, hostname) { return (await project(id)).starterDomains(deployId, action, hostname); },

@@ -167,3 +167,5 @@ export { CustomerHostingCommandSchema, PrivateLaunchTemplateSchema, type Private
 
 export { InstallationLaunchInputSchema, type InstallationProvider, type InstallationAuthorization, type InstallationObserver, type InstallationLaunchInput } from './installation-provider.ts';
 export type { SourceReleaseHosting, SourceReleaseObserver } from './source-release-hosting.ts';
+
+export { MarketplaceReleaseSchema, MarketplaceReleaseSelectionSchema, MarketplaceReleasePublicationSchema, type MarketplaceReleaseSelection, type MarketplaceReleasePublication, type MarketplaceRelease } from './marketplace-release.ts';

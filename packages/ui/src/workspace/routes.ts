@@ -1,4 +1,6 @@
-import type { ParamsOf } from '@platfolio/api-contract/generated/types';
+import type { ParamsOf, RequestBodyOf } from '@platfolio/api-contract/generated/types';
+
+export type TemplateReleaseSelection = NonNullable<RequestBodyOf<'startStarterLaunch'>['release']>;
 
 export type PrivateLaunchTemplate = NonNullable<ParamsOf<'getStarterLaunch'>['template']>;
 export const privateLaunchTemplates = ['shared-identity', 'starter-worker'] as const satisfies readonly PrivateLaunchTemplate[];
@@ -29,8 +31,9 @@ export const workspacePaths = {
   teamConnections: (team: string) => `/dashboard/teams/${team}/connections`,
   teamInvitations: (team: string) => `/dashboard/teams/${team}/members/invitations`,
   templates: (team: string) => `/dashboard/teams/${team}/create-instance`,
-  launchForTeam: (team: string, template?: string) =>
-    `/dashboard/teams/${team}/create-instance/launch${isPrivateLaunchTemplate(template) ? '/' + template : ''}`,
+  launchForTeam: (team: string, template?: string, release?: TemplateReleaseSelection) =>
+    `/dashboard/teams/${team}/create-instance/launch${isPrivateLaunchTemplate(template) ? '/' + template : ''}` +
+    (release ? `/${release.version}/${release.revision}` : ''),
   instanceStatus: (team: string, instance: string) => `/dashboard/teams/${team}/instances/${instance}/status`,
   instanceSetup: (team: string, instance: string) => `/dashboard/teams/${team}/instances/${instance}/setup`,
   instance: (team: string, instance: string) => `/dashboard/teams/${team}/instances/${instance}`,
@@ -67,7 +70,7 @@ export type WorkspaceRoute =
   | { kind: 'team-invitations'; team: string }
   | { kind: 'team-connections'; team: string }
   | { kind: 'templates'; team: string }
-  | { kind: 'team-launch'; team: string; template?: PrivateLaunchTemplate }
+  | { kind: 'team-launch'; team: string; template?: PrivateLaunchTemplate; release?: TemplateReleaseSelection }
   | { kind: 'instance'; team: string; instance: string }
   | { kind: 'instance-setup'; team: string; instance: string }
   | { kind: 'instance-status'; team: string; instance: string }
@@ -83,7 +86,7 @@ const pathPattern = (path: string) => new RegExp(`^${path}$`);
 const teamRoutes = {
   team: workspacePaths.team, 'team-activity': workspacePaths.teamActivity, 'team-members': workspacePaths.teamMembers,
   'team-connections': workspacePaths.teamConnections, 'team-invitations': workspacePaths.teamInvitations,
-  templates: workspacePaths.templates, 'team-launch': workspacePaths.launchForTeam,
+  templates: workspacePaths.templates, 'team-launch': (team: string) => workspacePaths.launchForTeam(team),
 } as const;
 const instanceRoutes = { instance: workspacePaths.instance, 'instance-status': workspacePaths.instanceStatus, 'instance-setup': workspacePaths.instanceSetup } as const;
 
@@ -92,6 +95,8 @@ function routePatterns<K extends string>(routes: Record<K, (...segments: string[
 }
 
 const privateLaunch = pathPattern(workspacePaths.launchForTeam(oneSegment) + '/(' + privateLaunchTemplates.join('|') + ')');
+const pinnedLaunch = pathPattern(workspacePaths.launchForTeam(oneSegment) +
+  '(?:/(' + privateLaunchTemplates.join('|') + '))?/([0-9]+\\.[0-9]+\\.[0-9]+)/([a-f0-9]{40})');
 const teamPatterns = routePatterns(teamRoutes, [oneSegment]);
 const instancePatterns = routePatterns(instanceRoutes, [oneSegment, oneSegment]);
 const environmentSuffixes = Object.keys(environmentTabs).filter((tab) => tab !== 'overview').join('|');
@@ -105,6 +110,9 @@ export function matchWorkspaceRoute(path: string): WorkspaceRoute {
   for (const tab of Object.keys(accountTabs) as (keyof typeof accountTabs)[]) {
     if (pathname === accountTabs[tab].href) return { kind: 'account', tab };
   }
+  const [, pinnedTeam, pinnedTemplate, version, revision] = pinnedLaunch.exec(pathname) ?? [];
+  if (pinnedTeam && version && revision) return { kind: 'team-launch', team: pinnedTeam,
+    ...(isPrivateLaunchTemplate(pinnedTemplate) ? { template: pinnedTemplate } : {}), release: { version, revision } };
   const [, launchTeam, template] = privateLaunch.exec(pathname) ?? [];
   if (launchTeam && isPrivateLaunchTemplate(template)) return { kind: 'team-launch', team: launchTeam, template };
   for (const [kind, pattern] of teamPatterns) {
@@ -124,6 +132,6 @@ export function matchWorkspaceRoute(path: string): WorkspaceRoute {
 
 /** OAuth return destinations are local workspace paths with a bounded length. */
 export function workspaceReturnPath(path: string | undefined): string | undefined {
-  if (!path || path.length > 480 || /[^a-z0-9/-]/.test(path)) return undefined;
+  if (!path || path.length > 480 || /[^a-z0-9./-]/.test(path)) return undefined;
   return matchWorkspaceRoute(path).kind === 'unavailable' ? undefined : path;
 }

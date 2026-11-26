@@ -131,7 +131,7 @@ export class GitScm {
       } catch {
         commit = '';
       }
-      if (commit === '') {
+      if (commit === '' || (/^[a-f0-9]{40}$/.test(request.ref) && commit !== request.ref)) {
         throw new RepositoryReadError({ kind: 'ref-not-found', detail: `${this.mask(this.remoteUrl(request.repo))} has no resolvable commit at "${request.ref}"` }, 404);
       }
       // `rev-parse <commit>:<path>` yields the blob (or tree) identity directly: git computes what GitHub quotes.
