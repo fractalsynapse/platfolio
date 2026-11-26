@@ -10,7 +10,7 @@ export type { Endpoint, OperationTable, PollTransportConfig } from './poll.ts';
 // the table imports it from `@platfolio/api-contract/generated/types` the way it imports every other generated
 // type (rule 1). What this package exports is the seam: the entry shape, the total table type, and the two
 // helpers that turn an operation id plus `ParamsOf` into a request.
-export { endpointFor, fillPath, PollTransport, queryString } from './poll.ts';
+export { createPublicMarketplaceCatalog, endpointFor, fillPath, PollTransport, queryString } from './poll.ts';
 export type { SdkContextValue, UseOperationInput, UseOperationResult } from './use-operation.ts';
 export { SdkContext, SdkProvider, useOperation } from './use-operation.ts';
 export { applyResult, initial, isRefresh } from './state.ts';

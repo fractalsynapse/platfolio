@@ -1,8 +1,8 @@
 {
   "schema": 1,
-  "version": "7.1.0",
-  "bump": "MINOR 7.0.0 -> 7.1.0 (surface diff: 0 removed, 0 widened, 32 added, 0 reordered)",
-  "digest": "c55d152da1e4a948",
+  "version": "7.2.0",
+  "bump": "MINOR 7.1.0 -> 7.2.0 (surface diff: 0 removed, 0 widened, 1 added, 0 reordered)",
+  "digest": "222e36226250c28a",
   "declarations": [
     "attestation.d.ts: action: z.ZodEnum<{",
     "attestation.d.ts: action: z.ZodEnum<{",
@@ -294,6 +294,7 @@
     "customer-hosting-commands.d.ts: action: z.ZodLiteral<\"initialize\">;",
     "customer-hosting-commands.d.ts: action: z.ZodLiteral<\"marketplace-catalog\">;",
     "customer-hosting-commands.d.ts: action: z.ZodLiteral<\"marketplace-enroll\">;",
+    "customer-hosting-commands.d.ts: action: z.ZodLiteral<\"marketplace-public-catalog\">;",
     "customer-hosting-commands.d.ts: action: z.ZodLiteral<\"marketplace-status\">;",
     "customer-hosting-commands.d.ts: action: z.ZodLiteral<\"redeploy\">;",
     "customer-hosting-commands.d.ts: action: z.ZodLiteral<\"remove\">;",
@@ -325,6 +326,7 @@
     "customer-hosting-commands.d.ts: body: z.ZodObject<{",
     "customer-hosting-commands.d.ts: body: z.ZodObject<{",
     "customer-hosting-commands.d.ts: body: z.ZodOptional<z.ZodObject<{",
+    "customer-hosting-commands.d.ts: body: z.ZodOptional<z.ZodObject<{}, z.core.$strict>>;",
     "customer-hosting-commands.d.ts: body: z.ZodOptional<z.ZodObject<{}, z.core.$strict>>;",
     "customer-hosting-commands.d.ts: body: z.ZodOptional<z.ZodObject<{}, z.core.$strict>>;",
     "customer-hosting-commands.d.ts: body: z.ZodOptional<z.ZodObject<{}, z.core.$strict>>;",

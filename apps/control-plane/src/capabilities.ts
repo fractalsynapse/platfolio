@@ -1692,6 +1692,16 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
     id: 'template-catalog',
     requires: ['identity', 'store'],
     routes: [{
+      method: 'GET', path: '/api/v1/marketplace/catalog', operationId: 'getPublicMarketplaceCatalog',
+      async handle(_request, _params, context) {
+        const catalog = customer
+          ? await customer.call('marketplace-public-catalog')
+          : { ok: true, body: marketplaceCatalog(await context.store.listMarketplaceReleases())
+            .filter(({ template }, index, releases) => releases.findIndex((release) => release.template === template) === index) };
+        if (!catalog.ok) return { status: 503, body: { error: 'marketplace-unavailable', message: 'The public template catalog is unavailable. Try again shortly.' } };
+        return { ...send('getPublicMarketplaceCatalog', 200, catalog.body), headers: { 'cache-control': 'no-store' } };
+      },
+    }, {
       method: 'GET', path: '/api/v1/templates', operationId: 'listInstallableTemplates',
       async handle(request, _params, context) {
         const auth = await authorize(context, request);

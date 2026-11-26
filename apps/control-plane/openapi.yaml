@@ -583,6 +583,23 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
+  /api/v1/marketplace/catalog:
+    get:
+      operationId: getPublicMarketplaceCatalog
+      summary: Browse the latest public template releases
+      security: []
+      responses:
+        '200':
+          description: The newest published release of each public template, including its immutable source pin.
+          content:
+            application/json:
+              schema: *marketplace-catalog
+        '503':
+          description: The public marketplace catalog could not be reached.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
   /api/v1/teams/{teamId}/members:
     parameters:
       - { name: teamId, in: path, required: true, schema: { type: string } }

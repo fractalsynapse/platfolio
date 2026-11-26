@@ -1,3 +1,4 @@
+import { ENDPOINTS } from '../packages/api-contract/src/generated/types.ts';
 import { createHash, randomBytes } from 'node:crypto';
 import { FREE_STARTER_RELEASE, MARKETPLACE_RELEASES, readMarketplaceListing, templateCatalogEntry } from '../packages/manifest/src/template-catalog.ts';
 import type { customerOpenBao, MarketplaceGrant } from './customer-openbao.ts';
@@ -103,6 +104,18 @@ export function customerMarketplaceConnection(hub: string | undefined, bao: Vaul
     if (!saved?.claimed) return [];
     const response = await call(saved, 'catalog', saved.credential);
     if (response.status === 404) return [];
+    return readCatalog(response);
+  }
+
+  async function publicCatalog() {
+    if (!hub) throw new Error('Marketplace origin is not configured');
+    const { method, path } = ENDPOINTS.getPublicMarketplaceCatalog;
+    return readCatalog(await request(new URL(path, hub), {
+      method: method.toUpperCase(), redirect: 'error', credentials: 'omit', signal: AbortSignal.timeout(4_000),
+    }));
+  }
+
+  async function readCatalog(response: Response) {
     if (response.status !== 200) throw new Error('Marketplace catalog unavailable');
     const entries = await response.json();
     if (!Array.isArray(entries)) throw new Error('Invalid marketplace catalog');
@@ -112,5 +125,5 @@ export function customerMarketplaceConnection(hub: string | undefined, bao: Vaul
     });
   }
 
-  return { connection, enroll, canLaunchStarter, catalog };
+  return { connection, enroll, canLaunchStarter, catalog, publicCatalog };
 }

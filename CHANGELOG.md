@@ -5,6 +5,8 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+- Public template pages show the latest published versions and source pins from the hub catalog (#288).
+
 - The hub can publish new versions of its free templates without a Platfolio release. Connected private installations refresh the catalog and keep the release approved for each app when resuming, restoring, or redeploying it (#288).
 
 - Install and redeploy Starter Worker from a private Platfolio. The worker runs in its own staging project with persistent storage and no public ingress (#288).

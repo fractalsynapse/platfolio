@@ -25068,7 +25068,7 @@ function date4(params) {
 }
 
 // packages/contracts/src/generated/contract-version.ts
-var CONTRACT_VERSION = "7.1.0";
+var CONTRACT_VERSION = "7.2.0";
 
 // packages/contracts/src/infra.ts
 var CONTRACT_NAME = "infra.provider";
@@ -27959,6 +27959,7 @@ var CustomerHostingCommandSchema = external_exports.discriminatedUnion("action",
   command("remove", HostingRemovalSchema),
   command("marketplace-status", empty),
   command("marketplace-catalog", empty),
+  command("marketplace-public-catalog", empty),
   command("marketplace-enroll", external_exports.object({ handoff: external_exports.string().regex(/^[0-9a-f-]{36}:[A-Za-z0-9_-]{43}$/) }).strict()),
   command("domains-list", target),
   command("domain-attach", domain2),

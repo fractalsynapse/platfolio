@@ -157,10 +157,23 @@ export class PollTransport implements Transport {
     return this.endpoints;
   }
 
-  async call<O extends OperationId>(
+  call<O extends OperationId>(
     op: O,
     input: { params: ParamsOf<O>; body?: RequestBodyOf<O> },
     auth: AuthSource,
+    signal?: AbortSignal,
+  ): Promise<Result<SuccessOf<O>>> {
+    return this.request(op, input, auth, signal);
+  }
+
+  readPublicMarketplaceCatalog(signal?: AbortSignal) {
+    return this.request('getPublicMarketplaceCatalog', { params: {} }, undefined, signal);
+  }
+
+  private async request<O extends OperationId>(
+    op: O,
+    input: { params: ParamsOf<O>; body?: RequestBodyOf<O> },
+    auth: AuthSource | undefined,
     signal?: AbortSignal,
   ): Promise<Result<SuccessOf<O>>> {
     const endpoint = endpointFor(this.endpoints, op);
@@ -171,9 +184,9 @@ export class PollTransport implements Transport {
     }
     const url = `${this.config.baseUrl.replace(/\/$/, '')}${path}${queryString(endpoint.path, params)}`;
 
-    let token: string;
+    let token: string | undefined;
     try {
-      token = await auth.token();
+      token = await auth?.token();
     } catch {
       // Auth is injected (07), so a failure here is the shell's, and the UI needs to be able to say so without
       // implying the server refused.
@@ -193,10 +206,11 @@ export class PollTransport implements Transport {
       response = await doFetch(url, {
         method,
         headers: {
-          authorization: `Bearer ${token}`,
+          ...(token === undefined ? {} : { authorization: `Bearer ${token}` }),
           ...(requestBody === undefined ? {} : { 'content-type': 'application/json' }),
         },
         ...(requestBody === undefined ? {} : { body: requestBody }),
+        ...(auth === undefined ? { credentials: 'omit', redirect: 'error' } : {}),
         ...(signal === undefined ? {} : { signal }),
       });
     } catch (cause) {
@@ -248,6 +262,16 @@ export class PollTransport implements Transport {
   get sourceCount(): number {
     return this.sources.size;
   }
+}
+
+/** The public pages have one anonymous read, with the same routing and refresh policy as the workspace. */
+export function createPublicMarketplaceCatalog(baseUrl: string) {
+  const transport = new PollTransport({ baseUrl });
+  const source = transport.freshness('getPublicMarketplaceCatalog');
+  return {
+    read: () => transport.readPublicMarketplaceCatalog(AbortSignal.timeout(8_000)),
+    subscribe: (listener: () => void) => source.subscribe(listener),
+  };
 }
 
 /**

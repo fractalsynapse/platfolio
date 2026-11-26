@@ -26,9 +26,9 @@ test('a private installation can exchange an owner’s code for registry access 
   const owner = signToken(fixture, { scope: 'platfolio.user', subject: 'owner' });
   const other = signToken(fixture, { scope: 'platfolio.user', subject: 'other' });
   const member = signToken(fixture, { scope: 'platfolio.user', subject: 'member' });
-  const call = (route: string, authorization: string, method = 'POST', body?: unknown) =>
+  const call = (route: string, authorization: string | undefined, method = 'POST', body?: unknown) =>
     fetch(`http://127.0.0.1:${app.server.address.port}${route}`, {
-      method, headers: { authorization: `Bearer ${authorization}`, 'content-type': 'application/json' },
+      method, headers: { ...(authorization ? { authorization: `Bearer ${authorization}` } : {}), 'content-type': 'application/json' },
       ...(body ? { body: JSON.stringify(body) } : {}),
     });
   try {
@@ -94,6 +94,12 @@ test('a private installation can exchange an owner’s code for registry access 
     assert.equal((await call(publish, owner, 'POST', { ...original, revision: '1'.repeat(40) })).status, 409);
     const published = { ...original, version: '0.1.2', revision: '2'.repeat(40) };
     assert.equal(await app.store.publishMarketplaceRelease(published), 'created');
+    const publicCatalog = await call('/api/v1/marketplace/catalog', undefined, 'GET');
+    assert.equal(publicCatalog.status, 200);
+    assert.equal(publicCatalog.headers.get('cache-control'), 'no-store');
+    assert.deepEqual(await publicCatalog.json(), MARKETPLACE_RELEASES.map((entry) =>
+      entry.template === published.template ? { ...entry, ...published } : entry));
+    assert.equal((await call('/api/v1/templates', undefined, 'GET')).status, 401);
     const updated = await call(`${registryPath}/catalog?format=releases`, registry);
     assert.equal(updated.status, 200);
     assert.deepEqual(await updated.json(), marketplaceCatalog([published]));

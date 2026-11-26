@@ -1,11 +1,10 @@
 import * as React from 'react';
 import { TEMPLATE_CATEGORIES, describeTemplate } from './template-presentation.ts';
 
-export function TemplateCard({ name, repo, version, ref, free, children }: {
+export function TemplateCard({ name, repo, version, free, children }: {
   readonly name: string;
   readonly repo: string;
   readonly version?: string;
-  readonly ref?: string;
   readonly free?: boolean;
   readonly children: React.ReactNode;
 }): React.ReactElement {
@@ -17,7 +16,7 @@ export function TemplateCard({ name, repo, version, ref, free, children }: {
     </header>
     <div className="ui-template-card-meta">
       <span>Published by <strong>{repo.split('/')[0]}</strong></span>
-      {version ? <span>Version {version}</span> : ref && <span>Branch {ref}</span>}
+      <span data-release-version="label" hidden={!version}>{version && `Version ${version}`}</span>
     </div>
     <div className="ui-template-card-body">
       <p>{template.summary}</p>

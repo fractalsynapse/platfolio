@@ -97,3 +97,21 @@ test('the same private worker discovers new pins only for the trusted repository
   assert.equal(releases.find(({ version }) => version === '5.0.0')?.installable, false);
   assert.equal(releases.some(({ version }) => ['3.0.0', '4.0.0'].includes(version)), false);
 });
+
+
+test('public catalog browsing on a private installation needs neither OpenBao nor enrollment', async () => {
+  const hub = 'https://registry.example.test';
+  const noVault = async () => assert.fail('Public browsing must leave OpenBao alone');
+  const spoke = customerMarketplaceConnection(hub, {
+    status: noVault, readMarketplaceGrant: noVault, writeMarketplaceGrant: noVault,
+  }, async (url, init) => {
+    assert.equal(new URL(String(url)).origin, hub);
+    assert.equal(init?.method, 'GET');
+    assert.equal(init?.redirect, 'error');
+    assert.equal(init?.credentials, 'omit');
+    assert.equal(new Headers(init?.headers).has('authorization'), false);
+    return Response.json(MARKETPLACE_RELEASES);
+  });
+
+  assert.deepEqual(await spoke.publicCatalog(), MARKETPLACE_RELEASES);
+});

@@ -4,7 +4,7 @@
  * hand, because every line reproduces from the specification.
  *
  * Source: apps/control-plane/openapi.yaml (OpenAPI 3.1.0, info.version 0.1.0)
- * Input digest: sha256/d06807d9aef5ed93
+ * Input digest: sha256/de17652c586e83ae
  *
  * Reproduce it with `pnpm run api:types`. `pnpm run api:types:check` fails when this file stops matching
  * what the committed spec produces, which is the only way a generated type deserves to be trusted.
@@ -641,6 +641,8 @@ export interface ApiParameters {
   getPrivateMarketplaceConnection: {
     teamId: string;
   };
+  /** GET /api/v1/marketplace/catalog */
+  getPublicMarketplaceCatalog: Record<string, never>;
   /** GET /readyz */
   getReady: Record<string, never>;
   /** GET /api/v1/teams/{teamId}/starter-launch */
@@ -1390,6 +1392,11 @@ export interface ApiResponses {
     '404': Error;
     '503': Error;
   };
+  /** GET /api/v1/marketplace/catalog */
+  getPublicMarketplaceCatalog: {
+    '200': MarketplaceRelease[];
+    '503': Error;
+  };
   /** GET /readyz */
   getReady: {
     '200': Ready;
@@ -2077,6 +2084,8 @@ export const ENDPOINTS = {
   getMyNotificationEmail: { method: 'get', path: '/api/v1/me/notification-email' },
   /** GET /api/v1/teams/{teamId}/marketplace/connection */
   getPrivateMarketplaceConnection: { method: 'get', path: '/api/v1/teams/{teamId}/marketplace/connection' },
+  /** GET /api/v1/marketplace/catalog */
+  getPublicMarketplaceCatalog: { method: 'get', path: '/api/v1/marketplace/catalog' },
   /** GET /readyz */
   getReady: { method: 'get', path: '/readyz' },
   /** GET /api/v1/teams/{teamId}/starter-launch */

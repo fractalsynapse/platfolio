@@ -442,6 +442,13 @@ Railway and uses it for retries, restore, and redeployment even if the hub canno
 reached. A source build pins the Git input. Its build dependencies must also be
 immutable to reproduce the same image bytes. Shared Identity pins the image itself.
 
+The public Astro template pages read the current catalog through an anonymous, read-only
+API. Private sites reach their configured hub through the installation worker. Browsing
+the public catalog requires no marketplace enrollment and confers no install rights.
+The static HTML carries descriptions and repository names. At runtime the site loads
+the published versions and source pins, and reports unavailability if the catalog is
+unreachable.
+
 ### Private marketplace connection
 
 Set the installation worker's hub with the launcher's `--registry-origin` option.
