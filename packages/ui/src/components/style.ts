@@ -250,8 +250,9 @@ export const COMPONENT_RULES = [
   },
   {
     selector: '.ui-workspace-trigger[data-kind="selector"] > span:last-child',
-    declarations: ['color: var(--ui-color-accent);'],
-    why: 'Use the same blue disclosure marker as the mockup.',
+    declarations: ['flex: none;', 'inline-size: 0.4rem;', 'block-size: 0.4rem;', 'border-inline-end: 1.5px solid currentColor;',
+      'border-block-end: 1.5px solid currentColor;', 'transform: translateY(-20%) rotate(45deg);', 'font-size: 0;'],
+    why: 'Use the same chevron as the mockup selector.',
   },
   {
     selector: '.ui-workspace-trigger[data-kind="avatar"]',
@@ -335,13 +336,24 @@ export const COMPONENT_RULES = [
   },
   {
     selector: '.ui-workspace-crumbs',
-    declarations: ['display: flex;', 'flex-wrap: wrap;', 'gap: var(--ui-space-2);', 'list-style: none;', 'margin: 0 0 0.6rem;', 'padding: 0;', 'font-size: var(--ui-font-caption);', 'color: var(--ui-color-textMuted);', 'overflow-wrap: anywhere;'],
+    declarations: ['display: flex;', 'flex-wrap: wrap;', 'align-items: baseline;', 'gap: 0.2rem 0.4rem;', 'list-style: none;',
+      'margin: 0 0 0.6rem;', 'padding: 0;', 'font-size: 0.8rem;', 'line-height: normal;', 'color: var(--ui-color-textMuted);', 'overflow-wrap: anywhere;'],
     why: 'Let shallow breadcrumbs wrap without obscuring the selected context.',
   },
   {
     selector: '.ui-workspace-crumbs li',
-    declarations: ['display: inline-flex;', 'gap: var(--ui-space-2);', 'min-inline-size: 0;'],
+    declarations: ['display: flex;', 'align-items: baseline;', 'gap: 0.4rem;', 'min-inline-size: 0;'],
     why: 'Keep separators with their labels.',
+  },
+  {
+    selector: '.ui-workspace-crumbs a',
+    declarations: ['display: inline-block;', 'padding-block: 0.25rem;', 'text-underline-offset: 0.15em;'],
+    why: 'Match the breadcrumb’s link spacing and underline.',
+  },
+  {
+    selector: '.ui-workspace-crumbs [aria-current="page"]',
+    declarations: ['font-weight: 650;'],
+    why: 'Give the current breadcrumb the same emphasis as the mockup.',
   },
   {
     selector: '.ui-public-main',
@@ -401,7 +413,7 @@ export const COMPONENT_RULES = [
   },
   {
     selector: '.ui-workspace-page-heading p',
-    declarations: ['margin: 0.45rem 0 0;', 'color: var(--ui-color-textMuted);'],
+    declarations: ['margin: 0.45rem 0 0;', 'max-inline-size: 62ch;', 'line-height: 1.55;', 'color: var(--ui-color-textMuted);'],
     why: 'Keep the short page description beside its title.',
   },
   {
@@ -476,8 +488,35 @@ export const COMPONENT_RULES = [
     selector: '.ui-workspace-secondary',
     declarations: ['display: inline-flex;', 'align-items: center;', 'justify-content: center;', 'padding: 0.55rem 0.9rem;',
       'border: 1px solid var(--ui-color-border);', 'border-radius: 0.6rem;', 'background: var(--ui-color-surface);',
-      'color: var(--ui-color-text);', 'text-decoration: none;', 'font-size: 0.91rem;', 'font-weight: 650;'],
+      'color: var(--ui-color-text);', 'text-decoration: none;', 'font-size: 0.91rem;', 'font-weight: 650;', 'line-height: 1.25;'],
     why: 'Use the mockup’s bordered secondary actions.',
+  },
+  {
+    selector: '.ui-workspace-resource',
+    declarations: ['display: grid;', 'grid-template-columns: auto minmax(0, 1fr) auto;', 'align-items: center;',
+      'gap: 0.75rem;', 'min-block-size: 3.85rem;', 'padding: 0.68rem 0.55rem;', 'border-radius: 0.6rem;',
+      'color: inherit;', 'line-height: normal;', 'text-decoration: none;'],
+    why: 'Use the mockup’s shared row for links to teams and apps.',
+  },
+  {
+    selector: '.ui-workspace-resource:hover',
+    declarations: ['background: var(--ui-color-bg);'],
+    why: 'Make it clear that the full resource row is a link.',
+  },
+  {
+    selector: '.ui-workspace-resource-text',
+    declarations: ['display: grid;', 'min-inline-size: 0;', 'gap: 0.2rem;', 'overflow-wrap: anywhere;'],
+    why: 'Match the two-line mockup row and let long labels wrap.',
+  },
+  {
+    selector: '.ui-workspace-resource-text > span',
+    declarations: ['font-size: 0.87rem;', 'color: var(--ui-color-textMuted);'],
+    why: 'Give the role and instance count their original visual weight.',
+  },
+  {
+    selector: '.ui-workspace-resource-chevron',
+    declarations: ['color: var(--ui-color-textMuted);', 'font-size: 1.3rem;'],
+    why: 'Place the navigation chevron at the end of each resource row.',
   },
   {
     selector: '.ui-environment-list',
@@ -692,7 +731,7 @@ export const COMPONENT_RULES = [
   },
   {
     selector: '.ui-workspace-primary',
-    declarations: ['display: inline-flex;', 'align-items: center;', 'justify-content: center;', 'padding: 0.55rem 0.9rem;', 'text-decoration: none;', 'background: var(--ui-color-action);', 'color: var(--ui-color-onAccent);', 'border: 1px solid transparent;', 'border-radius: 0.6rem;', 'font: inherit;', 'font-size: 0.91rem;', 'font-weight: 650;', 'cursor: pointer;'],
+    declarations: ['display: inline-flex;', 'align-items: center;', 'justify-content: center;', 'padding: 0.55rem 0.9rem;', 'text-decoration: none;', 'background: var(--ui-color-action);', 'color: var(--ui-color-onAccent);', 'border: 1px solid transparent;', 'border-radius: 0.6rem;', 'font: inherit;', 'font-size: 0.91rem;', 'font-weight: 650;', 'line-height: 1.25;', 'cursor: pointer;'],
     why: 'Use the strong accent for the next step.',
   },
   {

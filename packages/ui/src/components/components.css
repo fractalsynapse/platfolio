@@ -3,7 +3,7 @@
  * packages/ui/src/components/style.ts and it is the only one.
  *
  * Source: packages/ui/src/components/style.ts
- * Input digest: sha256/8c3fb91fe4125024
+ * Input digest: sha256/da60067cba197b71
  *
  * Reproduce with `pnpm run ui:css`; `pnpm run ui:css:check` fails when this stops matching the module. The
  * numbers in here are not literals: they reference the custom properties in ../tokens.css, which is what makes
@@ -325,9 +325,15 @@
   border-radius: 0.5rem;
 }
 
-/* Use the same blue disclosure marker as the mockup. */
+/* Use the same chevron as the mockup selector. */
 .ui-workspace-trigger[data-kind="selector"] > span:last-child {
-  color: var(--ui-color-accent);
+  flex: none;
+  inline-size: 0.4rem;
+  block-size: 0.4rem;
+  border-inline-end: 1.5px solid currentColor;
+  border-block-end: 1.5px solid currentColor;
+  transform: translateY(-20%) rotate(45deg);
+  font-size: 0;
 }
 
 /* Retain the full hit target around the circular avatar. */
@@ -474,20 +480,35 @@
 .ui-workspace-crumbs {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--ui-space-2);
+  align-items: baseline;
+  gap: 0.2rem 0.4rem;
   list-style: none;
   margin: 0 0 0.6rem;
   padding: 0;
-  font-size: var(--ui-font-caption);
+  font-size: 0.8rem;
+  line-height: normal;
   color: var(--ui-color-textMuted);
   overflow-wrap: anywhere;
 }
 
 /* Keep separators with their labels. */
 .ui-workspace-crumbs li {
-  display: inline-flex;
-  gap: var(--ui-space-2);
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
   min-inline-size: 0;
+}
+
+/* Match the breadcrumb’s link spacing and underline. */
+.ui-workspace-crumbs a {
+  display: inline-block;
+  padding-block: 0.25rem;
+  text-underline-offset: 0.15em;
+}
+
+/* Give the current breadcrumb the same emphasis as the mockup. */
+.ui-workspace-crumbs [aria-current="page"] {
+  font-weight: 650;
 }
 
 /* Use the mockup’s narrower public page measure. */
@@ -566,6 +587,8 @@
 /* Keep the short page description beside its title. */
 .ui-workspace-page-heading p {
   margin: 0.45rem 0 0;
+  max-inline-size: 62ch;
+  line-height: 1.55;
   color: var(--ui-color-textMuted);
 }
 
@@ -690,6 +713,46 @@
   text-decoration: none;
   font-size: 0.91rem;
   font-weight: 650;
+  line-height: 1.25;
+}
+
+/* Use the mockup’s shared row for links to teams and apps. */
+.ui-workspace-resource {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.75rem;
+  min-block-size: 3.85rem;
+  padding: 0.68rem 0.55rem;
+  border-radius: 0.6rem;
+  color: inherit;
+  line-height: normal;
+  text-decoration: none;
+}
+
+/* Make it clear that the full resource row is a link. */
+.ui-workspace-resource:hover {
+  background: var(--ui-color-bg);
+}
+
+/* Match the two-line mockup row and let long labels wrap. */
+.ui-workspace-resource-text {
+  display: grid;
+  min-inline-size: 0;
+  gap: 0.2rem;
+  overflow-wrap: anywhere;
+}
+
+/* Give the role and instance count their original visual weight. */
+.ui-workspace-resource-text > span {
+  font-size: 0.87rem;
+  color: var(--ui-color-textMuted);
+}
+
+/* Place the navigation chevron at the end of each resource row. */
+.ui-workspace-resource-chevron {
+  color: var(--ui-color-textMuted);
+  font-size: 1.3rem;
 }
 
 /* Use dividers inside one panel instead of bordering each list. */
@@ -1014,6 +1077,7 @@
   font: inherit;
   font-size: 0.91rem;
   font-weight: 650;
+  line-height: 1.25;
   cursor: pointer;
 }
 

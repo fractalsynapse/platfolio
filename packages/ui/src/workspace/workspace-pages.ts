@@ -30,7 +30,7 @@ function page<const Id extends string>(id: Id, title: string, render: () => Reac
 }
 
 export const workspacePages = {
-  'workspace.home': page('workspace.home', 'Your teams', WorkspaceHomePage),
+  'workspace.home': page('workspace.home', 'Your teams', WorkspaceHomePage, instanceReads),
   'workspace.create-team': page('workspace.create-team', 'Create a team', CreateTeamPage, ['createTeam']),
   'workspace.invitations': page('workspace.invitations', 'Invitations', InvitationsPage, ['acceptInvitation']),
   'workspace.notifications': page('workspace.notifications', 'Notifications', NotificationsPage,
@@ -42,7 +42,6 @@ export const workspacePages = {
     ['getMyNotificationEmail', 'updateMyNotificationEmail']),
   'workspace.templates': page('workspace.templates', 'Choose template', TemplatesPage, ['listInstallableTemplates'], true),
   'workspace.team-launch': page('workspace.team-launch', 'Set up Starter Web', StarterSetupPage, [...starterReads, ...setupReads], true),
-  'workspace.launch': page('workspace.launch', 'Starter setup', StarterSetupPage, [...starterReads, ...setupReads]),
   'workspace.team-members': page('workspace.team-members', 'Team members', TeamMembershipPage,
     ['listTeamMembers', 'updateTeamMemberRole', 'removeTeamMember'], true),
   'workspace.team-invitations': page('workspace.team-invitations', 'Team invitations', TeamMembershipPage,
@@ -73,6 +72,7 @@ export const workspacePageComponents = Object.fromEntries(workspacePageIds.map((
 
 export function workspacePageId(route: WorkspaceRoute): WorkspacePageId {
   switch (route.kind) {
+    case 'launch': return 'workspace.team-launch';
     case 'account': return `workspace.account-${route.tab}`;
     case 'environment': return `workspace.environment-${route.tab}`;
     default: return `workspace.${route.kind}`;

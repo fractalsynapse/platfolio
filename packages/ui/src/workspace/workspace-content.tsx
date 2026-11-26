@@ -23,7 +23,9 @@ export function WorkspaceContent() {
   const teams = state.status === 'loaded' ? state.data : empty;
   const team = 'team' in route ? teams.find((item) => item.name === route.team) : undefined;
   const page = workspacePages[workspacePageId(route)];
-  const allowed = (!('team' in route) || team !== undefined) && (!page.owner || team?.role === 'owner');
+  const allowed = route.kind === 'launch'
+    ? teams.some(({ role }) => role === 'owner')
+    : (!('team' in route) || team !== undefined) && (!page.owner || team?.role === 'owner');
   const document = allowed ? page.screen : workspacePages['workspace.unavailable'].screen;
 
   return <>

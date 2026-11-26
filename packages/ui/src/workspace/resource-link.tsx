@@ -7,10 +7,10 @@ export function ResourceLink({ href, title, detail, kind }: {
   readonly detail: string;
   readonly kind: 'team' | 'app';
 }): React.ReactElement {
-  const mark = kind === 'team' ? title.slice(0, 2).toUpperCase() : 'P';
-  return <WorkspaceLink className="ui-environment-summary ui-hit-primary" href={href}>
+  const mark = kind === 'team' ? title.charAt(0).toUpperCase() : 'P';
+  return <WorkspaceLink className="ui-workspace-resource ui-hit-primary" href={href}>
     <span className={kind === 'team' ? 'ui-workspace-avatar' : 'ui-environment-symbol'} aria-hidden="true">{mark}</span>
-    <span><strong>{title}</strong><br /><span className="ui-workspace-meta">{detail}</span></span>
-    <span className="ui-workspace-meta" aria-hidden="true">›</span>
+    <span className="ui-workspace-resource-text"><strong>{title}</strong><span>{detail}</span></span>
+    <span className="ui-workspace-resource-chevron" aria-hidden="true">›</span>
   </WorkspaceLink>;
 }
