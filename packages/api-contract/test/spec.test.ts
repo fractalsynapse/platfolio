@@ -25,7 +25,10 @@ test('the shipped spec is internally true', () => {
   assert.equal(new Set(ops.map((o) => o.operationId)).size, ops.length, 'operationIds are unique');
   // The public half declares itself explicitly rather than by omission -- that is what the security check is for.
   const publicOps = ops.filter((o) => Array.isArray(o.security) && o.security.length === 0).map((o) => o.operationId).sort();
-  assert.deepEqual(publicOps, ['completeHubInstallationAuthorization', 'completeStarterRailwayAuthorization', 'getHealth', 'getReady', 'getStatus', 'getVersion'], 'only operational probes, build identity and the state-bound OAuth callbacks are unauthenticated');
+  assert.deepEqual(publicOps, [
+    'completeHubInstallationAuthorization', 'completeStarterRailwayAuthorization', 'getHealth',
+    'getPublicMarketplaceCatalog', 'getReady', 'getStatus', 'getVersion',
+  ], 'only the public catalog, operational probes, build identity and state-bound OAuth callbacks are unauthenticated');
   const installationOperations = new Set(['redeemMarketplaceEnrollment', 'claimEnrolledMarketplaceRelease', 'getEnrolledMarketplaceCatalog']);
   for (const guarded of ops.filter((o) => !publicOps.includes(o.operationId))) {
     const scheme = installationOperations.has(guarded.operationId) ? 'marketplaceCredential' : 'bearerJwt';
