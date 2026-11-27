@@ -17,7 +17,22 @@ import {
 } from './fixtures/page-documents.ts';
 import { createMutationSandbox } from './mutation-sandbox.ts';
 import { WorkspaceModelContext } from '../src/workspace/workspace-model.ts';
+import { InstallationFirstSignIn } from '../src/workspace/installation-first-sign-in.tsx';
 import type { SignalBus } from '../src/signals.ts';
+
+test('first owner can save the temporary password before launch and see it after launch', () => {
+  const password = 'fixture-temporary-password';
+  const confirmation = { saved: false, change() {} };
+  const prepare = renderToStaticMarkup(React.createElement(InstallationFirstSignIn, { password, confirmation }));
+  const ready = renderToStaticMarkup(React.createElement(InstallationFirstSignIn, { password }));
+  for (const markup of [prepare, ready]) {
+    assert.ok(markup.includes('start sign-in again with this temporary password'));
+    assert.ok(markup.includes('download="platfolio-first-sign-in.txt" href="data:text/plain;charset=utf-8,' + password + '"'));
+  }
+  assert.match(prepare, /type="checkbox" required=""/);
+  assert.doesNotMatch(prepare, /value="fixture-temporary-password"/);
+  assert.match(ready, /readonly=""[^>]*value="fixture-temporary-password"/i);
+});
 
 /**
  * What the first real screens actually say, read out of the markup they produce.

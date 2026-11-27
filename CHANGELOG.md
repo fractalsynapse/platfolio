@@ -5,6 +5,8 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+- Save the private owner’s temporary password before launch and show it when the installation is ready, so an expired first sign-in can be restarted without redeploying (#288).
+
 - Redeploy Shared Identity at its installed release from the staging Deployments page, and restore it without replacing its Keycloak credentials or database (#288).
 
 - Public template pages show the latest published versions and source pins from the hub catalog (#288).

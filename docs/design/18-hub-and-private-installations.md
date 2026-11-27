@@ -528,10 +528,20 @@ readiness checks. The worker's readiness check requires a private response from 
 The owner initializes or unseals OpenBao before app secret operations become available.
 
 The OAuth grant authorizes one launch and is discarded after that run. The owner’s browser
-generates the first sign-in password and sends only its salted verifier for
-Keycloak to import. Save the password from Connections before leaving. The first sign-in
-requires a password change. Subsequent hosting authorization and OpenBao recovery are
-controlled in the private installation.
+generates a temporary password for `owner` and asks the owner to save the sign-in file before
+starting the launch. The browser sends only the salted verifier for Keycloak to import.
+Connections displays the temporary password when the installation is ready.
+
+Keycloak requires a password change before it grants access. If that screen expires before
+the change completes, reopen the private installation from Connections and sign in as
+`owner` with the saved temporary password. The completed change replaces that password.
+An installation with its own mail relay can use **Forgot password?** if the saved password
+is lost. If both the file and email recovery are unavailable, the infrastructure owner
+can recover access to the existing Keycloak database using the
+[Keycloak admin recovery procedure](https://www.keycloak.org/server/bootstrap-admin-recovery).
+
+Subsequent hosting authorization and OpenBao recovery are controlled in the private
+installation.
 
 To enable the browser launcher, publish the verified candidate installer rendered by
 `scripts/render-railway-installer.ts`. Configure the hub API's

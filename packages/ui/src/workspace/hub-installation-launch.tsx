@@ -3,6 +3,7 @@ import type { RequestBodyOf, SuccessOf } from '@platfolio/api-contract/generated
 import { ageLabel, useClock } from '../components/freshness.ts';
 import { useCommand, useOperation } from '../sdk/use-operation.ts';
 import { createInstallationOwner } from '../web/installation-owner.ts';
+import { InstallationFirstSignIn } from './installation-first-sign-in.tsx';
 import { LaunchProgress } from './launch-progress.tsx';
 import { OperationState } from './operation-state.tsx';
 import { WorkspaceAction } from './workspace-action.tsx';
@@ -29,7 +30,7 @@ export function HubInstallationLaunch({ teamId }: { readonly teamId: string }) {
   const [maintenance, setMaintenance] = React.useState<MaintenanceChoice>();
   const [consent, setConsent] = React.useState<SuccessOf<'authorizeHubInstallation'>>();
   const [workspace, setWorkspace] = React.useState('');
-  const [credential, setCredential] = React.useState<Awaited<ReturnType<typeof createInstallationOwner>>>();
+  const [firstSignIn, setFirstSignIn] = React.useState<{ credential: Awaited<ReturnType<typeof createInstallationOwner>>; saved: boolean }>();
   const [pending, setPending] = React.useState(false);
   const [problem, setProblem] = React.useState('');
   const fieldId = React.useId();
@@ -53,7 +54,7 @@ export function HubInstallationLaunch({ teamId }: { readonly teamId: string }) {
     if (url.protocol !== 'https:' || url.username || url.password) throw new Error('Invalid provider authorization URL');
     setWorkspace('');
     setMaintenance(operation);
-    setCredential(undefined);
+    setFirstSignIn(undefined);
     setConsent({ ...result.value, authorizationUrl: url.href });
     setActiveId(result.value.id);
     if (result.value.id === activeId) progress.reload();
@@ -65,13 +66,17 @@ export function HubInstallationLaunch({ teamId }: { readonly teamId: string }) {
     const environments = selection?.state === 'failed' ? selection.requested : environmentChoices.filter((name) => form.has(name));
     if (environments.length === 0) { setProblem('Choose staging, production, or both.'); return; }
     await run(async () => {
-      const setup = credential ?? await createInstallationOwner();
-      setCredential(setup);
+      if (!firstSignIn) {
+        setFirstSignIn({ credential: await createInstallationOwner(), saved: false });
+        return;
+      }
+      if (!firstSignIn.saved) { setProblem('Save the first sign-in file before launching.'); return; }
+      const { verifier, salt } = firstSignIn.credential;
       const result = await start({ params: launchParams, body: {
         workspaceId: selection?.workspaceId ?? (workspace || report?.workspaces[0]?.id || ''),
         name: selection?.name ?? String(form.get('name') ?? ''),
         ownerEmail: String(form.get('email') ?? ''),
-        environments, verifier: setup.verifier, salt: setup.salt,
+        environments, verifier, salt,
       } });
       if (!result.ok) { setProblem(result.error.message); return; }
       setConsent(undefined);
@@ -120,7 +125,12 @@ export function HubInstallationLaunch({ teamId }: { readonly teamId: string }) {
               </p>
             </div>
             <div className="ui-workspace-links">
-              <WorkspaceAction onClick={() => { setActiveId(row.id); setConsent(undefined); setCredential(undefined); setMaintenance(undefined); }}>View progress</WorkspaceAction>
+              <WorkspaceAction onClick={() => {
+                if (row.id !== activeId) setFirstSignIn(undefined);
+                setActiveId(row.id);
+                setConsent(undefined);
+                setMaintenance(undefined);
+              }}>View progress</WorkspaceAction>
               {row.state === 'failed' && !row.maintenance && <WorkspaceAction disabled={pending} onClick={() => void run(() => prepare(row.id))}>Resume setup</WorkspaceAction>}
               {row.state === 'ready' && row.verified.length < environmentChoices.length &&
                 <WorkspaceAction disabled={pending} onClick={() => void run(() => prepare(row.id))}>Add environment</WorkspaceAction>}
@@ -175,12 +185,14 @@ export function HubInstallationLaunch({ teamId }: { readonly teamId: string }) {
                   {name === 'staging' ? 'Staging' : 'Production'}
                 </label>)}
             </fieldset>}
-          <WorkspaceAction variant="primary" type="submit" disabled={pending}>
-            {selection?.state === 'failed' ? 'Continue setup' : selection ? 'Add environment' : 'Launch Platfolio'}
+          {firstSignIn && <InstallationFirstSignIn password={firstSignIn.credential.password} confirmation={{
+            saved: firstSignIn.saved, change: (saved) => setFirstSignIn({ ...firstSignIn, saved }),
+          }} />}
+          <WorkspaceAction variant="primary" type="submit" disabled={pending || Boolean(firstSignIn && !firstSignIn.saved)}>
+            {!firstSignIn ? 'Prepare first sign-in' : selection?.state === 'failed' ? 'Continue setup' : selection ? 'Add environment' : 'Launch Platfolio'}
           </WorkspaceAction>
         </form>}
-        {credential && <p>Save this one-time password for <code>owner</code> on newly deployed environments. You’ll replace it when you sign in.
-          {' '}<a download="platfolio-first-sign-in.txt" href={'data:text/plain;charset=utf-8,' + encodeURIComponent(credential.password)}>Download sign-in password</a></p>}
+        {firstSignIn && !consent && report?.state === 'ready' && <InstallationFirstSignIn password={firstSignIn.credential.password} />}
         {report && <>
           {report.state === 'running' && <p role="status">Working on your installation…</p>}
           {report.state === 'removed' && <p role="status">The hosting provider confirmed the installation was removed.</p>}
@@ -193,6 +205,7 @@ export function HubInstallationLaunch({ teamId }: { readonly teamId: string }) {
           {report.environments.length > 0 && <ul className="ui-workspace-list">
             {report.environments.map(({ name, origin }) => <li key={name}><a href={origin}>Open {name} Platfolio</a></li>)}
           </ul>}
+          {report.state === 'ready' && !firstSignIn && <p>For first sign-in, use the saved password file from setup. If the password change timed out, open the installation above and start sign-in again.</p>}
           <LaunchProgress report={report} />
           {progress.state.status === 'loaded' && <p className="ui-workspace-meta">{ageLabel(progress.state.freshness, clock().toISOString()).text}</p>}
         </>}
