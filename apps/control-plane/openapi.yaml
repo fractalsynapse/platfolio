@@ -2667,6 +2667,78 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
 
+  /api/v1/teams/{teamId}/marketplace/platforms/{platformId}/uploads:
+    parameters: &marketplace-publisher-params
+      - { name: teamId, in: path, required: true, schema: { type: string } }
+      - { name: platformId, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: issueMarketplaceUploadGrant
+      summary: Authorize an OCI push to a publisher release namespace
+      security: [{ bearerJwt: [] }]
+      requestBody: &marketplace-version-request
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MarketplaceArtifactVersion' }
+      responses:
+        '200': &marketplace-grant-response
+          description: Short-lived registry credentials scoped to the requested version.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MarketplaceArtifactGrant' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': &marketplace-artifact-unavailable
+          description: Release artifact delivery is unavailable.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/teams/{teamId}/marketplace/platforms/{platformId}/bundles:
+    parameters: *marketplace-publisher-params
+    post:
+      operationId: publishMarketplaceArtifactBundle
+      summary: Publish an immutable deployment recipe and OCI image set
+      security: [{ bearerJwt: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MarketplaceBundlePublication' }
+      responses:
+        '200':
+          description: Catalog summary of the verified release.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MarketplacePlatformRelease' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '503': *marketplace-artifact-unavailable
+
+  /api/v1/teams/{teamId}/marketplace/platforms/{platformId}/maintenance:
+    parameters: *marketplace-publisher-params
+    put:
+      operationId: setMarketplaceMaintenance
+      summary: Set a buyer team's eligibility for new maintained releases
+      security: [{ bearerJwt: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MarketplaceMaintenanceInput' }
+      responses:
+        '204': { description: Eligibility was recorded for this platform. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': *marketplace-artifact-unavailable
+
   /api/v1/teams/{teamId}/marketplace/installations:
     parameters:
       - { name: teamId, in: path, required: true, schema: { type: string } }
@@ -2846,6 +2918,47 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/marketplace/installations/{installationId}/bundle-acquisitions:
+    parameters:
+      - { name: installationId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: acquireMarketplaceArtifactRelease
+      summary: Acquire a free or maintained OCI bundle
+      security: [{ marketplaceCredential: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MarketplacePlatformAcquisitionInput' }
+      responses:
+        '200':
+          description: The durable acquisition and its pinned deployment bundle.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MarketplaceArtifactAcquisition' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '503': *marketplace-artifact-unavailable
+
+  /api/v1/marketplace/installations/{installationId}/pulls:
+    parameters:
+      - { name: installationId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: issueMarketplacePullGrant
+      summary: Authorize downloading the artifacts covered by a saved acquisition
+      security: [{ marketplaceCredential: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MarketplacePlatformAcquisitionInput' }
+      responses:
+        '200': *marketplace-grant-response
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': *marketplace-artifact-unavailable
 
   /api/v1/teams/{teamId}/marketplace/installs:
     parameters:
@@ -3329,6 +3442,92 @@ components:
           additionalProperties: false
         variant: { type: string, enum: [starter-template, shared-service, hosted-application] }
       additionalProperties: false
+    MarketplaceArtifactVersion:
+      # GENERATED by scripts/gen-api-spec.ts from MarketplaceArtifactVersionSchema (packages/contracts). Do not hand-edit: pnpm run spec:check fails on a difference, and the prose lives in packages/api-contract/src/spec-annotations.ts.
+      type: object
+      required: [version]
+      properties:
+        version: { type: string, pattern: '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$', maxLength: 64 }
+      additionalProperties: false
+    MarketplaceBundlePublication:
+      # GENERATED by scripts/gen-api-spec.ts from MarketplaceBundlePublicationSchema (packages/contracts). Do not hand-edit: pnpm run spec:check fails on a difference, and the prose lives in packages/api-contract/src/spec-annotations.ts.
+      type: object
+      required: [version, bundle, images]
+      properties:
+        version: { type: string, pattern: '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$', maxLength: 64 }
+        bundle:
+          type: object
+          required: [compose, inventory, offer]
+          properties:
+            compose: { type: string, minLength: 1, maxLength: 131072 }
+            inventory: { type: string, minLength: 1, maxLength: 65536 }
+            offer: { type: string, enum: [free, maintenance] }
+          additionalProperties: false
+        images:
+          type: array
+          minItems: 1
+          maxItems: 24
+          items: { type: string, pattern: '^[A-Za-z0-9](?![^@]*\/\/)[A-Za-z0-9._:/-]*@sha256:[a-f0-9]{64}$', maxLength: 512 }
+      additionalProperties: false
+    MarketplaceMaintenanceInput:
+      # GENERATED by scripts/gen-api-spec.ts from MarketplaceMaintenanceInputSchema (packages/contracts). Do not hand-edit: pnpm run spec:check fails on a difference, and the prose lives in packages/api-contract/src/spec-annotations.ts.
+      type: object
+      required: [buyerTeamId, through]
+      properties:
+        buyerTeamId: { type: string, minLength: 1, maxLength: 128 }
+        through:
+          type: string
+          format: date-time
+          pattern: '^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z))$'
+      additionalProperties: false
+    MarketplaceArtifactAcquisition:
+      # GENERATED by scripts/gen-api-spec.ts from MarketplaceArtifactAcquisitionSchema (packages/contracts). Do not hand-edit: pnpm run spec:check fails on a difference, and the prose lives in packages/api-contract/src/spec-annotations.ts.
+      type: object
+      required: [id, teamId, acquiredAt, variant, release]
+      properties:
+        id: { type: string, minLength: 1 }
+        teamId: { type: string, minLength: 1 }
+        acquiredAt:
+          type: string
+          format: date-time
+          pattern: '^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z))$'
+        variant: { type: string, enum: [starter-template, shared-service, hosted-application] }
+        release:
+          type: object
+          required: [platformId, version, images, installer, descriptorDigest, bundle]
+          properties:
+            platformId: { type: string, minLength: 1, maxLength: 128 }
+            version: { type: string, pattern: '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$', maxLength: 64 }
+            images:
+              type: array
+              maxItems: 64
+              items: { type: string, pattern: '^[A-Za-z0-9](?![^@]*\/\/)[A-Za-z0-9._:/-]*@sha256:[a-f0-9]{64}$', maxLength: 512 }
+            installer: { type: string, pattern: '^[a-z0-9-]+@[0-9]+$', maxLength: 64 }
+            descriptorDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+            bundle:
+              type: object
+              required: [compose, inventory, offer]
+              properties:
+                compose: { type: string, minLength: 1, maxLength: 131072 }
+                inventory: { type: string, minLength: 1, maxLength: 65536 }
+                offer: { type: string, enum: [free, maintenance] }
+              additionalProperties: false
+          additionalProperties: false
+      additionalProperties: false
+    MarketplaceArtifactGrant:
+      # GENERATED by scripts/gen-api-spec.ts from MarketplaceArtifactGrantSchema (packages/contracts). Do not hand-edit: pnpm run spec:check fails on a difference, and the prose lives in packages/api-contract/src/spec-annotations.ts.
+      type: object
+      required: [registry, namespace, username, password, expiresAt]
+      properties:
+        registry: { type: string, minLength: 1 }
+        namespace: { type: string, minLength: 1 }
+        username: { type: string, const: platfolio }
+        password: { type: string, minLength: 1 }
+        expiresAt:
+          type: string
+          format: date-time
+          pattern: '^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z))$'
+      additionalProperties: false
     MarketplacePlatformAcquisitionInput:
       # GENERATED by scripts/gen-api-spec.ts from MarketplacePlatformAcquisitionInputSchema (packages/contracts). Do not hand-edit: pnpm run spec:check fails on a difference, and the prose lives in packages/api-contract/src/spec-annotations.ts.
       type: object
@@ -3400,6 +3599,15 @@ components:
               items: { type: string, pattern: '^[A-Za-z0-9](?![^@]*\/\/)[A-Za-z0-9._:/-]*@sha256:[a-f0-9]{64}$', maxLength: 512 }
             installer: { type: string, pattern: '^[a-z0-9-]+@[0-9]+$', maxLength: 64 }
             descriptorDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+            bundle:
+              type: object
+              required: [compose, inventory, offer]
+              properties:
+                compose: { type: string, minLength: 1, maxLength: 131072 }
+                inventory: { type: string, minLength: 1, maxLength: 65536 }
+                offer: { type: string, enum: [free, maintenance] }
+              additionalProperties: false
+            offer: { type: string, enum: [free, maintenance] }
           additionalProperties: false
       additionalProperties: false
     MarketplacePlatformRelease:
@@ -3422,6 +3630,15 @@ components:
           items: { type: string, pattern: '^[A-Za-z0-9](?![^@]*\/\/)[A-Za-z0-9._:/-]*@sha256:[a-f0-9]{64}$', maxLength: 512 }
         installer: { type: string, pattern: '^[a-z0-9-]+@[0-9]+$', maxLength: 64 }
         descriptorDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+        bundle:
+          type: object
+          required: [compose, inventory, offer]
+          properties:
+            compose: { type: string, minLength: 1, maxLength: 131072 }
+            inventory: { type: string, minLength: 1, maxLength: 65536 }
+            offer: { type: string, enum: [free, maintenance] }
+          additionalProperties: false
+        offer: { type: string, enum: [free, maintenance] }
       additionalProperties: false
     MarketplaceReleaseSelection:
       # GENERATED by scripts/gen-api-spec.ts from MarketplaceReleaseSelectionSchema (packages/contracts). Do not hand-edit: pnpm run spec:check fails on a difference, and the prose lives in packages/api-contract/src/spec-annotations.ts.

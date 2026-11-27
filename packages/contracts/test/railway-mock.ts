@@ -262,7 +262,7 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
       // `name`. That is why a rename is a SERVICE-level operation: `ServiceInstanceUpdateInput` carries no
       // `name` at all, and `ServiceInstance` has `serviceId`/`serviceName` but no name of its own.
       serviceUpdate: ['icon', 'name'],
-      serviceInstanceUpdate: ['numReplicas', 'healthcheckPath', 'healthcheckTimeout', 'source', 'startCommand', 'buildCommand', 'preDeployCommand', 'region', 'restartPolicyType', 'sleepApplication', 'watchPatterns', 'cronSchedule', 'dockerfilePath', 'buildpacks', 'nixpacksPlan'],
+      serviceInstanceUpdate: ['numReplicas', 'healthcheckPath', 'healthcheckTimeout', 'source', 'startCommand', 'buildCommand', 'preDeployCommand', 'region', 'restartPolicyType', 'sleepApplication', 'watchPatterns', 'cronSchedule', 'dockerfilePath', 'buildpacks', 'nixpacksPlan', 'registryCredentials'],
       variableUpsert: ['projectId', 'environmentId', 'serviceId', 'name', 'value', 'skipDeploys'],
       // Captured from `SharedVariableConfigureInput`: there is NO value field here, only which services the
       // already-written environment-scoped variable is enabled or disabled for. Any provider that treats this

@@ -1,12 +1,13 @@
 import { GitScm, type HostingTarget } from '../packages/contracts/src/index.ts';
-import type { MarketplacePlatformAcquisition } from '../packages/contracts/src/marketplace-release.ts';
+import type { MarketplaceArtifactGrant, MarketplacePlatformAcquisition } from '../packages/contracts/src/marketplace-release.ts';
 import type { VerifiedMarketplaceInstall } from '../packages/contracts/src/marketplace-install.ts';
 import {
-  buildPlan, composeDocuments, parseCompose, parseInventory, readRepositorySource,
+  buildPlan, composeDocuments, marketplaceBundleManifest, parseCompose, parseInventory, readRepositorySource,
   validateIdentitySource, validateManifest, validateStarterSource, validateWorkerSource,
   type RepositoryFileReader,
 } from '../packages/manifest/src/index.ts';
 import { verifyMarketplaceImage } from './marketplace-image-verification.ts';
+import { artifactImages, artifactNamespace, readArtifactGraph, registryAuthorization } from '../apps/control-plane/src/marketplace-artifacts.ts';
 
 const marketplaceGit = new GitScm({ timeoutMs: 20_000 });
 
@@ -15,9 +16,22 @@ export async function verifyMarketplaceInstall(
   receipt: MarketplacePlatformAcquisition,
   readFile: RepositoryFileReader = (input) => marketplaceGit.readRepositoryFile(input),
   verifyImage: (image: string) => Promise<void> = verifyMarketplaceImage,
+  pull?: () => Promise<MarketplaceArtifactGrant>,
 ): Promise<VerifiedMarketplaceInstall> {
   const { release, variant } = receipt;
-  const { installer, images, source } = release;
+  const { installer, images, source, bundle } = release;
+  if (bundle) {
+    if (source || variant === 'starter-template' || installer !== 'compose-bundle@1' || !pull) throw new Error('The bundle uses an unsupported installer');
+    const manifest = marketplaceBundleManifest(bundle, images, variant);
+    const ticket = await pull();
+    const namespace = artifactNamespace(release.platformId, release.version);
+    if (namespace !== ticket.namespace) throw new Error('Registry grant did not match this release');
+    const allowed = artifactImages({ origin: ticket.registry }, namespace, images);
+    const headers = new Headers({ authorization: registryAuthorization(ticket) });
+    await Promise.all(allowed.map((image) => readArtifactGraph(ticket.registry, image, fetch, headers)));
+    return { receipt, plan: buildPlan(manifest, { instanceId: target.id, teamId: target.teamId, provider: target.provider, domains: 'generated-public' }) };
+  }
+  if (!source) throw new Error('The release is missing its pinned source');
   const starter = variant === 'starter-template';
   const legacyWeb = release.platformId === 'platfolio.starter-web' && installer === 'starter-web@1';
   const legacyWorker = release.platformId === 'platfolio.starter-worker' && installer === 'starter-worker@1';

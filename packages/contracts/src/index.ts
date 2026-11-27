@@ -173,6 +173,9 @@ export {
   MarketplacePlatformSchema, MarketplacePlatformReleaseSchema, MarketplacePlatformCreationSchema, MarketplacePublisherPlatformSchema,
   MarketplacePlatformPublicationSchema, MarketplacePlatformAcquisitionInputSchema, MarketplacePlatformAcquisitionSchema,
   marketplacePlatformDescriptorDigest, type MarketplacePlatformDescriptor, type MarketplacePlatformAcquisition,
+  MarketplaceBundlePublicationSchema, MarketplaceArtifactGrantSchema, MarketplaceArtifactVersionSchema, MarketplaceMaintenanceInputSchema,
+  MarketplaceArtifactAcquisitionSchema, MarketplaceAcquisitionReceiptSchema,
+  type MarketplaceArtifactGrant,
 } from './marketplace-release.ts';
 export {
   MarketplaceInstallInputSchema, MarketplaceInstallSchema, VerifiedMarketplaceInstallSchema,

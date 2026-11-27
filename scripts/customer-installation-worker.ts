@@ -16,6 +16,7 @@ import type { MarketplaceReleaseSelection } from '../packages/contracts/src/mark
 import { CustomerHostingCommandSchema, type PrivateLaunchTemplate } from '../packages/contracts/src/customer-hosting-commands.ts';
 import { privateRailwayExecution } from '../apps/control-plane/src/private-railway-execution.ts';
 import { createKernel } from '../packages/kernel/src/index.ts';
+import { artifactImages, artifactNamespace } from '../apps/control-plane/src/marketplace-artifacts.ts';
 
 const directory = process.env.PLATFOLIO_LAUNCH_STATE_DIR;
 const workerKey = process.env.PLATFOLIO_LAUNCH_WORKER_KEY;
@@ -51,6 +52,13 @@ function privateRun(template: PrivateLaunchTemplate) {
 const execution = await createKernel({ provider: 'railway', infrastructure: [privateRailwayExecution(team, async () => {
   if (await bao.status() !== 'ready') throw new Error('Unlock OpenBao before managing a project');
   return oauth.credential();
+}, async ({ selection, images }) => {
+  const ticket = await marketplace.pullGrant(selection);
+  const namespace = artifactNamespace(selection.platformId, selection.version);
+  if (namespace !== ticket.namespace) throw new Error('Registry grant did not match this release');
+  artifactImages({ origin: ticket.registry }, namespace, images);
+  const pins = new Set(images);
+  return (image) => pins.has(image) ? { username: ticket.username, password: ticket.password } : undefined;
 })], requiredServices: ['infra'] });
 const expected = Buffer.from('Bearer ' + workerKey);
 const replyError = { error: 'launcher-setup-unavailable', message: 'Check OpenBao and Railway connection, then try again.' };
@@ -93,12 +101,18 @@ const server = createServer({ requestTimeout: 10000 }, (request, response) => {
       case 'marketplace-enroll': reply(200, await marketplace.enroll(command.body.handoff)); return;
       case 'marketplace-catalog': reply(200, await marketplace.catalog()); return;
       case 'marketplace-public-catalog': reply(200, await marketplace.publicCatalog()); return;
+      case 'marketplace-platforms':
+      case 'marketplace-platform-releases': {
+        const result = await marketplace.platformCatalog(command.body?.platformId);
+        reply(result.status, result.ok ? await result.json() : null);
+        return;
+      }
       case 'marketplace-verify-install': {
         const { target, release } = command.body;
         if (target.teamId !== team || target.provider !== 'railway') { reply(404, null); return; }
         const receipt = await marketplace.acquire(release);
         if (!receipt) { reply(409, null); return; }
-        reply(200, await verifyMarketplaceInstall(target, receipt));
+        reply(200, await verifyMarketplaceInstall(target, receipt, undefined, undefined, () => marketplace.pullGrant(release)));
         return;
       }
       case 'template-report': reply(200, privateRun(command.body.template).read()); return;

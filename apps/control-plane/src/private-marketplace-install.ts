@@ -47,14 +47,14 @@ export function privateMarketplaceInstall(scoped: typeof scopedRoute, customer: 
 
           const verified = VerifiedMarketplaceInstallSchema.parse(response.body);
           const { receipt, plan } = verified;
-          const { source } = receipt.release;
+          const { source, bundle } = receipt.release;
           const starter = receipt.variant === 'starter-template';
-          if (!matchesMarketplaceRelease(receipt.release, release) || starter === Boolean(plan) ||
+          if (!matchesMarketplaceRelease(receipt.release, release) || starter === Boolean(plan) || Boolean(source) === Boolean(bundle) ||
               (plan && (plan.instanceId !== target.id || plan.teamId !== teamId || plan.provider !== target.provider))) {
             return unavailable();
           }
           if (starter) {
-            if (!sourceRepository || sourceRepository.toLowerCase() === source.repo.toLowerCase()) {
+            if (!source || !sourceRepository || sourceRepository.toLowerCase() === source.repo.toLowerCase()) {
               return badRequest('Import the selected starter commit into your own repository and supply that repository.');
             }
             try {
@@ -69,7 +69,7 @@ export function privateMarketplaceInstall(scoped: typeof scopedRoute, customer: 
           const now = new Date().toISOString();
           const instance: Instance = {
             ...target, template: release.platformId, state: 'pending', createdAt: now, updatedAt: now,
-            templateRef: { repo: sourceRepository ?? source.repo, commitSha: source.revision },
+            ...(source ? { templateRef: { repo: sourceRepository ?? source.repo, commitSha: source.revision } } : {}),
             ...(plan ? { desiredPlanHash: plan.planHash } : {}),
           };
           const recorded = await store.recordMarketplaceInstall(instance, verified);

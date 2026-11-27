@@ -94,6 +94,39 @@ test('naming one service restarts exactly that service, reported by its PHYSICAL
   assert.equal(result.verified, true);
 });
 
+test('an acquired image sends provider registry credentials on create and renews them before redeploy', async () => {
+  const mock = new RailwayMock();
+  const real = mock.graphql.bind(mock);
+  const writes: Array<{ operation: string; password?: string }> = [];
+  mock.graphql = (async (input: Parameters<typeof real>[0]) => {
+    const registry = (input.variables?.input as { registryCredentials?: { password: string } } | undefined)?.registryCredentials;
+    if (registry || input.operation === 'serviceInstanceDeploy') {
+      writes.push({ operation: input.operation, ...(registry ? { password: registry.password } : {}) });
+    }
+    return real(input);
+  }) as typeof real;
+  let password = 'first-fixture-pull-grant';
+  const provider = new RailwayInfraProvider({
+    credentials: mock, transport: mock, workspaceId: 'ws-1', deployBudget: 20, deployTimeoutMs: 2_000,
+    pollIntervalMs: 1, sleep: async () => {},
+    registryCredentials: (image) => image === `${IMAGE}@${DIGEST}` ? { username: 'platfolio', password } : undefined,
+  });
+  const applied = await provider.applyPlan(planWith());
+  assert.deepEqual(applied.failures, []);
+  assert.ok(writes.some((write) => write.operation === 'serviceCreate' && write.password === password));
+  assert.ok(!JSON.stringify(applied).includes(password));
+
+  writes.length = 0;
+  password = 'renewed-fixture-pull-grant';
+  const redeployed = await provider.redeploy({ instanceId: INST, environment: 'production', service: 'api' });
+  assert.ok(redeployed.verified);
+  assert.deepEqual(writes, [
+    { operation: 'serviceInstanceUpdate', password },
+    { operation: 'serviceInstanceDeploy' },
+  ]);
+  assert.ok(!JSON.stringify(redeployed).includes(password));
+});
+
 test('verified is an OBSERVATION of a new deployment id, not the mutation returning true', async () => {
   // The control for this whole file. `serviceInstanceDeploy` answers a bare boolean on Railway; a provider that
   // reported `verified` from that answer would say "restarted" for a call the provider coalesced, cancelled or

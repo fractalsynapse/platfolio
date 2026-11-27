@@ -518,6 +518,25 @@ variables:
     environments: [staging]
     deployedTo: railway:variable
     note: "Private customer installation worker origin."
+  - name: PLATFOLIO_ARTIFACT_ORIGIN
+    kind: value
+    secret: false
+    environments: all
+    deployedTo: railway:variable
+    note: "Public HTTPS origin for the marketplace OCI gateway, shared by the hub API and gateway."
+  - name: PLATFOLIO_ARTIFACT_BACKEND
+    kind: value
+    secret: false
+    environments: all
+    deployedTo: railway:variable
+    note: "Private Distribution origin used by the marketplace hub and gateway."
+  - name: PLATFOLIO_ARTIFACT_KEY
+    kind: secret
+    secret: true
+    environments: all
+    required: false
+    deployedTo: railway:shared-variable
+    note: "Operator-supplied signing key shared by the marketplace hub and gateway. Rotate to end all outstanding grants."
   - name: PLATFOLIO_RAILWAY_INSTALL_REVISION
     kind: value
     secret: false

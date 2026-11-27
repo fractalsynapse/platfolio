@@ -1,14 +1,19 @@
 import { z } from 'zod';
-import { MarketplacePlatformAcquisitionInputSchema, MarketplaceReleaseSelectionSchema } from './marketplace-release.ts';
+import { MarketplacePlatformAcquisitionInputSchema, MarketplacePlatformReleaseSchema, MarketplaceReleaseSelectionSchema } from './marketplace-release.ts';
 import { HostingProviderIdSchema, HostingRemovalSchema, InfraPlanSchema } from './infra.ts';
 
 export const RAILWAY_AUTHORIZATION_CALLBACK = '/api/v1/railway/callback';
 
+const artifact = z.object({
+  selection: MarketplacePlatformAcquisitionInputSchema,
+  images: MarketplacePlatformReleaseSchema.shape.images,
+}).strict();
 export const HostingTargetSchema = z.object({
   id: z.string().min(1).max(128).regex(/^[a-zA-Z0-9_-]+$/),
   name: z.string().min(1).max(40).regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/),
   teamId: z.string().min(1).max(128),
   provider: HostingProviderIdSchema,
+  artifact: artifact.optional(),
 }).strict();
 export type HostingTarget = z.infer<typeof HostingTargetSchema>;
 
@@ -51,6 +56,8 @@ export const CustomerHostingCommandSchema = z.discriminatedUnion('action', [
   command('marketplace-status', empty),
   command('marketplace-catalog', empty),
   command('marketplace-public-catalog', empty),
+  command('marketplace-platforms', empty),
+  command('marketplace-platform-releases', MarketplacePlatformReleaseSchema.pick({ platformId: true })),
   command('marketplace-verify-install', z.object({ target: HostingTargetSchema, release: MarketplacePlatformAcquisitionInputSchema }).strict()),
   command('marketplace-enroll', z.object({ handoff: z.string().regex(/^[0-9a-f-]{36}:[A-Za-z0-9_-]{43}$/) }).strict()),
   command('domains-list', target),

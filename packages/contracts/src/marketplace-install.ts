@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { InfraPlanSchema } from './infra.ts';
 import { InstanceSchema } from './persistence.ts';
 import {
-  MarketplacePlatformAcquisitionInputSchema, MarketplacePlatformAcquisitionSchema, MarketplacePlatformPublicationSchema, MarketplacePlatformVariantSchema,
+  MarketplacePlatformAcquisitionInputSchema, MarketplaceAcquisitionReceiptSchema, MarketplacePlatformPublicationSchema, MarketplacePlatformVariantSchema,
 } from './marketplace-release.ts';
 
 export const MarketplaceInstallInputSchema = z.object({
@@ -14,13 +14,13 @@ export type MarketplaceInstallInput = z.infer<typeof MarketplaceInstallInputSche
 
 export const MarketplaceInstallSchema = z.object({
   instance: InstanceSchema,
-  receiptId: MarketplacePlatformAcquisitionSchema.shape.id,
+  receiptId: MarketplaceAcquisitionReceiptSchema.shape.id,
   release: MarketplacePlatformAcquisitionInputSchema,
   variant: MarketplacePlatformVariantSchema,
 }).strict();
 
 export const VerifiedMarketplaceInstallSchema = z.object({
-  receipt: MarketplacePlatformAcquisitionSchema,
+  receipt: MarketplaceAcquisitionReceiptSchema,
   plan: InfraPlanSchema.optional(),
 }).strict();
 export type VerifiedMarketplaceInstall = z.infer<typeof VerifiedMarketplaceInstallSchema>;
@@ -29,10 +29,11 @@ export const MarketplaceInstallRecordSchema = z.object({
   instance: InstanceSchema,
   verified: VerifiedMarketplaceInstallSchema,
 }).strict().refine(({ instance, verified: { receipt, plan } }) => {
+  const { source, bundle } = receipt.release;
   if (instance.state !== 'pending' || instance.template !== receipt.release.platformId ||
-      instance.templateRef?.commitSha !== receipt.release.source.revision) return false;
-  if (receipt.variant === 'starter-template') return !plan && instance.desiredPlanHash === undefined;
-  return plan !== undefined && instance.templateRef.repo === receipt.release.source.repo &&
+      Boolean(source) === Boolean(bundle) || instance.templateRef?.commitSha !== source?.revision) return false;
+  if (receipt.variant === 'starter-template') return Boolean(source) && !plan && instance.desiredPlanHash === undefined;
+  return plan !== undefined && instance.templateRef?.repo === source?.repo &&
     plan.instanceId === instance.id && plan.teamId === instance.teamId && plan.provider === instance.provider &&
     instance.desiredPlanHash === plan.planHash;
 }, { message: 'The verified release and plan must belong to the new instance' });

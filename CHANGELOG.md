@@ -5,6 +5,12 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+### Added — gated marketplace artifact delivery (#288)
+
+Publisher teams can publish a deployment bundle with pinned OCI images. Private installations can
+prepare the release without publisher source access. Maintenance coverage gates new acquisitions.
+Existing receipts retain access to their exact manifests and layers.
+
 ### Added — receipt-backed private marketplace installs (#288)
 
 Private installation owners can prepare a named instance from an exact marketplace acquisition.
