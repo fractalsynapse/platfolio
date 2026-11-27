@@ -3,7 +3,7 @@
  * packages/ui/src/components/style.ts and it is the only one.
  *
  * Source: packages/ui/src/components/style.ts
- * Input digest: sha256/49d0a784ddd6089a
+ * Input digest: sha256/a2abaae4fe80c8b3
  *
  * Reproduce with `pnpm run ui:css`; `pnpm run ui:css:check` fails when this stops matching the module. The
  * numbers in here are not literals: they reference the custom properties in ../tokens.css, which is what makes
@@ -418,8 +418,16 @@
   white-space: nowrap;
 }
 
-/* Identify Platfolio with its own simple wordmark and accent. */
-.ui-workspace-mark, .ui-auth-wordmark::before {
+/* Keep the color-ring logo square beside the wordmark. */
+.ui-workspace-mark {
+  display: block;
+  flex: none;
+  inline-size: 2.15rem;
+  block-size: auto;
+}
+
+/* Identify Platfolio in the sign-in theme. */
+.ui-auth-wordmark::before {
   display: grid;
   flex: none;
   place-items: center;

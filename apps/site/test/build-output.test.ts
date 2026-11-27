@@ -87,6 +87,21 @@ test('the landing page emits no client JavaScript at all', () => {
   assert.match(html, /<title>Platfolio\b[^<]*<\/title>/, 'the HTML names the product in the browser title');
 });
 
+test('the site serves the Platfolio logo and declares its favicon on public and workspace pages', () => {
+  assert.match(readPage('/'), /<img\b[^>]*\bsrc="\/platfolio-logo\.svg"[^>]*\balt=""/);
+  for (const route of ['/', '/dashboard', '/callback']) {
+    const [head] = readPage(route).split('</head>', 1);
+    assert.ok(head);
+    assert.match(head, /<link rel="icon" href="\/favicon\.ico"/);
+    assert.match(head, /<link rel="icon" href="\/platfolio-logo\.svg" type="image\/svg\+xml"/);
+  }
+  assert.match(fs.readFileSync(path.join(DIST, 'platfolio-logo.svg'), 'utf8'), /<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg"/);
+  const icon = fs.readFileSync(path.join(DIST, 'favicon.ico'));
+  assert.equal(icon.readUInt16LE(2), 1, 'the browser fallback is an ICO file');
+  assert.equal(icon.readUInt16LE(4), 3, 'the fallback contains three sizes');
+  assert.deepEqual([icon[6], icon[22], icon[38]], [16, 32, 48]);
+});
+
 test('the public template catalog and details are prerendered without React hydration', () => {
   const catalog = readPage('/templates');
   assert.match(catalog, /<h1>Templates<\/h1>/);

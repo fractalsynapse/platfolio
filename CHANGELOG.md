@@ -5,6 +5,8 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+- Show the four-color Platfolio logo in the site and workspace headers, and use it as the browser tab icon (#332).
+
 - Save the private owner’s temporary password before launch and show it when the installation is ready, so an expired first sign-in can be restarted without redeploying (#288).
 
 - Redeploy Shared Identity at its installed release from the staging Deployments page, and restore it without replacing its Keycloak credentials or database (#288).
