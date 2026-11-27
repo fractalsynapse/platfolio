@@ -27149,7 +27149,8 @@ var RailwayInfraProvider = class {
         return;
       }
       const key = keys[0];
-      const composedConfig = { ...config2, services: { [key]: { ...services[key], name: databaseName } } };
+      const { networking: _networking, ...privateDatabase } = services[key];
+      const composedConfig = { ...config2, services: { [key]: { ...privateDatabase, name: databaseName } } };
       const deployed = await deployRailwayTemplate(access, {
         templateId,
         serializedConfig: composedConfig,
