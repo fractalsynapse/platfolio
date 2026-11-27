@@ -76,7 +76,7 @@ the acquisition receipt. For a new publication, the digest identifies the publis
 coordinates. The 1C installer must verify those coordinates against the material it fetches before
 performing provider actions.
 
-## 1C — Installs and storefront switch
+## 1C — Receipt-backed private installs
 
 An installation owner prepares an install by naming a local instance and selecting a platform,
 version and descriptor digest. The private worker requests the receipt using its enrolled machine
@@ -110,7 +110,27 @@ Identity image. A local registry supplies the three images for Platfolio's real 
 test preparation of both environments. Generated host and secret bootstrap through the hosted
 provider remain part of staging acceptance, along with the storefront switch.
 
-Switch the storefront once the legacy worker and the new path both pass in staging. Verify that a new
-release leaves older installations pinned. Redeploy from retained inputs with the hub unavailable.
-Run `pnpm run verify` and record the hosted observations separately from local evidence. Payments,
-federated sign-in, cross-installation bindings, and managed release promotion follow in later phases.
+## 1D — Artifact delivery and storefront acceptance
+
+The [marketplace roadmap](19-marketplace-migration.md#release-delivery-before-the-storefront-cutover)
+defines the publication and credential boundaries. 1A–1C can integrate with the existing storefront
+and installers in service. The following checks gate the storefront cutover and Phase 1 acceptance.
+
+1. Use the existing Platfolio or Shared Identity project to prepare two image releases with a
+   minimal, versioned recipe. Ingest the full OCI content and record the immutable bundle digest.
+   Verify installation needs only the exported release and works without access to the publisher's
+   Git repository or registry credentials.
+2. Exercise a free acquisition and simulate maintenance eligibility with two releases. Acquire the
+   first, expire maintenance, and verify a clean client can still pull the first. Verify that the
+   same installation cannot acquire or pull the second through the gated registry, even with its
+   exact digest. Check isolation against a separate team's installation.
+3. Seed a customer-controlled copy of the acquired release. Remove access to the hub and publisher
+   registries, then recreate the workload from the retained recipe, manifests, and layers on a clean
+   target. Publishing a newer version must leave earlier installation pins intact.
+4. On an approved staging deployment, verify private Platfolio bootstrap, the legacy worker and the
+   new install path. Check Railway's plan and credential permissions, an authenticated private
+   pull, and a cold redeploy after pull-grant expiry or renewal. Record the results separately from
+   local verification. Keep the existing storefront in service until those checks pass.
+
+Run `pnpm run verify` for repository changes. Payments, federated sign-in, cross-installation
+bindings, and managed release promotion follow in later phases.
