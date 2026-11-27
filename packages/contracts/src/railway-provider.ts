@@ -1660,7 +1660,9 @@ export class RailwayInfraProvider implements InfraProvider {
       // its own database: naming it after the plan alone would put production's service name here, the lookup
       // above would find production's already-created service, and staging would spend its life writing to a
       // dataset it does not own (D57, measured as `connect ETIMEDOUT` on the duplicated environment).
-      const composedConfig = { ...config, services: { [key]: { ...services[key]!, name: databaseName } } };
+      // Managed databases use private references. Railway's catalog template may add a public TCP proxy.
+      const { networking: _networking, ...privateDatabase } = services[key]!;
+      const composedConfig = { ...config, services: { [key]: { ...privateDatabase, name: databaseName } } };
 
       const deployed = await deployRailwayTemplate(access, {
         templateId, serializedConfig: composedConfig, projectId, environmentId, workspaceId: this.workspaceId,

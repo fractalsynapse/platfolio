@@ -1,5 +1,6 @@
 import * as React from 'react';
 import type { InstanceResponse, RequestBodyOf } from '@platfolio/api-contract/generated/types';
+import { isSelectableEnvironment } from '../components/enums.ts';
 import { ageLabel, useClock } from '../components/freshness.ts';
 import { useCommand, useOperation } from '../sdk/use-operation.ts';
 import { HostingRemoval } from './hosting-removal.tsx';
@@ -7,15 +8,21 @@ import { OperationState } from './operation-state.tsx';
 import { WorkspaceAction } from './workspace-action.tsx';
 import { WorkspacePanel } from './workspace-panel.tsx';
 
+type RedeployEnvironment = RequestBodyOf<'redeployInstance'>['environment'];
+
 export function InstanceHosting({ app }: { readonly app: InstanceResponse }): React.ReactElement {
   const params = React.useMemo(() => ({ instanceId: app.id }), [app.id]);
   const hosting = useOperation('getInstanceHostingState', { params });
   const apply = useCommand('applyInstanceHostingPlan');
   const remove = useCommand('removeInstanceHosting');
+  const redeploy = useCommand('redeployInstance');
   const [pending, setPending] = React.useState(false);
   const [outcome, setOutcome] = React.useState('');
   const [removed, setRemoved] = React.useState(app.state === 'removed');
   const clock = useClock();
+  const services = hosting.state.status === 'loaded' ? hosting.state.data.services : [];
+  const environments = [...new Set(services.map(({ environment }) => environment))]
+    .filter((environment): environment is RedeployEnvironment => isSelectableEnvironment(environment) || environment === 'preview');
 
   async function run(operation: () => Promise<{ message: string; accepted: boolean }>) {
     setPending(true);
@@ -52,6 +59,16 @@ export function InstanceHosting({ app }: { readonly app: InstanceResponse }): Re
     });
   }
 
+  function redeployEnvironment(environment: RedeployEnvironment) {
+    return run(async () => {
+      const result = await redeploy({ params, body: { environment } });
+      if (!result.ok) return { accepted: false, message: result.error.message };
+      return { accepted: result.value.verified, message: result.value.verified
+        ? 'The hosting provider started new deployments.'
+        : result.value.refused[0]?.reason ?? 'The hosting provider could not verify a new deployment.' };
+    });
+  }
+
   return <WorkspacePanel title="Hosting">
     <p className="ui-workspace-meta">{app.provider}</p>
     {!removed && <OperationState status={hosting.state.status} pending="Checking the app’s hosting project…"
@@ -64,6 +81,10 @@ export function InstanceHosting({ app }: { readonly app: InstanceResponse }): Re
           </li>)}
         </ul>
         <p className="ui-workspace-meta">{ageLabel(hosting.state.freshness, clock().toISOString()).text}</p>
+        {app.desiredPlanHash && app.state !== 'paused' && environments.map((environment) =>
+          <p key={environment}><WorkspaceAction variant="secondary" disabled={pending} onClick={() => void redeployEnvironment(environment)}>
+            Redeploy {environment}
+          </WorkspaceAction></p>)}
         <HostingRemoval name={app.name} pending={pending} onRemove={removeApp} />
       </>}
     </OperationState>}

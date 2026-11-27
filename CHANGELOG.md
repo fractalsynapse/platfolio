@@ -5,6 +5,12 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+### Fixed — Railway reconnection in private installations (#288)
+
+- Show the Railway connection action when the worker can no longer use or refresh its saved grant.
+- Offer redeploy for applied environments in the private workspace's hosting panel.
+- Keep managed PostgreSQL private when the provider template includes a public TCP proxy.
+
 ### Fixed — environment wiring for OCI marketplace installs (#288)
 
 - Validate the bundled environment registry against its Compose recipe and apply its defaults,

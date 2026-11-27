@@ -577,6 +577,7 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
                   name: 'Postgres',
                   source: { image: 'ghcr.io/ncontiero/postgres-ssl:18.6', type: 'image' },
                   variables: { POSTGRES_PASSWORD: { isSensitive: true, generateValue: true } },
+                  networking: { tcpProxies: { 5432: {} } },
                 },
               },
             },
@@ -588,6 +589,7 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
         if (credential.kind !== 'workspace') throw new Error('railway templateDeployV2: Bad Access [UNPROCESSABLE]');
         const input = v.input as { templateId: string; serializedConfig: { services: Record<string, { name?: string; source?: { image?: string }; variables?: Record<string, unknown> }> }; projectId: string; environmentId: string };
         const spec = Object.values(input.serializedConfig.services)[0]!;
+        if ('networking' in spec) throw new Error('Managed database template must omit public ingress');
         const name = spec.name ?? 'Postgres';
         this.templateDeploys.push({ templateId: input.templateId, serviceName: name, credentialKind: credential.kind });
         if (!this.projects.has(input.projectId)) throw new Error('railway templateDeployV2: project not found [NOT_FOUND]');

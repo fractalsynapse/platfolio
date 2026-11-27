@@ -153,7 +153,7 @@ const server = createServer({ requestTimeout: 10000 }, (request, response) => {
       case 'report': reply(200, await launch.read()); return;
       case 'setup': {
         const openBao = await bao.status();
-        const railway = openBao === 'ready' && (await bao.readGrant()).grant ? 'connected' : 'connect';
+        const railway = openBao === 'ready' ? await oauth.connection() : 'connect';
         reply(200, { openBao, railway, workerKey: bao.publicKey, canWipeData: !project });
         return;
       }

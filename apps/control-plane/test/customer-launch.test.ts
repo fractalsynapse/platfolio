@@ -7,6 +7,49 @@ import { FREE_STARTER_RELEASE, SHARED_IDENTITY_RELEASE, STARTER_WORKER_RELEASE }
 import { hostedStarterObservation } from '../src/hosted-starter.ts';
 import { buildCapabilities } from '../src/capabilities.ts';
 import { customerLaunch, customerLaunchConfig, privateHostingPlugin } from '../src/customer-launch.ts';
+import { customerRailwayOAuth } from '../../../scripts/customer-railway-oauth.ts';
+import type { RailwayGrant } from '../../../scripts/customer-openbao.ts';
+
+test('a saved Railway grant that cannot refresh offers reconnection with the original workspace scope', async () => {
+  let saved: RailwayGrant = { access: 'fixture-expired', refresh: 'fixture-refused', expires: 0 };
+  let version = 1;
+  let refreshAttempts = 0;
+  const workspaceId = 'fixture-workspace';
+  const callback = 'https://private.example.test/api/v1/railway/callback';
+  const issuer = 'https://backboard.railway.com';
+  const oauth = customerRailwayOAuth({ clientId: 'fixture-client', callback, workspaceId }, {
+    async readGrant() { return { version, grant: saved }; },
+    async writeGrant(grant, expectedVersion) {
+      assert.equal(expectedVersion, version);
+      saved = grant;
+      version++;
+    },
+    async readRailwayClient() { throw new Error('The installation has a configured client'); },
+    async writeRailwayClient() { throw new Error('The installation has a configured client'); },
+  }, async (input, init) => {
+    if (input === issuer + '/oauth/token') {
+      assert.ok(init?.body instanceof URLSearchParams);
+      if (init.body.get('grant_type') === 'refresh_token') {
+        refreshAttempts++;
+        return Response.json({ error: 'invalid_grant' }, { status: 400 });
+      }
+      assert.equal(init.body.get('redirect_uri'), callback);
+      return Response.json({ access_token: 'fixture-new', refresh_token: 'fixture-renewal', expires_in: 3600, scope: 'workspace:admin' });
+    }
+    assert.equal(new Headers(init?.headers).get('Authorization'), 'Bearer fixture-new');
+    return Response.json({ data: { me: { workspaces: [{ id: workspaceId, name: 'Fixture' }] } } });
+  });
+
+  assert.equal(await oauth.connection(), 'connect');
+  assert.equal(await oauth.connection(), 'connect');
+  assert.equal(refreshAttempts, 1);
+  assert.equal(version, 1);
+  const authorization = new URL(await oauth.begin());
+  assert.equal(authorization.searchParams.get('scope'), 'openid email profile workspace:admin offline_access');
+  assert.equal(await oauth.complete({ code: 'fixture-code', state: authorization.searchParams.get('state')!, issuer, error: '' }), true);
+  assert.equal(await oauth.connection(), 'connected');
+  assert.equal(version, 2);
+});
 
 test('customer launch is owner scoped and passes only the intended fields to a private worker', async () => {
   const identity = createIdentityFixture();

@@ -20,6 +20,7 @@ export function customerRailwayOAuth({ clientId, callback, workspaceId, projectI
   let refreshing: Promise<CustomerRailwayGrant> | undefined;
   let registering: Promise<string> | undefined;
   let unpersisted: RailwayOAuthClient | undefined;
+  let retryConnectionAfter = 0;
 
   async function register(): Promise<RailwayOAuthClient> {
     const response = await request(issuer + '/oauth/register', {
@@ -81,6 +82,7 @@ export function customerRailwayOAuth({ clientId, callback, workspaceId, projectI
       if (projectId) await customerRailway({ kind: 'app', name: 'starter-web', id: projectId }, undefined, forProvider(grant.access), transport);
       else if (!(await railwayAuthorizedWorkspaces(grant.access, transport)).some(({ id }) => id === workspaceId)) return false;
       await bao.writeGrant(grant, (await bao.readGrant()).version);
+      retryConnectionAfter = 0;
       return true;
     } catch { return false; }
   }
@@ -95,11 +97,22 @@ export function customerRailwayOAuth({ clientId, callback, workspaceId, projectI
     return forProvider(fresh.access);
   }
 
-  return {
-    begin, complete,
-    credential() {
-      refreshing ??= useGrant().finally(() => { refreshing = undefined; });
-      return refreshing;
-    },
-  };
+  function credential() {
+    refreshing ??= useGrant().finally(() => { refreshing = undefined; });
+    return refreshing;
+  }
+
+  async function connection() {
+    if (retryConnectionAfter > Date.now()) return 'connect';
+    try {
+      await credential();
+      return 'connected';
+    } catch {
+      // The setup screen polls. Keep an explicit reconnect available without retrying a failed refresh on each poll.
+      retryConnectionAfter = Date.now() + 30_000;
+      return 'connect';
+    }
+  }
+
+  return { begin, complete, credential, connection };
 }
