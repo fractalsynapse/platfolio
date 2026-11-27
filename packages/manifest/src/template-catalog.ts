@@ -126,17 +126,20 @@ function listing(release: MarketplaceReleasePublication): MarketplaceRelease {
 export const MARKETPLACE_RELEASES = [FREE_STARTER_RELEASE, STARTER_WORKER_RELEASE, SHARED_IDENTITY_RELEASE]
   .map(({ priceMinor: _, ...release }) => listing({ ...release, installer: marketplaceInstaller(release.template) }));
 
+export function newestMarketplaceVersionFirst(a: string, b: string): number {
+  const first = a.split('.').map(BigInt);
+  const second = b.split('.').map(BigInt);
+  for (const [index, value] of first.entries()) {
+    if (value !== second[index]) return value > second[index]! ? -1 : 1;
+  }
+  return 0;
+}
+
 export function marketplaceCatalog(published: readonly MarketplaceReleasePublication[]) {
   return [...MARKETPLACE_RELEASES, ...published.map(listing)].sort((a, b) => {
     const byTemplate = TEMPLATE_CATALOG.findIndex(({ name }) => a.template === name) -
       TEMPLATE_CATALOG.findIndex(({ name }) => b.template === name);
-    if (byTemplate) return byTemplate;
-    const first = a.version.split('.').map(BigInt);
-    const second = b.version.split('.').map(BigInt);
-    for (const [index, value] of first.entries()) {
-      if (value !== second[index]) return value > second[index]! ? -1 : 1;
-    }
-    return 0;
+    return byTemplate || newestMarketplaceVersionFirst(a.version, b.version);
   });
 }
 

@@ -1,4 +1,8 @@
-import { MarketplaceReleasePublicationSchema, type MarketplaceReleasePublication } from './marketplace-release.ts';
+import {
+  MarketplacePlatformAcquisitionSchema, MarketplacePlatformAliasSchema, MarketplacePlatformDescriptorSchema, MarketplacePublisherPlatformSchema, MarketplaceReleasePublicationSchema,
+  type MarketplacePlatformAcquisitionInput, type MarketplacePlatformCreation, type MarketplacePlatformDescriptor, type MarketplaceReleasePublication,
+} from './marketplace-release.ts';
+import { MarketplaceInstallRecordSchema, type VerifiedMarketplaceInstall } from './marketplace-install.ts';
 import { InstallationJournalSchema, type InstallationJournal } from './installation-journal.ts';
 import { z } from 'zod';
 import { Pool, type PoolClient } from 'pg';
@@ -214,6 +218,83 @@ export class PostgresStore implements Store {
     return result.rowCount === 1;
   }
 
+  async listMarketplacePlatformAliases() {
+    const result = await this.pool.query(
+      `SELECT id, variant, legacy_template AS "legacyTemplate" FROM ${this.q('marketplace_platforms')}
+       WHERE legacy_template IS NOT NULL ORDER BY id`,
+    );
+    return result.rows.map((row) => MarketplacePlatformAliasSchema.parse(row));
+  }
+
+  async createMarketplacePlatform(teamId: string, input: MarketplacePlatformCreation) {
+    const platform = MarketplacePublisherPlatformSchema.parse({ ...input, id: newId('platform'), publisherTeamId: teamId });
+    const result = await this.pool.query(
+      `INSERT INTO ${this.q('marketplace_platforms')} (id, variant, publisher_team_id, slug, title)
+       SELECT $1, $2, id, $4, $5 FROM ${this.q('teams')} WHERE id = $3
+       ON CONFLICT (publisher_team_id, slug) DO NOTHING`,
+      [platform.id, platform.variant, teamId, platform.slug, platform.title],
+    );
+    if (result.rowCount === 1) return ok(platform);
+    const team = await this.getTeam(teamId);
+    return team.ok ? err({ code: 'conflict', reason: 'A platform with that slug already exists for this team.' }) : err(team);
+  }
+
+  async getMarketplacePublisherPlatform(teamId: string, platformId: string) {
+    const result = await this.pool.query(
+      `SELECT id, variant, slug, title, publisher_team_id AS "publisherTeamId" FROM ${this.q('marketplace_platforms')}
+       WHERE id = $1 AND publisher_team_id = $2`, [platformId, teamId],
+    );
+    return result.rows[0] ? MarketplacePublisherPlatformSchema.parse(result.rows[0]) : undefined;
+  }
+
+  async publishMarketplacePlatformRelease(teamId: string, input: MarketplacePlatformDescriptor) {
+    const descriptor = MarketplacePlatformDescriptorSchema.parse(input);
+    const args = [descriptor.platformId, descriptor.version, descriptor, teamId];
+    const platforms = this.q('marketplace_platforms');
+    const releases = this.q('marketplace_platform_releases');
+    const result = await this.pool.query(
+      `INSERT INTO ${releases} (platform_id, version, descriptor)
+       SELECT id, $2, $3 FROM ${platforms} WHERE id = $1 AND publisher_team_id = $4
+       ON CONFLICT (platform_id, version) DO NOTHING`, args,
+    );
+    if (result.rowCount === 1) return 'created';
+    const previous = await this.pool.query(
+      `SELECT release.descriptor = $3::jsonb AS matches FROM ${releases} AS release
+       JOIN ${platforms} AS platform ON platform.id = release.platform_id
+       WHERE release.platform_id = $1 AND release.version = $2 AND platform.publisher_team_id = $4`, args,
+    );
+    const existing = previous.rows[0];
+    return existing ? (existing.matches ? 'existing' : 'conflict') : 'not-found';
+  }
+
+  async listMarketplacePublishedPlatformReleases() {
+    const result = await this.pool.query(
+      `SELECT platform.id, platform.variant, platform.slug, platform.title, platform.publisher_team_id AS "publisherTeamId",
+              release.descriptor
+       FROM ${this.q('marketplace_platform_releases')} AS release
+       JOIN ${this.q('marketplace_platforms')} AS platform ON platform.id = release.platform_id`,
+    );
+    return result.rows.map(({ descriptor, ...platform }) => ({
+      platform: MarketplacePublisherPlatformSchema.parse(platform),
+      descriptor: MarketplacePlatformDescriptorSchema.parse(descriptor),
+    }));
+  }
+
+  async acquireMarketplacePlatformRelease(installationId: string, registryDigest: string, release: MarketplacePlatformAcquisitionInput) {
+    const result = await this.pool.query(
+      `INSERT INTO ${this.q('marketplace_platform_acquisitions')} AS receipt (id, team_id, platform_id, version, descriptor_digest)
+       SELECT $3, link.team_id, $4, $5, $6 FROM ${this.q('marketplace_links')} AS link
+       WHERE link.installation_id = $1 AND link.registry_digest = $2 AND NOT link.disconnected
+       FOR SHARE OF link
+       ON CONFLICT (team_id, platform_id, version) DO UPDATE SET descriptor_digest = receipt.descriptor_digest
+       WHERE receipt.descriptor_digest = EXCLUDED.descriptor_digest
+       RETURNING id, team_id AS "teamId", acquired_at AS "acquiredAt"`,
+      [installationId, registryDigest, newId('acquisition'), release.platformId, release.version, release.descriptorDigest],
+    );
+    const saved = result.rows[0];
+    return saved ? { id: String(saved.id), teamId: String(saved.teamId), acquiredAt: iso(saved.acquiredAt) } : undefined;
+  }
+
   async listMarketplaceReleases() {
     const result = await this.pool.query(
       `SELECT template, version, revision, installer, image FROM ${this.q('marketplace_releases')}`,
@@ -324,6 +405,44 @@ export class PostgresStore implements Store {
       throw error;
     }
     return ok(i);
+  }
+
+  async recordMarketplaceInstall(instance: Instance, verified: VerifiedMarketplaceInstall): Promise<StoreResult<Instance>> {
+    const admitted = admit(MarketplaceInstallRecordSchema, { instance, verified }, 'marketplace install');
+    if (!admitted.accepted) return err({ code: 'conflict', reason: admitted.reason });
+    const { receipt, plan } = admitted.value.verified;
+    try {
+      await this.pool.query(
+        `WITH installed AS (
+           INSERT INTO ${this.q('instances')}
+             (id, team_id, name, template, template_repo, template_commit, state, provider, created_at, updated_at, marketplace_receipt, desired_plan_hash)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$9,$10::jsonb,$11)
+           RETURNING id
+         )
+         INSERT INTO ${this.q('plans')} (instance_id, plan_hash, plan, registered_at)
+         SELECT id, $11, $12::jsonb, now() FROM installed WHERE $11 IS NOT NULL`,
+        [instance.id, instance.teamId, instance.name, instance.template, instance.templateRef?.repo ?? null,
+          instance.templateRef?.commitSha ?? null, instance.state, instance.provider, instance.createdAt,
+          JSON.stringify(receipt), plan?.planHash ?? null, plan ? JSON.stringify(plan) : null],
+      );
+    } catch (error) {
+      const code = (error as { code?: string }).code;
+      if (code === '23503') return err({ code: 'not-found', what: 'team', id: instance.teamId });
+      if (code === '23505') return err({ code: 'conflict', reason: 'This name already belongs to an instance' });
+      throw error;
+    }
+    return ok(instance);
+  }
+
+  async getMarketplaceInstall(teamId: string, name: string) {
+    const row = (await this.pool.query(
+      `SELECT * FROM ${this.q('instances')} WHERE team_id = $1 AND name = $2 AND marketplace_receipt IS NOT NULL`,
+      [teamId, name],
+    )).rows[0] as Row | undefined;
+    if (!row) return undefined;
+    const instance = this.asInstance(row);
+    if (!instance.ok) throw new Error('The stored marketplace instance is invalid');
+    return { instance: instance.value, receipt: MarketplacePlatformAcquisitionSchema.parse(row.marketplace_receipt) };
   }
 
   async recordHostedStarter(input: NewHostedStarter): Promise<StoreResult<Instance>> {
@@ -1038,10 +1157,17 @@ export class PostgresStore implements Store {
     if (!plan || typeof plan !== 'object') return err({ code: 'conflict', reason: 'plan must be an object' });
     if (!/^[0-9a-f]{64}$/.test(planHash)) return err({ code: 'conflict', reason: `plan hash is not a bare 64-hex digest: ${planHash.slice(0, 24)}` });
     try {
-      await this.pool.query(
-        `INSERT INTO ${this.q('plans')} (instance_id, plan_hash, plan, registered_at) VALUES ($1,$2,$3::jsonb, now())
+      const result = await this.pool.query(
+        `INSERT INTO ${this.q('plans')} (instance_id, plan_hash, plan, registered_at)
+         SELECT id,$2,$3::jsonb,now() FROM ${this.q('instances')}
+         WHERE id = $1 AND (marketplace_receipt IS NULL OR marketplace_receipt->>'variant' = 'starter-template')
          ON CONFLICT (instance_id) DO UPDATE SET plan_hash = EXCLUDED.plan_hash, plan = EXCLUDED.plan, registered_at = now()`,
         [instanceId, planHash, JSON.stringify(plan)]);
+      if (!result.rowCount) {
+        return (await this.getInstance(instanceId)).ok
+          ? err({ code: 'conflict', reason: 'The verified marketplace image plan is immutable' })
+          : err({ code: 'not-found', what: 'instance', id: instanceId });
+      }
     } catch (error) {
       if ((error as { code?: string }).code === '23503') return err({ code: 'not-found', what: 'instance', id: instanceId });
       throw error;

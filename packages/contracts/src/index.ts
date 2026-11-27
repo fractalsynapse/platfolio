@@ -169,3 +169,12 @@ export { InstallationLaunchInputSchema, type InstallationProvider, type Installa
 export type { SourceReleaseHosting, SourceReleaseObserver } from './source-release-hosting.ts';
 
 export { MarketplaceReleaseSchema, MarketplaceReleaseSelectionSchema, MarketplaceReleasePublicationSchema, type MarketplaceReleaseSelection, type MarketplaceReleasePublication, type MarketplaceRelease } from './marketplace-release.ts';
+export {
+  MarketplacePlatformSchema, MarketplacePlatformReleaseSchema, MarketplacePlatformCreationSchema, MarketplacePublisherPlatformSchema,
+  MarketplacePlatformPublicationSchema, MarketplacePlatformAcquisitionInputSchema, MarketplacePlatformAcquisitionSchema,
+  marketplacePlatformDescriptorDigest, type MarketplacePlatformDescriptor, type MarketplacePlatformAcquisition,
+} from './marketplace-release.ts';
+export {
+  MarketplaceInstallInputSchema, MarketplaceInstallSchema, VerifiedMarketplaceInstallSchema,
+  matchesMarketplaceRelease, type MarketplaceInstallInput, type VerifiedMarketplaceInstall,
+} from './marketplace-install.ts';

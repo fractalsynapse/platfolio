@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { MarketplaceReleaseSelectionSchema } from './marketplace-release.ts';
+import { MarketplacePlatformAcquisitionInputSchema, MarketplaceReleaseSelectionSchema } from './marketplace-release.ts';
 import { HostingProviderIdSchema, HostingRemovalSchema, InfraPlanSchema } from './infra.ts';
 
 export const RAILWAY_AUTHORIZATION_CALLBACK = '/api/v1/railway/callback';
@@ -51,6 +51,7 @@ export const CustomerHostingCommandSchema = z.discriminatedUnion('action', [
   command('marketplace-status', empty),
   command('marketplace-catalog', empty),
   command('marketplace-public-catalog', empty),
+  command('marketplace-verify-install', z.object({ target: HostingTargetSchema, release: MarketplacePlatformAcquisitionInputSchema }).strict()),
   command('marketplace-enroll', z.object({ handoff: z.string().regex(/^[0-9a-f-]{36}:[A-Za-z0-9_-]{43}$/) }).strict()),
   command('domains-list', target),
   command('domain-attach', domain),

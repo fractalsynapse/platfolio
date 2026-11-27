@@ -1,4 +1,8 @@
-import type { MarketplaceReleasePublication } from './marketplace-release.ts';
+import type {
+  MarketplacePlatformAcquisition, MarketplacePlatformAcquisitionInput, MarketplacePlatformAcquisitionRecord, MarketplacePlatformAlias, MarketplacePlatformCreation,
+  MarketplacePlatformDescriptor, MarketplacePublishedPlatformRelease, MarketplacePublisherPlatform, MarketplaceReleasePublication,
+} from './marketplace-release.ts';
+import type { VerifiedMarketplaceInstall } from './marketplace-install.ts';
 import type { InstallationJournal } from './installation-journal.ts';
 import { z } from 'zod';
 import { AttestationSchema, type Attestation } from './attestation.ts';
@@ -547,6 +551,13 @@ export interface Store {
   disconnectMarketplaceInstallation(teamId: string, installationId: string): Promise<boolean>;
   issueMarketplaceEnrollment(teamId: string, installationId: string, enrollmentDigest: string, expiresAt: string): Promise<boolean>;
   redeemMarketplaceEnrollment(installationId: string, enrollmentDigest: string, registryDigest: string, now: string): Promise<boolean>;
+  listMarketplacePlatformAliases(): Promise<MarketplacePlatformAlias[]>;
+  createMarketplacePlatform(teamId: string, input: MarketplacePlatformCreation): Promise<StoreResult<MarketplacePublisherPlatform>>;
+  getMarketplacePublisherPlatform(teamId: string, platformId: string): Promise<MarketplacePublisherPlatform | undefined>;
+  publishMarketplacePlatformRelease(teamId: string, descriptor: MarketplacePlatformDescriptor): Promise<'created' | 'existing' | 'conflict' | 'not-found'>;
+  listMarketplacePublishedPlatformReleases(): Promise<MarketplacePublishedPlatformRelease[]>;
+  acquireMarketplacePlatformRelease(installationId: string, registryDigest: string,
+    release: MarketplacePlatformAcquisitionInput): Promise<MarketplacePlatformAcquisitionRecord | undefined>;
   listMarketplaceReleases(): Promise<MarketplaceReleasePublication[]>;
   publishMarketplaceRelease(release: MarketplaceReleasePublication): Promise<'created' | 'existing' | 'conflict'>;
   verifyMarketplaceCredential(installationId: string, registryDigest: string): Promise<boolean>;
@@ -559,6 +570,9 @@ export interface Store {
   listTeams(): Promise<Team[]>;
 
   createInstance(input: NewInstance): Promise<StoreResult<Instance>>;
+  /** Atomically retain the verified acquisition and its initial image plan with the new instance. */
+  recordMarketplaceInstall(instance: Instance, verified: VerifiedMarketplaceInstall): Promise<StoreResult<Instance>>;
+  getMarketplaceInstall(teamId: string, name: string): Promise<{ instance: Instance; receipt: MarketplacePlatformAcquisition } | undefined>;
   getInstance(id: string): Promise<StoreResult<Instance>>;
   /** Atomically register verified staging evidence. Never adopt a pre-existing instance or another team's project. */
   recordHostedStarter(input: NewHostedStarter): Promise<StoreResult<Instance>>;

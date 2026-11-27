@@ -44,6 +44,7 @@ COPY packages/manifest ./packages/manifest
 COPY apps/control-plane ./apps/control-plane
 COPY scripts/customer-installation-worker.ts scripts/customer-launch-run.ts scripts/customer-openbao.ts scripts/customer-railway-oauth.ts scripts/customer-railway.ts scripts/launch-starter-app.ts scripts/launch-shared-identity.ts scripts/launch-starter-worker.ts scripts/source-release-upload.ts ./scripts/
 COPY scripts/customer-marketplace-connection.ts scripts/customer-installation-topology.ts ./scripts/
+COPY scripts/customer-marketplace-install.ts scripts/marketplace-image-verification.ts ./scripts/
 # CI records the commit and build time; a verified release tag is supplied at deployment.
 # Defaults that satisfy the published schema. The inherited values here were `unknown`, copied from the
 # status-api Dockerfile, and the OpenAPI spec for /version requires a hex commit and a date-time build time --

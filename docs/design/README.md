@@ -29,6 +29,8 @@ the check before implementing and 01 as the record of what was decided.
 | [16](16-foundation-build-order.md) | Foundation build order | Interfaces first: why identity and the API are one build, the four slices to a self-hosted platfolio, and the rule that keeps us out of side bugs |
 | [17](17-object-model.md) | Object model | Persons, teams, instances and templates in plain terms; what is implemented, contract-only, or absent, and the five places the model will not stretch |
 | [18](18-hub-and-private-installations.md) | Hub and private installations | Official launcher, optional registry and account links, local identity and secret custody, and acceptance for the first proof |
+| [19](19-marketplace-migration.md) | Marketplace migration | Four delivery phases for the platform catalog, connections, maintained releases, and commerce |
+| [20](20-platform-catalog-phase-one.md) | Platform catalog implementation plan | API contract, mixed-version rollout, and acceptance for catalog migration and the three install journeys |
 
 Evidence base, not restated here:
 

@@ -30,7 +30,7 @@ export interface InstanceConfig {
    */
   images?: Record<string, { image: string; digest: string }>;
   /** Bootstrap may omit domains or request provider-generated hosts. Both are part of desired state. */
-  domains?: 'omit' | 'generated';
+  domains?: 'omit' | 'generated' | 'generated-public';
   /** Limit an operator apply to one declared environment. */
   environment?: string;
   environments?: readonly string[];
@@ -92,10 +92,10 @@ export function buildPlan(manifest: Manifest, config: InstanceConfig): InfraPlan
 
     const placedNames = new Set(services.map((s) => s.name));
     const domains = config.domains === 'omit' ? [] : services.flatMap((s) => {
-      if (config.domains === 'generated') {
+      const svc = manifest.spec.services[s.name]!;
+      if (config.domains === 'generated' || (config.domains === 'generated-public' && svc.public)) {
         return [{ host: `${s.name}.generated.up.railway.app`, service: s.name, port: s.port, verificationName: `${s.name}-verify` }];
       }
-      const svc = manifest.spec.services[s.name]!;
       if (!svc.public) return [];
       // Declared per-environment hosts (D68) win; absent them this is the old derivation exactly -- production
       // hosts verbatim, every other environment through `stagingHost()`. `effectiveDomains` is the one home for

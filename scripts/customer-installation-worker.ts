@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { customerLaunchRun } from './customer-launch-run.ts';
 import { customerOpenBao } from './customer-openbao.ts';
 import { customerMarketplaceConnection, privateMarketplaceOrigin } from './customer-marketplace-connection.ts';
+import { verifyMarketplaceInstall } from './customer-marketplace-install.ts';
 import { customerRailwayOAuth } from './customer-railway-oauth.ts';
 import { StarterBrandChangeSchema } from '../packages/contracts/src/starter-brand.ts';
 import { railwayStarterWorkerHosting } from './launch-starter-worker.ts';
@@ -92,6 +93,14 @@ const server = createServer({ requestTimeout: 10000 }, (request, response) => {
       case 'marketplace-enroll': reply(200, await marketplace.enroll(command.body.handoff)); return;
       case 'marketplace-catalog': reply(200, await marketplace.catalog()); return;
       case 'marketplace-public-catalog': reply(200, await marketplace.publicCatalog()); return;
+      case 'marketplace-verify-install': {
+        const { target, release } = command.body;
+        if (target.teamId !== team || target.provider !== 'railway') { reply(404, null); return; }
+        const receipt = await marketplace.acquire(release);
+        if (!receipt) { reply(409, null); return; }
+        reply(200, await verifyMarketplaceInstall(target, receipt));
+        return;
+      }
       case 'template-report': reply(200, privateRun(command.body.template).read()); return;
       case 'redeploy':
       case 'template-redeploy': {

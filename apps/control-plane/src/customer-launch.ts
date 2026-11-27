@@ -41,7 +41,8 @@ export function customerLaunch(config: CustomerLaunchConfig, request: typeof fet
       if (!command.success) return { ok: false as const, status: 400 };
       try {
         const response = await request(config.workerUrl + '/launch', {
-          method: 'POST', redirect: 'error', signal: AbortSignal.timeout(action === 'hosting-apply' ? 720_000 : ['initialize', 'unlock', 'callback', 'hosting-remove'].includes(action) ? 120_000 : 15000),
+          method: 'POST', redirect: 'error', signal: AbortSignal.timeout(action === 'hosting-apply' ? 720_000
+            : ['initialize', 'unlock', 'callback', 'hosting-remove', 'marketplace-verify-install'].includes(action) ? 120_000 : 15000),
           headers: { authorization: 'Bearer ' + config.workerKey, 'content-type': 'application/json' },
           body: JSON.stringify(command.data),
         });
