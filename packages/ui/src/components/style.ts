@@ -316,9 +316,14 @@ export const COMPONENT_RULES = [
     why: 'Long team names leave space for the account button and are shown in full in the selector.',
   },
   {
-    selector: '.ui-workspace-mark, .ui-auth-wordmark::before',
+    selector: '.ui-workspace-mark',
+    declarations: ['display: block;', 'flex: none;', 'inline-size: 2.15rem;', 'block-size: auto;'],
+    why: 'Keep the color-ring logo square beside the wordmark.',
+  },
+  {
+    selector: '.ui-auth-wordmark::before',
     declarations: ['display: grid;', 'flex: none;', 'place-items: center;', 'inline-size: 2.15rem;', 'aspect-ratio: 1;', 'background: var(--ui-color-brand);', 'color: var(--ui-color-onAccent);', 'border-radius: 0.55rem;', 'font-weight: 750;'],
-    why: 'Identify Platfolio with its own simple wordmark and accent.',
+    why: 'Identify Platfolio in the sign-in theme.',
   },
   {
     selector: '.ui-workspace-avatar',

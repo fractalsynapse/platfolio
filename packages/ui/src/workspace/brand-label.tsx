@@ -1,5 +1,5 @@
 import * as React from 'react';
 
 export function BrandLabel(): React.ReactElement {
-  return <><span className="ui-workspace-mark" aria-hidden="true">P</span>Platfolio</>;
+  return <><img className="ui-workspace-mark" src="/platfolio-logo.svg" width={34} height={34} alt="" />Platfolio</>;
 }
