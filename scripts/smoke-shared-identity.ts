@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
+import { constants, createPublicKey, publicEncrypt, randomBytes } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -139,8 +139,9 @@ try {
   await vaultPut('sys/auth/approle', { type: 'approle' });
   const mount = 'customer-launch/data/identity/';
   const policy = (placement: boolean) => [
-    `path "${mount}providers/*" { capabilities = ["read"] }`,
+    `path "${mount}providers/*" { capabilities = ["create", "read"] }`,
     `path "${mount}consumers/*" { capabilities = ["read"] }`,
+    `path "${mount}inputs/*" { capabilities = ["create", "read"] }`,
     `path "${mount}state/*" { capabilities = ["create", "read", "update"] }`,
     `path "${mount}clients/*" { capabilities = [${placement ? '"create", "read", "update"' : '"read"'}] }`,
     'path "customer-launch/metadata/identity/clients/*" { capabilities = ["delete"] }',
@@ -205,15 +206,21 @@ try {
   const environmentPath = bindingPath + '/environments/staging';
   const clientPath = mount + 'clients/' + consumer.id + '/staging';
   const providerPath = mount + 'providers/' + provider.id + '/production';
-  await requireStatus(await vault(providerPath, { data: { issuer, clientId: managementId, clientSecret: managementSecret } }), 200, 'save customer realm grant');
-  await requireStatus(await vault(mount + 'consumers/' + consumer.id + '/staging', { data: { redirectUri: appOrigin + '/auth/callback' } }), 200, 'save exact callback');
   await requireStatus(await control(provider.id + '/capability/identity', 'PUT'), 200, 'publish pinned contract');
   await requireStatus(await control(bindingPath + '/intent', 'PUT', { providerInstanceId: provider.id, clientType: 'confidential' }), 200, 'bind reviewed release');
   await requireStatus(await control(environmentPath, 'GET', undefined, realmGrant), 401, 'application realm credential is rejected by the control plane');
 
   stage = 'register, interrupt placement, and retry';
+  const setupResponse = await requireStatus(await http(apiOrigin + '/api/v1/teams/' + teamId + '/starter-launch/setup', {
+    headers: { authorization: 'Bearer ' + controlToken },
+  }), 200, 'obtain the private worker sealing key');
+  const { workerKey: sealingKey } = await setupResponse.json() as { workerKey: string };
+  const key = createPublicKey({ key: Buffer.from(sealingKey, 'base64'), format: 'der', type: 'spki' });
+  const sealedGrant = publicEncrypt({ key, padding: constants.RSA_PKCS1_OAEP_PADDING, oaepHash: 'sha256' },
+    Buffer.from(JSON.stringify({ clientId: managementId, clientSecret: managementSecret }))).toString('base64');
   const place = () => control(environmentPath, 'PUT', { providerEnvironment: 'production' });
-  await requireStatus(await place(), 503, 'OpenBao write interrupted after registration');
+  await requireStatus(await control(environmentPath, 'PUT', { providerEnvironment: 'production',
+    setup: { issuer, redirectUri: appOrigin + '/auth/callback', realmGrant: sealedGrant } }), 503, 'OpenBao write interrupted after encrypted setup and registration');
   assert.ok(await api.store.getIdentityClient(consumer.id, 'staging'), 'The private API reserved the consumer binding before provisioning');
   const applicationClients = async () => {
     const response = await requireStatus(await keycloak('/phase2-apps/clients'), 200, 'observe Keycloak clients');

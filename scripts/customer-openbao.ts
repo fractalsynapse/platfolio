@@ -20,8 +20,9 @@ const clientPath = 'customer-launch/data/railway-client';
 const identityPath = 'customer-launch/data/identity/';
 const workerPolicy = [path, marketplacePath, clientPath].map((entry) =>
   `path "${entry}" { capabilities = ["create", "read", "update"] }`).concat([
-  `path "${identityPath}providers/*" { capabilities = ["read"] }`,
+  `path "${identityPath}providers/*" { capabilities = ["create", "read"] }`,
   `path "${identityPath}consumers/*" { capabilities = ["read"] }`,
+  `path "${identityPath}inputs/*" { capabilities = ["create", "read"] }`,
   `path "${identityPath}state/*" { capabilities = ["create", "read", "update"] }`,
   `path "${identityPath}clients/*" { capabilities = ["create", "read", "update"] }`,
   'path "customer-launch/metadata/identity/clients/*" { capabilities = ["delete"] }',
@@ -73,7 +74,7 @@ export function customerOpenBao(origin: string, secretId: string, directory: str
   }
   async function identityPolicyReady(token: string) {
     // The reserved path holds no data. A 404 proves the worker may read this part of the mount.
-    const reply = await request(identityPath + 'providers/_policy_check/staging', undefined, token);
+    const reply = await request(identityPath + 'inputs/_policy_check/staging', undefined, token);
     if (reply.status === 403) return false;
     if (reply.status !== 404) throw new Error('OpenBao did not return an empty policy check path');
     return true;
@@ -178,7 +179,7 @@ export function customerOpenBao(origin: string, secretId: string, directory: str
     }
   }
 
-  function identityKey(kind: 'providers' | 'consumers' | 'state' | 'clients', id: string, environment: string) {
+  function identityKey(kind: 'providers' | 'consumers' | 'inputs' | 'state' | 'clients', id: string, environment: string) {
     if (!/^[A-Za-z0-9_-]{1,128}$/.test(id) || !['production', 'staging'].includes(environment)) {
       throw new Error('The identity binding did not match a customer environment');
     }
@@ -198,9 +199,9 @@ export function customerOpenBao(origin: string, secretId: string, directory: str
     readMarketplaceGrant: () => read<MarketplaceGrant>(marketplacePath),
     writeMarketplaceGrant: (grant: MarketplaceGrant, version: number) => write(marketplacePath, grant, version),
     identity: {
-      read: <T>(kind: 'providers' | 'consumers' | 'state' | 'clients', id: string, environment: string) =>
+      read: <T>(kind: 'providers' | 'consumers' | 'inputs' | 'state' | 'clients', id: string, environment: string) =>
         read<T>(identityPath + identityKey(kind, id, environment)),
-      write: (kind: 'state' | 'clients', id: string, environment: string, value: object, version: number) =>
+      write: (kind: 'providers' | 'inputs' | 'state' | 'clients', id: string, environment: string, value: object, version: number) =>
         write(identityPath + identityKey(kind, id, environment), value, version),
       async deleteClient(id: string, environment: string) {
         const token = await serviceToken();

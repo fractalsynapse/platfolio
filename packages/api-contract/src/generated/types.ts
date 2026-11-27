@@ -4,7 +4,7 @@
  * hand, because every line reproduces from the specification.
  *
  * Source: apps/control-plane/openapi.yaml (OpenAPI 3.1.0, info.version 0.1.0)
- * Input digest: sha256/df8b6722b5d538af
+ * Input digest: sha256/1c8da0e987915454
  *
  * Reproduce it with `pnpm run api:types`. `pnpm run api:types:check` fails when this file stops matching
  * what the committed spec produces, which is the only way a generated type deserves to be trusted.
@@ -1182,6 +1182,12 @@ export interface ApiRequestBodies {
   /** PUT /api/v1/instances/{instanceId}/bindings/identity/environments/{environment} */
   placeSharedIdentityClient: {
     providerEnvironment: 'production' | 'staging';
+    /** Optional initial customer configuration. Seal only the realm manager client ID and secret to the private worker key returned by the owner setup operation. */
+    setup?: {
+      issuer: string;
+      redirectUri: string;
+      realmGrant: string;
+    };
   };
   /** POST /api/v1/attestations */
   postAttestation: Attestation;

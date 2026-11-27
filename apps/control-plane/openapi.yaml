@@ -2345,14 +2345,14 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
         '503':
-          description: The private worker, OpenBao, pinned release source or Keycloak could not complete verification.
+          description: The private worker, OpenBao, pinned release source, Keycloak or Railway could not complete verification.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
     put:
       operationId: placeSharedIdentityClient
-      summary: Register a Keycloak client and place its configuration in customer OpenBao
-      description: Uses the retained identity binding and the destination declarations in the consumer release. The customer configures the application origins and administration grant inside OpenBao.
+      summary: Register a Keycloak client and deliver its configuration
+      description: Uses the retained identity binding and the destination declarations in the consumer release. The customer can configure the application origins and administration grant inside OpenBao or provide a worker-encrypted initial setup. For a marketplace OCI install, the private worker delivers the configuration to the pinned Railway service and verifies a new deployment before reporting placed.
       security: [{ bearerJwt: [] }]
       requestBody:
         required: true
@@ -2364,11 +2364,20 @@ paths:
               required: [providerEnvironment]
               properties:
                 providerEnvironment: { type: string, enum: [production, staging] }
+                setup:
+                  type: object
+                  description: Optional initial customer configuration. Seal only the realm manager client ID and secret to the private worker key returned by the owner setup operation.
+                  additionalProperties: false
+                  required: [issuer, redirectUri, realmGrant]
+                  properties:
+                    issuer: { type: string, minLength: 1, maxLength: 1024 }
+                    redirectUri: { type: string, minLength: 1, maxLength: 1024 }
+                    realmGrant: { type: string, minLength: 512, maxLength: 512, pattern: '^[a-zA-Z0-9+/=]+$' }
       responses: *identity-client-responses
     delete:
       operationId: revokeSharedIdentityClient
-      summary: Disable the issued client and revoke its OpenBao placement
-      description: Disables the exact client and removes its current credential placement before releasing the environment reservation. The consumer binding remains until explicitly detached.
+      summary: Disable the issued client and remove its credential placement
+      description: Disables the exact client, clears the runtime configuration for a marketplace OCI install, and removes its OpenBao placement before releasing the environment reservation. The consumer binding remains until explicitly detached.
       security: [{ bearerJwt: [] }]
       responses: *identity-client-responses
 

@@ -236,7 +236,7 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
 
     // The measured authorization split. Getting this wrong is how a provider "works" against a fake and
     // fails on the first real call.
-    const needsProject = ['serviceCreate', 'serviceInstanceUpdate', 'serviceInstanceLimitsUpdate', 'variableUpsert', 'serviceInstanceDeploy', 'environment.serviceInstances', 'environment.config', 'serviceDomainCreate', 'customDomainCreate', 'customDomainIssueCertificate', 'sharedVariableConfigure'];
+    const needsProject = ['serviceCreate', 'serviceInstanceUpdate', 'serviceInstanceLimitsUpdate', 'variableUpsert', 'variableCollectionUpsert', 'variableDelete', 'serviceInstanceDeploy', 'environment.serviceInstances', 'environment.config', 'serviceDomainCreate', 'customDomainCreate', 'customDomainIssueCertificate', 'sharedVariableConfigure'];
     const needsWorkspace = ['projects', 'project', 'projectCreate', 'projectUpdate', 'projectDelete', 'project.environments', 'environmentCreate', 'project.services', 'projectTokenCreate', 'projectTokens', 'projectTokenDelete', 'serviceDelete', 'project.buckets', 'bucketCreate', 'project.bucketsList'];
     if (needsProject.includes(operation) && credential.kind !== 'project') {
       this.denied.push(operation);
@@ -264,6 +264,8 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
       serviceUpdate: ['icon', 'name'],
       serviceInstanceUpdate: ['numReplicas', 'healthcheckPath', 'healthcheckTimeout', 'source', 'startCommand', 'buildCommand', 'preDeployCommand', 'region', 'restartPolicyType', 'sleepApplication', 'watchPatterns', 'cronSchedule', 'dockerfilePath', 'buildpacks', 'nixpacksPlan', 'registryCredentials'],
       variableUpsert: ['projectId', 'environmentId', 'serviceId', 'name', 'value', 'skipDeploys'],
+      variableCollectionUpsert: ['projectId', 'environmentId', 'serviceId', 'variables', 'replace', 'skipDeploys'],
+      variableDelete: ['projectId', 'environmentId', 'serviceId', 'name'],
       // Captured from `SharedVariableConfigureInput`: there is NO value field here, only which services the
       // already-written environment-scoped variable is enabled or disabled for. Any provider that treats this
       // call as the write is wrong, and the double refuses it rather than quietly agreeing.
@@ -291,7 +293,7 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
       environmentCreate: ['projectId', 'name'],
     };
 
-    const inputKey = ['projectCreate', 'projectUpdate', 'environmentCreate', 'projectTokenCreate', 'serviceCreate', 'serviceUpdate', 'serviceInstanceUpdate', 'variableUpsert', 'serviceDomainCreate', 'customDomainCreate', 'serviceInstanceLimitsUpdate', 'sharedVariableConfigure'].includes(operation) ? 'input' : null;
+    const inputKey = ['projectCreate', 'projectUpdate', 'environmentCreate', 'projectTokenCreate', 'serviceCreate', 'serviceUpdate', 'serviceInstanceUpdate', 'variableUpsert', 'variableCollectionUpsert', 'variableDelete', 'serviceDomainCreate', 'customDomainCreate', 'serviceInstanceLimitsUpdate', 'sharedVariableConfigure'].includes(operation) ? 'input' : null;
     if (inputKey) {
       const allowed = inputFields[operation];
       const payload = (v[inputKey] ?? {}) as Record<string, unknown>;
@@ -631,6 +633,23 @@ export class RailwayMock implements RailwayTransport, RailwayCredentialSource {
           if (instance.domains.some((d) => `cdom-${d}` === id)) { instance.verifiedDomains = true; instance.settledDomains = true; }
         }
         return { customDomainIssueCertificate: true } as T;
+      }
+      case 'variableCollectionUpsert':
+      case 'variableDelete': {
+        const input = v.input as { environmentId: string; serviceId: string; name: string; variables: Record<string, string>; replace: boolean; skipDeploys: boolean };
+        const instance = this.instances.get(`${input.environmentId}:${input.serviceId}`);
+        if (!instance) throw new Error('No service in this environment');
+        if (operation === 'variableDelete') {
+          return { variableDelete: instance.variables.delete(input.name) } as T;
+        }
+        if (input.replace) instance.variables.clear();
+        for (const [name, value] of Object.entries(input.variables)) {
+          instance.variables.add(name);
+          this.writtenVariables.push({ name, value, serviceId: input.serviceId, environmentId: input.environmentId,
+            skipDeploys: input.skipDeploys, at: this.operations.length });
+          this.applyMeasuredDeploySemantics(input.environmentId, input.serviceId, name, value, input.skipDeploys);
+        }
+        return { variableCollectionUpsert: true } as T;
       }
       case 'variableUpsert': {
         const input = v.input as { environmentId: string; serviceId?: string; name: string; value: string; skipDeploys?: boolean };

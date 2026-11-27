@@ -5,6 +5,13 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+### Added — Shared Identity delivery to pinned Railway installs (#288)
+
+The private worker can deliver OpenBao’s client configuration to the verified web service in a
+Marketplace OCI install. Placement and revocation verify a new deployment of the same image pin.
+Owners can encrypt an initial application realm manager grant to the private worker instead of
+writing it directly to OpenBao.
+
 ### Added — customer-side Shared Identity client placement (#288)
 
 Private installations can register a per-environment Keycloak client and place its configuration in

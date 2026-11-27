@@ -25068,7 +25068,7 @@ function date4(params) {
 }
 
 // packages/contracts/src/generated/contract-version.ts
-var CONTRACT_VERSION = "8.2.0";
+var CONTRACT_VERSION = "8.3.0";
 
 // packages/contracts/src/infra.ts
 var CONTRACT_NAME = "infra.provider";
@@ -26351,6 +26351,59 @@ var RailwayInfraProvider = class {
     const refresh = stampBefore === void 0 || stampAfter === void 0 ? "unknown" : stampAfter !== stampBefore ? "redeployed" : "unchanged";
     return { ok: true, verified: present, refresh };
   }
+  /** The private worker calls this with a retained Marketplace install and its exact consumer callback. */
+  async configureIdentityClient(input2) {
+    const names = ["OIDC_ISSUER", "OIDC_JWKS_URI", "OIDC_CLIENT_ID", "OIDC_REDIRECT_URI", "OIDC_CLIENT_SECRET"];
+    const project = await this.findProject(this.projectName({ instanceId: input2.instanceId }));
+    if (!this.project || this.project.instanceId !== input2.instanceId || !project || project.description !== this.projectDescription(input2.planHash)) throw new Error("Apply the pinned plan before changing identity configuration");
+    const workspace = await this.credentials.workspace();
+    const environment = (await this.environments(project.id, workspace)).find(({ name }) => name === input2.environment);
+    const service = environment && await this.serviceInEnvironment(project.id, environment, "web", workspace);
+    if (!environment || !service) throw new Error("The pinned web service is missing from this environment");
+    const credential = await this.credentials.forEnvironment(project.id, environment.name);
+    const active = await this.instanceStatus(project.id, environment.id, service.id, credential);
+    const callback = new URL(input2.callback);
+    if (!active || active.image !== input2.image || callback.protocol !== "https:" || callback.port || callback.pathname !== "/auth/callback" || !active.domainHosts.includes(callback.hostname)) {
+      throw new Error("The running image or callback does not match the pinned deployment");
+    }
+    if (input2.checkOnly) return;
+    if (!this.registryCredentials?.(input2.image)) throw new Error("The pinned image needs a renewed registry grant");
+    const scope = { projectId: project.id, environmentId: environment.id, serviceId: service.id };
+    const readNames = () => this.configVariableNames(scope.projectId, scope.environmentId, scope.serviceId, true);
+    if (input2.variables) {
+      const keys = Object.keys(input2.variables);
+      if (!names.slice(0, 4).every((name) => input2.variables?.[name]) || keys.some((name) => !names.includes(name) || !input2.variables?.[name]) || input2.variables.OIDC_REDIRECT_URI !== input2.callback) throw new Error("Invalid OIDC placement");
+      const result2 = await this.transport.graphql({
+        operation: "variableCollectionUpsert",
+        credential,
+        query: "mutation ($input: VariableCollectionUpsertInput!) { variableCollectionUpsert(input: $input) }",
+        variables: { input: { ...scope, variables: input2.variables, replace: false, skipDeploys: true } }
+      });
+      if (result2.variableCollectionUpsert !== true) throw new Error("Railway refused the identity placement");
+    } else {
+      const existing = await readNames();
+      for (const name of names.filter((key) => existing.includes(key))) {
+        const result2 = await this.transport.graphql({
+          operation: "variableDelete",
+          credential,
+          query: "mutation ($input: VariableDeleteInput!) { variableDelete(input: $input) }",
+          variables: { input: { ...scope, name } }
+        });
+        if (result2.variableDelete !== true) throw new Error("Railway refused the identity removal");
+      }
+    }
+    const present = await readNames();
+    if (names.some((name) => present.includes(name) !== Boolean(input2.variables?.[name]))) {
+      throw new Error("Railway did not verify the identity variable names");
+    }
+    const result = await this.redeploy({ instanceId: input2.instanceId, environment: input2.environment, service: "web" }, input2.image);
+    if (!result.verified) throw new Error("Railway did not verify a new web deployment");
+    const settled = await this.awaitDeployment(scope.projectId, scope.environmentId, scope.serviceId, credential, [], []);
+    const observed = await this.instanceStatus(scope.projectId, scope.environmentId, scope.serviceId, credential);
+    if (settled.status !== "live" || observed?.image !== input2.image) {
+      throw new Error("The pinned web deployment did not become healthy");
+    }
+  }
   async secretPresence(input2) {
     const out = {};
     const project = await this.findProject(this.projectName({ instanceId: input2.instanceId }));
@@ -26394,7 +26447,7 @@ var RailwayInfraProvider = class {
    * decision to make, which is why it is an operation with an audit row rather than an automatic consequence of
    * a write.
    */
-  async redeploy(input2) {
+  async redeploy(input2, expectedImage) {
     const project = await this.findProject(this.projectName({ instanceId: input2.instanceId }));
     if (!project) {
       return {
@@ -26454,6 +26507,7 @@ var RailwayInfraProvider = class {
       }
       if (this.registryCredentials) {
         const info = await this.instanceStatus(project.id, env.id, serviceId, token);
+        if (expectedImage && info?.image !== expectedImage) throw new Error("The web image changed during identity delivery");
         const registryCredentials = info && this.registryCredentials(info.image);
         if (registryCredentials) {
           await configureRailwayService({ transport: this.transport, credential: token }, { environmentId: env.id, serviceId }, { registryCredentials }).catch(() => {
@@ -26860,7 +26914,7 @@ var RailwayInfraProvider = class {
       }
     }
   }
-  async configVariableNames(projectId, environmentId, serviceId) {
+  async configVariableNames(projectId, environmentId, serviceId, requireConfig = false) {
     const token = await this.credentials.forEnvironment(projectId, await this.environmentName(projectId, environmentId));
     const data = await this.transport.graphql({
       operation: "environment.config",
@@ -26868,6 +26922,9 @@ var RailwayInfraProvider = class {
       query: "query ($projectId: String!, $environmentId: String!) { environment(projectId: $projectId, id: $environmentId) { config } }",
       variables: { projectId, environmentId }
     });
+    if (requireConfig && !data.environment?.config?.services?.[serviceId]) {
+      throw new Error("Railway did not return the scoped service configuration");
+    }
     return Object.keys(data.environment?.config?.services?.[serviceId]?.variables ?? {});
   }
   async environmentName(projectId, environmentId) {
@@ -27944,6 +28001,71 @@ var InstallationJournalSchema = external_exports.object({
   leaseUntil: external_exports.iso.datetime()
 }).strict();
 
+// packages/contracts/src/customer-hosting-commands.ts
+var artifact = external_exports.object({
+  selection: MarketplacePlatformAcquisitionInputSchema,
+  images: MarketplacePlatformReleaseSchema.shape.images
+}).strict();
+var HostingTargetSchema = external_exports.object({
+  id: external_exports.string().min(1).max(128).regex(/^[a-zA-Z0-9_-]+$/),
+  name: external_exports.string().min(1).max(40).regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/),
+  teamId: external_exports.string().min(1).max(128),
+  provider: HostingProviderIdSchema,
+  artifact: artifact.optional()
+}).strict();
+var selectedRelease = { release: MarketplaceReleaseSelectionSchema.optional() };
+var empty = external_exports.object({}).strict().optional();
+var target = external_exports.object({ projectId: external_exports.string().min(1), deploymentId: external_exports.string().min(1) }).strict();
+var PrivateLaunchTemplateSchema = external_exports.enum(["shared-identity", "starter-worker"]);
+var domain2 = target.extend({ hostname: external_exports.string().min(1).max(253) });
+var encoded = external_exports.string().regex(/^[a-zA-Z0-9+/=]+$/);
+var boundEnvironment = external_exports.object({
+  target: HostingTargetSchema,
+  environment: external_exports.string().min(1).max(64),
+  service: external_exports.string().min(1).max(64).optional()
+}).strict();
+var command = (action, body) => external_exports.object({ action: external_exports.literal(action), body }).strict();
+var CustomerHostingCommandSchema = external_exports.discriminatedUnion("action", [
+  command("report", empty),
+  command("setup", empty),
+  command("start", external_exports.object(selectedRelease).strict().optional()),
+  command("template-report", external_exports.object({ template: PrivateLaunchTemplateSchema }).strict()),
+  command("template-start", external_exports.discriminatedUnion("template", [
+    external_exports.object({ template: external_exports.literal("shared-identity"), bootstrap: encoded.length(512), ...selectedRelease }).strict(),
+    external_exports.object({ template: external_exports.literal("starter-worker"), ...selectedRelease }).strict()
+  ])),
+  command("template-restore", external_exports.object({ template: PrivateLaunchTemplateSchema }).strict()),
+  command("template-remove", HostingRemovalSchema.extend({ template: PrivateLaunchTemplateSchema }).strict()),
+  command("template-redeploy", target.extend({ template: PrivateLaunchTemplateSchema })),
+  command("authorize", empty),
+  command("initialize", external_exports.object({ publicKey: encoded.min(500).max(1024) }).strict()),
+  command("unlock", external_exports.object({ recovery: encoded.min(500).max(640) }).strict()),
+  command("callback", external_exports.object({
+    code: external_exports.string().max(1024),
+    state: external_exports.string().max(1024),
+    issuer: external_exports.string().max(1024),
+    error: external_exports.string().max(1024)
+  }).strict()),
+  command("redeploy", target),
+  command("remove", HostingRemovalSchema),
+  command("marketplace-status", empty),
+  command("marketplace-catalog", empty),
+  command("marketplace-public-catalog", empty),
+  command("marketplace-platforms", empty),
+  command("marketplace-platform-releases", MarketplacePlatformReleaseSchema.pick({ platformId: true })),
+  command("marketplace-verify-install", external_exports.object({ target: HostingTargetSchema, release: MarketplacePlatformAcquisitionInputSchema }).strict()),
+  command("marketplace-enroll", external_exports.object({ handoff: external_exports.string().regex(/^[0-9a-f-]{36}:[A-Za-z0-9_-]{43}$/) }).strict()),
+  command("domains-list", target),
+  command("domain-attach", domain2),
+  command("domain-detach", domain2),
+  command("brand-read", target),
+  command("brand-apply", target.extend({ value: external_exports.string().max(60) })),
+  command("hosting-apply", external_exports.object({ target: HostingTargetSchema, plan: InfraPlanSchema }).strict()),
+  command("hosting-observe", HostingTargetSchema),
+  command("hosting-remove", external_exports.object({ target: HostingTargetSchema, options: HostingRemovalSchema }).strict()),
+  command("hosting-redeploy", boundEnvironment)
+]);
+
 // packages/contracts/src/shared-identity-execution.ts
 var id = external_exports.string().min(1).max(128).regex(/^[A-Za-z0-9_-]+$/);
 var IdentityEnvironmentSchema = external_exports.enum(["production", "staging"]);
@@ -27959,8 +28081,22 @@ var IdentityClientTargetSchema = external_exports.object({
 var IdentityClientRequestSchema = external_exports.object({
   action: external_exports.enum(["status", "place", "revoke"]),
   target: IdentityClientTargetSchema,
-  controlPlaneIssuer: external_exports.string().min(1).max(1024)
-}).strict();
+  controlPlaneIssuer: external_exports.string().min(1).max(1024),
+  setup: external_exports.object({
+    issuer: external_exports.string().min(1).max(1024),
+    redirectUri: external_exports.string().min(1).max(1024),
+    realmGrant: external_exports.string().length(512).regex(/^[a-zA-Z0-9+/=]+$/)
+  }).strict().optional(),
+  railway: HostingTargetSchema.extend({
+    provider: external_exports.literal("railway"),
+    artifact: HostingTargetSchema.shape.artifact.unwrap(),
+    image: external_exports.string().min(1).max(512),
+    planHash: external_exports.string().min(1).max(128)
+  }).optional()
+}).strict().refine(
+  ({ target: target2, railway }) => !railway || railway.id === target2.consumerInstanceId && railway.teamId === target2.teamId && railway.artifact.images.includes(railway.image),
+  { message: "The Railway target must match the reserved consumer and its immutable release" }
+);
 var IdentityClientPlacementSchema = external_exports.object({
   state: external_exports.enum(["unconfigured", "pending", "placed", "revoked"]),
   clientId: id.optional()
@@ -28074,71 +28210,6 @@ function hostingProviders(providers, requiredRange = `^${CONTRACT_VERSION}`) {
     }
   };
 }
-
-// packages/contracts/src/customer-hosting-commands.ts
-var artifact = external_exports.object({
-  selection: MarketplacePlatformAcquisitionInputSchema,
-  images: MarketplacePlatformReleaseSchema.shape.images
-}).strict();
-var HostingTargetSchema = external_exports.object({
-  id: external_exports.string().min(1).max(128).regex(/^[a-zA-Z0-9_-]+$/),
-  name: external_exports.string().min(1).max(40).regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/),
-  teamId: external_exports.string().min(1).max(128),
-  provider: HostingProviderIdSchema,
-  artifact: artifact.optional()
-}).strict();
-var selectedRelease = { release: MarketplaceReleaseSelectionSchema.optional() };
-var empty = external_exports.object({}).strict().optional();
-var target = external_exports.object({ projectId: external_exports.string().min(1), deploymentId: external_exports.string().min(1) }).strict();
-var PrivateLaunchTemplateSchema = external_exports.enum(["shared-identity", "starter-worker"]);
-var domain2 = target.extend({ hostname: external_exports.string().min(1).max(253) });
-var encoded = external_exports.string().regex(/^[a-zA-Z0-9+/=]+$/);
-var boundEnvironment = external_exports.object({
-  target: HostingTargetSchema,
-  environment: external_exports.string().min(1).max(64),
-  service: external_exports.string().min(1).max(64).optional()
-}).strict();
-var command = (action, body) => external_exports.object({ action: external_exports.literal(action), body }).strict();
-var CustomerHostingCommandSchema = external_exports.discriminatedUnion("action", [
-  command("report", empty),
-  command("setup", empty),
-  command("start", external_exports.object(selectedRelease).strict().optional()),
-  command("template-report", external_exports.object({ template: PrivateLaunchTemplateSchema }).strict()),
-  command("template-start", external_exports.discriminatedUnion("template", [
-    external_exports.object({ template: external_exports.literal("shared-identity"), bootstrap: encoded.length(512), ...selectedRelease }).strict(),
-    external_exports.object({ template: external_exports.literal("starter-worker"), ...selectedRelease }).strict()
-  ])),
-  command("template-restore", external_exports.object({ template: PrivateLaunchTemplateSchema }).strict()),
-  command("template-remove", HostingRemovalSchema.extend({ template: PrivateLaunchTemplateSchema }).strict()),
-  command("template-redeploy", target.extend({ template: PrivateLaunchTemplateSchema })),
-  command("authorize", empty),
-  command("initialize", external_exports.object({ publicKey: encoded.min(500).max(1024) }).strict()),
-  command("unlock", external_exports.object({ recovery: encoded.min(500).max(640) }).strict()),
-  command("callback", external_exports.object({
-    code: external_exports.string().max(1024),
-    state: external_exports.string().max(1024),
-    issuer: external_exports.string().max(1024),
-    error: external_exports.string().max(1024)
-  }).strict()),
-  command("redeploy", target),
-  command("remove", HostingRemovalSchema),
-  command("marketplace-status", empty),
-  command("marketplace-catalog", empty),
-  command("marketplace-public-catalog", empty),
-  command("marketplace-platforms", empty),
-  command("marketplace-platform-releases", MarketplacePlatformReleaseSchema.pick({ platformId: true })),
-  command("marketplace-verify-install", external_exports.object({ target: HostingTargetSchema, release: MarketplacePlatformAcquisitionInputSchema }).strict()),
-  command("marketplace-enroll", external_exports.object({ handoff: external_exports.string().regex(/^[0-9a-f-]{36}:[A-Za-z0-9_-]{43}$/) }).strict()),
-  command("domains-list", target),
-  command("domain-attach", domain2),
-  command("domain-detach", domain2),
-  command("brand-read", target),
-  command("brand-apply", target.extend({ value: external_exports.string().max(60) })),
-  command("hosting-apply", external_exports.object({ target: HostingTargetSchema, plan: InfraPlanSchema }).strict()),
-  command("hosting-observe", HostingTargetSchema),
-  command("hosting-remove", external_exports.object({ target: HostingTargetSchema, options: HostingRemovalSchema }).strict()),
-  command("hosting-redeploy", boundEnvironment)
-]);
 
 // apps/managed-action/src/runner.ts
 var RELEASE = { version: process.env.PLATFOLIO_ACTION_VERSION ?? "0.0.0-dev", commitSha: process.env.PLATFOLIO_ACTION_SHA ?? "0".repeat(40), imageDigest: `sha256:${"0".repeat(64)}` };

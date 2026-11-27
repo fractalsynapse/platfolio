@@ -42,7 +42,7 @@ export function customerLaunch(config: CustomerLaunchConfig, request: typeof fet
       if (command.target.teamId !== config.teamId) return { status: 404 };
       try {
         const response = await request(config.workerUrl + '/identity', {
-          method: 'POST', redirect: 'error', signal: AbortSignal.timeout(120_000),
+          method: 'POST', redirect: 'error', signal: AbortSignal.timeout(command.action === 'status' ? 120_000 : 720_000),
           headers: { authorization: 'Bearer ' + config.workerKey, 'content-type': 'application/json' },
           body: JSON.stringify(command),
         });

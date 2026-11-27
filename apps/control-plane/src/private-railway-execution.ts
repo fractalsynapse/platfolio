@@ -1,11 +1,14 @@
 import { CONTRACT_VERSION, KEEP_DATA_FEATURE, HttpRailwayTransport, RailwayInfraProvider,
   planIssues, type DeleteOptions, type HostingTarget, type InfraProvider, type RailwayProviderOptions } from '@platfolio/contracts';
 import type { HostingPlugin } from '@platfolio/kernel';
+import type { IdentityClientRequest } from '../../../packages/contracts/src/shared-identity-execution.ts';
 
 type WorkspaceGrant = { token: string; workspaceId: string; projectId?: string };
 
 export function privateRailwayExecution(team: string, readGrant: () => Promise<WorkspaceGrant>,
-  readArtifact?: (artifact: NonNullable<HostingTarget['artifact']>) => Promise<NonNullable<RailwayProviderOptions['registryCredentials']>>): HostingPlugin {
+  readArtifact?: (artifact: NonNullable<HostingTarget['artifact']>) => Promise<NonNullable<RailwayProviderOptions['registryCredentials']>>): HostingPlugin & {
+    configureIdentity(target: NonNullable<IdentityClientRequest['railway']>, environment: string, callback: string, variables?: Readonly<Record<string, string>> | 'check'): Promise<void>;
+  } {
   const operations = new Set<string>();
   const transport = new HttpRailwayTransport();
   const describe: InfraProvider['describe'] = () => ({
@@ -48,6 +51,12 @@ export function privateRailwayExecution(team: string, readGrant: () => Promise<W
 
   return {
     describe, validatePlan: planIssues, applyPlan: refuse, readState: refuse, deleteInstance: refuse, redeploy: refuse,
+    async configureIdentity(target, environment, callback, variables) {
+      if (target.teamId !== team || !target.artifact.images.includes(target.image)) throw new Error('Invalid hosting scope');
+      await perform(target, (driver) => driver.configureIdentityClient({ instanceId: target.id, environment,
+        image: target.image, planHash: target.planHash, callback,
+        ...(variables === 'check' ? { checkOnly: true } : variables ? { variables } : {}) }), variables !== 'check');
+    },
     bindInstance(target) {
       if (target.provider !== 'railway' || target.teamId !== team) return undefined;
       return {

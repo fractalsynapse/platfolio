@@ -34,7 +34,6 @@ if (!directory || !workerKey || workerKey.length < 32 || !team || !callback || !
 }
 mkdirSync(directory, { recursive: true, mode: 0o700 });
 const bao = customerOpenBao(baoOrigin, baoSecret, directory);
-const sharedIdentity = customerSharedIdentity(bao.identity);
 const registryOrigin = privateMarketplaceOrigin(process.env.PLATFOLIO_REGISTRY_ORIGIN);
 const marketplace = customerMarketplaceConnection(registryOrigin, bao);
 const oauth = customerRailwayOAuth({ callback, workspaceId: workspace, ...(client ? { clientId: client } : {}), ...(project ? { projectId: project } : {}) }, bao);
@@ -52,7 +51,7 @@ function privateRun(template: PrivateLaunchTemplate) {
   privateRuns.set(template, initialized);
   return initialized;
 }
-const execution = await createKernel({ provider: 'railway', infrastructure: [privateRailwayExecution(team, async () => {
+const hosting = privateRailwayExecution(team, async () => {
   if (await bao.status() !== 'ready') throw new Error('Unlock OpenBao before managing a project');
   return oauth.credential();
 }, async ({ selection, images }) => {
@@ -62,7 +61,9 @@ const execution = await createKernel({ provider: 'railway', infrastructure: [pri
   artifactImages({ origin: ticket.registry }, namespace, images);
   const pins = new Set(images);
   return (image) => pins.has(image) ? { username: ticket.username, password: ticket.password } : undefined;
-})], requiredServices: ['infra'] });
+});
+const sharedIdentity = customerSharedIdentity(bao.identity, fetch, hosting.configureIdentity, bao.openEnvelope);
+const execution = await createKernel({ provider: 'railway', infrastructure: [hosting], requiredServices: ['infra'] });
 const expected = Buffer.from('Bearer ' + workerKey);
 const replyError = { error: 'launcher-setup-unavailable', message: 'Check OpenBao and Railway connection, then try again.' };
 let changingDomain = false;

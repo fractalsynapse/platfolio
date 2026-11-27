@@ -3,8 +3,8 @@ import type { RequestBodyOf } from '@platfolio/api-contract/generated/types';
 import { composeDocuments, enabledEnvironments, parseCompose, parseInventory, readRepositorySource,
   readTemplate, serviceEnvironments, SHARED_IDENTITY_RELEASE, templateCatalogEntry, validateIdentitySource } from '@platfolio/manifest';
 import type { ExtensionDescriptor } from '@platfolio/kernel';
-import type { Store } from '@platfolio/contracts';
-import { IdentityClientTargetSchema, IdentityEnvironmentSchema, type IdentityClientTarget } from '../../../packages/contracts/src/shared-identity-execution.ts';
+import { InfraPlanSchema, type Store } from '@platfolio/contracts';
+import { IdentityClientTargetSchema, IdentityEnvironmentSchema, type IdentityClientTarget, type IdentityClientRequest } from '../../../packages/contracts/src/shared-identity-execution.ts';
 import type { scoped } from './capabilities.ts';
 import type { customerLaunch } from './customer-launch.ts';
 import { badRequest, notFound, send, spec } from './respond.ts';
@@ -40,16 +40,37 @@ export function identityClient(route: typeof scoped, worker?: ReturnType<typeof 
         const instanceId = params.instanceId ?? '';
         const { store, scm } = context;
         let target = await store.getIdentityClient(instanceId, environment);
+        let railway: IdentityClientRequest['railway'];
+        let setup: IdentityClientRequest['setup'];
         if (action === 'place') {
           if (request.bodyError || !validateRequestBody(spec(), operation, request.body).ok) {
             return badRequest('Choose a Shared Identity provider environment.');
           }
-          const { providerEnvironment } = request.body as RequestBodyOf<typeof put>;
+          const { providerEnvironment, setup: supplied } = request.body as RequestBodyOf<typeof put>;
+          setup = supplied;
+          const consumer = await store.getInstance(instanceId);
+          if (!consumer.ok || consumer.value.teamId !== teamId) return notFound('private identity binding', '');
+          const retained = await store.getMarketplaceInstall(teamId, consumer.value.name);
+          const release = retained?.instance.id === instanceId ? retained.receipt.release : undefined;
+          const bundle = release?.bundle;
+          if (bundle && release) {
+            const stored = await store.getPlan(instanceId);
+            const plan = stored.ok ? InfraPlanSchema.safeParse(stored.value.plan) : undefined;
+            const web = plan?.success ? plan.data.environments.find(({ name }) => name === environment)?.services.find(({ name }) => name === 'web') : undefined;
+            const image = web && web.image + '@' + web.digest;
+            if (!plan?.success || plan.data.provider !== 'railway' || plan.data.instanceId !== instanceId || plan.data.teamId !== teamId ||
+                plan.data.planHash !== consumer.value.lastAppliedPlanHash || !image || !release.images.includes(image)) {
+              return conflict(operation, 'Apply the retained release to this Railway environment before managing its client.');
+            }
+            const { platformId, version, descriptorDigest, images } = release;
+            railway = { id: instanceId, name: consumer.value.name, teamId, provider: 'railway', image,
+              planHash: plan.data.planHash, artifact: { selection: { platformId, version, descriptorDigest }, images } };
+          }
           const binding = await store.getBinding(instanceId, 'identity');
           if (!binding.ok || binding.value.state !== 'bound') return conflict(operation, 'Record a same-team Shared Identity binding first.');
           const { providerInstanceId, destinations, boundAt } = binding.value;
-          const [provider, consumer] = await Promise.all([store.getInstance(providerInstanceId), store.getInstance(instanceId)]);
-          if (!provider.ok || !consumer.ok || provider.value.teamId !== teamId || consumer.value.teamId !== teamId) {
+          const provider = await store.getInstance(providerInstanceId);
+          if (!provider.ok || provider.value.teamId !== teamId) {
             return notFound('private identity binding', '');
           }
           if (provider.value.templateRef?.repo !== identityTemplate.repo || provider.value.templateRef.commitSha !== identityRelease.revision ||
@@ -66,8 +87,6 @@ export function identityClient(route: typeof scoped, worker?: ReturnType<typeof 
 
           try {
             const readFile: typeof scm.readFile = (file) => scm.readFile(file);
-            const retained = await store.getMarketplaceInstall(teamId, consumer.value.name);
-            const bundle = retained?.instance.id === instanceId ? retained.receipt.release.bundle : undefined;
             const pinned = consumer.value.templateRef;
             const recipe = bundle ?? (pinned && await readRepositorySource({ readFile, repo: pinned.repo, ref: pinned.commitSha, inventory: true, prodOverlay: true }));
             if (!recipe) return conflict(operation, 'Install a pinned Starter Web release with identity inputs.');
@@ -103,9 +122,9 @@ export function identityClient(route: typeof scoped, worker?: ReturnType<typeof 
           }
         }
         if (!target || target.teamId !== teamId) return send(operation, 200, { state: action === 'revoke' ? 'revoked' : 'unconfigured' });
-        const result = await worker.identity({ action, target, controlPlaneIssuer: claims.issuer });
+        const result = await worker.identity({ action, target, controlPlaneIssuer: claims.issuer, ...(railway ? { railway } : {}), ...(setup ? { setup } : {}) });
         if (result.status === 409) return conflict(operation, 'The client changed, is revoked, or has an operation in progress.');
-        if (!result.placement) return unavailable(operation, 'Check OpenBao and Keycloak in the private installation and retry.');
+        if (!result.placement) return unavailable(operation, 'Check OpenBao, Keycloak and the connected hosting workspace, then retry.');
         if (result.placement.state === 'revoked') {
           await store.releaseIdentityClient(target);
           if (action === 'place') return conflict(operation, 'This binding was revoked. Detach it before requesting a new client.');

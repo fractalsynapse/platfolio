@@ -95,20 +95,32 @@ Master realm metadata. The application login test still needs a dedicated applic
 
 ### Hosted credential delivery
 
-Keep OpenBao on the installation’s private network. The private worker should read the bound client
-configuration from OpenBao and deliver it through the scoped Railway write API to the consumer’s
-verified service and environment. Railway holds the application’s runtime copy. The hub receives
-neither the value nor delivery credentials. Require an exact saved binding, a named environment,
-and the declared Starter Web service before writing any of its OIDC variables. Preserve the OCI
-receipt and renew registry access before restarting the app.
+The private worker reads the issued client configuration from OpenBao. For a retained Marketplace
+OCI install, it checks the applied plan, image pin, Railway project ownership, named environment,
+and bound web callback before delivery. The worker writes the declared OIDC variables to that
+service, verifies their names, renews the release’s registry grant, and checks that a new deployment
+of the pinned image becomes healthy. The hub receives neither the configuration nor the Railway
+grant. Revocation disables the Keycloak client before removing the Railway variables. The worker
+verifies that the pinned application restarts and removes the OpenBao placement before releasing
+the reservation. A partial revocation can be retried without enabling the client again.
 
-For installations with an older worker policy, use **Enable Shared Identity** in **Connections**
-with the saved owner recovery file. Normal vault readiness stays available before the update.
-The site encrypts the file to the private worker. OpenBao issues a temporary admin token inside the
-installation to update the worker policy, and the recovery code verifies token retirement.
-Verify hosted sign-in, credential placement, revocation, and removal refusal with active
-dependents. Check cold recovery with the hub unavailable. Those checks require the OIDC-capable
-Starter Web release and remain open.
+For an older worker policy, use **Enable Shared Identity** in **Connections** with the saved owner
+recovery file. The site encrypts the file to the private worker. OpenBao issues a temporary admin
+token inside the installation to update the worker policy, and the recovery code verifies retirement.
+
+An owner can prepare the management grant and exact callback directly in private OpenBao or send
+them with the first placement request. For the latter, get the worker public key from
+`GET /api/v1/teams/{teamId}/starter-launch/setup`. Encrypt the JSON object containing
+`clientId` and `clientSecret` with RSA-OAEP and SHA-256. Base64-encode the ciphertext and supply it
+as `setup.realmGrant` with the application realm `setup.issuer` and the consumer’s
+`setup.redirectUri`. The worker validates the realm before storing the manager once in OpenBao.
+Later placements can omit the setup fields. Existing manager grants can be rotated directly in
+customer OpenBao. A release or callback change requires revoking the previous placement first.
+
+Starter Web 0.1.1 was published to the staging marketplace as a separate release. The existing
+0.1.0 install continues to use its original image pin. Hosted sign-in, removal refusal with an
+active dependency, runtime revocation, and cold recovery with the hub unavailable require
+separate hosted acceptance.
 
 ## 2D — Optional hub sign-in and application registration
 
