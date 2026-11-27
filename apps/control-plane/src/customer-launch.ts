@@ -54,7 +54,8 @@ export function customerLaunch(config: CustomerLaunchConfig, request: typeof fet
 
 
 /** RPC adapter for the customer execution worker. The installation owns the provider grant. */
-export function privateHostingPlugin(launch: ReturnType<typeof customerLaunch>): HostingPlugin {
+export function privateHostingPlugin(launch: ReturnType<typeof customerLaunch>,
+  loadArtifacts?: (instance: HostingTarget) => Promise<HostingTarget['artifact']>): HostingPlugin {
   const info = () => ({
     provider: 'railway', contract: CONTRACT_VERSION,
     operations: ['describe', 'validatePlan', 'applyPlan', 'readState', 'deleteInstance', 'redeploy'] as const,
@@ -73,10 +74,14 @@ export function privateHostingPlugin(launch: ReturnType<typeof customerLaunch>):
     bindInstance(instance) {
       if (instance.teamId !== launch.teamId || instance.provider !== 'railway') return undefined;
       const target: HostingTarget = { id: instance.id, teamId: instance.teamId, name: instance.name, provider: instance.provider };
+      async function releaseTarget() {
+        const artifact = await loadArtifacts?.(target);
+        return artifact ? { ...target, artifact } : target;
+      }
       return {
         describe: () => ({ ...info(), operations: [...info().operations] }),
         validatePlan: planIssues,
-        applyPlan: async (plan) => ApplyResultSchema.parse(await call('hosting-apply', { target, plan })),
+        applyPlan: async (plan) => ApplyResultSchema.parse(await call('hosting-apply', { target: await releaseTarget(), plan })),
         readState: async (id) => {
           if (target.id !== id) throw new Error('Hosting instance did not match the bound target');
           return StateSnapshotSchema.parse(await call('hosting-observe', target));
@@ -97,7 +102,7 @@ export function privateHostingPlugin(launch: ReturnType<typeof customerLaunch>):
             return { instanceId, environment: input.environment, services: [], budgetSkipped: [], verified: false,
               refused: outcome.ok ? [] : [{ service: target.name, code: 'operation-conflict', reason: 'Finish the current setup or refresh the app before trying again.' }] };
           }
-          return RedeployResultSchema.parse(await call('hosting-redeploy', { target, ...input }));
+          return RedeployResultSchema.parse(await call('hosting-redeploy', { target: await releaseTarget(), ...input }));
         },
       };
     },

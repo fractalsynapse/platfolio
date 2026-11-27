@@ -1,0 +1,26 @@
+# Optional Compose overlay for the marketplace hub. Put a TLS proxy in front of the gateway.
+services:
+  api:
+    environment: &artifact-config
+      PLATFOLIO_MARKETPLACE_ENABLED: "true"
+      PLATFOLIO_ARTIFACT_ORIGIN: ${PLATFOLIO_ARTIFACT_ORIGIN:?Set the public artifact registry origin}
+      PLATFOLIO_ARTIFACT_BACKEND: http://artifact-backend:5000
+      PLATFOLIO_ARTIFACT_KEY: ${PLATFOLIO_ARTIFACT_KEY:?Set a private artifact signing key}
+  artifact-gateway:
+    build:
+      context: .
+      dockerfile: apps/control-plane/Dockerfile
+    command: ['node', 'apps/control-plane/src/artifact-gateway.ts']
+    environment: *artifact-config
+    ports: ['127.0.0.1:19090:8080']
+    depends_on: [artifact-backend]
+  artifact-backend:
+    image: registry:3@sha256:82f6ff4a7f982960c8aa51617fea3aabc485df6e55cce80d22deb1de36f1bc3c
+    environment:
+      REGISTRY_HTTP_RELATIVEURLS: "true"
+      REGISTRY_STORAGE_DELETE_ENABLED: "false"
+    volumes:
+      - marketplace-artifacts:/var/lib/registry
+
+volumes:
+  marketplace-artifacts:

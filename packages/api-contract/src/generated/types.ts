@@ -4,7 +4,7 @@
  * hand, because every line reproduces from the specification.
  *
  * Source: apps/control-plane/openapi.yaml (OpenAPI 3.1.0, info.version 0.1.0)
- * Input digest: sha256/4bb3dbccb6ab46cd
+ * Input digest: sha256/7163f93b8c023195
  *
  * Reproduce it with `pnpm run api:types`. `pnpm run api:types:check` fails when this file stops matching
  * what the committed spec produces, which is the only way a generated type deserves to be trusted.
@@ -354,6 +354,47 @@ export interface Invitation {
   emailError?: string;
 }
 
+export interface MarketplaceArtifactAcquisition {
+  id: string;
+  teamId: string;
+  acquiredAt: string;
+  variant: 'starter-template' | 'shared-service' | 'hosted-application';
+  release: {
+    platformId: string;
+    version: string;
+    images: string[];
+    installer: string;
+    descriptorDigest: string;
+    bundle: {
+      compose: string;
+      inventory: string;
+      offer: 'free' | 'maintenance';
+    };
+  };
+}
+
+export interface MarketplaceArtifactGrant {
+  registry: string;
+  namespace: string;
+  username: 'platfolio';
+  password: string;
+  expiresAt: string;
+}
+
+export interface MarketplaceArtifactVersion {
+  version: string;
+}
+
+export interface MarketplaceBundlePublication {
+  version: string;
+  bundle: {
+    compose: string;
+    inventory: string;
+    offer: 'free' | 'maintenance';
+  };
+  images: string[];
+}
+
 export interface MarketplaceInstall {
   instance: {
     id: string;
@@ -395,6 +436,11 @@ export interface MarketplaceInstallation {
   state: 'pending' | 'connected' | 'linked' | 'disconnected';
 }
 
+export interface MarketplaceMaintenanceInput {
+  buyerTeamId: string;
+  through: string;
+}
+
 export interface MarketplacePlatform {
   id: string;
   title: string;
@@ -411,6 +457,12 @@ export interface MarketplacePlatform {
     images: string[];
     installer: string;
     descriptorDigest: string;
+    bundle?: {
+      compose: string;
+      inventory: string;
+      offer: 'free' | 'maintenance';
+    };
+    offer?: 'free' | 'maintenance';
   };
 }
 
@@ -463,6 +515,12 @@ export interface MarketplacePlatformRelease {
   images: string[];
   installer: string;
   descriptorDigest: string;
+  bundle?: {
+    compose: string;
+    inventory: string;
+    offer: 'free' | 'maintenance';
+  };
+  offer?: 'free' | 'maintenance';
 }
 
 export interface MarketplacePublisherPlatform {
@@ -606,6 +664,10 @@ export interface ApiParameters {
   /** POST /api/v1/me/invitations/{invitationId}/accept */
   acceptInvitation: {
     invitationId: string;
+  };
+  /** POST /api/v1/marketplace/installations/{installationId}/bundle-acquisitions */
+  acquireMarketplaceArtifactRelease: {
+    installationId: string;
   };
   /** POST /api/v1/marketplace/installations/{installationId}/acquisitions */
   acquireMarketplacePlatformRelease: {
@@ -791,6 +853,15 @@ export interface ApiParameters {
     teamId: string;
     installationId: string;
   };
+  /** POST /api/v1/marketplace/installations/{installationId}/pulls */
+  issueMarketplacePullGrant: {
+    installationId: string;
+  };
+  /** POST /api/v1/teams/{teamId}/marketplace/platforms/{platformId}/uploads */
+  issueMarketplaceUploadGrant: {
+    teamId: string;
+    platformId: string;
+  };
   /** GET /api/v1/audit */
   listAudit: {
     limit?: number;
@@ -869,6 +940,11 @@ export interface ApiParameters {
   publishCapability: {
     instanceId: string;
   };
+  /** POST /api/v1/teams/{teamId}/marketplace/platforms/{platformId}/bundles */
+  publishMarketplaceArtifactBundle: {
+    teamId: string;
+    platformId: string;
+  };
   /** POST /api/v1/teams/{teamId}/marketplace/platforms/{platformId}/releases */
   publishMarketplacePlatformRelease: {
     teamId: string;
@@ -933,6 +1009,11 @@ export interface ApiParameters {
     teamId: string;
     invitationId: string;
   };
+  /** PUT /api/v1/teams/{teamId}/marketplace/platforms/{platformId}/maintenance */
+  setMarketplaceMaintenance: {
+    teamId: string;
+    platformId: string;
+  };
   /** PUT /api/v1/instances/{instanceId}/capability/{capability}/shares */
   shareCapability: {
     instanceId: string;
@@ -992,6 +1073,8 @@ export interface ApiParameters {
 export interface ApiRequestBodies {
   /** POST /api/v1/me/invitations/{invitationId}/accept */
   acceptInvitation: Record<string, never>;
+  /** POST /api/v1/marketplace/installations/{installationId}/bundle-acquisitions */
+  acquireMarketplaceArtifactRelease: MarketplacePlatformAcquisitionInput;
   /** POST /api/v1/marketplace/installations/{installationId}/acquisitions */
   acquireMarketplacePlatformRelease: MarketplacePlatformAcquisitionInput;
   /** POST /api/v1/teams/{teamId}/marketplace/installation-launches */
@@ -1050,6 +1133,10 @@ export interface ApiRequestBodies {
   initializeStarterOpenBao: {
     publicKey: string;
   };
+  /** POST /api/v1/marketplace/installations/{installationId}/pulls */
+  issueMarketplacePullGrant: MarketplacePlatformAcquisitionInput;
+  /** POST /api/v1/teams/{teamId}/marketplace/platforms/{platformId}/uploads */
+  issueMarketplaceUploadGrant: MarketplaceArtifactVersion;
   /** POST /api/v1/teams/{teamId}/marketplace/installation-launches/{launchId}/maintenance */
   maintainHubInstallation: ({
     action: 'update';
@@ -1072,6 +1159,8 @@ export interface ApiRequestBodies {
       state?: 'not-issued' | 'issued-and-placed' | 'placement-unknown' | 're-issue-required';
     }>;
   };
+  /** POST /api/v1/teams/{teamId}/marketplace/platforms/{platformId}/bundles */
+  publishMarketplaceArtifactBundle: MarketplaceBundlePublication;
   /** POST /api/v1/teams/{teamId}/marketplace/platforms/{platformId}/releases */
   publishMarketplacePlatformRelease: MarketplacePlatformPublication;
   /** POST /api/v1/teams/{teamId}/marketplace/releases */
@@ -1127,6 +1216,8 @@ export interface ApiRequestBodies {
     sourceRef?: string;
     version?: string;
   };
+  /** PUT /api/v1/teams/{teamId}/marketplace/platforms/{platformId}/maintenance */
+  setMarketplaceMaintenance: MarketplaceMaintenanceInput;
   /** PUT /api/v1/instances/{instanceId}/capability/{capability}/shares */
   shareCapability: {
     /** A team id, or `*` to offer it to every team. Recorded, never implied. */
@@ -1192,6 +1283,14 @@ export interface ApiResponses {
     '401': Error;
     '404': Error;
     '409': Error;
+  };
+  /** POST /api/v1/marketplace/installations/{installationId}/bundle-acquisitions */
+  acquireMarketplaceArtifactRelease: {
+    '200': MarketplaceArtifactAcquisition;
+    '400': Error;
+    '404': Error;
+    '409': Error;
+    '503': Error;
   };
   /** POST /api/v1/marketplace/installations/{installationId}/acquisitions */
   acquireMarketplacePlatformRelease: {
@@ -1644,6 +1743,22 @@ export interface ApiResponses {
     '403': Error;
     '404': Error;
   };
+  /** POST /api/v1/marketplace/installations/{installationId}/pulls */
+  issueMarketplacePullGrant: {
+    '200': MarketplaceArtifactGrant;
+    '400': Error;
+    '404': Error;
+    '503': Error;
+  };
+  /** POST /api/v1/teams/{teamId}/marketplace/platforms/{platformId}/uploads */
+  issueMarketplaceUploadGrant: {
+    '200': MarketplaceArtifactGrant;
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '503': Error;
+  };
   /** GET /api/v1/audit */
   listAudit: {
     '200': AuditEntry[];
@@ -1824,6 +1939,16 @@ export interface ApiResponses {
     '400': Error;
     '401': Error;
     '404': Error;
+  };
+  /** POST /api/v1/teams/{teamId}/marketplace/platforms/{platformId}/bundles */
+  publishMarketplaceArtifactBundle: {
+    '200': MarketplacePlatformRelease;
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '409': Error;
+    '503': Error;
   };
   /** POST /api/v1/teams/{teamId}/marketplace/platforms/{platformId}/releases */
   publishMarketplacePlatformRelease: {
@@ -2022,6 +2147,15 @@ export interface ApiResponses {
     '404': Error;
     '409': Error;
   };
+  /** PUT /api/v1/teams/{teamId}/marketplace/platforms/{platformId}/maintenance */
+  setMarketplaceMaintenance: {
+    '204': void;
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '503': Error;
+  };
   /** PUT /api/v1/instances/{instanceId}/capability/{capability}/shares */
   shareCapability: {
     '200': CapabilityShare;
@@ -2207,6 +2341,8 @@ export interface Endpoint {
 export const ENDPOINTS = {
   /** POST /api/v1/me/invitations/{invitationId}/accept */
   acceptInvitation: { method: 'post', path: '/api/v1/me/invitations/{invitationId}/accept' },
+  /** POST /api/v1/marketplace/installations/{installationId}/bundle-acquisitions */
+  acquireMarketplaceArtifactRelease: { method: 'post', path: '/api/v1/marketplace/installations/{installationId}/bundle-acquisitions' },
   /** POST /api/v1/marketplace/installations/{installationId}/acquisitions */
   acquireMarketplacePlatformRelease: { method: 'post', path: '/api/v1/marketplace/installations/{installationId}/acquisitions' },
   /** POST /api/v1/instances/{instanceId}/hosting/apply */
@@ -2299,6 +2435,10 @@ export const ENDPOINTS = {
   initializeStarterOpenBao: { method: 'post', path: '/api/v1/teams/{teamId}/starter-launch/openbao' },
   /** POST /api/v1/teams/{teamId}/marketplace/installations/{installationId}/enrollment */
   issueMarketplaceEnrollment: { method: 'post', path: '/api/v1/teams/{teamId}/marketplace/installations/{installationId}/enrollment' },
+  /** POST /api/v1/marketplace/installations/{installationId}/pulls */
+  issueMarketplacePullGrant: { method: 'post', path: '/api/v1/marketplace/installations/{installationId}/pulls' },
+  /** POST /api/v1/teams/{teamId}/marketplace/platforms/{platformId}/uploads */
+  issueMarketplaceUploadGrant: { method: 'post', path: '/api/v1/teams/{teamId}/marketplace/platforms/{platformId}/uploads' },
   /** GET /api/v1/audit */
   listAudit: { method: 'get', path: '/api/v1/audit' },
   /** GET /api/v1/capabilities */
@@ -2343,6 +2483,8 @@ export const ENDPOINTS = {
   preparePrivateMarketplaceInstall: { method: 'post', path: '/api/v1/teams/{teamId}/marketplace/installs' },
   /** POST /api/v1/instances/{instanceId}/capability */
   publishCapability: { method: 'post', path: '/api/v1/instances/{instanceId}/capability' },
+  /** POST /api/v1/teams/{teamId}/marketplace/platforms/{platformId}/bundles */
+  publishMarketplaceArtifactBundle: { method: 'post', path: '/api/v1/teams/{teamId}/marketplace/platforms/{platformId}/bundles' },
   /** POST /api/v1/teams/{teamId}/marketplace/platforms/{platformId}/releases */
   publishMarketplacePlatformRelease: { method: 'post', path: '/api/v1/teams/{teamId}/marketplace/platforms/{platformId}/releases' },
   /** POST /api/v1/teams/{teamId}/marketplace/releases */
@@ -2371,6 +2513,8 @@ export const ENDPOINTS = {
   revokeCapabilityShare: { method: 'delete', path: '/api/v1/instances/{instanceId}/capability/{capability}/shares/{toTeamId}' },
   /** DELETE /api/v1/teams/{teamId}/invitations/{invitationId} */
   revokeInvitation: { method: 'delete', path: '/api/v1/teams/{teamId}/invitations/{invitationId}' },
+  /** PUT /api/v1/teams/{teamId}/marketplace/platforms/{platformId}/maintenance */
+  setMarketplaceMaintenance: { method: 'put', path: '/api/v1/teams/{teamId}/marketplace/platforms/{platformId}/maintenance' },
   /** PUT /api/v1/instances/{instanceId}/capability/{capability}/shares */
   shareCapability: { method: 'put', path: '/api/v1/instances/{instanceId}/capability/{capability}/shares' },
   /** PUT /api/v1/teams/{teamId}/marketplace/installation-launches/{launchId} */

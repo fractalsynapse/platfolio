@@ -121,6 +121,8 @@ export interface RailwayProviderOptions {
   workspaceId: string;
   /** An authorized instance can reserve its own project name in the customer workspace. */
   project?: { instanceId: string; name: string };
+  /** Ephemeral credentials from the private worker, scoped to an exact fully qualified image pin. */
+  registryCredentials?: (image: string) => { username: string; password: string } | undefined;
   /** Engine kind -> Railway Template code; public catalog entries are read by code (#75). */
   databaseTemplates?: Record<string, string>;
   /**
@@ -163,6 +165,7 @@ export class RailwayInfraProvider implements InfraProvider {
   private readonly transport: RailwayTransport;
   private readonly workspaceId: string;
   private readonly project: RailwayProviderOptions['project'];
+  private readonly registryCredentials: RailwayProviderOptions['registryCredentials'];
   private readonly deployBudget: number;
   private readonly deployTimeoutMs: number;
   private readonly pollIntervalMs: number;
@@ -179,6 +182,7 @@ export class RailwayInfraProvider implements InfraProvider {
     this.transport = options.transport ?? new HttpRailwayTransport();
     this.workspaceId = options.workspaceId;
     this.project = options.project;
+    this.registryCredentials = options.registryCredentials;
     this.databaseTemplates = { postgres: 'postgresql', ...options.databaseTemplates };
     this.deployBudget = options.deployBudget ?? 4;
     this.deployTimeoutMs = options.deployTimeoutMs ?? 180_000;
@@ -806,6 +810,14 @@ export class RailwayInfraProvider implements InfraProvider {
         budgetSkipped.push(label);
         continue;
       }
+      if (this.registryCredentials) {
+        const info = await this.instanceStatus(project.id, env.id, serviceId, token);
+        const registryCredentials = info && this.registryCredentials(info.image);
+        if (registryCredentials) {
+          await configureRailwayService({ transport: this.transport, credential: token }, { environmentId: env.id, serviceId }, { registryCredentials })
+            .catch(() => { throw new Error('Railway refused the renewed private registry grant. Check private registry access on this workspace.'); });
+        }
+      }
       this.deploymentsUsed += 1;
       services.push(label);
       await deployRailwayService({ transport: this.transport, credential: token }, { environmentId: env.id, serviceId });
@@ -1199,6 +1211,8 @@ export class RailwayInfraProvider implements InfraProvider {
   }
 
   private async createService(projectId: string, environmentId: string, service: ServicePlan, physicalName: string, credential: RailwayCredential): Promise<string> {
+    const image = `${service.image}@${service.digest}`;
+    const registryCredentials = this.registryCredentials?.(image);
     const data = await this.transport.graphql<{ serviceCreate: { id: string } }>({
       operation: 'serviceCreate',
       credential,
@@ -1211,22 +1225,33 @@ export class RailwayInfraProvider implements InfraProvider {
           // Measured: a workspace grant is refused here. The environment-scoped token is required. Measured
           // differently, and just as load-bearing: a name the project already holds is refused outright, which
           // is why this call gets the resolved name and never the plan's (D57).
-          source: { image: `${service.image}@${service.digest}` },
+          source: { image },
+          ...(registryCredentials ? { registryCredentials } : {}),
         },
       },
+    }).catch((error: unknown) => {
+      if (registryCredentials) throw new Error('Railway refused private image creation. Check private registry access on this workspace.');
+      throw error;
     });
     return data.serviceCreate.id;
   }
 
   private async updateService(serviceId: string, environmentId: string, service: ServicePlan, credential: RailwayCredential): Promise<void> {
+    const image = `${service.image}@${service.digest}`;
+    const registryCredentials = this.registryCredentials?.(image);
     const input: Record<string, unknown> = {
       numReplicas: service.replicas,
       healthcheckPath: service.healthPath,
-      source: { image: `${service.image}@${service.digest}` },
+      source: { image },
+      ...(registryCredentials ? { registryCredentials } : {}),
     };
     if (service.command) input.startCommand = service.command;
     if (service.preDeployCommand) input.preDeployCommand = service.preDeployCommand;
-    await configureRailwayService({ transport: this.transport, credential }, { environmentId, serviceId }, input);
+    await configureRailwayService({ transport: this.transport, credential }, { environmentId, serviceId }, input)
+      .catch((error: unknown) => {
+        if (registryCredentials) throw new Error('Railway refused the private registry grant. Check private registry access on this workspace.');
+        throw error;
+      });
   }
 
   private upsertVariable(projectId: string, environmentId: string, serviceId: string, name: string, value: string, credential: RailwayCredential, skipDeploys = true) {

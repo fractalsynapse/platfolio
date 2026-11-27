@@ -25068,7 +25068,7 @@ function date4(params) {
 }
 
 // packages/contracts/src/generated/contract-version.ts
-var CONTRACT_VERSION = "7.4.0";
+var CONTRACT_VERSION = "8.0.0";
 
 // packages/contracts/src/infra.ts
 var CONTRACT_NAME = "infra.provider";
@@ -25932,6 +25932,7 @@ var RailwayInfraProvider = class {
   transport;
   workspaceId;
   project;
+  registryCredentials;
   deployBudget;
   deployTimeoutMs;
   pollIntervalMs;
@@ -25946,6 +25947,7 @@ var RailwayInfraProvider = class {
     this.transport = options.transport ?? new HttpRailwayTransport();
     this.workspaceId = options.workspaceId;
     this.project = options.project;
+    this.registryCredentials = options.registryCredentials;
     this.databaseTemplates = { postgres: "postgresql", ...options.databaseTemplates };
     this.deployBudget = options.deployBudget ?? 4;
     this.deployTimeoutMs = options.deployTimeoutMs ?? 18e4;
@@ -26450,6 +26452,15 @@ var RailwayInfraProvider = class {
         budgetSkipped.push(label);
         continue;
       }
+      if (this.registryCredentials) {
+        const info = await this.instanceStatus(project.id, env.id, serviceId, token);
+        const registryCredentials = info && this.registryCredentials(info.image);
+        if (registryCredentials) {
+          await configureRailwayService({ transport: this.transport, credential: token }, { environmentId: env.id, serviceId }, { registryCredentials }).catch(() => {
+            throw new Error("Railway refused the renewed private registry grant. Check private registry access on this workspace.");
+          });
+        }
+      }
       this.deploymentsUsed += 1;
       services.push(label);
       await deployRailwayService({ transport: this.transport, credential: token }, { environmentId: env.id, serviceId });
@@ -26757,6 +26768,8 @@ var RailwayInfraProvider = class {
     }
   }
   async createService(projectId, environmentId, service, physicalName, credential) {
+    const image = `${service.image}@${service.digest}`;
+    const registryCredentials = this.registryCredentials?.(image);
     const data = await this.transport.graphql({
       operation: "serviceCreate",
       credential,
@@ -26769,21 +26782,31 @@ var RailwayInfraProvider = class {
           // Measured: a workspace grant is refused here. The environment-scoped token is required. Measured
           // differently, and just as load-bearing: a name the project already holds is refused outright, which
           // is why this call gets the resolved name and never the plan's (D57).
-          source: { image: `${service.image}@${service.digest}` }
+          source: { image },
+          ...registryCredentials ? { registryCredentials } : {}
         }
       }
+    }).catch((error62) => {
+      if (registryCredentials) throw new Error("Railway refused private image creation. Check private registry access on this workspace.");
+      throw error62;
     });
     return data.serviceCreate.id;
   }
   async updateService(serviceId, environmentId, service, credential) {
+    const image = `${service.image}@${service.digest}`;
+    const registryCredentials = this.registryCredentials?.(image);
     const input2 = {
       numReplicas: service.replicas,
       healthcheckPath: service.healthPath,
-      source: { image: `${service.image}@${service.digest}` }
+      source: { image },
+      ...registryCredentials ? { registryCredentials } : {}
     };
     if (service.command) input2.startCommand = service.command;
     if (service.preDeployCommand) input2.preDeployCommand = service.preDeployCommand;
-    await configureRailwayService({ transport: this.transport, credential }, { environmentId, serviceId }, input2);
+    await configureRailwayService({ transport: this.transport, credential }, { environmentId, serviceId }, input2).catch((error62) => {
+      if (registryCredentials) throw new Error("Railway refused the private registry grant. Check private registry access on this workspace.");
+      throw error62;
+    });
   }
   upsertVariable(projectId, environmentId, serviceId, name, value, credential, skipDeploys = true) {
     return writeRailwayVariable({ transport: this.transport, credential }, { projectId, environmentId, serviceId, name, value, skipDeploys });
@@ -27771,6 +27794,27 @@ var MarketplacePlatformSourceSchema = external_exports.object({
   revision: MarketplaceReleaseSelectionSchema.shape.revision
 }).strict();
 var MarketplaceImagesSchema = external_exports.array(external_exports.string().max(512).regex(/^[A-Za-z0-9](?![^@]*\/\/)[A-Za-z0-9._:/-]*@sha256:[a-f0-9]{64}$/)).max(64);
+var MarketplaceArtifactVersionSchema = external_exports.object({ version: MarketplaceReleaseSelectionSchema.shape.version }).strict();
+var MarketplaceBundleSchema = external_exports.object({
+  compose: external_exports.string().min(1).max(131072),
+  inventory: external_exports.string().min(1).max(65536),
+  offer: external_exports.enum(["free", "maintenance"])
+}).strict();
+var MarketplaceBundlePublicationSchema = MarketplaceArtifactVersionSchema.extend({
+  bundle: MarketplaceBundleSchema,
+  images: MarketplaceImagesSchema.min(1).max(24)
+});
+var MarketplaceMaintenanceInputSchema = external_exports.object({
+  buyerTeamId: external_exports.string().min(1).max(128),
+  through: external_exports.iso.datetime()
+}).strict();
+var MarketplaceArtifactGrantSchema = external_exports.object({
+  registry: external_exports.string().min(1),
+  namespace: external_exports.string().min(1),
+  username: external_exports.literal("platfolio"),
+  password: external_exports.string().min(1),
+  expiresAt: external_exports.iso.datetime()
+}).strict();
 var MarketplacePlatformCreationSchema = external_exports.object({
   slug: external_exports.string().max(80).regex(/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/),
   title: external_exports.string().trim().min(1).max(120),
@@ -27791,9 +27835,14 @@ var MarketplacePlatformReleaseSchema = external_exports.object({
   source: MarketplacePlatformSourceSchema.optional(),
   images: MarketplaceImagesSchema,
   installer: MarketplaceReleasePublicationSchema.shape.installer,
-  descriptorDigest: MarketplaceDescriptorDigestSchema
+  descriptorDigest: MarketplaceDescriptorDigestSchema,
+  bundle: MarketplaceBundleSchema.optional(),
+  offer: MarketplaceBundleSchema.shape.offer.optional()
 }).strict();
-var MarketplacePlatformDescriptorSchema = MarketplacePlatformReleaseSchema.omit({ descriptorDigest: true }).required({ source: true });
+var MarketplacePlatformDescriptorSchema = MarketplacePlatformReleaseSchema.omit({ descriptorDigest: true, offer: true }).refine(
+  ({ source, bundle }) => Boolean(source) !== Boolean(bundle),
+  "Use one pinned source or one release bundle"
+);
 var MarketplacePlatformSchema = external_exports.object({
   id: MarketplacePlatformIdSchema,
   title: external_exports.string().min(1),
@@ -27810,13 +27859,20 @@ var MarketplacePlatformAcquisitionInputSchema = MarketplacePlatformReleaseSchema
   version: true,
   descriptorDigest: true
 });
-var MarketplacePlatformAcquisitionSchema = external_exports.object({
+var acquisition = external_exports.object({
   id: external_exports.string().min(1),
   teamId: external_exports.string().min(1),
   acquiredAt: external_exports.iso.datetime(),
-  variant: MarketplacePlatformVariantSchema,
-  release: MarketplacePlatformReleaseSchema.required({ source: true })
+  variant: MarketplacePlatformVariantSchema
 }).strict();
+var acquiredRelease = MarketplacePlatformReleaseSchema.omit({ offer: true });
+var MarketplacePlatformAcquisitionSchema = acquisition.extend({
+  release: acquiredRelease.omit({ bundle: true }).required({ source: true })
+});
+var MarketplaceArtifactAcquisitionSchema = acquisition.extend({
+  release: acquiredRelease.omit({ source: true }).required({ bundle: true })
+});
+var MarketplaceAcquisitionReceiptSchema = acquisition.extend({ release: acquiredRelease });
 
 // packages/contracts/src/marketplace-install.ts
 var MarketplaceInstallInputSchema = external_exports.object({
@@ -27826,21 +27882,22 @@ var MarketplaceInstallInputSchema = external_exports.object({
 }).strict();
 var MarketplaceInstallSchema = external_exports.object({
   instance: InstanceSchema,
-  receiptId: MarketplacePlatformAcquisitionSchema.shape.id,
+  receiptId: MarketplaceAcquisitionReceiptSchema.shape.id,
   release: MarketplacePlatformAcquisitionInputSchema,
   variant: MarketplacePlatformVariantSchema
 }).strict();
 var VerifiedMarketplaceInstallSchema = external_exports.object({
-  receipt: MarketplacePlatformAcquisitionSchema,
+  receipt: MarketplaceAcquisitionReceiptSchema,
   plan: InfraPlanSchema.optional()
 }).strict();
 var MarketplaceInstallRecordSchema = external_exports.object({
   instance: InstanceSchema,
   verified: VerifiedMarketplaceInstallSchema
 }).strict().refine(({ instance, verified: { receipt, plan } }) => {
-  if (instance.state !== "pending" || instance.template !== receipt.release.platformId || instance.templateRef?.commitSha !== receipt.release.source.revision) return false;
-  if (receipt.variant === "starter-template") return !plan && instance.desiredPlanHash === void 0;
-  return plan !== void 0 && instance.templateRef.repo === receipt.release.source.repo && plan.instanceId === instance.id && plan.teamId === instance.teamId && plan.provider === instance.provider && instance.desiredPlanHash === plan.planHash;
+  const { source, bundle } = receipt.release;
+  if (instance.state !== "pending" || instance.template !== receipt.release.platformId || Boolean(source) === Boolean(bundle) || instance.templateRef?.commitSha !== source?.revision) return false;
+  if (receipt.variant === "starter-template") return Boolean(source) && !plan && instance.desiredPlanHash === void 0;
+  return plan !== void 0 && instance.templateRef?.repo === source?.repo && plan.instanceId === instance.id && plan.teamId === instance.teamId && plan.provider === instance.provider && instance.desiredPlanHash === plan.planHash;
 }, { message: "The verified release and plan must belong to the new instance" });
 
 // packages/contracts/src/installation-provider.ts
@@ -27996,11 +28053,16 @@ function hostingProviders(providers, requiredRange = `^${CONTRACT_VERSION}`) {
 }
 
 // packages/contracts/src/customer-hosting-commands.ts
+var artifact = external_exports.object({
+  selection: MarketplacePlatformAcquisitionInputSchema,
+  images: MarketplacePlatformReleaseSchema.shape.images
+}).strict();
 var HostingTargetSchema = external_exports.object({
   id: external_exports.string().min(1).max(128).regex(/^[a-zA-Z0-9_-]+$/),
   name: external_exports.string().min(1).max(40).regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/),
   teamId: external_exports.string().min(1).max(128),
-  provider: HostingProviderIdSchema
+  provider: HostingProviderIdSchema,
+  artifact: artifact.optional()
 }).strict();
 var selectedRelease = { release: MarketplaceReleaseSelectionSchema.optional() };
 var empty = external_exports.object({}).strict().optional();
@@ -28040,6 +28102,8 @@ var CustomerHostingCommandSchema = external_exports.discriminatedUnion("action",
   command("marketplace-status", empty),
   command("marketplace-catalog", empty),
   command("marketplace-public-catalog", empty),
+  command("marketplace-platforms", empty),
+  command("marketplace-platform-releases", MarketplacePlatformReleaseSchema.pick({ platformId: true })),
   command("marketplace-verify-install", external_exports.object({ target: HostingTargetSchema, release: MarketplacePlatformAcquisitionInputSchema }).strict()),
   command("marketplace-enroll", external_exports.object({ handoff: external_exports.string().regex(/^[0-9a-f-]{36}:[A-Za-z0-9_-]{43}$/) }).strict()),
   command("domains-list", target),

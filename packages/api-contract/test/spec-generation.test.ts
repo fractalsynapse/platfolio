@@ -81,7 +81,7 @@ test('what the generator owns, and what it deliberately leaves alone', () => {
   assert.deepEqual(generated, [
     'ApplyResult', 'Attestation', 'AttestationRecord', 'AuditEntry', 'BindingRecord', 'CapabilityOffer',
     'CapabilityShare', 'DeleteResult', 'DispatchIntent', 'HostedCustomDomain', 'HostedStarter', 'HostingRemovalRequest', 'InstallationLaunchInput', 'Instance', 'InstanceResponse', 'Invitation',
-    'MarketplaceInstall', 'MarketplaceInstallInput', 'MarketplaceInstallation', 'MarketplacePlatform', 'MarketplacePlatformAcquisition', 'MarketplacePlatformAcquisitionInput', 'MarketplacePlatformCreation',
+    'MarketplaceArtifactAcquisition', 'MarketplaceArtifactGrant', 'MarketplaceArtifactVersion', 'MarketplaceBundlePublication', 'MarketplaceInstall', 'MarketplaceInstallInput', 'MarketplaceInstallation', 'MarketplaceMaintenanceInput', 'MarketplacePlatform', 'MarketplacePlatformAcquisition', 'MarketplacePlatformAcquisitionInput', 'MarketplacePlatformCreation',
     'MarketplacePlatformPublication', 'MarketplacePlatformRelease', 'MarketplacePublisherPlatform', 'MarketplaceRelease', 'MarketplaceReleasePublication',
     'MarketplaceReleaseSelection', 'NotificationRule', 'StarterBrandChange', 'StateSnapshot',
   ], 'the generated set is the matched set plus the composed response -- stated, so an addition is a decision');

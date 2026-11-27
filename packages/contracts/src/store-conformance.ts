@@ -128,6 +128,37 @@ const expectErr = (result: { ok: boolean; value?: unknown } & Partial<StoreError
       : { status: 'fail', detail: 'installation name reservation did not follow removal' };
   });
 
+  await add('maintenance expiration preserves the exact team acquisition and blocks a new one', async () => {
+    const store = await fresh();
+    const seller = mustOk(await store.createTeam({ name: tName('marketplace-seller') }), 'seller');
+    const buyer = mustOk(await store.createTeam({ name: tName('marketplace-buyer') }), 'buyer');
+    const platform = mustOk(await store.createMarketplacePlatform(seller.id, {
+      slug: 'maintained-service', title: 'Maintained service', variant: 'shared-service',
+    }), 'platform');
+    const installation = randomUUID();
+    const code = 'e'.repeat(64);
+    const credential = 'f'.repeat(64);
+    const connection = await store.issueMarketplaceEnrollment(buyer.id, installation, code, '2099-01-01T00:00:00Z') &&
+      await store.redeemMarketplaceEnrollment(installation, code, credential, new Date().toISOString());
+    const first = { platformId: platform.id, version: '1.0.0', descriptorDigest: 'a'.repeat(64) };
+    const second = { ...first, version: '1.1.0', descriptorDigest: 'b'.repeat(64) };
+    if (!connection || await store.acquireMarketplacePlatformRelease(installation, credential, first, true) ||
+        await store.setMarketplaceMaintenance(buyer.id, platform.id, buyer.id, '2099-01-01T00:00:00Z') ||
+        !await store.setMarketplaceMaintenance(seller.id, platform.id, buyer.id, '2099-01-01T00:00:00Z')) {
+      return { status: 'fail', detail: 'maintenance authority escaped the publisher or an uncovered claim was accepted' };
+    }
+    const acquired = await store.acquireMarketplacePlatformRelease(installation, credential, first, true);
+    const ended = await store.setMarketplaceMaintenance(seller.id, platform.id, buyer.id, '2000-01-01T00:00:00Z');
+    const retained = await store.acquireMarketplacePlatformRelease(installation, credential, first, true);
+    const independent = acquired && ended && retained?.id === acquired.id &&
+      await store.hasMarketplaceAcquisition(installation, credential, first) &&
+      !await store.hasMarketplaceAcquisition(installation, credential, second) &&
+      !await store.acquireMarketplacePlatformRelease(installation, credential, second, true) &&
+      !await store.hasMarketplaceAcquisition(installation, code, first);
+    return independent ? { status: 'pass', detail: 'coverage and prior receipt coexist with distinct authorization' }
+      : { status: 'fail', detail: 'an acquisition leaked or was lost after coverage ended' };
+  });
+
   await add('marketplace installs retain the receipt and immutable image plan atomically', async () => {
     const store = await fresh();
     const owner = mustOk(await store.createTeam({ name: tName('marketplace-install') }), 'team');

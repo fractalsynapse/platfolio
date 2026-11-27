@@ -74,6 +74,8 @@ export class StoreService extends Service<z.infer<typeof StoreConfigSchema>> {
   publishMarketplacePlatformRelease(...args: Parameters<Store['publishMarketplacePlatformRelease']>) { return this.inner.publishMarketplacePlatformRelease(...args); }
   listMarketplacePublishedPlatformReleases() { return this.inner.listMarketplacePublishedPlatformReleases(); }
   acquireMarketplacePlatformRelease(...args: Parameters<Store['acquireMarketplacePlatformRelease']>) { return this.inner.acquireMarketplacePlatformRelease(...args); }
+  hasMarketplaceAcquisition(...args: Parameters<Store['hasMarketplaceAcquisition']>) { return this.inner.hasMarketplaceAcquisition(...args); }
+  setMarketplaceMaintenance(...args: Parameters<Store['setMarketplaceMaintenance']>) { return this.inner.setMarketplaceMaintenance(...args); }
   listMarketplaceReleases() { return this.inner.listMarketplaceReleases(); }
   publishMarketplaceRelease(...args: Parameters<Store['publishMarketplaceRelease']>) { return this.inner.publishMarketplaceRelease(...args); }
   verifyMarketplaceCredential(...args: Parameters<Store['verifyMarketplaceCredential']>) { return this.inner.verifyMarketplaceCredential(...args); }

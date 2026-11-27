@@ -11,6 +11,7 @@ import type { StarterLaunch } from './starter-launch.ts';
 import { customerLaunch, customerLaunchConfig, privateHostingPlugin, type CustomerLaunchConfig } from './customer-launch.ts';
 import { isReleaseTag } from './release-tag.ts';
 import { keycloakNotificationDirectory } from './notification-directory.ts';
+import { artifactConfigFromEnv, type ArtifactConfig } from './marketplace-artifacts.ts';
 
 export { ROUTE_MANIFEST };
 export { ALLOWED_ORIGINS_ENV, describeAllowedOriginsConfig, parseAllowedOrigins, type CorsBootConfig } from './cors.ts';
@@ -19,6 +20,7 @@ export interface BootConfig {
   issuer: string;
   audience: string;
   marketplaceEnabled?: boolean;
+  artifacts?: ArtifactConfig;
   marketplacePublisherTeam?: string;
   installation?: { configuration: RailwayInstallationConfig; returnTo: string };
   installationProvider?: { provider: InstallationProvider; returnTo: string };
@@ -62,6 +64,8 @@ export function configFromEnv(env: NodeJS.ProcessEnv): BootConfig {
   const templateDigest = env.PLATFOLIO_RAILWAY_INSTALL_CONFIG_SHA;
   const revision = env.PLATFOLIO_RAILWAY_INSTALL_REVISION;
   const installerJson = env.PLATFOLIO_RAILWAY_INSTALL_CONFIG_JSON;
+  const artifacts = artifactConfigFromEnv(env);
+  if (artifacts && env.PLATFOLIO_MARKETPLACE_ENABLED !== 'true') throw new Error('Artifact registry delivery requires a marketplace hub');
   const clientId = env.PLATFOLIO_HUB_RAILWAY_OAUTH_CLIENT;
   const callbackValue = env.PLATFOLIO_HUB_RAILWAY_OAUTH_CALLBACK;
   const returnTo = allowedOrigins[0];
@@ -102,6 +106,7 @@ export function configFromEnv(env: NodeJS.ProcessEnv): BootConfig {
     issuer: env.PLATFOLIO_IDENTITY_ISSUER as string,
     audience: env.PLATFOLIO_IDENTITY_AUDIENCE as string,
     marketplaceEnabled: env.PLATFOLIO_MARKETPLACE_ENABLED === 'true',
+    ...(artifacts ? { artifacts } : {}),
     ...(env.PLATFOLIO_MARKETPLACE_PUBLISHER_TEAM ? { marketplacePublisherTeam: env.PLATFOLIO_MARKETPLACE_PUBLISHER_TEAM } : {}),
     ...(launcher ? { customerLaunch: launcher } : {}),
     ...(installation ? { installation } : {}),
@@ -248,7 +253,15 @@ export async function boot(config: BootConfig, fetchImpl: typeof fetch = fetch) 
     provider: railwayInstallationProvider(config.installation.configuration, fetchImpl), returnTo: config.installation.returnTo,
   });
   const launch = config.customerLaunch && customerLaunch(config.customerLaunch, fetchImpl);
-  const infrastructure = config.infrastructure ?? (launch ? [privateHostingPlugin(launch)] : []);
+  let running: KernelContext | undefined;
+  const infrastructure = config.infrastructure ?? (launch ? [privateHostingPlugin(launch, async (instance) => {
+    if (!running) throw new Error('The private installation is starting');
+    const saved = await running.store.getMarketplaceInstall(instance.teamId, instance.name);
+    const release = saved?.receipt.release;
+    if (saved?.instance.id !== instance.id || !release?.bundle) return;
+    const { platformId, version, descriptorDigest, images } = release;
+    return { selection: { platformId, version, descriptorDigest }, images };
+  })] : []);
   const ctx = await createKernel({
     ...(infrastructure.length === 0 && config.infrastructure === undefined && !storeUrl
       ? { provider: 'fake' }
@@ -286,6 +299,7 @@ export async function boot(config: BootConfig, fetchImpl: typeof fetch = fetch) 
       ...buildCapabilities({
         build: config.build,
         marketplaceEnabled: config.marketplaceEnabled ?? false,
+        ...(config.artifacts ? { artifacts: config.artifacts } : {}),
         ...(config.marketplacePublisherTeam ? { marketplacePublisherTeam: config.marketplacePublisherTeam } : {}),
         ...(config.marketplaceEnabled && installation ? { installation } : {}),
         accountIssuer: { issuer: config.issuer, request: fetchImpl },
@@ -298,6 +312,7 @@ export async function boot(config: BootConfig, fetchImpl: typeof fetch = fetch) 
     ],
     requiredServices: ['identity', 'server', 'store', 'extensions'],
   });
+  running = ctx;
   ctx.identity.attachKeySource(new EndpointKeySource(identity, fetchImpl, config.jwksUri));
   // The transport logs the policy it will enforce; this line names the *source*, because "0 origins" reads
   // differently when you know whether the operator chose that or never set the variable. Stated on every boot:

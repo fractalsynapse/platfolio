@@ -1,5 +1,5 @@
 import {
-  MarketplacePlatformAcquisitionSchema, MarketplacePlatformAliasSchema, MarketplacePlatformDescriptorSchema, MarketplacePublisherPlatformSchema, MarketplaceReleasePublicationSchema,
+  MarketplaceAcquisitionReceiptSchema, MarketplacePlatformAliasSchema, MarketplacePlatformDescriptorSchema, MarketplacePublisherPlatformSchema, MarketplaceReleasePublicationSchema,
   type MarketplacePlatformAcquisitionInput, type MarketplacePlatformCreation, type MarketplacePlatformDescriptor, type MarketplaceReleasePublication,
 } from './marketplace-release.ts';
 import { MarketplaceInstallRecordSchema, type VerifiedMarketplaceInstall } from './marketplace-install.ts';
@@ -280,16 +280,44 @@ export class PostgresStore implements Store {
     }));
   }
 
-  async acquireMarketplacePlatformRelease(installationId: string, registryDigest: string, release: MarketplacePlatformAcquisitionInput) {
+  async setMarketplaceMaintenance(publisherTeamId: string, platformId: string, buyerTeamId: string, through: string) {
+    const result = await this.pool.query(
+      `INSERT INTO ${this.q('marketplace_maintenance')} (platform_id, buyer_team_id, eligible_through)
+       SELECT platform.id, buyer.id, $4::timestamptz FROM ${this.q('marketplace_platforms')} AS platform
+       JOIN ${this.q('teams')} AS buyer ON buyer.id = $3
+       WHERE platform.publisher_team_id = $1 AND platform.id = $2
+       ON CONFLICT (platform_id, buyer_team_id) DO UPDATE SET eligible_through = EXCLUDED.eligible_through`,
+      [publisherTeamId, platformId, buyerTeamId, through]);
+    return result.rowCount === 1;
+  }
+
+  async hasMarketplaceAcquisition(installationId: string, registryDigest: string, release: MarketplacePlatformAcquisitionInput) {
+    const result = await this.pool.query(
+      `SELECT 1 FROM ${this.q('marketplace_links')} AS link
+       JOIN ${this.q('marketplace_platform_acquisitions')} AS receipt ON receipt.team_id = link.team_id
+       WHERE link.installation_id = $1 AND link.registry_digest = $2 AND NOT link.disconnected
+         AND receipt.platform_id = $3 AND receipt.version = $4 AND receipt.descriptor_digest = $5`,
+      [installationId, registryDigest, release.platformId, release.version, release.descriptorDigest]);
+    return result.rowCount === 1;
+  }
+
+  async acquireMarketplacePlatformRelease(installationId: string, registryDigest: string, release: MarketplacePlatformAcquisitionInput, requiresMaintenance = false) {
     const result = await this.pool.query(
       `INSERT INTO ${this.q('marketplace_platform_acquisitions')} AS receipt (id, team_id, platform_id, version, descriptor_digest)
        SELECT $3, link.team_id, $4, $5, $6 FROM ${this.q('marketplace_links')} AS link
        WHERE link.installation_id = $1 AND link.registry_digest = $2 AND NOT link.disconnected
+         AND (NOT $7::boolean OR EXISTS (
+           SELECT 1 FROM ${this.q('marketplace_maintenance')} AS term
+           WHERE term.platform_id = $4 AND term.buyer_team_id = link.team_id AND term.eligible_through > now()
+         ) OR EXISTS (
+           SELECT 1 FROM ${this.q('marketplace_platform_acquisitions')} AS prior
+           WHERE prior.platform_id = $4 AND prior.team_id = link.team_id AND prior.version = $5 AND prior.descriptor_digest = $6
+         ))
        FOR SHARE OF link
        ON CONFLICT (team_id, platform_id, version) DO UPDATE SET descriptor_digest = receipt.descriptor_digest
        WHERE receipt.descriptor_digest = EXCLUDED.descriptor_digest
        RETURNING id, team_id AS "teamId", acquired_at AS "acquiredAt"`,
-      [installationId, registryDigest, newId('acquisition'), release.platformId, release.version, release.descriptorDigest],
+      [installationId, registryDigest, newId('acquisition'), release.platformId, release.version, release.descriptorDigest, requiresMaintenance],
     );
     const saved = result.rows[0];
     return saved ? { id: String(saved.id), teamId: String(saved.teamId), acquiredAt: iso(saved.acquiredAt) } : undefined;
@@ -442,7 +470,7 @@ export class PostgresStore implements Store {
     if (!row) return undefined;
     const instance = this.asInstance(row);
     if (!instance.ok) throw new Error('The stored marketplace instance is invalid');
-    return { instance: instance.value, receipt: MarketplacePlatformAcquisitionSchema.parse(row.marketplace_receipt) };
+    return { instance: instance.value, receipt: MarketplaceAcquisitionReceiptSchema.parse(row.marketplace_receipt) };
   }
 
   async recordHostedStarter(input: NewHostedStarter): Promise<StoreResult<Instance>> {

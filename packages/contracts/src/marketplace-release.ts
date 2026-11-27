@@ -29,6 +29,28 @@ const MarketplacePlatformSourceSchema = z.object({
   revision: MarketplaceReleaseSelectionSchema.shape.revision,
 }).strict();
 const MarketplaceImagesSchema = z.array(z.string().max(512).regex(/^[A-Za-z0-9](?![^@]*\/\/)[A-Za-z0-9._:/-]*@sha256:[a-f0-9]{64}$/)).max(64);
+export const MarketplaceArtifactVersionSchema = z.object({ version: MarketplaceReleaseSelectionSchema.shape.version }).strict();
+const MarketplaceBundleSchema = z.object({
+  compose: z.string().min(1).max(131072),
+  inventory: z.string().min(1).max(65536),
+  offer: z.enum(['free', 'maintenance']),
+}).strict();
+export const MarketplaceBundlePublicationSchema = MarketplaceArtifactVersionSchema.extend({
+  bundle: MarketplaceBundleSchema,
+  images: MarketplaceImagesSchema.min(1).max(24),
+});
+export const MarketplaceMaintenanceInputSchema = z.object({
+  buyerTeamId: z.string().min(1).max(128),
+  through: z.iso.datetime(),
+}).strict();
+export const MarketplaceArtifactGrantSchema = z.object({
+  registry: z.string().min(1),
+  namespace: z.string().min(1),
+  username: z.literal('platfolio'),
+  password: z.string().min(1),
+  expiresAt: z.iso.datetime(),
+}).strict();
+export type MarketplaceArtifactGrant = z.infer<typeof MarketplaceArtifactGrantSchema>;
 
 export const MarketplacePlatformCreationSchema = z.object({
   slug: z.string().max(80).regex(/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/),
@@ -56,9 +78,13 @@ export const MarketplacePlatformReleaseSchema = z.object({
   images: MarketplaceImagesSchema,
   installer: MarketplaceReleasePublicationSchema.shape.installer,
   descriptorDigest: MarketplaceDescriptorDigestSchema,
+  bundle: MarketplaceBundleSchema.optional(),
+  offer: MarketplaceBundleSchema.shape.offer.optional(),
 }).strict();
 
-export const MarketplacePlatformDescriptorSchema = MarketplacePlatformReleaseSchema.omit({ descriptorDigest: true }).required({ source: true });
+export const MarketplacePlatformDescriptorSchema = MarketplacePlatformReleaseSchema.omit({ descriptorDigest: true, offer: true }).refine(
+  ({ source, bundle }) => Boolean(source) !== Boolean(bundle), 'Use one pinned source or one release bundle',
+);
 export type MarketplacePlatformDescriptor = z.infer<typeof MarketplacePlatformDescriptorSchema>;
 
 export function marketplacePlatformDescriptorDigest(descriptor: MarketplacePlatformDescriptor): string {
@@ -95,11 +121,19 @@ export interface MarketplacePlatformAcquisitionRecord {
   acquiredAt: string;
 }
 
-export const MarketplacePlatformAcquisitionSchema = z.object({
+const acquisition = z.object({
   id: z.string().min(1),
   teamId: z.string().min(1),
   acquiredAt: z.iso.datetime(),
   variant: MarketplacePlatformVariantSchema,
-  release: MarketplacePlatformReleaseSchema.required({ source: true }),
 }).strict();
-export type MarketplacePlatformAcquisition = z.infer<typeof MarketplacePlatformAcquisitionSchema>;
+const acquiredRelease = MarketplacePlatformReleaseSchema.omit({ offer: true });
+export const MarketplacePlatformAcquisitionSchema = acquisition.extend({
+  release: acquiredRelease.omit({ bundle: true }).required({ source: true }),
+});
+export const MarketplaceArtifactAcquisitionSchema = acquisition.extend({
+  release: acquiredRelease.omit({ source: true }).required({ bundle: true }),
+});
+// The private worker accepts both response shapes while each published HTTP operation retains its own contract.
+export const MarketplaceAcquisitionReceiptSchema = acquisition.extend({ release: acquiredRelease });
+export type MarketplacePlatformAcquisition = z.infer<typeof MarketplaceAcquisitionReceiptSchema>;

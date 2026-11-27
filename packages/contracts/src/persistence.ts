@@ -557,7 +557,9 @@ export interface Store {
   publishMarketplacePlatformRelease(teamId: string, descriptor: MarketplacePlatformDescriptor): Promise<'created' | 'existing' | 'conflict' | 'not-found'>;
   listMarketplacePublishedPlatformReleases(): Promise<MarketplacePublishedPlatformRelease[]>;
   acquireMarketplacePlatformRelease(installationId: string, registryDigest: string,
-    release: MarketplacePlatformAcquisitionInput): Promise<MarketplacePlatformAcquisitionRecord | undefined>;
+    release: MarketplacePlatformAcquisitionInput, requiresMaintenance?: boolean): Promise<MarketplacePlatformAcquisitionRecord | undefined>;
+  hasMarketplaceAcquisition(installationId: string, registryDigest: string, release: MarketplacePlatformAcquisitionInput): Promise<boolean>;
+  setMarketplaceMaintenance(publisherTeamId: string, platformId: string, buyerTeamId: string, through: string): Promise<boolean>;
   listMarketplaceReleases(): Promise<MarketplaceReleasePublication[]>;
   publishMarketplaceRelease(release: MarketplaceReleasePublication): Promise<'created' | 'existing' | 'conflict'>;
   verifyMarketplaceCredential(installationId: string, registryDigest: string): Promise<boolean>;

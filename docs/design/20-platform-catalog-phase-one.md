@@ -116,6 +116,29 @@ The [marketplace roadmap](19-marketplace-migration.md#release-delivery-before-th
 defines the publication and credential boundaries. 1A–1C can integrate with the existing storefront
 and installers in service. The following checks gate the storefront cutover and Phase 1 acceptance.
 
+Use a private OCI Distribution backend and a gateway that checks Platfolio-issued, short-lived
+credentials. A publisher can push only into the namespace for its platform and release version.
+Publishing validates the recipe and the complete OCI graph before recording its digest. Pulls can
+read only the published roots and their reachable manifests and blobs. The backend stays on a
+private network. Maintenance eligibility gates new acquisition rows, and a pull always resolves
+against an existing receipt. API and database changes are additive. Git-backed releases keep
+their original descriptor digest and installer.
+
+The [OCI hub overlay](../../compose.marketplace-artifacts.yaml) runs the gateway from the same
+control-plane image and persists the native registry backend on its own volume. Set the external
+registry origin and the shared signing key for the hub and gateway. Keep the backend private and
+disable artifact deletion. Restrict production ingress to TLS. Bring the gateway up before
+enabling publishers to issue upload grants.
+
+Publishers request `POST …/platforms/{platformId}/uploads` for a version, then push tagged images
+in the returned namespace using normal Docker authentication. Publish through
+`POST …/platforms/{platformId}/bundles` with the pinned image references and recipe. The
+publication compares image pins to the recipe and checks the reachable OCI graph. Authenticated
+private installers acquire the bundle and exchange its receipt for a read grant. The private
+worker renews that grant before an apply or redeploy. Keep an acquired copy in customer-controlled
+storage for independent recovery. Copy manifest lists, their child manifests and all layers while
+preserving digests, then point the saved recipe at the customer's registry.
+
 1. Use the existing Platfolio or Shared Identity project to prepare two image releases with a
    minimal, versioned recipe. Ingest the full OCI content and record the immutable bundle digest.
    Verify installation needs only the exported release and works without access to the publisher's

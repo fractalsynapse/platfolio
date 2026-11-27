@@ -3,7 +3,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { FREE_STARTER_RELEASE, MARKETPLACE_RELEASES, readMarketplaceListing, templateCatalogEntry } from '../packages/manifest/src/template-catalog.ts';
 import type { customerOpenBao, MarketplaceGrant } from './customer-openbao.ts';
 import {
-  MarketplacePlatformAcquisitionSchema, marketplacePlatformDescriptorDigest, type MarketplacePlatformAcquisitionInput,
+  MarketplaceArtifactGrantSchema, MarketplaceAcquisitionReceiptSchema, marketplacePlatformDescriptorDigest, type MarketplacePlatformAcquisitionInput,
 } from '../packages/contracts/src/marketplace-release.ts';
 import { matchesMarketplaceRelease } from '../packages/contracts/src/marketplace-install.ts';
 
@@ -27,7 +27,7 @@ export function privateMarketplaceOrigin(raw: string | undefined): string | unde
 export function customerMarketplaceConnection(hub: string | undefined, bao: Vault, request: typeof fetch = fetch) {
   let enrolling = false;
 
-  function call(grant: MarketplaceGrant, endpoint: 'claim' | 'enrollment' | 'catalog' | 'acquisitions', bearer: string, body?: object) {
+  function call(grant: MarketplaceGrant, endpoint: 'claim' | 'enrollment' | 'catalog' | 'acquisitions' | 'bundle-acquisitions' | 'pulls', bearer: string, body?: object) {
     if (!hub || grant.hub !== hub) throw new Error('Marketplace origin changed');
     const url = new URL(`/api/v1/marketplace/installations/${encodeURIComponent(grant.installationId)}/${endpoint}`, hub);
     if (endpoint === 'catalog') url.searchParams.set('format', 'releases');
@@ -129,14 +129,26 @@ export function customerMarketplaceConnection(hub: string | undefined, bao: Vaul
     });
   }
 
+  function platformCatalog(platformId?: string) {
+    if (!hub) throw new Error('Marketplace origin is not configured');
+    const path = platformId === undefined ? ENDPOINTS.listMarketplacePlatforms.path
+      : ENDPOINTS.listMarketplacePlatformReleases.path.replace('{platformId}', encodeURIComponent(platformId));
+    return request(new URL(path, hub), { redirect: 'error', credentials: 'omit', signal: AbortSignal.timeout(4_000) });
+  }
+
   async function acquire(selection: MarketplacePlatformAcquisitionInput) {
     if (!hub || await bao.status() !== 'ready') return undefined;
     const { grant } = await bao.readMarketplaceGrant();
     if (!grant?.claimed) return undefined;
-    const response = await call(grant, 'acquisitions', grant.credential, selection);
+    let response = await call(grant, 'acquisitions', grant.credential, selection);
+    if (response.status === 409) {
+      const problem = await response.json() as { error?: string };
+      if (problem.error !== 'artifact-delivery-required') return undefined;
+      response = await call(grant, 'bundle-acquisitions', grant.credential, selection);
+    }
     if (response.status === 404 || response.status === 409) return undefined;
     if (response.status !== 200) throw new Error('Marketplace acquisition unavailable');
-    const acquired = MarketplacePlatformAcquisitionSchema.parse(await response.json());
+    const acquired = MarketplaceAcquisitionReceiptSchema.parse(await response.json());
     const { descriptorDigest, ...descriptor } = acquired.release;
     if (!matchesMarketplaceRelease(acquired.release, selection) || marketplacePlatformDescriptorDigest(descriptor) !== descriptorDigest) {
       throw new Error('Marketplace receipt does not match the approved release');
@@ -144,5 +156,19 @@ export function customerMarketplaceConnection(hub: string | undefined, bao: Vaul
     return acquired;
   }
 
-  return { connection, enroll, canLaunchStarter, catalog, publicCatalog, acquire };
+  async function pullGrant(selection: MarketplacePlatformAcquisitionInput) {
+    if (!hub || await bao.status() !== 'ready') throw new Error('Connect the marketplace before requesting registry access');
+    const { grant } = await bao.readMarketplaceGrant();
+    if (!grant?.claimed) throw new Error('Connect the marketplace before requesting registry access');
+    const response = await call(grant, 'pulls', grant.credential, selection);
+    if (!response.ok) throw new Error('The marketplace did not authorize this release pull');
+    const ticket = MarketplaceArtifactGrantSchema.parse(await response.json());
+    const registry = new URL(ticket.registry);
+    if (registry.origin !== ticket.registry || registry.protocol !== 'https:' || Date.parse(ticket.expiresAt) <= Date.now()) {
+      throw new Error('The marketplace returned an invalid registry grant');
+    }
+    return ticket;
+  }
+
+  return { connection, enroll, canLaunchStarter, catalog, publicCatalog, platformCatalog, acquire, pullGrant };
 }

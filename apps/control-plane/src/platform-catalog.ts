@@ -1,12 +1,15 @@
 import type { SuccessOf } from '@platfolio/api-contract/generated/types';
 import {
   MarketplacePlatformAcquisitionInputSchema, MarketplacePlatformCreationSchema, MarketplacePlatformPublicationSchema,
+  MarketplaceArtifactVersionSchema, MarketplaceBundlePublicationSchema, MarketplaceMaintenanceInputSchema,
   marketplacePlatformDescriptorDigest, reasonOf, type MarketplacePlatformDescriptor, type Store,
 } from '@platfolio/contracts';
 import type { ExtensionDescriptor, KernelContext, Request, Response_, RouteDefinition } from '@platfolio/kernel';
-import { marketplaceCatalog, newestMarketplaceVersionFirst, templateCatalogEntry } from '@platfolio/manifest';
+import { marketplaceBundleManifest, marketplaceCatalog, newestMarketplaceVersionFirst, templateCatalogEntry } from '@platfolio/manifest';
+import { artifactImages, artifactNamespace, issueArtifactGrant, readArtifactGraph, type ArtifactConfig } from './marketplace-artifacts.ts';
 import type { scoped } from './capabilities.ts';
 import { badRequest, notFound, send } from './respond.ts';
+import type { customerLaunch } from './customer-launch.ts';
 
 type Platform = SuccessOf<'listMarketplacePlatforms'>[number];
 type Release = SuccessOf<'listMarketplacePlatformReleases'>[number];
@@ -15,10 +18,12 @@ type RegistryRoute = (path: string, operationId: string,
   handle: (context: KernelContext, request: Request, installationId: string, registryDigest: string) => Promise<Response_>) => RouteDefinition;
 
 function summarize(descriptor: MarketplacePlatformDescriptor, publicCoordinates: boolean): Release {
-  const { platformId, version, installer, source, images } = descriptor;
+  const { platformId, version, installer, source, images, bundle } = descriptor;
   return {
     platformId, version, installer,
-    ...(publicCoordinates ? { source } : {}),
+    ...(publicCoordinates && source ? { source } : {}),
+    ...(publicCoordinates && bundle ? { bundle } : {}),
+    ...(!publicCoordinates && bundle ? { offer: bundle.offer } : {}),
     images: publicCoordinates ? images : [],
     descriptorDigest: marketplacePlatformDescriptorDigest(descriptor),
   };
@@ -74,15 +79,51 @@ const unavailable = () => ({
   body: { error: 'marketplace-unavailable', message: 'The platform catalog is unavailable. Check the hub catalog and release pins.' },
 });
 
-export function platformCatalog(enabled: boolean, publisherRoute: typeof scoped, registryRoute: RegistryRoute): ExtensionDescriptor {
+export function platformCatalog(enabled: boolean, publisherRoute: typeof scoped, registryRoute: RegistryRoute,
+  artifacts?: ArtifactConfig, customer?: ReturnType<typeof customerLaunch>): ExtensionDescriptor {
   const publishing = '/api/v1/teams/{teamId}/marketplace/platforms';
+  function acquire(operation: 'acquireMarketplacePlatformRelease' | 'acquireMarketplaceArtifactRelease') {
+    return registryRoute(operation === 'acquireMarketplacePlatformRelease' ? '/acquisitions' : '/bundle-acquisitions', operation,
+      async ({ store }, request, installationId, registryDigest) => {
+        const input = MarketplacePlatformAcquisitionInputSchema.safeParse(request.body);
+        if (request.bodyError || !input.success) return badRequest('Supply a platform, published version, and descriptor digest.');
+        try {
+          if (!await store.verifyMarketplaceCredential(installationId, registryDigest)) return notFound('marketplace installation', '');
+          const { platformId, version, descriptorDigest } = input.data;
+          const entry = (await readPlatforms(store)).find(({ platform }) => platform.id === platformId);
+          const descriptor = entry?.descriptors.find((release) => release.version === version);
+          if (!entry || !descriptor) return notFound('marketplace release', '');
+          const release = summarize(descriptor, true);
+          if (release.descriptorDigest !== descriptorDigest) return send(operation, 409, {
+            error: 'release-pin-mismatch', message: 'Refresh the catalog and approve the exact release digest.',
+          });
+          if (descriptor.bundle && operation === 'acquireMarketplacePlatformRelease') return send(operation, 409, {
+            error: 'artifact-delivery-required', message: 'Use the OCI bundle acquisition endpoint for this version.',
+          });
+          if (!descriptor.bundle && operation === 'acquireMarketplaceArtifactRelease') return notFound('marketplace bundle', '');
+          const receipt = await store.acquireMarketplacePlatformRelease(installationId, registryDigest, input.data, descriptor.bundle?.offer === 'maintenance');
+          if (!receipt) return descriptor.bundle?.offer === 'maintenance' ? send(operation, 409, {
+            error: 'maintenance-required', message: 'Renew this team’s maintenance coverage to acquire this release.',
+          }) : notFound('marketplace installation', '');
+          const fields = { ...receipt, variant: entry.platform.variant };
+          const response = descriptor.bundle
+            ? send('acquireMarketplaceArtifactRelease', 200, { ...fields, release: { ...release, bundle: descriptor.bundle } })
+            : send('acquireMarketplacePlatformRelease', 200, { ...fields, release: { ...release, source: descriptor.source! } });
+          return { ...response, headers: { 'cache-control': 'no-store' } };
+        } catch { return unavailable(); }
+      });
+  }
   return {
     id: 'platform-catalog',
     requires: ['store', 'identity'],
     routes: [{
       method: 'GET', path: '/api/v1/marketplace/platforms', operationId: 'listMarketplacePlatforms',
       async handle(_request, _params, { store }) {
-        if (!enabled) return notFound('marketplace catalog', '');
+        if (!enabled) {
+          if (!customer) return notFound('marketplace catalog', '');
+          const result = await customer.call('marketplace-platforms');
+          return result.ok ? { status: 200, body: result.body, headers: { 'cache-control': 'no-store' } } : unavailable();
+        }
         try {
           const entries = await readPlatforms(store);
           return { ...send('listMarketplacePlatforms', 200, entries.map(({ platform }) => platform)), headers: { 'cache-control': 'no-store' } };
@@ -91,7 +132,12 @@ export function platformCatalog(enabled: boolean, publisherRoute: typeof scoped,
     }, {
       method: 'GET', path: '/api/v1/marketplace/platforms/{platformId}/releases', operationId: 'listMarketplacePlatformReleases',
       async handle(_request, { platformId }, { store }) {
-        if (!enabled) return notFound('marketplace platform', '');
+        if (!enabled) {
+          if (!customer || !platformId) return notFound('marketplace platform', '');
+          const result = await customer.call('marketplace-platform-releases', { platformId });
+          if (!result.ok) return result.status === 404 ? notFound('marketplace platform', '') : unavailable();
+          return { status: 200, body: result.body, headers: { 'cache-control': 'no-store' } };
+        }
         try {
           const entries = await readPlatforms(store);
           const entry = entries.find(({ platform }) => platform.id === platformId);
@@ -134,22 +180,74 @@ export function platformCatalog(enabled: boolean, publisherRoute: typeof scoped,
         if (result === 'created') await store.appendAudit({ actorKind: 'user', actorRef: personId, action: 'marketplace.platform.publish',
           target: `${platform.id}@${descriptor.version}`, detail: { teamId } });
         return send('publishMarketplacePlatformRelease', 200, summarize(descriptor, false));
-      }), registryRoute('/acquisitions', 'acquireMarketplacePlatformRelease', async ({ store }, request, installationId, registryDigest) => {
-      const input = MarketplacePlatformAcquisitionInputSchema.safeParse(request.body);
-      if (request.bodyError || !input.success) return badRequest('Supply a platform, published version, and descriptor digest.');
-      try {
-        if (!await store.verifyMarketplaceCredential(installationId, registryDigest)) return notFound('marketplace installation', '');
-        const { platformId, version, descriptorDigest } = input.data;
-        const entry = (await readPlatforms(store)).find(({ platform }) => platform.id === platformId);
-        const descriptor = entry?.descriptors.find((release) => release.version === version);
-        if (!entry || !descriptor) return notFound('marketplace release', '');
-        const release = summarize(descriptor, true);
-        if (release.descriptorDigest !== descriptorDigest) return send('acquireMarketplacePlatformRelease', 409, {
-          error: 'release-pin-mismatch', message: 'Refresh the catalog and approve the exact release digest.',
+      }), publisherRoute('POST', publishing + '/{platformId}/uploads', 'issueMarketplaceUploadGrant', 'marketplace.manage',
+      async ({ context, teamId }, request, { platformId }) => {
+        if (!enabled) return notFound('marketplace', '');
+        const platform = await context.store.getMarketplacePublisherPlatform(teamId, platformId ?? '');
+        if (!platform || platform.variant === 'starter-template') return notFound('platform', '');
+        if (!artifacts) return unavailable();
+        const input = MarketplaceArtifactVersionSchema.safeParse(request.body);
+        if (request.bodyError || !input.success) return badRequest('Supply the stable version being prepared.');
+        return { ...send('issueMarketplaceUploadGrant', 200, issueArtifactGrant(artifacts, artifactNamespace(platform.id, input.data.version))),
+          headers: { 'cache-control': 'no-store' } };
+      }), publisherRoute('POST', publishing + '/{platformId}/bundles', 'publishMarketplaceArtifactBundle', 'marketplace.manage',
+      async ({ context, teamId, personId }, request, { platformId }) => {
+        if (!enabled) return notFound('marketplace', '');
+        const { store } = context;
+        const platform = await store.getMarketplacePublisherPlatform(teamId, platformId ?? '');
+        if (!platform || platform.variant === 'starter-template') return notFound('platform', '');
+        if (!artifacts) return unavailable();
+        const input = MarketplaceBundlePublicationSchema.safeParse(request.body);
+        if (request.bodyError || !input.success) return badRequest('Supply the release recipe and all pinned image references.');
+        const descriptor = {
+          platformId: platform.id, version: input.data.version, installer: 'compose-bundle@1',
+          bundle: input.data.bundle, images: [...input.data.images].sort(),
+        };
+        let images: ReturnType<typeof artifactImages>;
+        try {
+          marketplaceBundleManifest(descriptor.bundle, descriptor.images, platform.variant);
+          images = artifactImages(artifacts, artifactNamespace(platform.id, descriptor.version), descriptor.images);
+        } catch {
+          return badRequest('Verify the deployment recipe, secret declarations and exact pins in this release namespace.');
+        }
+        try {
+          await Promise.all(images.map((image) => readArtifactGraph(artifacts.backend, image)));
+        } catch {
+          return badRequest('Push every pinned image and its layers to the marketplace registry before publishing.');
+        }
+        const result = await store.publishMarketplacePlatformRelease(teamId, descriptor);
+        if (result === 'not-found') return notFound('platform', '');
+        if (result === 'conflict') return send('publishMarketplaceArtifactBundle', 409, {
+          error: 'release-already-published', message: 'This version has a different pin. Publish a new version.',
         });
-        const receipt = await store.acquireMarketplacePlatformRelease(installationId, registryDigest, input.data);
-        return receipt ? { ...send('acquireMarketplacePlatformRelease', 200, { ...receipt, variant: entry.platform.variant, release }), headers: { 'cache-control': 'no-store' } }
-          : notFound('marketplace installation', '');
+        if (result === 'created') await store.appendAudit({ actorKind: 'user', actorRef: personId, action: 'marketplace.platform.publish',
+          target: `${platform.id}@${descriptor.version}`, detail: { teamId } });
+        return send('publishMarketplaceArtifactBundle', 200, summarize(descriptor, false));
+      }), publisherRoute('PUT', publishing + '/{platformId}/maintenance', 'setMarketplaceMaintenance', 'marketplace.manage',
+      async ({ context, teamId, personId }, request, { platformId }) => {
+        if (!enabled) return notFound('marketplace', '');
+        const input = MarketplaceMaintenanceInputSchema.safeParse(request.body);
+        if (request.bodyError || !input.success) return badRequest('Supply an eligible buyer team and coverage end time.');
+        const { buyerTeamId, through } = input.data;
+        if (!await context.store.setMarketplaceMaintenance(teamId, platformId ?? '', buyerTeamId, through)) return notFound('platform or buyer team', '');
+        await context.store.appendAudit({ actorKind: 'user', actorRef: personId, action: 'marketplace.maintenance.set',
+          target: platformId!, detail: { teamId } });
+        return { status: 204, body: undefined };
+      }), acquire('acquireMarketplacePlatformRelease'), acquire('acquireMarketplaceArtifactRelease'),
+      registryRoute('/pulls', 'issueMarketplacePullGrant', async ({ store }, request, installationId, registryDigest) => {
+      const input = MarketplacePlatformAcquisitionInputSchema.safeParse(request.body);
+      if (request.bodyError || !input.success) return badRequest('Supply the acquired release pin.');
+      if (!artifacts) return unavailable();
+      try {
+        if (!await store.hasMarketplaceAcquisition(installationId, registryDigest, input.data)) return notFound('acquisition', '');
+        const { platformId, version, descriptorDigest } = input.data;
+        const descriptor = (await store.listMarketplacePublishedPlatformReleases()).find(({ descriptor: item }) =>
+          item.platformId === platformId && item.version === version)?.descriptor;
+        if (!descriptor?.bundle || marketplacePlatformDescriptorDigest(descriptor) !== descriptorDigest) return notFound('acquisition', '');
+        const namespace = artifactNamespace(platformId, version);
+        const images = artifactImages(artifacts, namespace, descriptor.images);
+        return { ...send('issueMarketplacePullGrant', 200, issueArtifactGrant(artifacts, namespace, images)),
+          headers: { 'cache-control': 'no-store' } };
       } catch { return unavailable(); }
     })],
   };

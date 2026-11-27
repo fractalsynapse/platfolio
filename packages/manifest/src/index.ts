@@ -12,3 +12,4 @@ export { checkRegistryObligations, type RegistryRow } from './registry-obligatio
 export { validateStarterSource } from './starter-release.ts';
 export { validateWorkerSource } from './starter-worker-release.ts';
 export { validateIdentitySource } from './shared-identity-release.ts';
+export { marketplaceBundleManifest } from './marketplace-bundle.ts';

@@ -218,12 +218,28 @@ export class MemoryStore implements Store {
       [...this.platformReleases.get(platform.id)?.values() ?? []].map((descriptor) => copy({ platform, descriptor })));
   }
 
-  async acquireMarketplacePlatformRelease(installationId: string, registryDigest: string, release: MarketplacePlatformAcquisitionInput) {
+  private readonly marketplaceMaintenance = new Map<string, string>();
+
+  async setMarketplaceMaintenance(publisherTeamId: string, platformId: string, buyerTeamId: string, through: string) {
+    if (this.closed || this.marketplacePlatforms.get(platformId)?.publisherTeamId !== publisherTeamId || !this.teams.has(buyerTeamId)) return false;
+    this.marketplaceMaintenance.set(JSON.stringify([platformId, buyerTeamId]), through);
+    return true;
+  }
+
+  async hasMarketplaceAcquisition(installationId: string, registryDigest: string, release: MarketplacePlatformAcquisitionInput) {
+    const link = this.marketplaceLinks.get(installationId);
+    if (this.closed || !link || link.disconnected || link.registryDigest !== registryDigest) return false;
+    return this.marketplaceAcquisitions.get(JSON.stringify([link.teamId, release.platformId, release.version]))?.descriptorDigest === release.descriptorDigest;
+  }
+
+  async acquireMarketplacePlatformRelease(installationId: string, registryDigest: string, release: MarketplacePlatformAcquisitionInput, requiresMaintenance = false) {
     const link = this.marketplaceLinks.get(installationId);
     if (this.closed || !link || link.disconnected || link.registryDigest !== registryDigest) return;
     const key = JSON.stringify([link.teamId, release.platformId, release.version]);
     const saved = this.marketplaceAcquisitions.get(key);
     if (saved && saved.descriptorDigest !== release.descriptorDigest) return;
+    const through = this.marketplaceMaintenance.get(JSON.stringify([release.platformId, link.teamId]));
+    if (!saved && requiresMaintenance && (!through || Date.parse(through) <= Date.parse(this.clock()))) return;
     const record = saved ?? { id: newId('acquisition'), teamId: link.teamId, acquiredAt: this.clock(), descriptorDigest: release.descriptorDigest };
     this.marketplaceAcquisitions.set(key, record);
     const { id, teamId, acquiredAt } = record;
