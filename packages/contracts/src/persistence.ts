@@ -627,6 +627,8 @@ export interface Store {
   // ---------- capability bindings (#176, D42) ----------
   /** Idempotent by instance+capability: republishing refreshes outputs rather than accumulating offers. */
   publishCapability(offer: NewCapabilityOffer): Promise<StoreResult<CapabilityOffer>>;
+  /** Create an offer once, or return the offer already recorded for that instance and capability. */
+  ensureCapabilityOffer(offer: NewCapabilityOffer): Promise<StoreResult<CapabilityOffer>>;
   getCapabilityOffer(instanceId: string, capability: string): Promise<StoreResult<CapabilityOffer>>;
   listCapabilityOffers(teamId?: string): Promise<CapabilityOffer[]>;
 
@@ -639,6 +641,8 @@ export interface Store {
 
   /** Validated against offers and shares by `checkBindingPolicy` before it is ever reached. */
   bindCapability(binding: NewBinding): Promise<StoreResult<BindingRecord>>;
+  /** Record a dependency once, or return the binding already recorded for the consumer and capability. */
+  ensureCapabilityBinding(binding: NewBinding): Promise<StoreResult<BindingRecord>>;
   getBinding(consumerInstanceId: string, capability: string): Promise<StoreResult<BindingRecord>>;
   listBindings(consumerInstanceId: string): Promise<BindingRecord[]>;
   /** The deletion guard's question, answered: who consumes this provider? */

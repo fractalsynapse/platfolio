@@ -4,7 +4,7 @@
  * hand, because every line reproduces from the specification.
  *
  * Source: apps/control-plane/openapi.yaml (OpenAPI 3.1.0, info.version 0.1.0)
- * Input digest: sha256/7163f93b8c023195
+ * Input digest: sha256/090bc30dc8365ccc
  *
  * Reproduce it with `pnpm run api:types`. `pnpm run api:types:check` fails when this file stops matching
  * what the committed spec produces, which is the only way a generated type deserves to be trusted.
@@ -696,6 +696,10 @@ export interface ApiParameters {
     instanceId: string;
     capability: string;
   };
+  /** PUT /api/v1/instances/{instanceId}/bindings/identity/intent */
+  bindSharedIdentity: {
+    instanceId: string;
+  };
   /** POST /api/v1/marketplace/installations/{installationId}/claim */
   claimEnrolledMarketplaceRelease: {
     installationId: string;
@@ -954,6 +958,10 @@ export interface ApiParameters {
   publishMarketplaceRelease: {
     teamId: string;
   };
+  /** PUT /api/v1/instances/{instanceId}/capability/identity */
+  publishSharedIdentityCapability: {
+    instanceId: string;
+  };
   /** PUT /api/v1/instances/{instanceId}/plan */
   putPlan: {
     instanceId: string;
@@ -1088,6 +1096,11 @@ export interface ApiRequestBodies {
       output: string;
       into: string[];
     }>;
+  };
+  /** PUT /api/v1/instances/{instanceId}/bindings/identity/intent */
+  bindSharedIdentity: {
+    providerInstanceId: string;
+    clientType: 'public' | 'confidential';
   };
   /** POST /api/v1/instances/{instanceId}/dispatches */
   createDispatch: {
@@ -1348,6 +1361,15 @@ export interface ApiResponses {
     '400': Error;
     '401': Error;
     '404': Error;
+  };
+  /** PUT /api/v1/instances/{instanceId}/bindings/identity/intent */
+  bindSharedIdentity: {
+    '200': BindingRecord;
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '409': Error;
   };
   /** POST /api/v1/marketplace/installations/{installationId}/claim */
   claimEnrolledMarketplaceRelease: {
@@ -1969,6 +1991,16 @@ export interface ApiResponses {
     '409': Error;
     '503': Error;
   };
+  /** PUT /api/v1/instances/{instanceId}/capability/identity */
+  publishSharedIdentityCapability: {
+    '200': CapabilityOffer;
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '409': Error;
+    '503': Error;
+  };
   /** PUT /api/v1/instances/{instanceId}/plan */
   putPlan: {
     '200': {
@@ -2355,6 +2387,8 @@ export const ENDPOINTS = {
   beginStarterRailwayAuthorization: { method: 'post', path: '/api/v1/teams/{teamId}/starter-launch/railway' },
   /** PUT /api/v1/instances/{instanceId}/bindings/{capability} */
   bindCapability: { method: 'put', path: '/api/v1/instances/{instanceId}/bindings/{capability}' },
+  /** PUT /api/v1/instances/{instanceId}/bindings/identity/intent */
+  bindSharedIdentity: { method: 'put', path: '/api/v1/instances/{instanceId}/bindings/identity/intent' },
   /** POST /api/v1/marketplace/installations/{installationId}/claim */
   claimEnrolledMarketplaceRelease: { method: 'post', path: '/api/v1/marketplace/installations/{installationId}/claim' },
   /** POST /api/v1/teams/{teamId}/marketplace/installations/{installationId}/claim */
@@ -2489,6 +2523,8 @@ export const ENDPOINTS = {
   publishMarketplacePlatformRelease: { method: 'post', path: '/api/v1/teams/{teamId}/marketplace/platforms/{platformId}/releases' },
   /** POST /api/v1/teams/{teamId}/marketplace/releases */
   publishMarketplaceRelease: { method: 'post', path: '/api/v1/teams/{teamId}/marketplace/releases' },
+  /** PUT /api/v1/instances/{instanceId}/capability/identity */
+  publishSharedIdentityCapability: { method: 'put', path: '/api/v1/instances/{instanceId}/capability/identity' },
   /** PUT /api/v1/instances/{instanceId}/plan */
   putPlan: { method: 'put', path: '/api/v1/instances/{instanceId}/plan' },
   /** PUT /api/v1/instances/{instanceId}/secrets/{name} */

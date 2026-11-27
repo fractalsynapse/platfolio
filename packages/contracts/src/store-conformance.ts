@@ -591,11 +591,17 @@ const expectErr = (result: { ok: boolean; value?: unknown } & Partial<StoreError
       instanceId: providerInst.id, teamId: team.id, capability: 'identity',
       outputs: [{ output: 'issuer', kind: 'url', state: 'issued-and-placed' }, { output: 'client_secret', kind: 'secret', state: 'not-issued' }],
     }), 'publishCapability');
-    mustOk(await store.bindCapability({
+    const binding = mustOk(await store.bindCapability({
       consumerInstanceId: consumerInst.id, capability: 'identity', providerInstanceId: offer.instanceId,
       destinations: [{ output: 'issuer', into: ['OIDC_ISSUER'] }, { output: 'client_secret', into: ['OIDC_CLIENT_SECRET'] }],
       boundBy: 'person-test',
     }), 'bindCapability');
+    const preservedOffer = mustOk(await store.ensureCapabilityOffer({ ...offer, outputs: [] }), 'preserve offer');
+    const preservedBinding = mustOk(await store.ensureCapabilityBinding({ ...binding, destinations: [] }), 'preserve binding');
+    if (preservedOffer.outputs.length !== offer.outputs.length || preservedBinding.destinations.length !== binding.destinations.length ||
+        preservedOffer.publishedAt !== offer.publishedAt || preservedBinding.boundAt !== binding.boundAt) {
+      return { status: 'fail', detail: 'preserve mode replaced metadata on an existing offer or binding' };
+    }
     const consumers = await store.listConsumers(providerInst.id);
     if (consumers.length !== 1 || consumers[0]?.consumerInstanceId !== consumerInst.id) {
       return { status: 'fail', detail: `listConsumers gave ${JSON.stringify(consumers.map((c) => c.consumerInstanceId))}` };

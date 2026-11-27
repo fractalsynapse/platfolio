@@ -2096,6 +2096,34 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /api/v1/instances/{instanceId}/capability/identity:
+    parameters:
+      - { name: instanceId, in: path, required: true, schema: { type: string, minLength: 1 } }
+    put:
+      operationId: publishSharedIdentityCapability
+      summary: Publish the reviewed Shared Identity output contract
+      description: |
+        Reads the built-in Shared Identity release at the instance's saved source revision. Records output
+        names and kinds. An existing compatible offer retains its recorded placement states. Publishing a
+        declaration does not make a client or place a credential.
+      security: [{ bearerJwt: [] }]
+      responses:
+        '200':
+          description: The identity capability offer.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CapabilityOffer' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '503':
+          description: The pinned Shared Identity source could not be read or verified.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
   /api/v1/instances/{instanceId}/capability/{capability}/shares:
     parameters:
       - { name: instanceId, in: path, required: true, schema: { type: string, minLength: 1 } }
@@ -2260,6 +2288,41 @@ paths:
           $ref: '#/components/responses/Unauthenticated'
         '404':
           $ref: '#/components/responses/NotFound'
+
+  /api/v1/instances/{instanceId}/bindings/identity/intent:
+    parameters:
+      - { name: instanceId, in: path, required: true, schema: { type: string, minLength: 1 } }
+    put:
+      operationId: bindSharedIdentity
+      summary: Select a Shared Identity instance for a consumer
+      description: |
+        Selects the same team's reviewed Shared Identity instance with a compatible offer. The server
+        derives the OIDC destination names for the selected client type. The shared binding record
+        protects the provider from removal. A bound record describes intent and carries no credentials
+        or guarantee of runtime activation.
+      security: [{ bearerJwt: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [providerInstanceId, clientType]
+              properties:
+                providerInstanceId: { type: string, minLength: 1, maxLength: 120 }
+                clientType: { type: string, enum: [public, confidential] }
+      responses:
+        '200':
+          description: The existing or newly recorded dependency and destination names.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BindingRecord' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
 
   /api/v1/instances/{instanceId}/consumers:
     parameters:

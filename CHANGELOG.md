@@ -5,6 +5,12 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+### Added — Shared Identity binding intent (#288)
+
+Teams can publish the reviewed Shared Identity release's output contract and record a same-team
+consumer binding through the API. The existing dependency record protects the provider from
+removal. Client registration and credential placement follow in Phase 2.
+
 ### Added — gated marketplace artifact delivery (#288)
 
 Publisher teams can publish a deployment bundle with pinned OCI images. Private installations can

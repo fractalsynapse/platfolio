@@ -21,6 +21,7 @@ import { installationLaunch } from './installation-launch.ts';
 import { hostingLifecycle } from './hosting-lifecycle.ts';
 import { platformCatalog } from './platform-catalog.ts';
 import { privateMarketplaceInstall } from './private-marketplace-install.ts';
+import { sharedIdentityBinding } from './shared-identity-binding.ts';
 import type { ArtifactConfig } from './marketplace-artifacts.ts';
 import { accountProfile, type AccountIssuer } from './account-profile.ts';
 import { customHostname } from '../../../packages/contracts/src/railway-domains.ts';
@@ -1698,7 +1699,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
     }],
   };
 
-  return [core, instances, hostingLifecycle(scoped), dispatches, audit, teams, bindings, invitations, secrets, controller, marketplace,
+  return [core, instances, hostingLifecycle(scoped), dispatches, audit, teams, bindings, sharedIdentityBinding(scoped), invitations, secrets, controller, marketplace,
     privateMarketplaceInstall(scoped, customer),
     platformCatalog(deps.marketplaceEnabled ?? false, scoped, (suffix, operationId, handle) => registryRoute(registryPath + suffix, operationId, handle), deps.artifacts, customer),
     installationLaunch(scoped, deps.installation), privateMarketplace, launcher, catalog, availability, notifications,

@@ -540,12 +540,18 @@ export class MemoryStore implements Store {
     return [...this.members.values()].filter((m) => m.personId === personId).map((m) => m.teamId);
   }
 
-  async publishCapability(offer: NewCapabilityOffer) {
+  publishCapability(offer: NewCapabilityOffer) { return this.saveCapabilityOffer(offer, false); }
+  ensureCapabilityOffer(offer: NewCapabilityOffer) { return this.saveCapabilityOffer(offer, true); }
+
+  private async saveCapabilityOffer(offer: NewCapabilityOffer, preserve: boolean) {
     if (this.closed) return this.refuse('publishCapability');
     if (!this.instances.has(offer.instanceId)) return err({ code: 'not-found', what: 'instance', id: offer.instanceId });
     const admitted = admit(CapabilityOfferSchema, { ...offer, publishedAt: offer.publishedAt ?? this.clock() }, 'capability offer');
     if (!admitted.accepted) return err({ code: 'conflict', reason: admitted.reason });
-    this.offers.set(`${admitted.value.instanceId}\u0000${admitted.value.capability}`, admitted.value);
+    const key = `${admitted.value.instanceId}\u0000${admitted.value.capability}`;
+    const existing = this.offers.get(key);
+    if (preserve && existing) return ok(copy(existing));
+    this.offers.set(key, admitted.value);
     return ok(admitted.value);
   }
   async getCapabilityOffer(instanceId: string, capability: string) {
@@ -594,13 +600,19 @@ export class MemoryStore implements Store {
     return all.map(copy);
   }
 
-  async bindCapability(binding: NewBinding) {
+  bindCapability(binding: NewBinding) { return this.saveCapabilityBinding(binding, false); }
+  ensureCapabilityBinding(binding: NewBinding) { return this.saveCapabilityBinding(binding, true); }
+
+  private async saveCapabilityBinding(binding: NewBinding, preserve: boolean) {
     if (this.closed) return this.refuse('bindCapability');
     const admitted = admit(BindingRecordSchema, { ...binding, boundAt: binding.boundAt ?? this.clock() }, 'binding');
     if (!admitted.accepted) return err({ code: 'conflict', reason: admitted.reason });
     const b = admitted.value;
     if (!this.instances.has(b.consumerInstanceId)) return err({ code: 'not-found', what: 'instance', id: b.consumerInstanceId });
-    this.bindings.set(`${b.consumerInstanceId}\u0000${b.capability}`, b);
+    const key = `${b.consumerInstanceId}\u0000${b.capability}`;
+    const existing = this.bindings.get(key);
+    if (preserve && existing) return ok(copy(existing));
+    this.bindings.set(key, b);
     return ok(b);
   }
   async getBinding(consumerInstanceId: string, capability: string) {

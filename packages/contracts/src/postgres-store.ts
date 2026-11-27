@@ -707,16 +707,21 @@ export class PostgresStore implements Store {
     return admitted.accepted ? ok(admitted.value) : err({ code: 'conflict', reason: admitted.reason });
   }
 
-  async publishCapability(offer: NewCapabilityOffer) {
+  publishCapability(offer: NewCapabilityOffer) { return this.saveCapabilityOffer(offer, false); }
+  ensureCapabilityOffer(offer: NewCapabilityOffer) { return this.saveCapabilityOffer(offer, true); }
+
+  private async saveCapabilityOffer(offer: NewCapabilityOffer, preserve: boolean) {
     const admitted = admit(CapabilityOfferSchema, { ...offer, publishedAt: offer.publishedAt ?? new Date().toISOString() }, 'capability offer');
     if (!admitted.accepted) return err({ code: 'conflict', reason: admitted.reason });
     const o = admitted.value;
     try {
-      await this.pool.query(
+      const conflict = preserve ? 'DO NOTHING' : 'DO UPDATE SET outputs = EXCLUDED.outputs, published_at = now()';
+      const saved = await this.pool.query(
         `INSERT INTO ${this.q('capability_offers')} (instance_id, capability, team_id, outputs, published_at)
          VALUES ($1,$2,$3,$4::jsonb,$5)
-         ON CONFLICT (instance_id, capability) DO UPDATE SET outputs = EXCLUDED.outputs, published_at = now()`,
+         ON CONFLICT (instance_id, capability) ${conflict}`,
         [o.instanceId, o.capability, o.teamId, JSON.stringify(o.outputs), o.publishedAt]);
+      if (saved.rowCount === 0) return await this.getCapabilityOffer(o.instanceId, o.capability);
     } catch (error) {
       if ((error as { code?: string }).code === '23503') return err({ code: 'not-found', what: 'instance', id: o.instanceId });
       throw error;
@@ -801,18 +806,22 @@ export class PostgresStore implements Store {
     return values(rows.map((r) => this.asOffer(r)));
   }
 
-  async bindCapability(binding: NewBinding) {
+  bindCapability(binding: NewBinding) { return this.saveCapabilityBinding(binding, false); }
+  ensureCapabilityBinding(binding: NewBinding) { return this.saveCapabilityBinding(binding, true); }
+
+  private async saveCapabilityBinding(binding: NewBinding, preserve: boolean) {
     const admitted = admit(BindingRecordSchema, { ...binding, boundAt: binding.boundAt ?? new Date().toISOString() }, 'binding');
     if (!admitted.accepted) return err({ code: 'conflict', reason: admitted.reason });
     const b = admitted.value;
     try {
-      await this.pool.query(
+      const conflict = preserve ? 'DO NOTHING' : `DO UPDATE SET provider_instance_id = EXCLUDED.provider_instance_id,
+        destinations = EXCLUDED.destinations, state = EXCLUDED.state, bound_at = now(), bound_by = EXCLUDED.bound_by`;
+      const saved = await this.pool.query(
         `INSERT INTO ${this.q('capability_bindings')} (consumer_instance_id, capability, provider_instance_id, destinations, state, bound_at, bound_by)
          VALUES ($1,$2,$3,$4::jsonb,$5,$6,$7)
-         ON CONFLICT (consumer_instance_id, capability) DO UPDATE SET provider_instance_id = EXCLUDED.provider_instance_id,
-                                                                    destinations = EXCLUDED.destinations, state = EXCLUDED.state,
-                                                                    bound_at = now(), bound_by = EXCLUDED.bound_by`,
+         ON CONFLICT (consumer_instance_id, capability) ${conflict}`,
         [b.consumerInstanceId, b.capability, b.providerInstanceId, JSON.stringify(b.destinations), b.state, b.boundAt, b.boundBy]);
+      if (saved.rowCount === 0) return await this.getBinding(b.consumerInstanceId, b.capability);
     } catch (error) {
       const code = (error as { code?: string }).code;
       if (code === '23503') return err({ code: 'not-found', what: 'capability offer', id: `${b.providerInstanceId}/${b.capability}` });

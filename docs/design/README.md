@@ -31,6 +31,7 @@ the check before implementing and 01 as the record of what was decided.
 | [18](18-hub-and-private-installations.md) | Hub and private installations | Official launcher, optional registry and account links, local identity and secret custody, and acceptance for the first proof |
 | [19](19-marketplace-migration.md) | Marketplace migration | Four delivery phases for the platform catalog, connections, maintained releases, and commerce |
 | [20](20-platform-catalog-phase-one.md) | Platform catalog implementation plan | API contract, mixed-version rollout, and acceptance for catalog migration and the three install journeys |
+| [21](21-shared-services-phase-two.md) | Shared services implementation plan | Shared Identity binding, customer-side credential placement, Railway verification, and optional hub sign-in |
 
 Evidence base, not restated here:
 
