@@ -17,8 +17,15 @@ const recoveryPolicy = `path "${recoveryAttempt}" { capabilities = ["create", "r
 const path = 'customer-launch/data/railway';
 const marketplacePath = 'customer-launch/data/marketplace';
 const clientPath = 'customer-launch/data/railway-client';
+const identityPath = 'customer-launch/data/identity/';
 const workerPolicy = [path, marketplacePath, clientPath].map((entry) =>
-  `path "${entry}" { capabilities = ["create", "read", "update"] }`).join('\n');
+  `path "${entry}" { capabilities = ["create", "read", "update"] }`).concat([
+  `path "${identityPath}providers/*" { capabilities = ["read"] }`,
+  `path "${identityPath}consumers/*" { capabilities = ["read"] }`,
+  `path "${identityPath}state/*" { capabilities = ["create", "read", "update"] }`,
+  `path "${identityPath}clients/*" { capabilities = ["create", "read", "update"] }`,
+  'path "customer-launch/metadata/identity/clients/*" { capabilities = ["delete"] }',
+]).join('\n');
 const settings = { padding: constants.RSA_PKCS1_OAEP_PADDING, oaepHash: 'sha256' };
 
 function privateOpenBaoRequest(origin: string) {
@@ -151,11 +158,18 @@ export function customerOpenBao(origin: string, secretId: string, directory: str
     return { version: stored.data.data.metadata.version, grant: stored.data.data.data };
   }
 
-  async function write(key: string, grant: RailwayGrant | MarketplaceGrant | RailwayOAuthClient, version: number) {
+  async function write(key: string, grant: object, version: number) {
     const token = await serviceToken();
     if (!token || !(await request(key, { options: { cas: version }, data: grant }, token)).ok) {
       throw new Error('OpenBao could not save the provider grant');
     }
+  }
+
+  function identityKey(kind: 'providers' | 'consumers' | 'state' | 'clients', id: string, environment: string) {
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(id) || !['production', 'staging'].includes(environment)) {
+      throw new Error('The identity binding did not match a customer environment');
+    }
+    return `${kind}/${id}/${environment}`;
   }
 
   return {
@@ -166,6 +180,19 @@ export function customerOpenBao(origin: string, secretId: string, directory: str
     writeRailwayClient: (client: RailwayOAuthClient, version: number) => write(clientPath, client, version),
     readMarketplaceGrant: () => read<MarketplaceGrant>(marketplacePath),
     writeMarketplaceGrant: (grant: MarketplaceGrant, version: number) => write(marketplacePath, grant, version),
+    identity: {
+      read: <T>(kind: 'providers' | 'consumers' | 'state' | 'clients', id: string, environment: string) =>
+        read<T>(identityPath + identityKey(kind, id, environment)),
+      write: (kind: 'state' | 'clients', id: string, environment: string, value: object, version: number) =>
+        write(identityPath + identityKey(kind, id, environment), value, version),
+      async deleteClient(id: string, environment: string) {
+        const token = await serviceToken();
+        const key = identityKey('clients', id, environment);
+        if (!token) throw new Error('Unlock OpenBao before revoking an identity client');
+        const removed = await request('customer-launch/metadata/identity/' + key, undefined, token, 'DELETE');
+        if (!removed.ok && removed.status !== 404) throw new Error('OpenBao could not remove the identity placement');
+      },
+    },
   };
 }
 

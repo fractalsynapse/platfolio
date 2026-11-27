@@ -5,6 +5,8 @@ import { createServer } from 'node:http';
 import { join } from 'node:path';
 import { customerLaunchRun } from './customer-launch-run.ts';
 import { customerOpenBao } from './customer-openbao.ts';
+import { customerSharedIdentity, SharedIdentityWorkerError } from './customer-shared-identity.ts';
+import { IdentityClientRequestSchema } from '../packages/contracts/src/shared-identity-execution.ts';
 import { customerMarketplaceConnection, privateMarketplaceOrigin } from './customer-marketplace-connection.ts';
 import { verifyMarketplaceInstall } from './customer-marketplace-install.ts';
 import { customerRailwayOAuth } from './customer-railway-oauth.ts';
@@ -32,6 +34,7 @@ if (!directory || !workerKey || workerKey.length < 32 || !team || !callback || !
 }
 mkdirSync(directory, { recursive: true, mode: 0o700 });
 const bao = customerOpenBao(baoOrigin, baoSecret, directory);
+const sharedIdentity = customerSharedIdentity(bao.identity);
 const registryOrigin = privateMarketplaceOrigin(process.env.PLATFOLIO_REGISTRY_ORIGIN);
 const marketplace = customerMarketplaceConnection(registryOrigin, bao);
 const oauth = customerRailwayOAuth({ callback, workspaceId: workspace, ...(client ? { clientId: client } : {}), ...(project ? { projectId: project } : {}) }, bao);
@@ -83,7 +86,7 @@ const server = createServer({ requestTimeout: 10000 }, (request, response) => {
   }
   if (request.method === 'GET' && request.url === '/status') { reply(200, { status: 'ok' }); return; }
   const auth = Buffer.from(request.headers.authorization ?? '');
-  if (request.method !== 'POST' || request.url !== '/launch' || auth.length !== expected.length || !timingSafeEqual(auth, expected)) {
+  if (request.method !== 'POST' || !['/launch', '/identity'].includes(request.url ?? '') || auth.length !== expected.length || !timingSafeEqual(auth, expected)) {
     reply(404, null);
     return;
   }
@@ -93,7 +96,15 @@ const server = createServer({ requestTimeout: 10000 }, (request, response) => {
       text += String(chunk);
       if (text.length > 512 * 1024) { reply(400, null); return; }
     }
-    const parsed = CustomerHostingCommandSchema.safeParse(JSON.parse(text));
+    const input: unknown = JSON.parse(text);
+    if (request.url === '/identity') {
+      const parsed = IdentityClientRequestSchema.safeParse(input);
+      if (!parsed.success || parsed.data.target.teamId !== team) { reply(404, null); return; }
+      const result = await sharedIdentity(parsed.data);
+      reply(result ? 200 : 409, result ?? null);
+      return;
+    }
+    const parsed = CustomerHostingCommandSchema.safeParse(input);
     if (!parsed.success) { reply(400, null); return; }
     const command = parsed.data;
     switch (command.action) {
@@ -240,7 +251,9 @@ const server = createServer({ requestTimeout: 10000 }, (request, response) => {
       }
       default: reply(404, null);
     }
-  })().catch(() => reply(503, replyError));
+  })().catch((error: unknown) => reply(503, request.url === '/identity'
+    ? { message: error instanceof SharedIdentityWorkerError ? error.message : 'The identity operation could not read or write OpenBao or Keycloak.' }
+    : replyError));
 });
 
 // Railway private networking can be IPv6-only on existing environments.

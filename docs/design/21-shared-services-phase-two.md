@@ -52,6 +52,28 @@ mark its bindings stale. Verify the distinction between share withdrawal and an 
 revocation. Exercise interrupted execution, repeated requests, and loss of hub connectivity in the
 local stack with independent control-plane and application issuers.
 
+The local implementation uses the private worker's existing OpenBao AppRole. The owner provisions an
+application-realm service account with `manage-clients` assigned to the account and included in its client
+scope. Attach the `kc-admin-api` default client scope for the Admin API audience on Keycloak 26.8.2.
+The owner writes the issuer, client ID, and credential
+directly to the `customer-launch` KV mount under `identity/providers/<provider-id>/<environment>`.
+The owner records the exact Starter Web `redirectUri` at `identity/consumers/<consumer-id>/<environment>`.
+The API takes the provider environment alongside the saved binding. The worker derives the client ID,
+checks discovery, and places the runtime configuration at `identity/clients/<consumer-id>/<environment>`.
+Give the app a vault policy that reads only its own placement. The runtime loads that placement before
+starting. The existing OpenBao policy recovery flow applies the added worker paths to an older vault.
+
+The worker stores registration checkpoints under `identity/state`. Postgres keeps a reservation on the
+original binding while a client is pending or placed. Revocation disables the client, removes its vault
+placement, and verifies both before releasing the reservation. Detach the binding after revocation.
+Existing app sessions expire under the app's own session policy.
+
+To reproduce the local proof, run `pnpm exec tsx scripts/smoke-shared-identity.ts <starter-web-checkout>`
+with the OIDC-capable Starter Web revision checked out. The command uses disposable local containers,
+the actual private worker, and the reviewed Shared Identity pin. It checks recovery from a refused vault
+write, worker restart, authorization-code sign-in, vault isolation, and revocation. Hosted runtime
+delivery and cross-project connectivity remain part of 2C.
+
 ## 2C — Verify hosted connectivity and lifecycle
 
 Finish Phase 1 hosted acceptance before running this slice on Railway. Keep the existing private

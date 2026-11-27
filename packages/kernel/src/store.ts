@@ -121,6 +121,9 @@ export class StoreService extends Service<z.infer<typeof StoreConfigSchema>> {
   listBindings(...args: Parameters<Store['listBindings']>) { return this.inner.listBindings(...args); }
   listConsumers(...args: Parameters<Store['listConsumers']>) { return this.inner.listConsumers(...args); }
   unbindCapability(...args: Parameters<Store['unbindCapability']>) { return this.inner.unbindCapability(...args); }
+  reserveIdentityClient(...args: Parameters<Store['reserveIdentityClient']>) { return this.inner.reserveIdentityClient(...args); }
+  getIdentityClient(...args: Parameters<Store['getIdentityClient']>) { return this.inner.getIdentityClient(...args); }
+  releaseIdentityClient(...args: Parameters<Store['releaseIdentityClient']>) { return this.inner.releaseIdentityClient(...args); }
   createInvitation(...args: Parameters<Store['createInvitation']>) { return this.inner.createInvitation(...args); }
   getInvitation(...args: Parameters<Store['getInvitation']>) { return this.inner.getInvitation(...args); }
   listInvitations(...args: Parameters<Store['listInvitations']>) { return this.inner.listInvitations(...args); }

@@ -5,6 +5,7 @@ import type {
 import type { VerifiedMarketplaceInstall } from './marketplace-install.ts';
 import type { InstallationJournal } from './installation-journal.ts';
 import { z } from 'zod';
+import type { IdentityClientTarget } from './shared-identity-execution.ts';
 import { AttestationSchema, type Attestation } from './attestation.ts';
 import { HostingProviderIdSchema } from './infra.ts';
 import { CONTRACT_VERSION } from './generated/contract-version.ts';
@@ -648,6 +649,9 @@ export interface Store {
   /** The deletion guard's question, answered: who consumes this provider? */
   listConsumers(providerInstanceId: string, capability?: string): Promise<BindingRecord[]>;
   unbindCapability(consumerInstanceId: string, capability: string): Promise<StoreResult<{ removed: boolean }>>;
+  reserveIdentityClient(target: IdentityClientTarget): Promise<IdentityClientTarget | undefined>;
+  getIdentityClient(consumerInstanceId: string, environment: IdentityClientTarget['environment']): Promise<IdentityClientTarget | undefined>;
+  releaseIdentityClient(target: IdentityClientTarget): Promise<void>;
 
   /**
    * Membership. `put` is idempotent by (teamId, subject): re-adding a member updates the role rather than

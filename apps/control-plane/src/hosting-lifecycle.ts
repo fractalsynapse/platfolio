@@ -2,6 +2,7 @@ import { HostingRemovalRequestSchema, InfraPlanSchema, KEEP_DATA_FEATURE, PINNED
 import type { ExtensionDescriptor, Response_ } from '@platfolio/kernel';
 import type { scoped as scopedRoute } from './capabilities.ts';
 import { badRequest, notFound, send } from './respond.ts';
+import { hasIdentityClient } from './identity-client.ts';
 
 export function hostingLifecycle(scoped: typeof scopedRoute): ExtensionDescriptor {
   const hostingOperations = new Set<string>();
@@ -91,6 +92,7 @@ export function hostingLifecycle(scoped: typeof scopedRoute): ExtensionDescripto
         try {
           const consumers = await store.listConsumers(id);
           if (consumers.length) return operationConflict(`Removing this instance would strand: ${bindingImpact(consumers).join('; ')}`);
+          if (await hasIdentityClient(store, id)) return operationConflict('Revoke the app’s identity clients before removing it.');
           if ((await store.getHostedStarter(id)).ok) return operationConflict('Remove this app through its installed launch workflow.');
           const result = await provider.deleteInstance(id, { data });
           if (result.instanceId !== id) return providerUnavailable();

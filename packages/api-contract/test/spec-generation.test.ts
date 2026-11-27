@@ -80,7 +80,7 @@ test('what the generator owns, and what it deliberately leaves alone', () => {
   const generated = generatedComponentNames(names, side.all);
   assert.deepEqual(generated, [
     'ApplyResult', 'Attestation', 'AttestationRecord', 'AuditEntry', 'BindingRecord', 'CapabilityOffer',
-    'CapabilityShare', 'DeleteResult', 'DispatchIntent', 'HostedCustomDomain', 'HostedStarter', 'HostingRemovalRequest', 'InstallationLaunchInput', 'Instance', 'InstanceResponse', 'Invitation',
+    'CapabilityShare', 'DeleteResult', 'DispatchIntent', 'HostedCustomDomain', 'HostedStarter', 'HostingRemovalRequest', 'IdentityClientPlacement', 'InstallationLaunchInput', 'Instance', 'InstanceResponse', 'Invitation',
     'MarketplaceArtifactAcquisition', 'MarketplaceArtifactGrant', 'MarketplaceArtifactVersion', 'MarketplaceBundlePublication', 'MarketplaceInstall', 'MarketplaceInstallInput', 'MarketplaceInstallation', 'MarketplaceMaintenanceInput', 'MarketplacePlatform', 'MarketplacePlatformAcquisition', 'MarketplacePlatformAcquisitionInput', 'MarketplacePlatformCreation',
     'MarketplacePlatformPublication', 'MarketplacePlatformRelease', 'MarketplacePublisherPlatform', 'MarketplaceRelease', 'MarketplaceReleasePublication',
     'MarketplaceReleaseSelection', 'NotificationRule', 'StarterBrandChange', 'StateSnapshot',

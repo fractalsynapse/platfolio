@@ -22,6 +22,7 @@ import { hostingLifecycle } from './hosting-lifecycle.ts';
 import { platformCatalog } from './platform-catalog.ts';
 import { privateMarketplaceInstall } from './private-marketplace-install.ts';
 import { sharedIdentityBinding } from './shared-identity-binding.ts';
+import { identityClient, hasIdentityClient } from './identity-client.ts';
 import type { ArtifactConfig } from './marketplace-artifacts.ts';
 import { accountProfile, type AccountIssuer } from './account-profile.ts';
 import { customHostname } from '../../../packages/contracts/src/railway-domains.ts';
@@ -365,6 +366,9 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
         },
       },
       scoped('DELETE', '/api/v1/instances/{instanceId}', 'destroyInstance', 'instance.destroy', async (scope, _request, params) => {
+        if (await hasIdentityClient(scope.context.store, params.instanceId ?? '')) {
+          return { status: 409, body: { error: 'conflict', message: 'Revoke the app’s identity clients before removing it.' } };
+        }
         // The reason #176 exists. `decide` already proved this caller is an OWNER of the team that holds the
         // instance (D43); this proves the destroy will not strand something that is running.
         const consumers = await scope.context.store.listConsumers(params.instanceId ?? '');
@@ -976,6 +980,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
       }),
       scoped('DELETE', '/api/v1/instances/{instanceId}/bindings/{capability}', 'unbindCapability', 'capability.bind', async (scope, _request, params) => {
         const removed = await scope.context.store.unbindCapability(params.instanceId ?? '', params.capability ?? '');
+        if (!removed.ok && removed.code === 'conflict') return send('unbindCapability', 409, { error: 'conflict', message: 'Revoke each environment’s identity client before removing this binding.' });
         if (removed.ok === false) return { status: removed.code === 'not-found' ? 404 : 400, body: { error: removed.code, message: reasonOf(removed) } };
         await scope.context.store.appendAudit({ actorKind: 'user', actorRef: scope.personId, action: 'capability.unbind', target: params.instanceId ?? '', detail: { capability: params.capability ?? '' } });
         return { status: 204, body: undefined };
@@ -1583,6 +1588,9 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
         if (!body.ok || !body.value || !['keep', 'wipe'].includes(body.value.data)) return badRequest('Select keep data or wipe data');
         if (body.value.data === 'wipe' && body.value.confirmation !== template) return badRequest(`Type ${template} to confirm deletion of its data`);
         const instance = (await context.store.listInstances(teamId)).find(({ name }) => name === template);
+        if (instance && await hasIdentityClient(context.store, instance.id)) {
+          return send('removeStarterLaunch', 409, { error: 'conflict', message: 'Revoke the app’s identity clients before removing it.' });
+        }
         const hosting = instance && await context.store.getHostedStarter(instance.id);
         if (instance && hosting?.ok) {
           const consumers = await context.store.listConsumers(instance.id);
@@ -1699,7 +1707,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
     }],
   };
 
-  return [core, instances, hostingLifecycle(scoped), dispatches, audit, teams, bindings, sharedIdentityBinding(scoped), invitations, secrets, controller, marketplace,
+  return [core, instances, hostingLifecycle(scoped), dispatches, audit, teams, bindings, sharedIdentityBinding(scoped), identityClient(scoped, customer), invitations, secrets, controller, marketplace,
     privateMarketplaceInstall(scoped, customer),
     platformCatalog(deps.marketplaceEnabled ?? false, scoped, (suffix, operationId, handle) => registryRoute(registryPath + suffix, operationId, handle), deps.artifacts, customer),
     installationLaunch(scoped, deps.installation), privateMarketplace, launcher, catalog, availability, notifications,

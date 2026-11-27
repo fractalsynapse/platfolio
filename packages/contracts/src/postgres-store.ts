@@ -5,6 +5,7 @@ import {
 import { MarketplaceInstallRecordSchema, type VerifiedMarketplaceInstall } from './marketplace-install.ts';
 import { InstallationJournalSchema, type InstallationJournal } from './installation-journal.ts';
 import { z } from 'zod';
+import { IdentityClientTargetSchema, type IdentityClientTarget } from './shared-identity-execution.ts';
 import { Pool, type PoolClient } from 'pg';
 import {
   HostedStarterSchema, MarketplaceInstallationSchema, NotificationRuleSchema, rollupState, type NewNotificationRule, type NotificationRule, type HostedStarter, type NewHostedStarter, type HostedAppCheck,
@@ -824,6 +825,9 @@ export class PostgresStore implements Store {
       if (saved.rowCount === 0) return await this.getBinding(b.consumerInstanceId, b.capability);
     } catch (error) {
       const code = (error as { code?: string }).code;
+      if (code === '23503' && (error as { table?: string }).table === 'identity_client_reservations') {
+        return err({ code: 'conflict', reason: 'Revoke the identity client before replacing this binding.' });
+      }
       if (code === '23503') return err({ code: 'not-found', what: 'capability offer', id: `${b.providerInstanceId}/${b.capability}` });
       if (code === '23514') return err({ code: 'conflict', reason: 'the provider instance cannot be deleted while this binding exists (RESTRICT)' });
       throw error;
@@ -859,9 +863,54 @@ export class PostgresStore implements Store {
   }
 
   async unbindCapability(consumerInstanceId: string, capability: string) {
-    const removed = await this.pool.query(`DELETE FROM ${this.q('capability_bindings')} WHERE consumer_instance_id = $1 AND capability = $2`, [consumerInstanceId, capability]);
+    let removed;
+    try {
+      removed = await this.pool.query(`DELETE FROM ${this.q('capability_bindings')} WHERE consumer_instance_id = $1 AND capability = $2`, [consumerInstanceId, capability]);
+    } catch (error) {
+      if ((error as { code?: string }).code === '23503' && capability === 'identity') {
+        return err({ code: 'conflict', reason: 'Revoke the identity client before removing this binding.' });
+      }
+      throw error;
+    }
     if ((removed.rowCount ?? 0) === 0) return err({ code: 'not-found', what: 'binding', id: `${consumerInstanceId}/${capability}` });
     return ok({ removed: true });
+  }
+
+  async reserveIdentityClient(input: IdentityClientTarget) {
+    const target = IdentityClientTargetSchema.parse(input);
+    const { consumerInstanceId, providerInstanceId, boundAt, environment, teamId } = target;
+    try {
+      const result = await this.pool.query(`INSERT INTO ${this.q('identity_client_reservations')}
+        (consumer_instance_id, provider_instance_id, bound_at, environment, target)
+        SELECT b.consumer_instance_id, b.provider_instance_id, b.bound_at, $4, $6::jsonb
+        FROM ${this.q('capability_bindings')} b
+        JOIN ${this.q('instances')} consumer ON consumer.id = b.consumer_instance_id
+        JOIN ${this.q('instances')} provider ON provider.id = b.provider_instance_id
+        WHERE b.consumer_instance_id = $1 AND b.provider_instance_id = $2 AND b.capability = 'identity'
+          AND date_trunc('milliseconds', b.bound_at) = $3::timestamptz AND b.state = 'bound'
+          AND consumer.team_id = $5 AND provider.team_id = $5
+          AND consumer.state NOT IN ('deprovisioning', 'removed') AND provider.state NOT IN ('deprovisioning', 'removed')
+        ON CONFLICT (consumer_instance_id, environment) DO NOTHING RETURNING target`,
+      [consumerInstanceId, providerInstanceId, boundAt, environment, teamId, JSON.stringify(target)]);
+      return result.rows.length ? target : await this.getIdentityClient(consumerInstanceId, environment);
+    } catch (error) {
+      if ((error as { code?: string }).code === '23503') return undefined;
+      throw error;
+    }
+  }
+
+  async getIdentityClient(consumerInstanceId: string, environment: IdentityClientTarget['environment']) {
+    const result = await this.pool.query(`SELECT target FROM ${this.q('identity_client_reservations')}
+      WHERE consumer_instance_id = $1 AND environment = $2`, [consumerInstanceId, environment]);
+    const row = result.rows[0];
+    return row ? IdentityClientTargetSchema.parse(row.target) : undefined;
+  }
+
+  async releaseIdentityClient(input: IdentityClientTarget) {
+    const target = IdentityClientTargetSchema.parse(input);
+    await this.pool.query(`DELETE FROM ${this.q('identity_client_reservations')}
+      WHERE consumer_instance_id = $1 AND environment = $2 AND target = $3::jsonb`,
+    [target.consumerInstanceId, target.environment, JSON.stringify(target)]);
   }
 
   async resolvePerson(input: { issuer: string; subject: string; kind?: Person['kind']; label?: string }) {

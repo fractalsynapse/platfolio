@@ -602,6 +602,15 @@ const expectErr = (result: { ok: boolean; value?: unknown } & Partial<StoreError
         preservedOffer.publishedAt !== offer.publishedAt || preservedBinding.boundAt !== binding.boundAt) {
       return { status: 'fail', detail: 'preserve mode replaced metadata on an existing offer or binding' };
     }
+    const target = { teamId: team.id, consumerInstanceId: consumerInst.id, providerInstanceId: providerInst.id,
+      boundAt: binding.boundAt, environment: 'staging', providerEnvironment: 'production', clientType: 'confidential' } as const;
+    const [first, second] = await Promise.all([store.reserveIdentityClient(target), store.reserveIdentityClient(target)]);
+    if (!first || first.boundAt !== target.boundAt || !second || second.providerInstanceId !== first.providerInstanceId ||
+        (await store.unbindCapability(consumerInst.id, 'identity')).ok || (await store.bindCapability(binding)).ok) {
+      return { status: 'fail', detail: 'a reserved client must keep its original dependency through retries and concurrent binding changes' };
+    }
+    await store.releaseIdentityClient(target);
+    if (await store.getIdentityClient(consumerInst.id, 'staging')) return { status: 'fail', detail: 'the revoked reservation is still present' };
     const consumers = await store.listConsumers(providerInst.id);
     if (consumers.length !== 1 || consumers[0]?.consumerInstanceId !== consumerInst.id) {
       return { status: 'fail', detail: `listConsumers gave ${JSON.stringify(consumers.map((c) => c.consumerInstanceId))}` };

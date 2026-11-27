@@ -5,6 +5,12 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+### Added — customer-side Shared Identity client placement (#288)
+
+Private installations can register a per-environment Keycloak client and place its configuration in
+customer OpenBao. Retries retain the registered client. A pending or placed client protects the
+original binding until the worker verifies revocation.
+
 ### Added — Shared Identity binding intent (#288)
 
 Teams can publish the reviewed Shared Identity release's output contract and record a same-team

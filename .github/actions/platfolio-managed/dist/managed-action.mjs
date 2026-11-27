@@ -8968,15 +8968,15 @@ var $ZodObjectJIT = /* @__PURE__ */ $constructor("$ZodObjectJIT", (inst, def) =>
     const syms = normalized.symbolKeys;
     const doc = new Doc(["payload", "ctx"], { shape, inst, memo: memo2, syms });
     const parseStr = (k) => `shape[${k}]._zod.run({ value: input[${k}], issues: [] }, ctx)`;
-    const prefixStr = (id, k) => `
-          let ${id}_ab = false;
-          for (let i = 0; i < ${id}.issues.length; i++) {
-            const iss = ${id}.issues[i];
+    const prefixStr = (id2, k) => `
+          let ${id2}_ab = false;
+          for (let i = 0; i < ${id2}.issues.length; i++) {
+            const iss = ${id2}.issues[i];
             iss.path = iss.path ? [${k}, ...iss.path] : [${k}];
             payload.issues.push(iss);
-            if (iss.continue !== true) ${id}_ab = true;
+            if (iss.continue !== true) ${id2}_ab = true;
           }
-          if (${id}_ab && ctx && ctx.abortEarly) {
+          if (${id2}_ab && ctx && ctx.abortEarly) {
             payload.value = newResult;
             return payload;
           }`;
@@ -8990,34 +8990,34 @@ var $ZodObjectJIT = /* @__PURE__ */ $constructor("$ZodObjectJIT", (inst, def) =>
     for (const key of normalized.allKeys) {
       if (key === "__proto__")
         continue;
-      const id = ids[key];
+      const id2 = ids[key];
       const k = typeof key === "symbol" ? `syms[${syms.indexOf(key)}]` : esc(key);
       const isPresent = `${k} in input`;
       const schema = shape[key];
       const optin = schema?._zod?.optin;
       const isOptionalIn = optin !== void 0;
       const isOptionalOut = schema?._zod?.optout === "optional";
-      doc.write(`const ${id} = ${parseStr(k)};`);
+      doc.write(`const ${id2} = ${parseStr(k)};`);
       if (isOptionalIn && isOptionalOut) {
-        const assign = optin === "optional" ? `${id}_present` : `${id}.value !== undefined || ${id}_present`;
+        const assign = optin === "optional" ? `${id2}_present` : `${id2}.value !== undefined || ${id2}_present`;
         doc.write(`
-        const ${id}_present = ${isPresent};
-        if (!${id}.issues.length || ${id}_present) {
-          if (${id}.issues.length) {${prefixStr(id, k)}
+        const ${id2}_present = ${isPresent};
+        if (!${id2}.issues.length || ${id2}_present) {
+          if (${id2}.issues.length) {${prefixStr(id2, k)}
           }
 
           if (${assign}) {
-            newResult[${k}] = ${id}.value;
+            newResult[${k}] = ${id2}.value;
           }
         }
 
       `);
       } else if (!isOptionalIn) {
         doc.write(`
-        const ${id}_present = ${isPresent};
-        if (${id}.issues.length) {${prefixStr(id, k)}
+        const ${id2}_present = ${isPresent};
+        if (${id2}.issues.length) {${prefixStr(id2, k)}
         }
-        if (!${id}_present && !${id}.issues.length) {
+        if (!${id2}_present && !${id2}.issues.length) {
           payload.issues.push({
             code: "invalid_type",
             expected: "nonoptional",
@@ -9030,22 +9030,22 @@ var $ZodObjectJIT = /* @__PURE__ */ $constructor("$ZodObjectJIT", (inst, def) =>
           }
         }
 
-        if (${id}_present) {
-          newResult[${k}] = ${id}.value;
+        if (${id2}_present) {
+          newResult[${k}] = ${id2}.value;
         }
 
       `);
       } else {
         doc.write(`
-        if (${id}.issues.length) {${prefixStr(id, k)}
+        if (${id2}.issues.length) {${prefixStr(id2, k)}
         }
       `);
         if (optin === "defaulted") {
-          doc.write(`newResult[${k}] = ${id}.value;`);
+          doc.write(`newResult[${k}] = ${id2}.value;`);
         } else {
           doc.write(`
-        if (${id}.value !== undefined || ${isPresent}) {
-          newResult[${k}] = ${id}.value;
+        if (${id2}.value !== undefined || ${isPresent}) {
+          newResult[${k}] = ${id2}.value;
         }
       `);
         }
@@ -21073,26 +21073,26 @@ function extractDefs(ctx, schema) {
     return;
   const idToSchema = /* @__PURE__ */ new Map();
   for (const entry of ctx.seen.entries()) {
-    const id = ctx.metadataRegistry.get(entry[0])?.id;
-    if (id) {
-      const existing = idToSchema.get(id);
+    const id2 = ctx.metadataRegistry.get(entry[0])?.id;
+    if (id2) {
+      const existing = idToSchema.get(id2);
       if (existing && existing !== entry[0]) {
-        throw new Error(`Duplicate schema id "${id}" detected during JSON Schema conversion. Two different schemas cannot share the same id when converted together.`);
+        throw new Error(`Duplicate schema id "${id2}" detected during JSON Schema conversion. Two different schemas cannot share the same id when converted together.`);
       }
-      idToSchema.set(id, entry[0]);
+      idToSchema.set(id2, entry[0]);
     }
   }
   const makeURI = (entry) => {
     const defsSegment = ctx.target === "draft-2020-12" ? "$defs" : "definitions";
     if (ctx.external) {
       const externalId = ctx.external.registry.get(entry[0])?.id;
-      const uriGenerator = ctx.external.uri ?? ((id2) => id2);
+      const uriGenerator = ctx.external.uri ?? ((id3) => id3);
       if (externalId) {
         return { ref: uriGenerator(externalId) };
       }
-      const id = entry[1].defId ?? entry[1].schema.id ?? `schema${ctx.counter++}`;
-      entry[1].defId = id;
-      return { defId: id, ref: `${uriGenerator("__shared")}#/${defsSegment}/${encodeJSONPointerSegment(id)}` };
+      const id2 = entry[1].defId ?? entry[1].schema.id ?? `schema${ctx.counter++}`;
+      entry[1].defId = id2;
+      return { defId: id2, ref: `${uriGenerator("__shared")}#/${defsSegment}/${encodeJSONPointerSegment(id2)}` };
     }
     const uriPrefix = `#`;
     const defUriPrefix = `${uriPrefix}/${defsSegment}/`;
@@ -21140,8 +21140,8 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
         continue;
       }
     }
-    const id = ctx.metadataRegistry.get(entry[0])?.id;
-    if (id) {
+    const id2 = ctx.metadataRegistry.get(entry[0])?.id;
+    if (id2) {
       extractToDef(entry);
       continue;
     }
@@ -21374,10 +21374,10 @@ function finalize(ctx, schema) {
   } else {
   }
   if (ctx.external?.uri) {
-    const id = ctx.external.registry.get(schema)?.id;
-    if (!id)
+    const id2 = ctx.external.registry.get(schema)?.id;
+    if (!id2)
       throw new Error("Schema is missing an `id` property");
-    result.$id = ctx.external.uri(id);
+    result.$id = ctx.external.uri(id2);
   }
   assignProps(result, root.defId ? root.schema : root.def ?? root.schema);
   const rootMetaId = ctx.metadataRegistry.get(schema)?.id;
@@ -21983,7 +21983,7 @@ function stringifyKeyNames(bySchema, json2, visited) {
   const values = json2.enum ?? (json2.const !== void 0 ? [json2.const] : void 0);
   if (!numericType && !values?.some((v) => typeof v === "number"))
     return json2;
-  const { minimum, maximum, exclusiveMinimum, exclusiveMaximum, multipleOf, format, id, ...rest } = json2;
+  const { minimum, maximum, exclusiveMinimum, exclusiveMaximum, multipleOf, format, id: id2, ...rest } = json2;
   if (rest.enum)
     rest.enum = rest.enum.map((v) => typeof v === "number" ? String(v) : v);
   else if (typeof rest.const === "number")
@@ -25068,7 +25068,7 @@ function date4(params) {
 }
 
 // packages/contracts/src/generated/contract-version.ts
-var CONTRACT_VERSION = "8.1.0";
+var CONTRACT_VERSION = "8.2.0";
 
 // packages/contracts/src/infra.ts
 var CONTRACT_NAME = "infra.provider";
@@ -25830,13 +25830,13 @@ var wipeReadbackDelays = [0, 1e3, 2e3, 3e3, 4e3, 5e3, 5e3, 5e3, 5e3];
 async function stopRailwayDeployments(input2) {
   const { transport, credential, read, sleep } = input2;
   const initial = await read();
-  const ids = new Set(initial.filter(({ status }) => !stopped.has(status) && status !== "REMOVING").map(({ id }) => id));
-  for (const id of ids) {
+  const ids = new Set(initial.filter(({ status }) => !stopped.has(status) && status !== "REMOVING").map(({ id: id2 }) => id2));
+  for (const id2 of ids) {
     await transport.graphql({
       operation: "deploymentRemove",
       credential,
       query: "mutation ($id: String!) { deploymentRemove(id: $id) }",
-      variables: { id }
+      variables: { id: id2 }
     }).catch(() => void 0);
   }
   for (let attempt = 0; attempt < input2.attempts; attempt++) {
@@ -26198,10 +26198,10 @@ var RailwayInfraProvider = class {
     }
     const environments = await this.environments(project.id, credential);
     const volumes = await this.listVolumes(project.id, credential);
-    const projectExists = async () => (await this.workspaceProjects(credential)).some(({ id }) => id === project.id);
+    const projectExists = async () => (await this.workspaceProjects(credential)).some(({ id: id2 }) => id2 === project.id);
     if (data === "keep") {
       try {
-        const placements2 = () => Promise.all(environments.map(({ id }) => railwayRetainedVolumeIds({ transport: this.transport, credential }, id)));
+        const placements2 = () => Promise.all(environments.map(({ id: id2 }) => railwayRetainedVolumeIds({ transport: this.transport, credential }, id2)));
         const keptPlacements = await placements2();
         for (const environment of environments) {
           const token = await this.credentials.forEnvironment(project.id, environment.name);
@@ -26214,8 +26214,8 @@ var RailwayInfraProvider = class {
             intervalMs: this.pollIntervalMs
           });
         }
-        const stillPresent = new Set((await this.listVolumes(project.id, credential)).map(({ id }) => id));
-        if (!await projectExists() || stillPresent.size !== volumes.length || !volumes.every(({ id }) => stillPresent.has(id)) || JSON.stringify(await placements2()) !== JSON.stringify(keptPlacements)) {
+        const stillPresent = new Set((await this.listVolumes(project.id, credential)).map(({ id: id2 }) => id2));
+        if (!await projectExists() || stillPresent.size !== volumes.length || !volumes.every(({ id: id2 }) => stillPresent.has(id2)) || JSON.stringify(await placements2()) !== JSON.stringify(keptPlacements)) {
           throw new Error("Railway storage changed while stopping workloads");
         }
         await this.writeMarker(project.id, "none", credential);
@@ -26512,14 +26512,14 @@ var RailwayInfraProvider = class {
     if (project && this.project && !this.ownsBoundProject(project)) throw new Error("The named Railway project belongs to another instance");
     return project;
   }
-  async findProjectById(id) {
+  async findProjectById(id2) {
     const credential = await this.credentials.workspace();
     try {
       const data = await this.transport.graphql({
         operation: "project",
         credential,
         query: "query ($id: String!) { project(id: $id) { id name description } }",
-        variables: { id }
+        variables: { id: id2 }
       });
       return this.toProject(data.project ?? null);
     } catch {
@@ -27943,6 +27943,28 @@ var InstallationJournalSchema = external_exports.object({
   leaseUntil: external_exports.iso.datetime()
 }).strict();
 
+// packages/contracts/src/shared-identity-execution.ts
+var id = external_exports.string().min(1).max(128).regex(/^[A-Za-z0-9_-]+$/);
+var IdentityEnvironmentSchema = external_exports.enum(["production", "staging"]);
+var IdentityClientTargetSchema = external_exports.object({
+  teamId: id,
+  consumerInstanceId: id,
+  providerInstanceId: id,
+  environment: IdentityEnvironmentSchema,
+  providerEnvironment: IdentityEnvironmentSchema,
+  boundAt: external_exports.iso.datetime(),
+  clientType: external_exports.enum(["public", "confidential"])
+}).strict();
+var IdentityClientRequestSchema = external_exports.object({
+  action: external_exports.enum(["status", "place", "revoke"]),
+  target: IdentityClientTargetSchema,
+  controlPlaneIssuer: external_exports.string().min(1).max(1024)
+}).strict();
+var IdentityClientPlacementSchema = external_exports.object({
+  state: external_exports.enum(["unconfigured", "pending", "placed", "revoked"]),
+  clientId: id.optional()
+}).strict();
+
 // node_modules/.pnpm/pg@8.23.1/node_modules/pg/esm/index.mjs
 var import_lib = __toESM(require_lib2(), 1);
 var Client = import_lib.default.Client;
@@ -28030,23 +28052,23 @@ function hostingProviders(providers, requiredRange = `^${CONTRACT_VERSION}`) {
   const registered = /* @__PURE__ */ new Map();
   for (const implementation of providers) {
     const info = CapabilityInfoSchema.parse(implementation.describe());
-    const id = HostingProviderIdSchema.parse(info.provider);
-    if (registered.has(id)) throw new Error(`${CONTRACT_NAME}: provider "${id}" is registered twice`);
+    const id2 = HostingProviderIdSchema.parse(info.provider);
+    if (registered.has(id2)) throw new Error(`${CONTRACT_NAME}: provider "${id2}" is registered twice`);
     if (!satisfiesRange(info.contract, requiredRange)) {
-      throw new Error(`${CONTRACT_NAME}: provider "${id}" at ${info.contract} does not satisfy required range "${requiredRange}"`);
+      throw new Error(`${CONTRACT_NAME}: provider "${id2}" at ${info.contract} does not satisfy required range "${requiredRange}"`);
     }
     for (const operation of info.operations) {
       if (typeof implementation[operation] !== "function") {
-        throw new Error(`${CONTRACT_NAME}: provider "${id}" advertises "${operation}" without implementing it`);
+        throw new Error(`${CONTRACT_NAME}: provider "${id2}" advertises "${operation}" without implementing it`);
       }
     }
-    registered.set(id, implementation);
+    registered.set(id2, implementation);
   }
   return {
-    get: (id) => registered.get(id),
-    require(id) {
-      const provider = registered.get(id);
-      if (!provider) throw new Error(`${CONTRACT_NAME}: provider "${id}" is not configured`);
+    get: (id2) => registered.get(id2),
+    require(id2) {
+      const provider = registered.get(id2);
+      if (!provider) throw new Error(`${CONTRACT_NAME}: provider "${id2}" is not configured`);
       return provider;
     }
   };
