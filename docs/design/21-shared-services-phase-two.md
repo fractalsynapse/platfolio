@@ -80,10 +80,34 @@ Finish Phase 1 hosted acceptance before running this slice on Railway. Keep the 
 `platfolio` test deployment available until those gates pass. Its in-place data and release pins are
 part of that evidence. Teardown follows the acceptance decision and is independent of local Phase 2 work.
 
-Use approved Shared Identity and Starter Web targets to measure which endpoints the consumer runtime,
-private worker, and end-user browser can reach across projects. Select the transport after that
-measurement. Verify sign-in, customer-controlled credential placement, revocation, and removal refusal
-with active dependents. Test a cold recovery with the hub unavailable and record what remains usable.
+### Railway connectivity measured on 2026-11-27
+
+| Origin | Shared Identity over HTTPS | Shared Identity private DNS | OpenBao private DNS |
+| --- | --- | --- | --- |
+| Starter Web runtime | OIDC discovery returned the expected issuer | Unresolved | Unresolved |
+| Private installation worker | OIDC discovery returned the expected issuer | Unresolved | Resolved and the health endpoint answered |
+| Browser | OIDC discovery returned the expected issuer | Unmeasured | Unmeasured |
+
+The Starter Web runtime also resolved its own PostgreSQL service over private DNS. The probes ran
+in the existing approved projects and retained their image pins. The Shared Identity probe read
+Master realm metadata. The application login test still needs a dedicated application realm.
+[Railway private networking](https://docs.railway.com/networking/private-networking/how-it-works)
+
+### Hosted credential delivery
+
+Keep OpenBao on the installation’s private network. The private worker should read the bound client
+configuration from OpenBao and deliver it through the scoped Railway write API to the consumer’s
+verified service and environment. Railway holds the application’s runtime copy. The hub receives
+neither the value nor delivery credentials. Require an exact saved binding, a named environment,
+and the declared Starter Web service before writing any of its OIDC variables. Preserve the OCI
+receipt and renew registry access before restarting the app.
+
+For installations with an older worker policy, use the saved owner recovery file in **Connections**.
+The site encrypts it to the private worker. OpenBao issues a temporary admin token inside the
+installation to update the worker policy, and the recovery code verifies token retirement.
+Verify hosted sign-in, credential placement, revocation, and removal refusal with active
+dependents. Check cold recovery with the hub unavailable. Those checks require the OIDC-capable
+Starter Web release and remain open.
 
 ## 2D — Optional hub sign-in and application registration
 

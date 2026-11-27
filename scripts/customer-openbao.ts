@@ -71,13 +71,22 @@ export function customerOpenBao(origin: string, secretId: string, directory: str
     const reply = await request<{ auth?: { client_token?: string } }>('auth/approle/login', { role_id: policy, secret_id: secretId });
     return reply.ok ? reply.data?.auth?.client_token : undefined;
   }
+  async function identityPolicyReady(token: string) {
+    // The reserved path holds no data. A 404 proves the worker may read this part of the mount.
+    const reply = await request(identityPath + 'providers/_policy_check/staging', undefined, token);
+    if (reply.status === 403) return false;
+    if (reply.status !== 404) throw new Error('OpenBao did not return an empty policy check path');
+    return true;
+  }
+
   async function status(): Promise<BaoState> {
     try {
       const state = await health();
       if (!state || typeof state.initialized !== 'boolean' || typeof state.sealed !== 'boolean') return 'unreachable';
       if (!state.initialized) return 'uninitialized';
       if (state.sealed) return 'sealed';
-      return await serviceToken() ? 'ready' : 'setup-required';
+      const token = await serviceToken();
+      return token && await identityPolicyReady(token) ? 'ready' : 'setup-required';
     } catch { return 'unreachable'; }
   }
 
@@ -143,7 +152,12 @@ export function customerOpenBao(origin: string, secretId: string, directory: str
       }
       await waitForActiveStorage();
       if (!await serviceToken()) await configure(data.bootstrap, [data.shares[0]!, data.shares[1]!, data.shares[2]!]);
-      if (!await serviceToken()) throw new Error('OpenBao did not authorize the worker');
+      const token = await serviceToken();
+      if (!token) throw new Error('OpenBao did not authorize the worker');
+      if (!await identityPolicyReady(token)) {
+        await restoreOpenBaoLauncherPolicy(origin, [data.shares[0]!, data.shares[1]!]);
+        if (!await identityPolicyReady(token)) throw new Error('OpenBao did not authorize the worker’s identity paths');
+      }
       const root = await request('auth/token/lookup-self', undefined, data.bootstrap);
       if (root.ok && !(await request('auth/token/revoke-self', {}, data.bootstrap)).ok) throw new Error('OpenBao did not retire the bootstrap credential');
     } finally { changing = false; }

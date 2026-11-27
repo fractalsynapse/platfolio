@@ -3175,7 +3175,7 @@ paths:
       security: [{ bearerJwt: [] }]
       responses:
         '200':
-          description: Current readiness and the worker public encryption key. The Railway connection requires a usable or refreshable authorization.
+          description: Current readiness and the worker public encryption key. An OpenBao policy that needs setup or recovery reports setup-required. The Railway connection requires a usable or refreshable authorization.
           content:
             application/json:
               schema:
@@ -3233,7 +3233,7 @@ paths:
       - { name: teamId, in: path, required: true, schema: { type: string } }
     post:
       operationId: unlockStarterOpenBao
-      summary: Unlock OpenBao with recovery material encrypted to the customer worker
+      summary: Restore OpenBao readiness with recovery material encrypted to the customer worker
       security: [{ bearerJwt: [] }]
       requestBody:
         required: true

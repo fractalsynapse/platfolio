@@ -9,7 +9,8 @@ change; entries describe merged intent, not aspirations.
 
 Private installations can register a per-environment Keycloak client and place its configuration in
 customer OpenBao. Retries retain the registered client. A pending or placed client protects the
-original binding until the worker verifies revocation.
+original binding until the worker verifies revocation. Owners can apply the updated worker policy
+through the encrypted recovery flow in Connections.
 
 ### Added — Shared Identity binding intent (#288)
 
