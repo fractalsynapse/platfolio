@@ -17,6 +17,17 @@ Teams can publish the reviewed Shared Identity release's output contract and rec
 consumer binding through the API. The existing dependency record protects the provider from
 removal. Client registration and credential placement follow in Phase 2.
 
+### Fixed — Railway reconnection in private installations (#288)
+
+- Show the Railway connection action when the worker can no longer use or refresh its saved grant.
+- Offer redeploy for applied environments in the private workspace's hosting panel.
+- Keep managed PostgreSQL private when the provider template includes a public TCP proxy.
+
+### Fixed — environment wiring for OCI marketplace installs (#288)
+
+- Validate the bundled environment registry against its Compose recipe and apply its defaults,
+  credential names, and database references in the environments it declares.
+
 ### Added — gated marketplace artifact delivery (#288)
 
 Publisher teams can publish a deployment bundle with pinned OCI images. Private installations can

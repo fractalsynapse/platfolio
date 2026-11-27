@@ -16,10 +16,19 @@ export function privateRailwayExecution(team: string, readGrant: () => Promise<W
   const refuse = async (): Promise<never> => { throw new Error('The hosting plugin requires an authorized instance'); };
 
   async function provider(target: HostingTarget, authorizeArtifacts = false): Promise<RailwayInfraProvider> {
-    const registryCredentials = authorizeArtifacts && target.artifact ? await readArtifact?.(target.artifact) : undefined;
+    const registryCredentials = authorizeArtifacts && target.artifact ? await readArtifact?.(target.artifact).catch(() => {
+      console.warn('Private hosting release authorization failed.');
+      throw new Error('The marketplace could not authorize this release.');
+    }) : undefined;
     if (authorizeArtifacts && target.artifact && !registryCredentials) throw new Error('Connect the artifact registry before applying this release.');
-    const grant = await readGrant();
-    if (grant.projectId) throw new Error('Connect a workspace grant to manage this instance');
+    const grant = await readGrant().catch(() => {
+      if (authorizeArtifacts) console.warn('Private hosting workspace authorization failed.');
+      throw new Error('The connected workspace grant is unavailable.');
+    });
+    if (grant.projectId) {
+      if (authorizeArtifacts) console.warn('Private hosting requires a workspace grant.');
+      throw new Error('Connect a workspace grant to manage this instance');
+    }
     const credential = { kind: 'workspace' as const, token: grant.token };
     return new RailwayInfraProvider({
       transport, workspaceId: grant.workspaceId,
@@ -53,7 +62,10 @@ export function privateRailwayExecution(team: string, readGrant: () => Promise<W
               return Promise.reject(new Error('The plan images do not match this acquisition'));
             }
           }
-          return perform(target, (driver) => driver.applyPlan(plan), true);
+          return perform(target, (driver) => driver.applyPlan(plan).catch(() => {
+            console.warn('Private hosting Railway apply failed.');
+            throw new Error('Railway could not apply the plan.');
+          }), true);
         },
         async readState(id) { return (await provider(target)).readState(id); },
         deleteInstance(id: string, options: DeleteOptions = { data: 'wipe' }) { return perform(target, (driver) => driver.deleteInstance(id, options)); },

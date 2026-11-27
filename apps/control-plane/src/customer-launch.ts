@@ -79,7 +79,10 @@ export function privateHostingPlugin(launch: ReturnType<typeof customerLaunch>,
   const refuse = async (): Promise<never> => { throw new Error('Hosting operations require a bound instance'); };
   async function call(action: CustomerHostingCommand['action'], body: object) {
     const outcome = await launch.call(action, body);
-    if (!outcome.ok) throw new Error('The private hosting worker could not complete the operation');
+    if (!outcome.ok) {
+      if (action === 'hosting-apply') console.warn('Private hosting apply worker response:', outcome.status ?? 'unreachable');
+      throw new Error('The private hosting worker could not complete the operation');
+    }
     return outcome.body;
   }
   return {

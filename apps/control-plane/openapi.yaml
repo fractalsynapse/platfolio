@@ -3171,11 +3171,11 @@ paths:
       - { name: teamId, in: path, required: true, schema: { type: string } }
     get:
       operationId: getStarterLaunchSetup
-      summary: Read the customer worker and OpenBao readiness
+      summary: Read the customer worker, OpenBao and Railway connection readiness
       security: [{ bearerJwt: [] }]
       responses:
         '200':
-          description: Current readiness and the worker public encryption key.
+          description: Current readiness and the worker public encryption key. The Railway connection requires a usable or refreshable authorization.
           content:
             application/json:
               schema:

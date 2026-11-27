@@ -54,7 +54,7 @@ export const workspacePages = {
   'workspace.instance': page('workspace.instance', 'App overview', TeamWorkspace, instanceReads),
   'workspace.instance-status': page('workspace.instance-status', 'App status', TeamWorkspace, [...instanceReads, 'getHostedAppStatus']),
   'workspace.instance-setup': page('workspace.instance-setup', 'Manage app', TeamWorkspace, [...environmentReads, ...starterReads, ...setupReads,
-    'getInstanceHostingState', 'applyInstanceHostingPlan', 'removeInstanceHosting'], true),
+    'getInstanceHostingState', 'applyInstanceHostingPlan', 'removeInstanceHosting', 'redeployInstance'], true),
   'workspace.environment-overview': page('workspace.environment-overview', 'Environment overview', TeamWorkspace, environmentReads),
   'workspace.environment-deployments': page('workspace.environment-deployments', 'Deployments', TeamWorkspace, [...environmentReads, 'redeployHostedStarter']),
   'workspace.environment-configuration': page('workspace.environment-configuration', 'Configuration', TeamWorkspace,
