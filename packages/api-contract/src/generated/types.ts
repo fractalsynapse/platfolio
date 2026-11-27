@@ -4,7 +4,7 @@
  * hand, because every line reproduces from the specification.
  *
  * Source: apps/control-plane/openapi.yaml (OpenAPI 3.1.0, info.version 0.1.0)
- * Input digest: sha256/def1709db8f89b11
+ * Input digest: sha256/4bb3dbccb6ab46cd
  *
  * Reproduce it with `pnpm run api:types`. `pnpm run api:types:check` fails when this file stops matching
  * what the committed spec produces, which is the only way a generated type deserves to be trusted.
@@ -354,9 +354,123 @@ export interface Invitation {
   emailError?: string;
 }
 
+export interface MarketplaceInstall {
+  instance: {
+    id: string;
+    teamId: string;
+    name: string;
+    template: string;
+    templateRef?: {
+      repo: string;
+      commitSha: string;
+    };
+    state: 'pending' | 'provisioning' | 'live' | 'degraded' | 'paused' | 'failed' | 'deprovisioning' | 'removed';
+    provider: string;
+    desiredPlanHash?: string;
+    lastAppliedPlanHash?: string;
+    createdAt: string;
+    updatedAt: string;
+  };
+  receiptId: string;
+  release: {
+    platformId: string;
+    version: string;
+    descriptorDigest: string;
+  };
+  variant: 'starter-template' | 'shared-service' | 'hosted-application';
+}
+
+export interface MarketplaceInstallInput {
+  name: string;
+  release: {
+    platformId: string;
+    version: string;
+    descriptorDigest: string;
+  };
+  sourceRepository?: string;
+}
+
 export interface MarketplaceInstallation {
   installationId: string;
   state: 'pending' | 'connected' | 'linked' | 'disconnected';
+}
+
+export interface MarketplacePlatform {
+  id: string;
+  title: string;
+  variant: 'starter-template' | 'shared-service' | 'hosted-application';
+  publisherTeamId?: string;
+  slug?: string;
+  latestRelease: {
+    platformId: string;
+    version: string;
+    source?: {
+      repo: string;
+      revision: string;
+    };
+    images: string[];
+    installer: string;
+    descriptorDigest: string;
+  };
+}
+
+export interface MarketplacePlatformAcquisition {
+  id: string;
+  teamId: string;
+  acquiredAt: string;
+  variant: 'starter-template' | 'shared-service' | 'hosted-application';
+  release: {
+    platformId: string;
+    version: string;
+    source: {
+      repo: string;
+      revision: string;
+    };
+    images: string[];
+    installer: string;
+    descriptorDigest: string;
+  };
+}
+
+export interface MarketplacePlatformAcquisitionInput {
+  platformId: string;
+  version: string;
+  descriptorDigest: string;
+}
+
+export interface MarketplacePlatformCreation {
+  slug: string;
+  title: string;
+  variant: 'starter-template' | 'shared-service' | 'hosted-application';
+}
+
+export interface MarketplacePlatformPublication {
+  version: string;
+  source: {
+    repo: string;
+    revision: string;
+  };
+  images: string[];
+}
+
+export interface MarketplacePlatformRelease {
+  platformId: string;
+  version: string;
+  source?: {
+    repo: string;
+    revision: string;
+  };
+  images: string[];
+  installer: string;
+  descriptorDigest: string;
+}
+
+export interface MarketplacePublisherPlatform {
+  slug: string;
+  title: string;
+  variant: 'starter-template' | 'shared-service' | 'hosted-application';
+  id: string;
+  publisherTeamId: string;
 }
 
 export interface MarketplaceRelease {
@@ -493,6 +607,10 @@ export interface ApiParameters {
   acceptInvitation: {
     invitationId: string;
   };
+  /** POST /api/v1/marketplace/installations/{installationId}/acquisitions */
+  acquireMarketplacePlatformRelease: {
+    installationId: string;
+  };
   /** POST /api/v1/instances/{instanceId}/hosting/apply */
   applyInstanceHostingPlan: {
     instanceId: string;
@@ -552,6 +670,10 @@ export interface ApiParameters {
   createInstance: Record<string, never>;
   /** POST /api/v1/teams/{teamId}/invitations */
   createInvitation: {
+    teamId: string;
+  };
+  /** POST /api/v1/teams/{teamId}/marketplace/platforms */
+  createMarketplacePlatform: {
     teamId: string;
   };
   /** POST /api/v1/instances/{instanceId}/notification-rules */
@@ -706,6 +828,12 @@ export interface ApiParameters {
   listMarketplaceInstallations: {
     teamId: string;
   };
+  /** GET /api/v1/marketplace/platforms/{platformId}/releases */
+  listMarketplacePlatformReleases: {
+    platformId: string;
+  };
+  /** GET /api/v1/marketplace/platforms */
+  listMarketplacePlatforms: Record<string, never>;
   /** GET /api/v1/me/invitations */
   listMyInvitations: Record<string, never>;
   /** GET /api/v1/me/notifications */
@@ -733,9 +861,18 @@ export interface ApiParameters {
   };
   /** POST /api/v1/attestations */
   postAttestation: Record<string, never>;
+  /** POST /api/v1/teams/{teamId}/marketplace/installs */
+  preparePrivateMarketplaceInstall: {
+    teamId: string;
+  };
   /** POST /api/v1/instances/{instanceId}/capability */
   publishCapability: {
     instanceId: string;
+  };
+  /** POST /api/v1/teams/{teamId}/marketplace/platforms/{platformId}/releases */
+  publishMarketplacePlatformRelease: {
+    teamId: string;
+    platformId: string;
   };
   /** POST /api/v1/teams/{teamId}/marketplace/releases */
   publishMarketplaceRelease: {
@@ -855,6 +992,8 @@ export interface ApiParameters {
 export interface ApiRequestBodies {
   /** POST /api/v1/me/invitations/{invitationId}/accept */
   acceptInvitation: Record<string, never>;
+  /** POST /api/v1/marketplace/installations/{installationId}/acquisitions */
+  acquireMarketplacePlatformRelease: MarketplacePlatformAcquisitionInput;
   /** POST /api/v1/teams/{teamId}/marketplace/installation-launches */
   authorizeHubInstallation: {
     installationId: string;
@@ -891,6 +1030,8 @@ export interface ApiRequestBodies {
     role?: 'owner' | 'member';
     ttlDays?: number;
   };
+  /** POST /api/v1/teams/{teamId}/marketplace/platforms */
+  createMarketplacePlatform: MarketplacePlatformCreation;
   /** POST /api/v1/instances/{instanceId}/notification-rules */
   createNotificationRule: {
     event: 'deployment-failed' | 'app-outage' | 'secret-updated';
@@ -920,6 +1061,8 @@ export interface ApiRequestBodies {
   });
   /** POST /api/v1/attestations */
   postAttestation: Attestation;
+  /** POST /api/v1/teams/{teamId}/marketplace/installs */
+  preparePrivateMarketplaceInstall: MarketplaceInstallInput;
   /** POST /api/v1/instances/{instanceId}/capability */
   publishCapability: {
     capability: string;
@@ -929,6 +1072,8 @@ export interface ApiRequestBodies {
       state?: 'not-issued' | 'issued-and-placed' | 'placement-unknown' | 're-issue-required';
     }>;
   };
+  /** POST /api/v1/teams/{teamId}/marketplace/platforms/{platformId}/releases */
+  publishMarketplacePlatformRelease: MarketplacePlatformPublication;
   /** POST /api/v1/teams/{teamId}/marketplace/releases */
   publishMarketplaceRelease: MarketplaceReleasePublication;
   /** PUT /api/v1/instances/{instanceId}/plan */
@@ -1047,6 +1192,14 @@ export interface ApiResponses {
     '401': Error;
     '404': Error;
     '409': Error;
+  };
+  /** POST /api/v1/marketplace/installations/{installationId}/acquisitions */
+  acquireMarketplacePlatformRelease: {
+    '200': MarketplacePlatformAcquisition;
+    '400': Error;
+    '404': Error;
+    '409': Error;
+    '503': Error;
   };
   /** POST /api/v1/instances/{instanceId}/hosting/apply */
   applyInstanceHostingPlan: {
@@ -1168,6 +1321,15 @@ export interface ApiResponses {
         reason?: string;
       };
     };
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '409': Error;
+  };
+  /** POST /api/v1/teams/{teamId}/marketplace/platforms */
+  createMarketplacePlatform: {
+    '201': MarketplacePublisherPlatform;
     '400': Error;
     '401': Error;
     '403': Error;
@@ -1547,6 +1709,18 @@ export interface ApiResponses {
     '403': Error;
     '404': Error;
   };
+  /** GET /api/v1/marketplace/platforms/{platformId}/releases */
+  listMarketplacePlatformReleases: {
+    '200': MarketplacePlatformRelease[];
+    '404': Error;
+    '503': Error;
+  };
+  /** GET /api/v1/marketplace/platforms */
+  listMarketplacePlatforms: {
+    '200': MarketplacePlatform[];
+    '404': Error;
+    '503': Error;
+  };
   /** GET /api/v1/me/invitations */
   listMyInvitations: {
     '200': Invitation[];
@@ -1634,12 +1808,31 @@ export interface ApiResponses {
     '401': Error;
     '409': Error;
   };
+  /** POST /api/v1/teams/{teamId}/marketplace/installs */
+  preparePrivateMarketplaceInstall: {
+    '200': MarketplaceInstall;
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '409': Error;
+    '503': Error;
+  };
   /** POST /api/v1/instances/{instanceId}/capability */
   publishCapability: {
     '200': CapabilityOffer;
     '400': Error;
     '401': Error;
     '404': Error;
+  };
+  /** POST /api/v1/teams/{teamId}/marketplace/platforms/{platformId}/releases */
+  publishMarketplacePlatformRelease: {
+    '200': MarketplacePlatformRelease;
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '409': Error;
   };
   /** POST /api/v1/teams/{teamId}/marketplace/releases */
   publishMarketplaceRelease: {
@@ -2014,6 +2207,8 @@ export interface Endpoint {
 export const ENDPOINTS = {
   /** POST /api/v1/me/invitations/{invitationId}/accept */
   acceptInvitation: { method: 'post', path: '/api/v1/me/invitations/{invitationId}/accept' },
+  /** POST /api/v1/marketplace/installations/{installationId}/acquisitions */
+  acquireMarketplacePlatformRelease: { method: 'post', path: '/api/v1/marketplace/installations/{installationId}/acquisitions' },
   /** POST /api/v1/instances/{instanceId}/hosting/apply */
   applyInstanceHostingPlan: { method: 'post', path: '/api/v1/instances/{instanceId}/hosting/apply' },
   /** PUT /api/v1/instances/{instanceId}/environments/{environment}/custom-domains/{hostname} */
@@ -2040,6 +2235,8 @@ export const ENDPOINTS = {
   createInstance: { method: 'post', path: '/api/v1/instances' },
   /** POST /api/v1/teams/{teamId}/invitations */
   createInvitation: { method: 'post', path: '/api/v1/teams/{teamId}/invitations' },
+  /** POST /api/v1/teams/{teamId}/marketplace/platforms */
+  createMarketplacePlatform: { method: 'post', path: '/api/v1/teams/{teamId}/marketplace/platforms' },
   /** POST /api/v1/instances/{instanceId}/notification-rules */
   createNotificationRule: { method: 'post', path: '/api/v1/instances/{instanceId}/notification-rules' },
   /** POST /api/v1/teams */
@@ -2122,6 +2319,10 @@ export const ENDPOINTS = {
   listInvitations: { method: 'get', path: '/api/v1/teams/{teamId}/invitations' },
   /** GET /api/v1/teams/{teamId}/marketplace/installations */
   listMarketplaceInstallations: { method: 'get', path: '/api/v1/teams/{teamId}/marketplace/installations' },
+  /** GET /api/v1/marketplace/platforms/{platformId}/releases */
+  listMarketplacePlatformReleases: { method: 'get', path: '/api/v1/marketplace/platforms/{platformId}/releases' },
+  /** GET /api/v1/marketplace/platforms */
+  listMarketplacePlatforms: { method: 'get', path: '/api/v1/marketplace/platforms' },
   /** GET /api/v1/me/invitations */
   listMyInvitations: { method: 'get', path: '/api/v1/me/invitations' },
   /** GET /api/v1/me/notifications */
@@ -2138,8 +2339,12 @@ export const ENDPOINTS = {
   maintainHubInstallation: { method: 'post', path: '/api/v1/teams/{teamId}/marketplace/installation-launches/{launchId}/maintenance' },
   /** POST /api/v1/attestations */
   postAttestation: { method: 'post', path: '/api/v1/attestations' },
+  /** POST /api/v1/teams/{teamId}/marketplace/installs */
+  preparePrivateMarketplaceInstall: { method: 'post', path: '/api/v1/teams/{teamId}/marketplace/installs' },
   /** POST /api/v1/instances/{instanceId}/capability */
   publishCapability: { method: 'post', path: '/api/v1/instances/{instanceId}/capability' },
+  /** POST /api/v1/teams/{teamId}/marketplace/platforms/{platformId}/releases */
+  publishMarketplacePlatformRelease: { method: 'post', path: '/api/v1/teams/{teamId}/marketplace/platforms/{platformId}/releases' },
   /** POST /api/v1/teams/{teamId}/marketplace/releases */
   publishMarketplaceRelease: { method: 'post', path: '/api/v1/teams/{teamId}/marketplace/releases' },
   /** PUT /api/v1/instances/{instanceId}/plan */

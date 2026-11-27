@@ -600,6 +600,53 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
+  /api/v1/marketplace/platforms:
+    get:
+      operationId: listMarketplacePlatforms
+      summary: Browse published platforms and their latest releases
+      description: Public hub catalog. This operation grants no artifact, installation, or provider access.
+      security: []
+      responses:
+        '200':
+          description: Published platforms with their marketplace variant and latest release summary.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/MarketplacePlatform' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503':
+          description: The published catalog is unavailable or its release pins conflict.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/marketplace/platforms/{platformId}/releases:
+    parameters:
+      - name: platformId
+        in: path
+        required: true
+        schema: { type: string, minLength: 1, maxLength: 128 }
+    get:
+      operationId: listMarketplacePlatformReleases
+      summary: List the published releases of a platform
+      description: Releases are ordered newest version first. A newer release does not replace an older pin.
+      security: []
+      responses:
+        '200':
+          description: Published release summaries, including each original source pin and image digest where present.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/MarketplacePlatformRelease' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503':
+          description: The published catalog is unavailable or its release pins conflict.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
   /api/v1/teams/{teamId}/members:
     parameters:
       - { name: teamId, in: path, required: true, schema: { type: string } }
@@ -2569,6 +2616,57 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+  /api/v1/teams/{teamId}/marketplace/platforms:
+    parameters:
+      - { name: teamId, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: createMarketplacePlatform
+      summary: Create a marketplace platform owned by the publishing team
+      description: The listing becomes public on its first release. Only a team owner can create it.
+      security: [{ bearerJwt: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MarketplacePlatformCreation' }
+      responses:
+        '201':
+          description: The newly created listing.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MarketplacePublisherPlatform' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/v1/teams/{teamId}/marketplace/platforms/{platformId}/releases:
+    parameters:
+      - { name: teamId, in: path, required: true, schema: { type: string } }
+      - { name: platformId, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+    post:
+      operationId: publishMarketplacePlatformRelease
+      summary: Publish an immutable release of a team-owned platform
+      description: A retry of the same version and coordinates returns the same release summary. A version cannot be repinned.
+      security: [{ bearerJwt: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MarketplacePlatformPublication' }
+      responses:
+        '200':
+          description: The release summary and the digest required for an exact acquisition.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MarketplacePlatformRelease' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
   /api/v1/teams/{teamId}/marketplace/installations:
     parameters:
       - { name: teamId, in: path, required: true, schema: { type: string } }
@@ -2720,6 +2818,64 @@ paths:
               schema: *marketplace-catalog
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/marketplace/installations/{installationId}/acquisitions:
+    parameters:
+      - { name: installationId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: acquireMarketplacePlatformRelease
+      summary: Acquire an exact free release for an enrolled installation's team
+      description: The hub resolves the team from the enrollment. A receipt includes the pinned artifact coordinates and grants no provider authority.
+      security: [{ marketplaceCredential: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MarketplacePlatformAcquisitionInput' }
+      responses:
+        '200':
+          description: The team's durable receipt and exact release descriptor. A retry returns the same receipt.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MarketplacePlatformAcquisition' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '503':
+          description: The hub could not read the selected release or record the acquisition.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/teams/{teamId}/marketplace/installs:
+    parameters:
+      - { name: teamId, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: preparePrivateMarketplaceInstall
+      summary: Verify and retain an acquired release on a private installation
+      description: An image install can be provisioned by applying its retained hosting plan. A starter install returns the customer repository pin for the source workflow. Retrying an exact selection under the same name returns the retained installation.
+      security: [{ bearerJwt: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MarketplaceInstallInput' }
+      responses:
+        '200':
+          description: The local instance and associated acquisition receipt ID.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MarketplaceInstall' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '503':
+          description: The private worker, artifact source or storage is unavailable.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /api/v1/teams/{teamId}/marketplace/connection:
     parameters:
@@ -3081,6 +3237,192 @@ components:
           example: 'Bearer realm="platfolio", error="invalid_token"'
 
   schemas:
+    MarketplacePlatformCreation:
+      # GENERATED by scripts/gen-api-spec.ts from MarketplacePlatformCreationSchema (packages/contracts). Do not hand-edit: pnpm run spec:check fails on a difference, and the prose lives in packages/api-contract/src/spec-annotations.ts.
+      type: object
+      required: [slug, title, variant]
+      properties:
+        slug: { type: string, pattern: '^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$', maxLength: 80 }
+        title: { type: string, minLength: 1, maxLength: 120 }
+        variant: { type: string, enum: [starter-template, shared-service, hosted-application] }
+      additionalProperties: false
+    MarketplacePublisherPlatform:
+      # GENERATED by scripts/gen-api-spec.ts from MarketplacePublisherPlatformSchema (packages/contracts). Do not hand-edit: pnpm run spec:check fails on a difference, and the prose lives in packages/api-contract/src/spec-annotations.ts.
+      type: object
+      required: [slug, title, variant, id, publisherTeamId]
+      properties:
+        slug: { type: string, pattern: '^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$', maxLength: 80 }
+        title: { type: string, minLength: 1, maxLength: 120 }
+        variant: { type: string, enum: [starter-template, shared-service, hosted-application] }
+        id: { type: string, minLength: 1, maxLength: 128 }
+        publisherTeamId: { type: string, minLength: 1 }
+      additionalProperties: false
+    MarketplacePlatformPublication:
+      # GENERATED by scripts/gen-api-spec.ts from MarketplacePlatformPublicationSchema (packages/contracts). Do not hand-edit: pnpm run spec:check fails on a difference, and the prose lives in packages/api-contract/src/spec-annotations.ts.
+      type: object
+      required: [version, source, images]
+      properties:
+        version: { type: string, pattern: '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$', maxLength: 64 }
+        source:
+          type: object
+          required: [repo, revision]
+          properties:
+            repo: { type: string, pattern: '^[A-Za-z0-9_-][A-Za-z0-9_.-]*\/[A-Za-z0-9_-][A-Za-z0-9_.-]*$', maxLength: 200 }
+            revision: { type: string, pattern: '^[a-f0-9]{40}$' }
+          additionalProperties: false
+        images:
+          type: array
+          maxItems: 64
+          items: { type: string, pattern: '^[A-Za-z0-9](?![^@]*\/\/)[A-Za-z0-9._:/-]*@sha256:[a-f0-9]{64}$', maxLength: 512 }
+      additionalProperties: false
+    MarketplaceInstallInput:
+      # GENERATED by scripts/gen-api-spec.ts from MarketplaceInstallInputSchema (packages/contracts). Do not hand-edit: pnpm run spec:check fails on a difference, and the prose lives in packages/api-contract/src/spec-annotations.ts.
+      type: object
+      required: [name, release]
+      properties:
+        name: { type: string, pattern: '^[a-z0-9]([a-z0-9-]{0,39}[a-z0-9])?$', minLength: 1, maxLength: 40 }
+        release:
+          type: object
+          required: [platformId, version, descriptorDigest]
+          properties:
+            platformId: { type: string, minLength: 1, maxLength: 128 }
+            version: { type: string, pattern: '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$', maxLength: 64 }
+            descriptorDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+          additionalProperties: false
+        sourceRepository: { type: string, pattern: '^[A-Za-z0-9_-][A-Za-z0-9_.-]*\/[A-Za-z0-9_-][A-Za-z0-9_.-]*$', maxLength: 200 }
+      additionalProperties: false
+    MarketplaceInstall:
+      # GENERATED by scripts/gen-api-spec.ts from MarketplaceInstallSchema (packages/contracts). Do not hand-edit: pnpm run spec:check fails on a difference, and the prose lives in packages/api-contract/src/spec-annotations.ts.
+      type: object
+      required: [instance, receiptId, release, variant]
+      properties:
+        instance:
+          type: object
+          required: [id, teamId, name, template, state, provider, createdAt, updatedAt]
+          properties:
+            id: { type: string, minLength: 1 }
+            teamId: { type: string, minLength: 1 }
+            name: { type: string, pattern: '^[a-z0-9]([a-z0-9-]{0,39}[a-z0-9])?$', minLength: 1, maxLength: 40 }
+            template: { type: string, minLength: 1 }
+            templateRef:
+              type: object
+              required: [repo, commitSha]
+              properties:
+                repo: { type: string, minLength: 3, maxLength: 200 }
+                commitSha: { type: string, pattern: '^[0-9a-f]{40}$' }
+              additionalProperties: false
+            state: { type: string, enum: [pending, provisioning, live, degraded, paused, failed, deprovisioning, removed] }
+            provider: { type: string, pattern: '^[a-z0-9]+(-[a-z0-9]+)*$', default: railway, maxLength: 64 }
+            desiredPlanHash: { type: string }
+            lastAppliedPlanHash: { type: string }
+            createdAt: { type: string, minLength: 1 }
+            updatedAt: { type: string, minLength: 1 }
+          additionalProperties: false
+        receiptId: { type: string, minLength: 1 }
+        release:
+          type: object
+          required: [platformId, version, descriptorDigest]
+          properties:
+            platformId: { type: string, minLength: 1, maxLength: 128 }
+            version: { type: string, pattern: '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$', maxLength: 64 }
+            descriptorDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+          additionalProperties: false
+        variant: { type: string, enum: [starter-template, shared-service, hosted-application] }
+      additionalProperties: false
+    MarketplacePlatformAcquisitionInput:
+      # GENERATED by scripts/gen-api-spec.ts from MarketplacePlatformAcquisitionInputSchema (packages/contracts). Do not hand-edit: pnpm run spec:check fails on a difference, and the prose lives in packages/api-contract/src/spec-annotations.ts.
+      type: object
+      required: [platformId, version, descriptorDigest]
+      properties:
+        platformId: { type: string, minLength: 1, maxLength: 128 }
+        version: { type: string, pattern: '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$', maxLength: 64 }
+        descriptorDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+      additionalProperties: false
+    MarketplacePlatformAcquisition:
+      # GENERATED by scripts/gen-api-spec.ts from MarketplacePlatformAcquisitionSchema (packages/contracts). Do not hand-edit: pnpm run spec:check fails on a difference, and the prose lives in packages/api-contract/src/spec-annotations.ts.
+      type: object
+      required: [id, teamId, acquiredAt, variant, release]
+      properties:
+        id: { type: string, minLength: 1 }
+        teamId: { type: string, minLength: 1 }
+        acquiredAt:
+          type: string
+          format: date-time
+          pattern: '^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z))$'
+        variant: { type: string, enum: [starter-template, shared-service, hosted-application] }
+        release:
+          type: object
+          required: [platformId, version, source, images, installer, descriptorDigest]
+          properties:
+            platformId: { type: string, minLength: 1, maxLength: 128 }
+            version: { type: string, pattern: '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$', maxLength: 64 }
+            source:
+              type: object
+              required: [repo, revision]
+              properties:
+                repo: { type: string, pattern: '^[A-Za-z0-9_-][A-Za-z0-9_.-]*\/[A-Za-z0-9_-][A-Za-z0-9_.-]*$', maxLength: 200 }
+                revision: { type: string, pattern: '^[a-f0-9]{40}$' }
+              additionalProperties: false
+            images:
+              type: array
+              maxItems: 64
+              items: { type: string, pattern: '^[A-Za-z0-9](?![^@]*\/\/)[A-Za-z0-9._:/-]*@sha256:[a-f0-9]{64}$', maxLength: 512 }
+            installer: { type: string, pattern: '^[a-z0-9-]+@[0-9]+$', maxLength: 64 }
+            descriptorDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+          additionalProperties: false
+      additionalProperties: false
+    MarketplacePlatform:
+      # GENERATED by scripts/gen-api-spec.ts from MarketplacePlatformSchema (packages/contracts). Do not hand-edit: pnpm run spec:check fails on a difference, and the prose lives in packages/api-contract/src/spec-annotations.ts.
+      type: object
+      required: [id, title, variant, latestRelease]
+      properties:
+        id: { type: string, minLength: 1, maxLength: 128 }
+        title: { type: string, minLength: 1 }
+        variant: { type: string, enum: [starter-template, shared-service, hosted-application] }
+        publisherTeamId: { type: string, minLength: 1 }
+        slug: { type: string, pattern: '^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$', maxLength: 80 }
+        latestRelease:
+          type: object
+          required: [platformId, version, images, installer, descriptorDigest]
+          properties:
+            platformId: { type: string, minLength: 1, maxLength: 128 }
+            version: { type: string, pattern: '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$', maxLength: 64 }
+            source:
+              type: object
+              required: [repo, revision]
+              properties:
+                repo: { type: string, pattern: '^[A-Za-z0-9_-][A-Za-z0-9_.-]*\/[A-Za-z0-9_-][A-Za-z0-9_.-]*$', maxLength: 200 }
+                revision: { type: string, pattern: '^[a-f0-9]{40}$' }
+              additionalProperties: false
+            images:
+              type: array
+              maxItems: 64
+              items: { type: string, pattern: '^[A-Za-z0-9](?![^@]*\/\/)[A-Za-z0-9._:/-]*@sha256:[a-f0-9]{64}$', maxLength: 512 }
+            installer: { type: string, pattern: '^[a-z0-9-]+@[0-9]+$', maxLength: 64 }
+            descriptorDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+          additionalProperties: false
+      additionalProperties: false
+    MarketplacePlatformRelease:
+      # GENERATED by scripts/gen-api-spec.ts from MarketplacePlatformReleaseSchema (packages/contracts). Do not hand-edit: pnpm run spec:check fails on a difference, and the prose lives in packages/api-contract/src/spec-annotations.ts.
+      type: object
+      required: [platformId, version, images, installer, descriptorDigest]
+      properties:
+        platformId: { type: string, minLength: 1, maxLength: 128 }
+        version: { type: string, pattern: '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$', maxLength: 64 }
+        source:
+          type: object
+          required: [repo, revision]
+          properties:
+            repo: { type: string, pattern: '^[A-Za-z0-9_-][A-Za-z0-9_.-]*\/[A-Za-z0-9_-][A-Za-z0-9_.-]*$', maxLength: 200 }
+            revision: { type: string, pattern: '^[a-f0-9]{40}$' }
+          additionalProperties: false
+        images:
+          type: array
+          maxItems: 64
+          items: { type: string, pattern: '^[A-Za-z0-9](?![^@]*\/\/)[A-Za-z0-9._:/-]*@sha256:[a-f0-9]{64}$', maxLength: 512 }
+        installer: { type: string, pattern: '^[a-z0-9-]+@[0-9]+$', maxLength: 64 }
+        descriptorDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+      additionalProperties: false
     MarketplaceReleaseSelection:
       # GENERATED by scripts/gen-api-spec.ts from MarketplaceReleaseSelectionSchema (packages/contracts). Do not hand-edit: pnpm run spec:check fails on a difference, and the prose lives in packages/api-contract/src/spec-annotations.ts.
       type: object

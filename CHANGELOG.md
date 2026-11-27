@@ -5,6 +5,28 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+### Added — receipt-backed private marketplace installs (#288)
+
+Private installation owners can prepare a named instance from an exact marketplace acquisition.
+The private installer verifies the Git commit and the registry manifest digests before image
+provisioning. Shared services and hosted applications retain the verified image plan for retries.
+Starter templates retain the acquired commit in the customer's repository for the source workflow.
+
+### Added — team-owned platform publications and exact free acquisitions (#288)
+
+Marketplace team owners can publish immutable versions for all three platform variants. Published
+versions appear in the classified catalog and an enrolled installation can acquire a version by its
+descriptor digest. The buyer's team receives one durable receipt for that release. New listings keep
+artifact coordinates behind acquisition. Existing marketplace endpoints and pins remain compatible.
+
+### Added — classified marketplace platform catalog (#288)
+
+The hub exposes a platform listing and release history alongside the existing template endpoints.
+Starter Web and Starter Worker are starter templates. Shared Identity is a shared service. A forward
+migration assigns stable platform IDs while keeping the original release rows and pins. Legacy catalog
+and claim responses keep their existing shape. The hosted-application variant is reserved for the
+first publisher-built application release.
+
 - Show the four-color Platfolio logo in the site and workspace headers, and use it as the browser tab icon (#332).
 
 - Save the private owner’s temporary password before launch and show it when the installation is ready, so an expired first sign-in can be restarted without redeploying (#288).

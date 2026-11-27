@@ -3,6 +3,8 @@ import { randomUUID } from 'node:crypto';
 import { AttestationSchema, type Attestation } from './attestation.ts';
 import { RepoConnectionSchema, reasonOf, type DispatchRecord, type Store, type StoreError, type StoreResult } from './persistence.ts';
 import { checkBindingPolicy } from './binding-policy.ts';
+import { samplePlan } from './conformance.ts';
+import { marketplacePlatformDescriptorDigest, type MarketplacePlatformAcquisition } from './marketplace-release.ts';
 
 /**
  * The Store conformance suite -- the same cases for the memory double and Postgres (docs/design/10 OD8).
@@ -124,6 +126,50 @@ const expectErr = (result: { ok: boolean; value?: unknown } & Partial<StoreError
     const accepted = created && removed && reused && history.length === 2 && history.some(({ removedAt }) => removedAt !== undefined);
     return accepted ? { status: 'pass', detail: 'one active reservation with removal history' }
       : { status: 'fail', detail: 'installation name reservation did not follow removal' };
+  });
+
+  await add('marketplace installs retain the receipt and immutable image plan atomically', async () => {
+    const store = await fresh();
+    const owner = mustOk(await store.createTeam({ name: tName('marketplace-install') }), 'team');
+    const id = 'inst-' + randomUUID();
+    const plan = samplePlan({ instanceId: id, teamId: owner.id, provider: 'railway', planHash });
+    const descriptor = {
+      platformId: 'example.portal', version: '1.4.0', installer: 'compose-image@1',
+      source: { repo: 'platfolio-fixtures/portal', revision: 'a'.repeat(40) },
+      images: [`ghcr.io/acme/api:1.4.0@sha256:${'a'.repeat(64)}`],
+    };
+    const now = new Date().toISOString();
+    const receipt: MarketplacePlatformAcquisition = {
+      id: 'acquisition-' + randomUUID(), teamId: 'hub-team', acquiredAt: now, variant: 'hosted-application',
+      release: { ...descriptor, descriptorDigest: marketplacePlatformDescriptorDigest(descriptor) },
+    };
+    const instance = {
+      id, teamId: owner.id, provider: plan.provider, name: 'marketplace-portal', template: descriptor.platformId,
+      templateRef: { repo: descriptor.source.repo, commitSha: descriptor.source.revision },
+      state: 'pending' as const, createdAt: now, updatedAt: now, desiredPlanHash: planHash,
+    };
+    const contender = { ...instance, id: 'inst-' + randomUUID() };
+    const invalid = await store.recordMarketplaceInstall(instance, { receipt, plan: { ...plan, teamId: 'different-team' } });
+    if (invalid.ok || await store.getMarketplaceInstall(owner.id, instance.name)) {
+      return { status: 'fail', detail: 'a plan scoped to another team reserved the instance' };
+    }
+    const writes = await Promise.all([
+      store.recordMarketplaceInstall(instance, { receipt, plan }),
+      store.recordMarketplaceInstall(contender, { receipt, plan: { ...plan, instanceId: contender.id } }),
+    ]);
+    const winner = await store.getMarketplaceInstall(owner.id, instance.name);
+    if (!winner || winner.receipt.id !== receipt.id || writes.filter(({ ok }) => ok).length !== 1) {
+      return { status: 'fail', detail: 'one instance and its receipt must win' };
+    }
+    const winnerId = winner.instance.id;
+    const stored = await store.getPlan(winnerId);
+    const loserPlan = await store.getPlan(winnerId === id ? contender.id : id);
+    const overwritten = await store.putPlan(winnerId, plan, 'c'.repeat(64));
+    const outside = await store.getMarketplaceInstall('another-team', instance.name);
+    const intact = !outside && stored.ok && stored.value.planHash === planHash &&
+      (stored.value.plan as { instanceId: string }).instanceId === winnerId && !loserPlan.ok && !overwritten.ok;
+    return intact ? { status: 'pass', detail: 'receipt and immutable plan share the same scoped instance' }
+      : { status: 'fail', detail: 'the receipt or plan leaked, was overwritten, or was committed only in part' };
   });
 
   await add('marketplace links preserve team scope and remain revoked on connect replay', async () => {

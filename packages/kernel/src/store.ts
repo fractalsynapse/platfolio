@@ -68,6 +68,12 @@ export class StoreService extends Service<z.infer<typeof StoreConfigSchema>> {
   disconnectMarketplaceInstallation(...args: Parameters<Store['disconnectMarketplaceInstallation']>) { return this.inner.disconnectMarketplaceInstallation(...args); }
   issueMarketplaceEnrollment(...args: Parameters<Store['issueMarketplaceEnrollment']>) { return this.inner.issueMarketplaceEnrollment(...args); }
   redeemMarketplaceEnrollment(...args: Parameters<Store['redeemMarketplaceEnrollment']>) { return this.inner.redeemMarketplaceEnrollment(...args); }
+  listMarketplacePlatformAliases() { return this.inner.listMarketplacePlatformAliases(); }
+  createMarketplacePlatform(...args: Parameters<Store['createMarketplacePlatform']>) { return this.inner.createMarketplacePlatform(...args); }
+  getMarketplacePublisherPlatform(...args: Parameters<Store['getMarketplacePublisherPlatform']>) { return this.inner.getMarketplacePublisherPlatform(...args); }
+  publishMarketplacePlatformRelease(...args: Parameters<Store['publishMarketplacePlatformRelease']>) { return this.inner.publishMarketplacePlatformRelease(...args); }
+  listMarketplacePublishedPlatformReleases() { return this.inner.listMarketplacePublishedPlatformReleases(); }
+  acquireMarketplacePlatformRelease(...args: Parameters<Store['acquireMarketplacePlatformRelease']>) { return this.inner.acquireMarketplacePlatformRelease(...args); }
   listMarketplaceReleases() { return this.inner.listMarketplaceReleases(); }
   publishMarketplaceRelease(...args: Parameters<Store['publishMarketplaceRelease']>) { return this.inner.publishMarketplaceRelease(...args); }
   verifyMarketplaceCredential(...args: Parameters<Store['verifyMarketplaceCredential']>) { return this.inner.verifyMarketplaceCredential(...args); }
@@ -78,6 +84,8 @@ export class StoreService extends Service<z.infer<typeof StoreConfigSchema>> {
   // Parameters and returns come from the interface itself. Hand-copying a union here is how a new state
   // ('degraded', added to the schema the same day) silently fails to reach the facade.
   createInstance(input: Parameters<Store['createInstance']>[0]) { return this.inner.createInstance(input); }
+  recordMarketplaceInstall(...args: Parameters<Store['recordMarketplaceInstall']>) { return this.inner.recordMarketplaceInstall(...args); }
+  getMarketplaceInstall(...args: Parameters<Store['getMarketplaceInstall']>) { return this.inner.getMarketplaceInstall(...args); }
   getInstance(id: string) { return this.inner.getInstance(id); }
   listInstances(teamId?: string) { return this.inner.listInstances(teamId); }
   updateInstanceState(...args: Parameters<Store['updateInstanceState']>) { return this.inner.updateInstanceState(...args); }

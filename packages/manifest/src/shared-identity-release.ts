@@ -22,5 +22,5 @@ export function validateIdentitySource(source: RepositorySource, version: string
       !service.secrets.some(({ name }) => name === identityBootstrapSetting)) {
     throw new Error('Unexpected identity release topology');
   }
-  return { database, service };
+  return { database, service, manifest };
 }

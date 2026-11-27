@@ -25068,7 +25068,7 @@ function date4(params) {
 }
 
 // packages/contracts/src/generated/contract-version.ts
-var CONTRACT_VERSION = "7.3.0";
+var CONTRACT_VERSION = "7.4.0";
 
 // packages/contracts/src/infra.ts
 var CONTRACT_NAME = "infra.provider";
@@ -27748,6 +27748,101 @@ var InvitationSchema = external_exports.object({
   emailError: external_exports.string().max(300).optional()
 }).strict();
 
+// packages/contracts/src/marketplace-release.ts
+var MarketplaceReleaseSelectionSchema = external_exports.object({
+  version: external_exports.string().max(64).regex(/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/),
+  revision: external_exports.string().regex(/^[a-f0-9]{40}$/)
+}).strict();
+var MarketplaceReleasePublicationSchema = MarketplaceReleaseSelectionSchema.extend({
+  template: external_exports.enum(["starter-web", "starter-worker", "shared-identity"]),
+  installer: external_exports.string().max(64).regex(/^[a-z0-9-]+@[0-9]+$/),
+  image: external_exports.string().max(192).regex(/^keycloak\/keycloak:[a-zA-Z0-9._-]+@sha256:[a-f0-9]{64}$/).optional()
+});
+var MarketplaceReleaseSchema = MarketplaceReleasePublicationSchema.extend({
+  repo: external_exports.string(),
+  priceMinor: external_exports.literal(0),
+  installable: external_exports.boolean()
+});
+var MarketplacePlatformVariantSchema = external_exports.enum(["starter-template", "shared-service", "hosted-application"]);
+var MarketplacePlatformIdSchema = external_exports.string().min(1).max(128);
+var MarketplaceDescriptorDigestSchema = external_exports.string().regex(/^[a-f0-9]{64}$/);
+var MarketplacePlatformSourceSchema = external_exports.object({
+  repo: external_exports.string().max(200).regex(/^[A-Za-z0-9_-][A-Za-z0-9_.-]*\/[A-Za-z0-9_-][A-Za-z0-9_.-]*$/),
+  revision: MarketplaceReleaseSelectionSchema.shape.revision
+}).strict();
+var MarketplaceImagesSchema = external_exports.array(external_exports.string().max(512).regex(/^[A-Za-z0-9](?![^@]*\/\/)[A-Za-z0-9._:/-]*@sha256:[a-f0-9]{64}$/)).max(64);
+var MarketplacePlatformCreationSchema = external_exports.object({
+  slug: external_exports.string().max(80).regex(/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/),
+  title: external_exports.string().trim().min(1).max(120),
+  variant: MarketplacePlatformVariantSchema
+}).strict();
+var MarketplacePublisherPlatformSchema = MarketplacePlatformCreationSchema.extend({
+  id: MarketplacePlatformIdSchema,
+  publisherTeamId: external_exports.string().min(1)
+});
+var MarketplacePlatformPublicationSchema = external_exports.object({
+  version: MarketplaceReleaseSelectionSchema.shape.version,
+  source: MarketplacePlatformSourceSchema,
+  images: MarketplaceImagesSchema
+}).strict();
+var MarketplacePlatformReleaseSchema = external_exports.object({
+  platformId: MarketplacePlatformIdSchema,
+  version: MarketplaceReleaseSelectionSchema.shape.version,
+  source: MarketplacePlatformSourceSchema.optional(),
+  images: MarketplaceImagesSchema,
+  installer: MarketplaceReleasePublicationSchema.shape.installer,
+  descriptorDigest: MarketplaceDescriptorDigestSchema
+}).strict();
+var MarketplacePlatformDescriptorSchema = MarketplacePlatformReleaseSchema.omit({ descriptorDigest: true }).required({ source: true });
+var MarketplacePlatformSchema = external_exports.object({
+  id: MarketplacePlatformIdSchema,
+  title: external_exports.string().min(1),
+  variant: MarketplacePlatformVariantSchema,
+  publisherTeamId: external_exports.string().min(1).optional(),
+  slug: MarketplacePlatformCreationSchema.shape.slug.optional(),
+  latestRelease: MarketplacePlatformReleaseSchema
+}).strict();
+var MarketplacePlatformAliasSchema = MarketplacePlatformSchema.pick({ id: true, variant: true }).extend({
+  legacyTemplate: MarketplaceReleasePublicationSchema.shape.template
+});
+var MarketplacePlatformAcquisitionInputSchema = MarketplacePlatformReleaseSchema.pick({
+  platformId: true,
+  version: true,
+  descriptorDigest: true
+});
+var MarketplacePlatformAcquisitionSchema = external_exports.object({
+  id: external_exports.string().min(1),
+  teamId: external_exports.string().min(1),
+  acquiredAt: external_exports.iso.datetime(),
+  variant: MarketplacePlatformVariantSchema,
+  release: MarketplacePlatformReleaseSchema.required({ source: true })
+}).strict();
+
+// packages/contracts/src/marketplace-install.ts
+var MarketplaceInstallInputSchema = external_exports.object({
+  name: InstanceSchema.shape.name,
+  release: MarketplacePlatformAcquisitionInputSchema,
+  sourceRepository: MarketplacePlatformPublicationSchema.shape.source.shape.repo.optional()
+}).strict();
+var MarketplaceInstallSchema = external_exports.object({
+  instance: InstanceSchema,
+  receiptId: MarketplacePlatformAcquisitionSchema.shape.id,
+  release: MarketplacePlatformAcquisitionInputSchema,
+  variant: MarketplacePlatformVariantSchema
+}).strict();
+var VerifiedMarketplaceInstallSchema = external_exports.object({
+  receipt: MarketplacePlatformAcquisitionSchema,
+  plan: InfraPlanSchema.optional()
+}).strict();
+var MarketplaceInstallRecordSchema = external_exports.object({
+  instance: InstanceSchema,
+  verified: VerifiedMarketplaceInstallSchema
+}).strict().refine(({ instance, verified: { receipt, plan } }) => {
+  if (instance.state !== "pending" || instance.template !== receipt.release.platformId || instance.templateRef?.commitSha !== receipt.release.source.revision) return false;
+  if (receipt.variant === "starter-template") return !plan && instance.desiredPlanHash === void 0;
+  return plan !== void 0 && instance.templateRef.repo === receipt.release.source.repo && plan.instanceId === instance.id && plan.teamId === instance.teamId && plan.provider === instance.provider && instance.desiredPlanHash === plan.planHash;
+}, { message: "The verified release and plan must belong to the new instance" });
+
 // packages/contracts/src/installation-provider.ts
 var installationEnvironment = external_exports.enum(["staging", "production"]);
 var InstallationLaunchInputSchema = external_exports.object({
@@ -27790,22 +27885,6 @@ var InstallationJournalSchema = external_exports.object({
   version: external_exports.number().int().min(0),
   leaseUntil: external_exports.iso.datetime()
 }).strict();
-
-// packages/contracts/src/marketplace-release.ts
-var MarketplaceReleaseSelectionSchema = external_exports.object({
-  version: external_exports.string().max(64).regex(/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/),
-  revision: external_exports.string().regex(/^[a-f0-9]{40}$/)
-}).strict();
-var MarketplaceReleasePublicationSchema = MarketplaceReleaseSelectionSchema.extend({
-  template: external_exports.enum(["starter-web", "starter-worker", "shared-identity"]),
-  installer: external_exports.string().max(64).regex(/^[a-z0-9-]+@[0-9]+$/),
-  image: external_exports.string().max(192).regex(/^keycloak\/keycloak:[a-zA-Z0-9._-]+@sha256:[a-f0-9]{64}$/).optional()
-});
-var MarketplaceReleaseSchema = MarketplaceReleasePublicationSchema.extend({
-  repo: external_exports.string(),
-  priceMinor: external_exports.literal(0),
-  installable: external_exports.boolean()
-});
 
 // node_modules/.pnpm/pg@8.23.1/node_modules/pg/esm/index.mjs
 var import_lib = __toESM(require_lib2(), 1);
@@ -27961,6 +28040,7 @@ var CustomerHostingCommandSchema = external_exports.discriminatedUnion("action",
   command("marketplace-status", empty),
   command("marketplace-catalog", empty),
   command("marketplace-public-catalog", empty),
+  command("marketplace-verify-install", external_exports.object({ target: HostingTargetSchema, release: MarketplacePlatformAcquisitionInputSchema }).strict()),
   command("marketplace-enroll", external_exports.object({ handoff: external_exports.string().regex(/^[0-9a-f-]{36}:[A-Za-z0-9_-]{43}$/) }).strict()),
   command("domains-list", target),
   command("domain-attach", domain2),

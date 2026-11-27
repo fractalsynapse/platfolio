@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { test } from 'node:test';
-import { createIdentityFixture, defaultIdentityConfig, signToken } from '@platfolio/contracts';
+import { createIdentityFixture, defaultIdentityConfig, marketplacePlatformDescriptorDigest, signToken } from '@platfolio/contracts';
 import { createKernel, disposeKernel, type KernelContext } from '@platfolio/kernel';
 import { MARKETPLACE_RELEASES, marketplaceCatalog } from '@platfolio/manifest';
 import { buildCapabilities } from '../src/capabilities.ts';
@@ -73,8 +73,10 @@ test('a private installation can exchange an owner’s code for registry access 
     assert.equal((await call('/api/v1/teams', registry, 'GET')).status, 401);
     const claim = await call(`${registryPath}/claim`, registry);
     assert.equal(claim.status, 200);
-    const receipt = await claim.json() as { installationId: string; template: string; priceMinor: number };
-    assert.deepEqual([receipt.installationId, receipt.template, receipt.priceMinor], [installationId, 'starter-web', 0]);
+    const receipt = await claim.json() as { installationId: string; template: string; priceMinor: number; revision: string };
+    const starter = MARKETPLACE_RELEASES.find(({ template }) => template === 'starter-web')!;
+    assert.deepEqual([receipt.installationId, receipt.template, receipt.priceMinor, receipt.revision],
+      [installationId, starter.template, 0, starter.revision]);
     assert.equal((await call('/api/v1/templates', registry, 'GET')).status, 401);
     const catalog = await call('/api/v1/templates', owner, 'GET');
     assert.equal(catalog.status, 200, await catalog.clone().text());
@@ -104,6 +106,35 @@ test('a private installation can exchange an owner’s code for registry access 
     assert.equal(updated.status, 200);
     assert.deepEqual(await updated.json(), marketplaceCatalog([published]));
     assert.deepEqual(await (await call(`${registryPath}/catalog`, registry)).json(), MARKETPLACE_RELEASES);
+
+    const platforms = await call('/api/v1/marketplace/platforms', undefined, 'GET');
+    assert.equal(platforms.status, 200, await platforms.clone().text());
+    const listings = await platforms.json() as Array<{ id: string; variant: string; latestRelease: { version: string } }>;
+    assert.deepEqual(listings.map(({ id, variant }) => [id, variant]), [
+      ['platfolio.shared-identity', 'shared-service'],
+      ['platfolio.starter-web', 'starter-template'],
+      ['platfolio.starter-worker', 'starter-template'],
+    ]);
+    assert.equal(listings.find(({ id }) => id === 'platfolio.starter-worker')?.latestRelease.version, published.version);
+    const releases = await call('/api/v1/marketplace/platforms/platfolio.starter-worker/releases', undefined, 'GET');
+    assert.equal(releases.status, 200, await releases.clone().text());
+    const pinned = ({ repo, revision, version, installer, image, template }: typeof baseline) => {
+      const descriptor = { platformId: `platfolio.${template}`, version, installer, source: { repo, revision }, images: image ? [image] : [] };
+      return { ...descriptor, descriptorDigest: marketplacePlatformDescriptorDigest(descriptor) };
+    };
+    assert.deepEqual(await releases.json(), [pinned({ ...baseline, ...published }), pinned(baseline)]);
+    const identity = MARKETPLACE_RELEASES.find(({ template }) => template === 'shared-identity')!;
+    const identityReleases = await call('/api/v1/marketplace/platforms/platfolio.shared-identity/releases', undefined, 'GET');
+    const pinnedIdentity = pinned(identity);
+    assert.deepEqual(await identityReleases.json(), [pinnedIdentity]);
+    const acquisition = await call(`${registryPath}/acquisitions`, registry, 'POST', {
+      platformId: pinnedIdentity.platformId, version: pinnedIdentity.version, descriptorDigest: pinnedIdentity.descriptorDigest,
+    });
+    assert.equal(acquisition.status, 200, await acquisition.clone().text());
+    assert.deepEqual((await acquisition.json() as { release: unknown }).release, pinnedIdentity);
+    assert.equal((await call('/api/v1/marketplace/platforms/unknown/releases', undefined, 'GET')).status, 404);
+    assert.deepEqual(await (await call(`${registryPath}/claim`, registry)).json(), receipt);
+
     assert.equal((await call(teamPath, owner, 'DELETE')).status, 204);
     assert.equal((await call(`${registryPath}/claim`, registry)).status, 404);
     assert.equal((await call(`${registryPath}/catalog`, registry)).status, 404);

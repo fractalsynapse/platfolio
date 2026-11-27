@@ -28,8 +28,9 @@ test('the shipped spec is internally true', () => {
   assert.deepEqual(publicOps, [
     'completeHubInstallationAuthorization', 'completeStarterRailwayAuthorization', 'getHealth',
     'getPublicMarketplaceCatalog', 'getReady', 'getStatus', 'getVersion',
+    'listMarketplacePlatformReleases', 'listMarketplacePlatforms',
   ], 'only the public catalog, operational probes, build identity and state-bound OAuth callbacks are unauthenticated');
-  const installationOperations = new Set(['redeemMarketplaceEnrollment', 'claimEnrolledMarketplaceRelease', 'getEnrolledMarketplaceCatalog']);
+  const installationOperations = new Set(['redeemMarketplaceEnrollment', 'claimEnrolledMarketplaceRelease', 'getEnrolledMarketplaceCatalog', 'acquireMarketplacePlatformRelease']);
   for (const guarded of ops.filter((o) => !publicOps.includes(o.operationId))) {
     const scheme = installationOperations.has(guarded.operationId) ? 'marketplaceCredential' : 'bearerJwt';
     assert.deepEqual(guarded.security, [scheme], `${guarded.operationId} must declare exactly ${scheme}`);

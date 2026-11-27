@@ -1,4 +1,9 @@
-import type { MarketplaceReleasePublication } from './marketplace-release.ts';
+import {
+  marketplacePlatformDescriptorDigest, MarketplacePlatformDescriptorSchema, MarketplacePublisherPlatformSchema,
+  type MarketplacePlatformAcquisition, type MarketplacePlatformAcquisitionInput, type MarketplacePlatformAcquisitionRecord, type MarketplacePlatformAlias,
+  type MarketplacePlatformCreation, type MarketplacePlatformDescriptor, type MarketplacePublisherPlatform, type MarketplaceReleasePublication,
+} from './marketplace-release.ts';
+import { MarketplaceInstallRecordSchema, type VerifiedMarketplaceInstall } from './marketplace-install.ts';
 import { InstallationJournalSchema, type InstallationJournal } from './installation-journal.ts';
 import { z } from 'zod';
 import type { Attestation } from './attestation.ts';
@@ -54,6 +59,7 @@ export class MemoryStore implements Store {
   private readonly hostedChecks = new Map<string, HostedAppCheck>();
   private readonly hostedStarters = new Map<string, HostedStarter>();
   private readonly instances = new Map<string, Instance>();
+  private readonly marketplaceReceipts = new Map<string, MarketplacePlatformAcquisition>();
   private readonly repos = new Map<string, RepoConnection>();
   private readonly providers = new Map<string, ProviderConnection>();
   private readonly dispatches = new Map<string, DispatchRecord>();
@@ -167,6 +173,62 @@ export class MemoryStore implements Store {
   }
 
   private readonly marketplaceReleases = new Map<string, MarketplaceReleasePublication>();
+  private readonly marketplacePlatforms = new Map<string, MarketplacePublisherPlatform>();
+  private readonly platformReleases = new Map<string, Map<string, MarketplacePlatformDescriptor>>();
+  private readonly marketplaceAcquisitions = new Map<string, MarketplacePlatformAcquisitionRecord & { descriptorDigest: string }>();
+
+  async listMarketplacePlatformAliases(): Promise<MarketplacePlatformAlias[]> {
+    if (this.closed) return [];
+    return [
+      { id: 'platfolio.shared-identity', variant: 'shared-service', legacyTemplate: 'shared-identity' },
+      { id: 'platfolio.starter-web', variant: 'starter-template', legacyTemplate: 'starter-web' },
+      { id: 'platfolio.starter-worker', variant: 'starter-template', legacyTemplate: 'starter-worker' },
+    ];
+  }
+
+  async createMarketplacePlatform(teamId: string, input: MarketplacePlatformCreation) {
+    if (this.closed || !this.teams.has(teamId)) return err({ code: 'not-found', what: 'team', id: teamId });
+    const platform = MarketplacePublisherPlatformSchema.parse({ ...input, id: newId('platform'), publisherTeamId: teamId });
+    if ([...this.marketplacePlatforms.values()].some((entry) => entry.publisherTeamId === teamId && entry.slug === platform.slug)) {
+      return err({ code: 'conflict', reason: 'A platform with that slug already exists for this team.' });
+    }
+    this.marketplacePlatforms.set(platform.id, platform);
+    return ok(copy(platform));
+  }
+
+  async getMarketplacePublisherPlatform(teamId: string, platformId: string) {
+    const platform = this.marketplacePlatforms.get(platformId);
+    return !this.closed && platform?.publisherTeamId === teamId ? copy(platform) : undefined;
+  }
+
+  async publishMarketplacePlatformRelease(teamId: string, input: MarketplacePlatformDescriptor) {
+    const descriptor = MarketplacePlatformDescriptorSchema.parse(input);
+    if (this.closed || this.marketplacePlatforms.get(descriptor.platformId)?.publisherTeamId !== teamId) return 'not-found';
+    const releases = this.platformReleases.get(descriptor.platformId) ?? new Map<string, MarketplacePlatformDescriptor>();
+    const previous = releases.get(descriptor.version);
+    if (previous) return marketplacePlatformDescriptorDigest(previous) === marketplacePlatformDescriptorDigest(descriptor) ? 'existing' : 'conflict';
+    releases.set(descriptor.version, descriptor);
+    this.platformReleases.set(descriptor.platformId, releases);
+    return 'created';
+  }
+
+  async listMarketplacePublishedPlatformReleases() {
+    if (this.closed) return [];
+    return [...this.marketplacePlatforms.values()].flatMap((platform) =>
+      [...this.platformReleases.get(platform.id)?.values() ?? []].map((descriptor) => copy({ platform, descriptor })));
+  }
+
+  async acquireMarketplacePlatformRelease(installationId: string, registryDigest: string, release: MarketplacePlatformAcquisitionInput) {
+    const link = this.marketplaceLinks.get(installationId);
+    if (this.closed || !link || link.disconnected || link.registryDigest !== registryDigest) return;
+    const key = JSON.stringify([link.teamId, release.platformId, release.version]);
+    const saved = this.marketplaceAcquisitions.get(key);
+    if (saved && saved.descriptorDigest !== release.descriptorDigest) return;
+    const record = saved ?? { id: newId('acquisition'), teamId: link.teamId, acquiredAt: this.clock(), descriptorDigest: release.descriptorDigest };
+    this.marketplaceAcquisitions.set(key, record);
+    const { id, teamId, acquiredAt } = record;
+    return { id, teamId, acquiredAt };
+  }
 
   async listMarketplaceReleases() {
     return [...this.marketplaceReleases.values()].map((release) => ({ ...release }));
@@ -241,6 +303,27 @@ export class MemoryStore implements Store {
     this.instances.set(admitted.value.id, admitted.value);
     return ok(admitted.value);
   }
+  async recordMarketplaceInstall(instance: Instance, verified: VerifiedMarketplaceInstall): Promise<StoreResult<Instance>> {
+    if (this.closed) return this.refuse('recordMarketplaceInstall');
+    const admitted = admit(MarketplaceInstallRecordSchema, { instance, verified }, 'marketplace install');
+    if (!admitted.accepted) return err({ code: 'conflict', reason: admitted.reason });
+    const { receipt, plan } = admitted.value.verified;
+    if (!this.teams.has(instance.teamId)) return err({ code: 'not-found', what: 'team', id: instance.teamId });
+    if (this.instances.has(instance.id) || [...this.instances.values()].some((i) => i.teamId === instance.teamId && i.name === instance.name)) {
+      return err({ code: 'conflict', reason: 'This name already belongs to an instance' });
+    }
+    this.instances.set(instance.id, admitted.value.instance);
+    this.marketplaceReceipts.set(instance.id, copy(receipt));
+    if (plan) this.plans.set(instance.id, { instanceId: instance.id, planHash: plan.planHash, plan: copy(plan) });
+    return ok(copy(instance));
+  }
+
+  async getMarketplaceInstall(teamId: string, name: string) {
+    const instance = [...this.instances.values()].find((i) => i.teamId === teamId && i.name === name);
+    const receipt = instance && this.marketplaceReceipts.get(instance.id);
+    return instance && receipt ? copy({ instance, receipt }) : undefined;
+  }
+
   async recordHostedStarter(input: NewHostedStarter): Promise<StoreResult<Instance>> {
     if (this.closed) return this.refuse('recordHostedStarter');
     if (!this.teams.has(input.teamId)) return err({ code: 'not-found', what: 'team', id: input.teamId });
@@ -635,6 +718,10 @@ export class MemoryStore implements Store {
 
   async putPlan(instanceId: string, plan: unknown, planHash: string) {
     if (this.closed) return this.refuse('putPlan');
+    const receipt = this.marketplaceReceipts.get(instanceId);
+    if (receipt && receipt.variant !== 'starter-template') {
+      return err({ code: 'conflict', reason: 'The verified marketplace image plan is immutable' });
+    }
     if (!this.instances.has(instanceId)) return err({ code: 'not-found', what: 'instance', id: instanceId });
     if (!/^[0-9a-f]{64}$/.test(planHash)) return err({ code: 'conflict', reason: `plan hash is not a bare 64-hex digest: ${planHash.slice(0, 24)}` });
     if (!plan || typeof plan !== 'object') return err({ code: 'conflict', reason: 'plan must be an object' });
