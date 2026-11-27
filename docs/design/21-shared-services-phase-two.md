@@ -102,8 +102,9 @@ neither the value nor delivery credentials. Require an exact saved binding, a na
 and the declared Starter Web service before writing any of its OIDC variables. Preserve the OCI
 receipt and renew registry access before restarting the app.
 
-For installations with an older worker policy, use the saved owner recovery file in **Connections**.
-The site encrypts it to the private worker. OpenBao issues a temporary admin token inside the
+For installations with an older worker policy, use **Enable Shared Identity** in **Connections**
+with the saved owner recovery file. Normal vault readiness stays available before the update.
+The site encrypts the file to the private worker. OpenBao issues a temporary admin token inside the
 installation to update the worker policy, and the recovery code verifies token retirement.
 Verify hosted sign-in, credential placement, revocation, and removal refusal with active
 dependents. Check cold recovery with the hub unavailable. Those checks require the OIDC-capable

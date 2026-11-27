@@ -85,8 +85,7 @@ export function customerOpenBao(origin: string, secretId: string, directory: str
       if (!state || typeof state.initialized !== 'boolean' || typeof state.sealed !== 'boolean') return 'unreachable';
       if (!state.initialized) return 'uninitialized';
       if (state.sealed) return 'sealed';
-      const token = await serviceToken();
-      return token && await identityPolicyReady(token) ? 'ready' : 'setup-required';
+      return await serviceToken() ? 'ready' : 'setup-required';
     } catch { return 'unreachable'; }
   }
 
@@ -188,6 +187,10 @@ export function customerOpenBao(origin: string, secretId: string, directory: str
 
   return {
     publicKey, status, initialize, unlock, openEnvelope,
+    async identityPolicyNeedsRecovery() {
+      const token = await serviceToken();
+      return token !== undefined && !await identityPolicyReady(token);
+    },
     readGrant: () => read<RailwayGrant>(path),
     writeGrant: (grant: RailwayGrant, version: number) => write(path, grant, version),
     readRailwayClient: () => read<RailwayOAuthClient>(clientPath),

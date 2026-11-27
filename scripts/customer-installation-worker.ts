@@ -165,7 +165,9 @@ const server = createServer({ requestTimeout: 10000 }, (request, response) => {
       case 'setup': {
         const openBao = await bao.status();
         const railway = openBao === 'ready' ? await oauth.connection() : 'connect';
-        reply(200, { openBao, railway, workerKey: bao.publicKey, canWipeData: !project });
+        const identityPolicyNeedsRecovery = openBao === 'ready' && await bao.identityPolicyNeedsRecovery().catch(() => false);
+        reply(200, { openBao, railway, workerKey: bao.publicKey, canWipeData: !project,
+          ...(identityPolicyNeedsRecovery ? { identityPolicyNeedsRecovery } : {}) });
         return;
       }
       case 'initialize': reply(200, { recovery: await bao.initialize(command.body.publicKey) }); return;
