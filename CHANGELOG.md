@@ -5,6 +5,11 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+### Fixed — environment wiring for OCI marketplace installs (#288)
+
+- Validate the bundled environment registry against its Compose recipe and apply its defaults,
+  credential names, and database references in the environments it declares.
+
 ### Added — gated marketplace artifact delivery (#288)
 
 Publisher teams can publish a deployment bundle with pinned OCI images. Private installations can

@@ -101,7 +101,25 @@ test('OCI delivery binds publication, checkout eligibility, and durable pulls to
     const image = new URL(config.origin).host + '/' + repo + ':release@' + rootDigest;
     const body = {
       version, images: [image],
-      bundle: { offer: version === '1.2.0' ? 'free' : 'maintenance', inventory: 'variables: []', compose: `
+      bundle: { offer: version === '1.2.0' ? 'free' : 'maintenance', inventory: `
+variables:
+  - name: DATABASE_URL
+    kind: reference
+    secret: false
+    service: keycloak
+    database: identity-db
+    output: DATABASE_URL
+  - name: OIDC_CLIENT_SECRET
+    kind: secret
+    secret: true
+    service: keycloak
+    environments: [production]
+  - name: UI_BRAND
+    kind: value
+    secret: false
+    service: keycloak
+    default: Identity
+`, compose: `
 name: identity
 services:
   keycloak:
@@ -114,10 +132,12 @@ x-platfolio:
     title: Identity service
     summary: Test the gated container delivery path.
     kind: web
-    mode: hosted
+    mode: development
+  resources:
+    database: { name: identity-db, kind: postgres }
   environments:
     production: { enabled: true, branch: main }
-    staging: { enabled: false }
+    staging: { enabled: true, branch: staging }
     preview: { enabled: false }
 ` },
     };
@@ -128,6 +148,10 @@ x-platfolio:
     assert.equal(missing.status, 400, await missing.clone().text());
     files.set(blobPath, { content: blob, type: 'application/octet-stream' });
     assert.equal((await call(sellerPath + '/bundles', other.token, body)).status, 404);
+    const invalid = { ...body, bundle: { ...body.bundle, inventory: body.bundle.inventory.replace('database: identity-db', 'database: missing') } };
+    assert.equal((await call(sellerPath + '/bundles', seller.token, invalid)).status, 400);
+    const inlineSecret = { ...body, bundle: { ...body.bundle, inventory: body.bundle.inventory.replace('secret: true', 'secret: true\n    default: fixture-forbidden') } };
+    assert.equal((await call(sellerPath + '/bundles', seller.token, inlineSecret)).status, 400);
     const published = await call(sellerPath + '/bundles', seller.token, body);
     assert.equal(published.status, 200, await published.clone().text());
     const summary = await published.json() as { platformId: string; version: string; descriptorDigest: string; images: []; bundle?: unknown; source?: unknown };
@@ -170,7 +194,15 @@ x-platfolio:
     { id: 'inst-gated', teamId: 'private-team', name: 'identity', provider: 'railway' }, acquired,
     async () => { assert.fail('Publisher Git must stay private'); }, undefined, pull,
   );
-  assert.equal(installed.plan?.environments[0]?.services[0]?.digest, firstDigest);
+  const production = installed.plan?.environments.find(({ name }) => name === 'production')?.services[0];
+  const staging = installed.plan?.environments.find(({ name }) => name === 'staging')?.services[0];
+  assert.equal(production?.digest, firstDigest);
+  assert.equal(staging?.digest, firstDigest);
+  assert.deepEqual(production?.references, [{ variable: 'DATABASE_URL', database: 'identity-db', output: 'DATABASE_URL' }]);
+  assert.deepEqual(staging?.references, production.references);
+  assert.deepEqual(production.secrets, [{ name: 'OIDC_CLIENT_SECRET', source: 'preserve' }]);
+  assert.deepEqual(staging?.secrets, []);
+  assert.deepEqual(staging?.env, [{ name: 'UI_BRAND', literal: 'Identity' }]);
   const ticket = await pull();
   const headers = { authorization: registryAuthorization(ticket) };
   assert.equal((await fetch(`${config.origin}/v2/${firstRepo}/manifests/release`, { headers })).headers.get('content-type'), mediaType);

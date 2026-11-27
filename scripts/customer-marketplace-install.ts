@@ -22,14 +22,15 @@ export async function verifyMarketplaceInstall(
   const { installer, images, source, bundle } = release;
   if (bundle) {
     if (source || variant === 'starter-template' || installer !== 'compose-bundle@1' || !pull) throw new Error('The bundle uses an unsupported installer');
-    const manifest = marketplaceBundleManifest(bundle, images, variant);
+    const { manifest, inventory } = marketplaceBundleManifest(bundle, images, variant);
     const ticket = await pull();
     const namespace = artifactNamespace(release.platformId, release.version);
     if (namespace !== ticket.namespace) throw new Error('Registry grant did not match this release');
     const allowed = artifactImages({ origin: ticket.registry }, namespace, images);
     const headers = new Headers({ authorization: registryAuthorization(ticket) });
     await Promise.all(allowed.map((image) => readArtifactGraph(ticket.registry, image, fetch, headers)));
-    return { receipt, plan: buildPlan(manifest, { instanceId: target.id, teamId: target.teamId, provider: target.provider, domains: 'generated-public' }) };
+    return { receipt, plan: buildPlan(manifest, { instanceId: target.id, teamId: target.teamId, provider: target.provider,
+      domains: 'generated-public', inventory }) };
   }
   if (!source) throw new Error('The release is missing its pinned source');
   const starter = variant === 'starter-template';

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { DEFAULT_STAGING_PREFIX } from './environments.ts';
 import { CONTRACT_VERSION, InfraPlanSchema, type InfraPlan } from '@platfolio/contracts';
 import { effectiveDomains, enabledEnvironments, serviceEnvironments } from './environments.ts';
+import { applyInventory, type InventoryEntry } from './inventory.ts';
 import type { Manifest } from './schema.ts';
 
 /**
@@ -34,6 +35,7 @@ export interface InstanceConfig {
   /** Limit an operator apply to one declared environment. */
   environment?: string;
   environments?: readonly string[];
+  inventory?: readonly InventoryEntry[];
 }
 
 // Template documentation values, e.g. sha256:1111... or sha2222...: a single repeated character is not what a
@@ -61,7 +63,10 @@ export function buildPlan(manifest: Manifest, config: InstanceConfig): InfraPlan
   const verificationName = `${platform}-verify`;
 
   const environments = selected.map((envName) => {
-    const services = Object.entries(manifest.spec.services)
+    const environmentManifest = config.inventory
+      ? applyInventory(manifest, config.inventory.filter((entry) => !entry.environments || entry.environments.includes(envName)))
+      : manifest;
+    const services = Object.entries(environmentManifest.spec.services)
       .filter(([, svc]) => serviceEnvironments(svc, enabled).includes(envName))
       .map(([name, svc]) => {
         const image = config.images?.[name];

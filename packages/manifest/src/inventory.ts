@@ -79,15 +79,20 @@ const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'obj
  *
  * `kind` is carried across unchanged, because it is the field that decides whether an operator is being asked
  * for something: `value`/`secret` are obligations, `reference`/`output` are wiring the platform resolves. The
- * registry-only fields (`secret`, `environments`, `deployedTo`, `note`) describe custody and are not part of
- * what a plan needs, so they are dropped here rather than duplicated into a second concept.
+ * registry also lists local development. Preserve the declared subset of hosted environments and
+ * map `all` to an unscoped inventory entry.
  */
 function fromRegistryRow(row: Record<string, unknown>): Record<string, unknown> {
-  const { kind = 'value', name, service, database, output, from, default: def, required, rotate, description, note } = row;
+  const { kind = 'value', name, service, database, output, from, environments, default: def, value, required, rotate, description, note } = row;
   const out: Record<string, unknown> = { kind, name };
   if (service !== undefined) out.service = service;
+  if (environments !== undefined && environments !== 'all') {
+    out.environments = Array.isArray(environments) ? environments.filter((environment) => environment !== 'development') : environments;
+  }
   if (kind === 'value' && def !== undefined) out.default = def;
   if (kind === 'secret') {
+    if (def !== undefined) out.default = def;
+    if (value !== undefined) out.value = value;
     out.required = required ?? true;
     if (rotate !== undefined) out.rotate = rotate;
   }
@@ -119,7 +124,7 @@ export function parseInventory(source: string): ParsedInventory {
   // described the same variables in two shapes and drifted apart, so they were merged -- `variables:` is now the
   // only accepted envelope here.
   const raw = isRecord(doc) && Array.isArray(doc.variables)
-    ? (doc.variables as Record<string, unknown>[]).map(fromRegistryRow)
+    ? doc.variables.map((row: unknown) => isRecord(row) ? fromRegistryRow(row) : row)
     : Array.isArray(doc) ? doc
       : null;
   if (!raw) {
