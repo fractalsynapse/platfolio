@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseCompose, parseComposeDeploymentConfiguration, validateManifest, buildPlan } from '../packages/manifest/src/index.ts';
-import { RailwayInfraProvider, type RailwayCredentialSource } from '../packages/contracts/src/index.ts';
+import { physicalServiceName, RailwayInfraProvider, type RailwayCredentialSource } from '../packages/contracts/src/index.ts';
 import { listRailwayProjects } from '../packages/contracts/src/railway-project.ts';
 import { HttpRailwayTransport } from '../packages/contracts/src/railway-transport.ts';
 import { resolveCheckoutCandidate } from './platform-candidate.ts';
@@ -120,7 +120,7 @@ async function main() {
   }
   const provider = new RailwayInfraProvider({ transport, credentials, workspaceId,
     project: { instanceId: plan.instanceId, name: project },
-    deployBudget: 10, deployTimeoutMs: 600_000,
+    deployBudget: 10, deployTimeoutMs: 600_000, deployAfterResources: true,
     initialSecret: ({ service, name }) => service !== 'identity' ? undefined
       : name === 'PLATFOLIO_INSTALL_OWNER_PASSWORD' ? ownerPassword
       : name === 'KC_BOOTSTRAP_ADMIN_PASSWORD' ? adminPassword : undefined,
@@ -134,7 +134,15 @@ async function main() {
   if (!result.verified || result.failures.length) {
     throw new Error('Hub deployment is incomplete: ' + result.failures.map(({ step, code }) => step + ' ' + code).join(', '));
   }
-  console.log('Railway verified the hub staging plan. Confirm the staged public origins and initialize OpenBao before onboarding.');
+  const snapshot = await provider.readState(plan.instanceId);
+  const expected = new Map(staging.services.map(({ name, image, digest }) =>
+    [physicalServiceName(name, environment), `${image}@${digest}`]));
+  const databases = staging.databases.map(({ name }) => physicalServiceName(name, environment));
+  const ready = [...expected.keys(), ...databases].every((name) => snapshot.services.some((service) =>
+    service.name === name && service.environment === environment && service.status === 'live' &&
+    (!expected.has(name) || service.image === expected.get(name))));
+  if (!ready) throw new Error('Railway did not read back the complete staging hub running the planned images.');
+  console.log('Railway verified the hub staging services. Confirm the staged public origins and initialize OpenBao before onboarding.');
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

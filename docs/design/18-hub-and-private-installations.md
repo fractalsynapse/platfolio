@@ -34,7 +34,9 @@ on the legacy compatibility surface during migration.
    configuring the GitHub environment below, set the repository variable `PLATFOLIO_HUB_DEPLOY_ENABLED`
    to `true` to enable the staging deployment job. The Railway destination is `platfolio-hub` with `staging` as its sole environment.
    The plan supplies its own site, API, Keycloak, Postgres and private OpenBao with durable Raft
-   storage. The hub issuer and browser clients use the new staging hosts. The workflow uses the
+   storage. CI configures start commands and health checks, wires database references and mounts
+   persistent storage before it starts the hub services. The hub issuer and browser clients use
+   the new staging hosts. The workflow uses the
    GitHub environment `staging-hub`. Set `RAILWAY_WORKSPACE_ID`, `PLATFOLIO_HUB_SITE_HOST`, `PLATFOLIO_HUB_API_HOST`,
    `PLATFOLIO_HUB_AUTH_HOST` and `PLATFOLIO_INSTALL_OWNER_EMAIL` there as variables. Supply `RAILWAY_TOKEN`,
    `PLATFOLIO_INSTALL_OWNER_PASSWORD` and `KC_BOOTSTRAP_ADMIN_PASSWORD` as environment secrets.

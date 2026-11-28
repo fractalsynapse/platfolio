@@ -25068,7 +25068,7 @@ function date4(params) {
 }
 
 // packages/contracts/src/generated/contract-version.ts
-var CONTRACT_VERSION = "8.6.0";
+var CONTRACT_VERSION = "8.7.0";
 
 // packages/contracts/src/infra.ts
 var CONTRACT_NAME = "infra.provider";
@@ -25930,6 +25930,7 @@ var RailwayInfraProvider = class {
   contract = CONTRACT_VERSION;
   credentials;
   initialSecret;
+  deployAfterResources;
   transport;
   workspaceId;
   project;
@@ -25946,6 +25947,7 @@ var RailwayInfraProvider = class {
   constructor(options) {
     this.credentials = options.credentials;
     this.initialSecret = options.initialSecret;
+    this.deployAfterResources = options.deployAfterResources ?? false;
     this.transport = options.transport ?? new HttpRailwayTransport();
     this.workspaceId = options.workspaceId;
     this.project = options.project;
@@ -26024,11 +26026,12 @@ var RailwayInfraProvider = class {
     if (this.markerOf(existing?.description) === plan.planHash) {
       const coverage = await this.coverageOf(projectId, parsed.data.environments, workspaceCredential);
       const state = await this.snapshot(projectId);
-      if (coverage.covered) {
+      const healthy = state.services.length > 0 && state.services.every((s) => s.status === "live");
+      if (coverage.covered && (!this.deployAfterResources || healthy)) {
         return {
           instanceId: plan.instanceId,
           planHash: plan.planHash,
-          verified: state.services.length > 0 && state.services.every((s) => s.status === "live"),
+          verified: healthy,
           services: state.services,
           domains: state.domains,
           failures,
@@ -26037,10 +26040,10 @@ var RailwayInfraProvider = class {
       }
       notes.push({
         step: "idempotency",
-        code: "marker-without-state",
+        code: coverage.covered ? "marker-without-healthy-state" : "marker-without-state",
         // Named, not counted: an operator reading this has to know WHICH declared thing the provider is missing,
         // or the resume looks like flapping.
-        message: `this plan's marker is present but ${String(coverage.missing.length)} declared thing(s) are absent in the provider (${coverage.missing.slice(0, 6).join("; ")}); resuming the apply rather than reporting success`
+        message: coverage.covered ? "This plan was applied but an expected service is unhealthy. Resuming deployment." : `this plan's marker is present but ${String(coverage.missing.length)} declared thing(s) are absent in the provider (${coverage.missing.slice(0, 6).join("; ")}); resuming the apply rather than reporting success`
       });
     }
     for (const environment of parsed.data.environments) {
@@ -26052,6 +26055,28 @@ var RailwayInfraProvider = class {
         environment.name,
         [...environment.services.map((s) => s.name), ...environment.databases.map((d) => d.name)]
       );
+      const previousFailures = failures.length;
+      const deployService = async (service, name2, serviceId) => {
+        const deployed = await this.deploy(serviceId, environmentId, token, failures);
+        const outcome = deployed ? await this.awaitDeployment(projectId, environmentId, serviceId, token, failures, notes) : { status: "pending", instanceId: serviceId };
+        if (outcome.status !== "live") {
+          const hint = registryPullHint(service.image);
+          if (hint) {
+            notes.push({ step: `services.${service.name}`, code: "image-pull-authorization-hint", message: hint });
+          }
+        }
+        services.push({
+          // The PHYSICAL name (D57), because this list is compared against `readState`, and readState can only
+          // report what the provider calls the service. Reporting the plan's logical name here would give one
+          // service two identities depending on which method produced the row.
+          name: name2,
+          environment: environment.name,
+          externalId: outcome.instanceId,
+          status: outcome.status,
+          image: `${service.image}@${service.digest}`,
+          numReplicas: service.replicas
+        });
+      };
       for (const service of environment.services) {
         const name2 = physical.get(service.name) ?? service.name;
         let known = projectServices.find((s) => s.name === name2);
@@ -26101,25 +26126,23 @@ var RailwayInfraProvider = class {
             failures.push({ step: `services.${service.name}.limits`, code: "ceilings-not-applied", message: `${error62.message.slice(0, 120)} \u2014 the plan asks for cpu ${service.limits.cpu} / ${service.limits.memoryMB}MB and this is not enforced` });
           }
         }
-        const deployed = await this.deploy(serviceId, environmentId, token, failures);
-        const outcome = deployed ? await this.awaitDeployment(projectId, environmentId, serviceId, token, failures, notes) : { status: "pending", instanceId: serviceId };
-        if (outcome.status !== "live") {
-          const hint = registryPullHint(service.image);
-          if (hint) {
-            notes.push({ step: `services.${service.name}`, code: "image-pull-authorization-hint", message: hint });
-          }
+        if (this.deployAfterResources && serviceId !== known?.id) {
+          await this.updateService(serviceId, environmentId, service, token);
         }
-        services.push({
-          // The PHYSICAL name (D57), because this list is compared against `readState`, and readState can only
-          // report what the provider calls the service. Reporting the plan's logical name here would give one
-          // service two identities depending on which method produced the row.
-          name: physical.get(service.name) ?? service.name,
-          environment: environment.name,
-          externalId: outcome.instanceId,
-          status: outcome.status,
-          image: `${service.image}@${service.digest}`,
-          numReplicas: service.replicas
-        });
+        if (!this.deployAfterResources) await deployService(service, name2, serviceId);
+      }
+      for (const database of environment.databases) {
+        await this.provisionDatabase(projectId, environmentId, environment.name, database, environment, physical, token, serviceIds, failures, notes, projectServices, placed, workspaceCredential);
+      }
+      for (const volume of environment.volumes ?? []) {
+        await this.provisionVolume(projectId, environmentId, volume, environment.name, serviceIds, workspaceCredential, failures, notes);
+      }
+      if (this.deployAfterResources) {
+        if (failures.length > previousFailures) continue;
+        for (const service of environment.services) {
+          const serviceId = serviceIds.get(`${environment.name}/${service.name}`);
+          if (serviceId) await deployService(service, physical.get(service.name) ?? service.name, serviceId);
+        }
       }
       for (const domain3 of environment.domains) {
         const targetServiceId = serviceIds.get(`${environment.name}/${domain3.service}`);
@@ -26141,12 +26164,6 @@ var RailwayInfraProvider = class {
           ...settled?.domainRecords[placed2.host] ? { records: settled.domainRecords[placed2.host] } : {},
           targetService: domainServiceName
         });
-      }
-      for (const database of environment.databases) {
-        await this.provisionDatabase(projectId, environmentId, environment.name, database, environment, physical, token, serviceIds, failures, notes, projectServices, placed, workspaceCredential);
-      }
-      for (const volume of environment.volumes ?? []) {
-        await this.provisionVolume(projectId, environmentId, volume, environment.name, serviceIds, workspaceCredential, failures, notes);
       }
       for (const bucket of environment.buckets) {
         try {
