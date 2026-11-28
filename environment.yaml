@@ -532,6 +532,20 @@ variables:
     required: false
     deployedTo: railway:variable
     note: "Salt for the private Keycloak bootstrap verifier."
+  - name: PLATFOLIO_PRIVATE_SETUP_KEY
+    kind: secret
+    secret: true
+    environments: all
+    required: false
+    deployedTo: railway:variable
+    note: "Installation-local Keycloak realm setup credential, referenced by the private API."
+  - name: PLATFOLIO_HUB_BOOTSTRAP_KEY
+    kind: secret
+    secret: true
+    environments: all
+    required: false
+    deployedTo: railway:variable
+    note: "Hub key for deriving per-environment first sign-in passwords. Keep stable while an installation has an active first sign-in."
   - name: PLATFOLIO_LAUNCH_APP_PROJECT
     kind: value
     secret: false

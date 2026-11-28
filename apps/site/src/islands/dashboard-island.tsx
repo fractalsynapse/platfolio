@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Workspace, WorkspaceEntry, createShellContext, isHubSignInCallback, workspacePaths, workspaceReturnPath } from '@platfolio/ui';
+import { PrivateSetupGate, Workspace, WorkspaceEntry, createShellContext, isHubSignInCallback, workspacePaths, workspaceReturnPath } from '@platfolio/ui';
 import { endpointsForIsland, runtimeConfigFrom, type SitePublicConfig } from '../lib/site-config.ts';
 import { browserCapabilities } from '../lib/browser-capabilities.ts';
 import type { HubSignIn, ShellContext } from '@platfolio/ui';
@@ -96,6 +96,7 @@ export default function DashboardIsland({ config, callback }: DashboardIslandPro
   };
   const signOut = () => globalThis.location.assign(shell.auth.signOut() ?? '/');
   const changePassword = async () => globalThis.location.assign(await shell.auth.begin(workspacePaths.accountPassword, 'UPDATE_PASSWORD'));
-  return shell.wrap(<Workspace pathname={pathname} navigate={navigate} signIn={begin} signOut={signOut} changePassword={changePassword}
-    {...(endpoints.installationRole ? { installationRole: endpoints.installationRole } : {})} />);
+  const workspace = <Workspace pathname={pathname} navigate={navigate} signIn={begin} signOut={signOut} changePassword={changePassword}
+    {...(endpoints.installationRole ? { installationRole: endpoints.installationRole } : {})} />;
+  return shell.wrap(endpoints.installationRole === 'private' ? <PrivateSetupGate>{workspace}</PrivateSetupGate> : workspace);
 }

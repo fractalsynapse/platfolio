@@ -186,3 +186,25 @@ proofs, stops the test hub, then completes a fresh local owner sign-in and opt-o
 End-user app registration uses separate clients, audiences, and app-owned roles. Use
 [the private installation identity model](18-hub-and-private-installations.md) for the
 account-linking boundary. Payments and managed release promotion are later phases.
+
+### Private installation readiness before hosted 2D acceptance
+
+First sign-in requires a new owner password. Connections must let the launch owner retrieve
+the temporary credential after a reload, with a distinct credential for each environment.
+Access to the temporary credential ends when private Keycloak no longer requires a password
+change. Keep owner verifiers in private Keycloak and relay configuration in the installation.
+The hub derives temporary passwords from a deployment key scoped to launch, owner and
+environment. It keeps the key in its deployment environment and stores neither passwords
+nor verifiers in its journal. A launch owner has to request a password explicitly. The hub
+checks private setup immediately before each disclosure and sends a non-cacheable response.
+
+After the password change, the owner must verify a private SMTP relay before workspace
+operations open. A rejected relay leaves setup available so the owner can correct it. Once SMTP
+is verified, private account recovery sends mail through that relay. Existing installations
+remain usable until explicitly adopted into the new setup requirement.
+
+Hosted acceptance starts with a new private installation after verifying that Railway removed
+the old project and the hub retired its connection and launch record. Verify the default
+password, the forced change, rejection of the old password, the SMTP gate and actual reset
+delivery before retrying the hub sign-in checks. Verify the independent Starter Web 0.1.0 pin
+before and after the replacement.

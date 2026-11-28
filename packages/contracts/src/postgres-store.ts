@@ -109,6 +109,14 @@ export class PostgresStore implements Store {
     return first ? InstallationJournalSchema.parse(first.document) : undefined;
   }
 
+  async forgetInstallationJournal(teamId: string, personId: string, id: string, version: number): Promise<boolean> {
+    if (!z.uuid().safeParse(id).success) return false;
+    const result = await this.pool.query(`DELETE FROM ${this.q('installation_journals')}
+      WHERE team_id = $1 AND person_id = $2 AND id = $3 AND version = $4
+        AND document->>'removedAt' IS NOT NULL AND document->>'maintenance' IS NULL`, [teamId, personId, id, version]);
+    return result.rowCount === 1;
+  }
+
   async saveInstallationJournal(input: InstallationJournal): Promise<boolean> {
     const parsed = InstallationJournalSchema.safeParse(input);
     if (this.closed || !parsed.success) return false;

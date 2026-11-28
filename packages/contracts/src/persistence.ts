@@ -542,6 +542,7 @@ export interface Store {
   listInstallationJournals(teamId: string, personId: string): Promise<InstallationJournal[]>;
   getInstallationJournal(teamId: string, personId: string, id: string): Promise<InstallationJournal | undefined>;
   saveInstallationJournal(next: InstallationJournal): Promise<boolean>;
+  forgetInstallationJournal(teamId: string, personId: string, id: string, version: number): Promise<boolean>;
 
   readonly driver: string;
   describe(): { driver: string; contract: string; schemaReady: boolean };

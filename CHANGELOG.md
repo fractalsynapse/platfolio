@@ -34,6 +34,13 @@ OpenAPI restricts hub provisioning to the pinned private Platfolio launcher and 
 installations the application deployment operations. The hosted renderer accepts separate deployment
 settings alongside normal Docker Compose.
 
+### Added — private owner and email setup (#288)
+
+Connections can reveal the temporary password for a new private environment until the
+owner changes it. New private workspaces require a verified SMTP relay for password recovery
+before regular workspace operations open. Owners can manage the relay from Account → Emails
+and forget a private installation after its removal is verified.
+
 ### Added — optional private hub sign-in (#288)
 
 A private owner can opt in to a dedicated hub OpenID Connect client. Local members link

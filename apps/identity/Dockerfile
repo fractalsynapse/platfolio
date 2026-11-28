@@ -11,8 +11,10 @@ RUN mkdir /realm \
          > /realm/platfolio-operator-profile.json \
     && for owner in '' '-with-verifier'; do \
          for mail in '' '-with-mail'; do \
-           node --experimental-strip-types --disable-warning=ExperimentalWarning apps/identity/src/private-operator-realm.ts \
-             ${owner:+--owner-verifier} ${mail:+--password-recovery} > "/realm/platfolio-realm$owner$mail.json" || exit; \
+           for setup in '' '-with-setup'; do \
+             node --experimental-strip-types --disable-warning=ExperimentalWarning apps/identity/src/private-operator-realm.ts \
+               ${owner:+--owner-verifier} ${mail:+--password-recovery} ${setup:+--with-setup} > "/realm/platfolio-realm$owner$mail$setup.json" || exit; \
+           done; \
          done; \
        done
 

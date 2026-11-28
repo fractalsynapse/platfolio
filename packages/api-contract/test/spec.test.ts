@@ -27,7 +27,7 @@ test('the shipped spec is internally true', () => {
   const publicOps = ops.filter((o) => Array.isArray(o.security) && o.security.length === 0).map((o) => o.operationId).sort();
   assert.deepEqual(publicOps, [
     'completeHubInstallationAuthorization', 'completeStarterRailwayAuthorization', 'getHealth',
-    'getHubSignIn', 'getPublicMarketplaceCatalog', 'getReady', 'getStatus', 'getVersion',
+    'getHubSignIn', 'getPrivateSetup', 'getPublicMarketplaceCatalog', 'getReady', 'getStatus', 'getVersion',
     'listMarketplacePlatformReleases', 'listMarketplacePlatforms',
   ], 'only public catalog and sign-in discovery, operational probes, build identity and state-bound OAuth callbacks are unauthenticated');
   const installationOperations = new Set(['redeemMarketplaceEnrollment', 'claimEnrolledMarketplaceRelease', 'getEnrolledMarketplaceCatalog', 'acquireMarketplacePlatformRelease', 'acquireMarketplaceArtifactRelease', 'issueMarketplacePullGrant']);

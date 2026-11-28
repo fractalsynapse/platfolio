@@ -29,6 +29,8 @@ export interface BootConfig {
   infrastructure?: readonly import('@platfolio/kernel').HostingPlugin[];
   customerLaunch?: CustomerLaunchConfig;
   hubIdentity?: HubSignInTrust;
+  privateSetupKey?: string;
+  hubBootstrapKey?: string;
   jwksUri?: string;
   host: string;
   port: number;
@@ -113,6 +115,8 @@ export function configFromEnv(env: NodeJS.ProcessEnv): BootConfig {
   const hubIdentity = hubSignInConfig(env.PLATFOLIO_HUB_IDENTITY_ISSUER, env.PLATFOLIO_HUB_IDENTITY_CLIENT);
   return {
     ...(hubIdentity ? { hubIdentity } : {}),
+    ...(env.PLATFOLIO_PRIVATE_SETUP_KEY ? { privateSetupKey: env.PLATFOLIO_PRIVATE_SETUP_KEY } : {}),
+    ...(env.PLATFOLIO_HUB_BOOTSTRAP_KEY ? { hubBootstrapKey: env.PLATFOLIO_HUB_BOOTSTRAP_KEY } : {}),
     issuer: env.PLATFOLIO_IDENTITY_ISSUER as string,
     audience: env.PLATFOLIO_IDENTITY_AUDIENCE as string,
     ...(role ? { role } : {}),
@@ -264,6 +268,9 @@ export async function boot(config: BootConfig, fetchImpl: typeof fetch = fetch) 
   }
   const ownerSubject = config.customerLaunch?.ownerSubject;
   const installationTeamId = config.customerLaunch?.teamId;
+  if (config.privateSetupKey && (!ownerSubject || !installationTeamId || marketplaceEnabled || !/^[A-Za-z0-9_-]{32,128}$/.test(config.privateSetupKey))) {
+    throw new Error('Private email setup requires a private owner workspace and its Keycloak setup grant');
+  }
   const hubIdentity = config.hubIdentity && hubSignInConfig(config.hubIdentity.issuer, config.hubIdentity.clientId);
   if (hubIdentity && (!installationTeamId || marketplaceEnabled || !storeUrl || hubIdentity.issuer === config.issuer)) {
     throw new Error('Hub identity requires a private workspace with a database and a distinct issuer');
@@ -325,13 +332,18 @@ export async function boot(config: BootConfig, fetchImpl: typeof fetch = fetch) 
         ...(config.artifacts ? { artifacts: config.artifacts } : {}),
         ...(config.marketplacePublisherTeam ? { marketplacePublisherTeam: config.marketplacePublisherTeam } : {}),
         ...(marketplaceEnabled && installation ? { installation } : {}),
+        ...(marketplaceEnabled && config.hubBootstrapKey ? { hubBootstrapKey: config.hubBootstrapKey } : {}),
         accountIssuer: { issuer: config.issuer, request: fetchImpl },
         ...(config.notificationDirectory ? { notificationDirectory: keycloakNotificationDirectory(config.issuer,
           config.notificationDirectory.client, config.notificationDirectory.secret, fetchImpl) } : {}),
         ...(config.cors?.allowedOrigins.length === 1 ? { invitationOrigin: config.cors.allowedOrigins[0]! } : {}),
         ...(config.starterLaunch ? { starterLaunch: config.starterLaunch } : {}),
         ...(launch ? { customerLaunch: launch } : {}),
-        ...(hubIdentity ? { hubIdentity, hubIdentityFetch: fetchImpl } : {}),
+        ...(hubIdentity ? { hubIdentity } : {}),
+        hubIdentityFetch: fetchImpl,
+        ...(config.privateSetupKey && ownerSubject && installationTeamId ? { privateSetup: {
+          issuer: config.issuer, teamId: installationTeamId, ownerSubject, clientSecret: config.privateSetupKey,
+        } } : {}),
       }, config.role),
     ],
     requiredServices: ['identity', 'server', 'store', 'extensions'],
