@@ -113,7 +113,7 @@ test('the first-party hub candidate builds a staging-only plan with private pers
   assert.equal(staging.databases[0]?.kind, 'postgres');
   assert.deepEqual(staging.volumes?.map(({ service, mountPath }) => [service, mountPath]), [['openbao', '/openbao/file']]);
   assert.deepEqual(staging.domains.map(({ service }) => service).sort(), ['api', 'identity', 'site']);
-  assert.equal(staging.services.find(({ name }) => name === 'openbao')?.healthPath, '/v1/sys/seal-status');
+  assert.equal(staging.services.find(({ name }) => name === 'openbao')?.healthPath, '/v1/sys/init');
   assert.equal(staging.services.find(({ name }) => name === 'api')?.env.find(({ name }) =>
     name === 'PLATFOLIO_IDENTITY_ISSUER')?.literal, 'https://auth.example.com/realms/platfolio');
   const { RailwayInfraProvider } = await import('../../contracts/src/railway-provider.ts');
