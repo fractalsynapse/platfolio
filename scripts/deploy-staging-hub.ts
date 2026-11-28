@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseCompose, parseComposeDeploymentConfiguration, validateManifest, buildPlan } from '../packages/manifest/src/index.ts';
-import { physicalServiceName, RailwayInfraProvider, type RailwayCredentialSource } from '../packages/contracts/src/index.ts';
+import { physicalServiceName, RailwayInfraProvider, redactCredentialShaped, type RailwayCredentialSource } from '../packages/contracts/src/index.ts';
 import { listRailwayProjects } from '../packages/contracts/src/railway-project.ts';
 import { HttpRailwayTransport } from '../packages/contracts/src/railway-transport.ts';
 import { resolveCheckoutCandidate } from './platform-candidate.ts';
@@ -146,5 +146,16 @@ async function main() {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  await main();
+  try {
+    await main();
+  } catch (error) {
+    let detail = error instanceof Error ? error.message : 'Unexpected failure while applying the hub plan.';
+    for (const secret of [process.env.RAILWAY_TOKEN, process.env.PLATFOLIO_INSTALL_OWNER_PASSWORD, process.env.KC_BOOTSTRAP_ADMIN_PASSWORD]) {
+      if (secret) detail = detail.replaceAll(secret, '[redacted]');
+    }
+    detail = redactCredentialShaped(detail).replace(/\s+/g, ' ').slice(0, 400);
+    if (process.env.GITHUB_ACTIONS === 'true') console.error('::error title=Staging hub deployment::' + detail.replaceAll('%', '%25'));
+    else console.error(detail);
+    process.exitCode = 1;
+  }
 }
