@@ -151,7 +151,7 @@ jobs:
             | .users[0].emailVerified = true
             | .users[0].attributes.upgradeFixture = ["retained"]
             | .components["org.keycloak.userprofile.UserProfileProvider"][0].config["kc.user.profile.config"][0] |=
-                (fromjson | .attributes |= (map(select(.name != "platfolioDisplayName")) + [
+                (fromjson | .attributes |= (map(select(.name != "platfolioDisplayName" and .name != "platfolioAvatarUrl")) + [
                   {name:"upgradeFixture", permissions:{view:["admin","user"],edit:["admin","user"]} }
                 ]) | tojson)
             | .clients |= map(if has("protocolMappers") then .protocolMappers |=
@@ -191,7 +191,7 @@ jobs:
             identity="identity-upgrade-repaired-$attempt"
             start_identity "$IDENTITY_IMAGE" start-private --http-enabled=true --hostname-strict=false
             smoke --expect-verified-email --expect-profile-attribute=upgradeFixture
-            count="$(docker logs "$identity" 2>&1 | grep -c 'Platfolio operator profile migration 1 applied' || true)"
+            count="$(docker logs "$identity" 2>&1 | grep -Ec 'Platfolio operator profile migration [0-9]+ applied' || true)"
             test "$count" -eq "$((2 - attempt))"
           done
 
