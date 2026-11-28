@@ -5,6 +5,7 @@ import type {
 import type { VerifiedMarketplaceInstall } from './marketplace-install.ts';
 import type { InstallationJournal } from './installation-journal.ts';
 import { z } from 'zod';
+import type { IdentityClientTarget } from './shared-identity-execution.ts';
 import { AttestationSchema, type Attestation } from './attestation.ts';
 import { HostingProviderIdSchema } from './infra.ts';
 import { CONTRACT_VERSION } from './generated/contract-version.ts';
@@ -627,6 +628,8 @@ export interface Store {
   // ---------- capability bindings (#176, D42) ----------
   /** Idempotent by instance+capability: republishing refreshes outputs rather than accumulating offers. */
   publishCapability(offer: NewCapabilityOffer): Promise<StoreResult<CapabilityOffer>>;
+  /** Create an offer once, or return the offer already recorded for that instance and capability. */
+  ensureCapabilityOffer(offer: NewCapabilityOffer): Promise<StoreResult<CapabilityOffer>>;
   getCapabilityOffer(instanceId: string, capability: string): Promise<StoreResult<CapabilityOffer>>;
   listCapabilityOffers(teamId?: string): Promise<CapabilityOffer[]>;
 
@@ -639,11 +642,16 @@ export interface Store {
 
   /** Validated against offers and shares by `checkBindingPolicy` before it is ever reached. */
   bindCapability(binding: NewBinding): Promise<StoreResult<BindingRecord>>;
+  /** Record a dependency once, or return the binding already recorded for the consumer and capability. */
+  ensureCapabilityBinding(binding: NewBinding): Promise<StoreResult<BindingRecord>>;
   getBinding(consumerInstanceId: string, capability: string): Promise<StoreResult<BindingRecord>>;
   listBindings(consumerInstanceId: string): Promise<BindingRecord[]>;
   /** The deletion guard's question, answered: who consumes this provider? */
   listConsumers(providerInstanceId: string, capability?: string): Promise<BindingRecord[]>;
   unbindCapability(consumerInstanceId: string, capability: string): Promise<StoreResult<{ removed: boolean }>>;
+  reserveIdentityClient(target: IdentityClientTarget): Promise<IdentityClientTarget | undefined>;
+  getIdentityClient(consumerInstanceId: string, environment: IdentityClientTarget['environment']): Promise<IdentityClientTarget | undefined>;
+  releaseIdentityClient(target: IdentityClientTarget): Promise<void>;
 
   /**
    * Membership. `put` is idempotent by (teamId, subject): re-adding a member updates the role rather than

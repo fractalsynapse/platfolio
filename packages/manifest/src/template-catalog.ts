@@ -39,6 +39,7 @@
  */
 import { parse as parseYaml } from 'yaml';
 import { MarketplaceReleasePublicationSchema, type MarketplaceRelease, type MarketplaceReleasePublication } from '@platfolio/contracts';
+import { parseInventory } from './inventory.ts';
 
 /** A published template, as the catalog names it (D45: `Instance.template` holds `name`). */
 export interface TemplateCatalogEntry {
@@ -296,7 +297,7 @@ export async function readTemplate(
   entry: TemplateCatalogEntry,
   ref: string = entry.ref,
 ): Promise<RepositorySource> {
-  return readRepositorySource({
+  const source = await readRepositorySource({
     readFile,
     repo: entry.repo,
     ref,
@@ -304,6 +305,19 @@ export async function readTemplate(
     devOverlay: entry.devOverlayPath !== undefined,
     inventory: true,
   });
+  if (entry.name === FREE_STARTER_RELEASE.template && parseInventory(source.inventory ?? '').entries.some((variable) =>
+    variable.kind === 'output' && variable.from === 'identity#issuer')) {
+    const sources = { ...source.sources };
+    const blobs = { ...source.blobs };
+    for (const path of ['package.json', 'package-lock.json', 'src/identity.mjs']) {
+      const file = await read(readFile, entry.repo, ref, path);
+      if (!file) throw new Error('The pinned Starter Web identity release is missing ' + path);
+      sources[path] = file.content;
+      blobs[path] = file.sha;
+    }
+    return { ...source, sources, blobs };
+  }
+  return source;
 }
 
 /** Every catalog entry, read. The acceptance test's single read point. */

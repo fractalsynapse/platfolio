@@ -1,6 +1,9 @@
 import { ApplyResultSchema, CONTRACT_VERSION, KEEP_DATA_FEATURE, PINNED_RELEASE_REDEPLOY_FEATURE, CustomerHostingCommandSchema, DeleteResultSchema, RAILWAY_AUTHORIZATION_CALLBACK,
   PrivateLaunchTemplateSchema, RedeployResultSchema, StateSnapshotSchema, planIssues, type CustomerHostingCommand, type HostingTarget } from '@platfolio/contracts';
 import type { HostingPlugin } from '@platfolio/kernel';
+import { IdentityClientPlacementSchema, IdentityClientRequestSchema, type IdentityClientRequest } from '../../../packages/contracts/src/shared-identity-execution.ts';
+
+export const privateOperationTimeoutMs = 720_000;
 
 export interface CustomerLaunchConfig {
   teamId: string;
@@ -36,12 +39,26 @@ export function customerLaunch(config: CustomerLaunchConfig, request: typeof fet
     teamId: config.teamId,
     callbackPath: RAILWAY_AUTHORIZATION_CALLBACK,
     returnTo: new URL('/dashboard/launch', config.siteOrigin).href,
+    async identity(input: IdentityClientRequest) {
+      const command = IdentityClientRequestSchema.parse(input);
+      if (command.target.teamId !== config.teamId) return { status: 404 };
+      try {
+        const response = await request(config.workerUrl + '/identity', {
+          method: 'POST', redirect: 'error', signal: AbortSignal.timeout(command.action === 'status' ? 120_000 : privateOperationTimeoutMs),
+          headers: { authorization: 'Bearer ' + config.workerKey, 'content-type': 'application/json' },
+          body: JSON.stringify(command),
+        });
+        return response.ok
+          ? { status: response.status, placement: IdentityClientPlacementSchema.parse(await response.json()) }
+          : { status: response.status };
+      } catch { return { status: 503 }; }
+    },
     async call(action: CustomerHostingCommand['action'], body?: object) {
       const command = CustomerHostingCommandSchema.safeParse({ action, ...(body === undefined ? {} : { body }) });
       if (!command.success) return { ok: false as const, status: 400 };
       try {
         const response = await request(config.workerUrl + '/launch', {
-          method: 'POST', redirect: 'error', signal: AbortSignal.timeout(action === 'hosting-apply' ? 720_000
+          method: 'POST', redirect: 'error', signal: AbortSignal.timeout(action === 'hosting-apply' ? privateOperationTimeoutMs
             : ['initialize', 'unlock', 'callback', 'hosting-remove', 'marketplace-verify-install'].includes(action) ? 120_000 : 15000),
           headers: { authorization: 'Bearer ' + config.workerKey, 'content-type': 'application/json' },
           body: JSON.stringify(command.data),

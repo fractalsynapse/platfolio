@@ -700,6 +700,67 @@ export class RailwayInfraProvider implements InfraProvider {
     return { ok: true, verified: present, refresh };
   }
 
+  /** The private worker calls this with a retained Marketplace install and its exact consumer callback. */
+  async configureIdentityClient(input: {
+    instanceId: string; environment: string; image: string; planHash: string; callback: string;
+    variables?: Readonly<Record<string, string>>;
+    checkOnly?: boolean;
+  }): Promise<void> {
+    const names = ['OIDC_ISSUER', 'OIDC_JWKS_URI', 'OIDC_CLIENT_ID', 'OIDC_REDIRECT_URI', 'OIDC_CLIENT_SECRET'];
+    const project = await this.findProject(this.projectName({ instanceId: input.instanceId }));
+    if (!this.project || this.project.instanceId !== input.instanceId || !project ||
+        project.description !== this.projectDescription(input.planHash)) throw new Error('Apply the pinned plan before changing identity configuration');
+    const workspace = await this.credentials.workspace();
+    const environment = (await this.environments(project.id, workspace)).find(({ name }) => name === input.environment);
+    const service = environment && await this.serviceInEnvironment(project.id, environment, 'web', workspace);
+    if (!environment || !service) throw new Error('The pinned web service is missing from this environment');
+    const credential = await this.credentials.forEnvironment(project.id, environment.name);
+    const active = await this.instanceStatus(project.id, environment.id, service.id, credential);
+    const callback = new URL(input.callback);
+    if (!active || active.image !== input.image || callback.protocol !== 'https:' || callback.port ||
+        callback.pathname !== '/auth/callback' || !active.domainHosts.includes(callback.hostname)) {
+      throw new Error('The running image or callback does not match the pinned deployment');
+    }
+    if (input.checkOnly) return;
+    if (!this.registryCredentials?.(input.image)) throw new Error('The pinned image needs a renewed registry grant');
+    const scope = { projectId: project.id, environmentId: environment.id, serviceId: service.id };
+    const readNames = () => this.configVariableNames(scope.projectId, scope.environmentId, scope.serviceId, true);
+    if (input.variables) {
+      const keys = Object.keys(input.variables);
+      if (!names.slice(0, 4).every((name) => input.variables?.[name]) ||
+          keys.some((name) => !names.includes(name) || !input.variables?.[name]) ||
+          input.variables.OIDC_REDIRECT_URI !== input.callback) throw new Error('Invalid OIDC placement');
+      const result = await this.transport.graphql<{ variableCollectionUpsert: boolean }>({
+        operation: 'variableCollectionUpsert', credential,
+        query: 'mutation ($input: VariableCollectionUpsertInput!) { variableCollectionUpsert(input: $input) }',
+        variables: { input: { ...scope, variables: input.variables, replace: false, skipDeploys: true } },
+      });
+      if (result.variableCollectionUpsert !== true) throw new Error('Railway refused the identity placement');
+    } else {
+      const existing = await readNames();
+      for (const name of names.filter((key) => existing.includes(key))) {
+        const result = await this.transport.graphql<{ variableDelete: boolean }>({
+          operation: 'variableDelete', credential,
+          query: 'mutation ($input: VariableDeleteInput!) { variableDelete(input: $input) }',
+          variables: { input: { ...scope, name } },
+        });
+        if (result.variableDelete !== true) throw new Error('Railway refused the identity removal');
+      }
+    }
+    const present = await readNames();
+    if (names.some((name) => present.includes(name) !== Boolean(input.variables?.[name]))) {
+      throw new Error('Railway did not verify the identity variable names');
+    }
+
+    const result = await this.redeploy({ instanceId: input.instanceId, environment: input.environment, service: 'web' }, input.image);
+    if (!result.verified) throw new Error('Railway did not verify a new web deployment');
+    const settled = await this.awaitDeployment(scope.projectId, scope.environmentId, scope.serviceId, credential, [], []);
+    const observed = await this.instanceStatus(scope.projectId, scope.environmentId, scope.serviceId, credential);
+    if (settled.status !== 'live' || observed?.image !== input.image) {
+      throw new Error('The pinned web deployment did not become healthy');
+    }
+  }
+
   async secretPresence(input: { instanceId: string; environment: string; service: string; names: string[] }): Promise<Record<string, SecretPresence>> {
     const out: Record<string, SecretPresence> = {};
     const project = await this.findProject(this.projectName({ instanceId: input.instanceId }));
@@ -744,7 +805,7 @@ export class RailwayInfraProvider implements InfraProvider {
    * decision to make, which is why it is an operation with an audit row rather than an automatic consequence of
    * a write.
    */
-  async redeploy(input: { instanceId: string; environment: string; service?: string }): Promise<RedeployResult> {
+  async redeploy(input: { instanceId: string; environment: string; service?: string }, expectedImage?: string): Promise<RedeployResult> {
     const project = await this.findProject(this.projectName({ instanceId: input.instanceId }));
     if (!project) {
       return {
@@ -812,6 +873,7 @@ export class RailwayInfraProvider implements InfraProvider {
       }
       if (this.registryCredentials) {
         const info = await this.instanceStatus(project.id, env.id, serviceId, token);
+        if (expectedImage && info?.image !== expectedImage) throw new Error('The web image changed during identity delivery');
         const registryCredentials = info && this.registryCredentials(info.image);
         if (registryCredentials) {
           await configureRailwayService({ transport: this.transport, credential: token }, { environmentId: env.id, serviceId }, { registryCredentials })
@@ -1310,7 +1372,7 @@ export class RailwayInfraProvider implements InfraProvider {
     }
   }
 
-  private async configVariableNames(projectId: string, environmentId: string, serviceId: string): Promise<string[]> {
+  private async configVariableNames(projectId: string, environmentId: string, serviceId: string, requireConfig = false): Promise<string[]> {
     const token = await this.credentials.forEnvironment(projectId, await this.environmentName(projectId, environmentId));
     const data = await this.transport.graphql<{ environment: { config: { services?: Record<string, { variables?: Record<string, unknown> }> } | null } | null }>({
       operation: 'environment.config',
@@ -1318,6 +1380,9 @@ export class RailwayInfraProvider implements InfraProvider {
       query: 'query ($projectId: String!, $environmentId: String!) { environment(projectId: $projectId, id: $environmentId) { config } }',
       variables: { projectId, environmentId },
     });
+    if (requireConfig && !data.environment?.config?.services?.[serviceId]) {
+      throw new Error('Railway did not return the scoped service configuration');
+    }
     return Object.keys(data.environment?.config?.services?.[serviceId]?.variables ?? {});
   }
 

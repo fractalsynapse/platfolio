@@ -155,5 +155,14 @@ preserving digests, then point the saved recipe at the customer's registry.
    pull, and a cold redeploy after pull-grant expiry or renewal. Record the results separately from
    local verification. Keep the existing storefront in service until those checks pass.
 
+### Hosted apply and cold redeploy measured on 2026-11-27
+
+The private installation reconnected Railway with a grant scoped to Internal Platfolio. The retained
+Starter Web `0.1.0` receipt provisioned `platfolio-starter-web`. Railway reported both services
+successful and no public database domain or TCP proxy. The first web process started before the
+database reference was available. A cold redeploy through Platfolio started a new deployment and web
+process on the same pinned image. The new process reported its database reference configured.
+The private Platfolio deployment remained healthy through these checks.
+
 Run `pnpm run verify` for repository changes. Payments, federated sign-in, cross-installation
 bindings, and managed release promotion follow in later phases.

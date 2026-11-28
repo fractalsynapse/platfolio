@@ -65,6 +65,8 @@ test('customer launch is owner scoped and passes only the intended fields to a p
   const ids = { projectId: randomUUID(), deploymentId: randomUUID() };
   let workerReport: object | false = false;
   let brandOutcome = 'requested';
+  let legacyWorker = false;
+  let identityPolicyNeedsRecovery = false;
   const domain = { host: 'preview.example.test', dnsStatus: 'pending', certificateStatus: 'pending', records: [] };
   const config = {
     get teamId() { return teamId; },
@@ -100,7 +102,12 @@ test('customer launch is owner scoped and passes only the intended fields to a p
     if (last?.action === 'domain-detach') return Response.json({ outcome: 'detached' });
     if (last?.action === 'brand-read') return Response.json({ outcome: 'read', configuration: { value: 'Starter', state: 'ready' } });
     if (last?.action === 'brand-apply') return Response.json({ outcome: brandOutcome });
-    return Response.json(last?.action === 'setup' ? { openBao: 'sealed', railway: 'connect', workerKey: 'public' } : false);
+    if (last?.action === 'setup') {
+      if (legacyWorker && last.body) return Response.json(null, { status: 400 });
+      return Response.json({ openBao: identityPolicyNeedsRecovery ? 'ready' : 'sealed', railway: 'connect', workerKey: 'public',
+        ...(last.body && identityPolicyNeedsRecovery ? { identityPolicyNeedsRecovery } : {}) });
+    }
+    return Response.json(false);
   };
   const customer = { ...customerLaunch(config, request), get teamId() { return teamId; } };
   const kernel = await createKernel({
@@ -160,6 +167,18 @@ test('customer launch is owner scoped and passes only the intended fields to a p
     assert.equal(launchWorker.status, 200);
     assert.deepEqual(last, { action: 'template-start', body: { template: 'starter-worker', release: selection } });
     assert.equal((await launchWorker.json() as { origin?: string }).origin, undefined);
+    const setupPath = path + '/setup';
+    identityPolicyNeedsRecovery = true;
+    const modernSetup = await fetch(setupPath, { headers: headers('owner') });
+    assert.equal(modernSetup.status, 200);
+    assert.equal((await modernSetup.json() as { identityPolicyNeedsRecovery?: boolean }).identityPolicyNeedsRecovery, true);
+    assert.deepEqual(last, { action: 'setup', body: { identityPolicy: true } });
+    legacyWorker = true;
+    const legacySetup = await fetch(setupPath, { headers: headers('owner') });
+    assert.equal(legacySetup.status, 200);
+    assert.equal((await legacySetup.json() as { identityPolicyNeedsRecovery?: boolean }).identityPolicyNeedsRecovery, undefined);
+    assert.deepEqual(last, { action: 'setup' });
+    legacyWorker = false;
     const response = await fetch(api + '/railway/callback?state=' + 'a'.repeat(43) + '&code=local-test', { redirect: 'manual' });
     assert.equal(response.status, 303);
     assert.equal(response.headers.get('location'), siteOrigin + '/dashboard/launch?railway=retry');

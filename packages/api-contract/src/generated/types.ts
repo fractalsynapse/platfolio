@@ -4,7 +4,7 @@
  * hand, because every line reproduces from the specification.
  *
  * Source: apps/control-plane/openapi.yaml (OpenAPI 3.1.0, info.version 0.1.0)
- * Input digest: sha256/5169b7fe620d8419
+ * Input digest: sha256/f59e32e7ed5cb98b
  *
  * Reproduce it with `pnpm run api:types`. `pnpm run api:types:check` fails when this file stops matching
  * what the committed spec produces, which is the only way a generated type deserves to be trusted.
@@ -272,6 +272,11 @@ export interface HubInstallationLaunch {
     name: 'staging' | 'production';
     origin: string;
   }>;
+}
+
+export interface IdentityClientPlacement {
+  state: 'unconfigured' | 'pending' | 'placed' | 'revoked';
+  clientId?: string;
 }
 
 export interface InstallationLaunchInput {
@@ -696,6 +701,10 @@ export interface ApiParameters {
     instanceId: string;
     capability: string;
   };
+  /** PUT /api/v1/instances/{instanceId}/bindings/identity/intent */
+  bindSharedIdentity: {
+    instanceId: string;
+  };
   /** POST /api/v1/marketplace/installations/{installationId}/claim */
   claimEnrolledMarketplaceRelease: {
     installationId: string;
@@ -829,6 +838,11 @@ export interface ApiParameters {
   getPublicMarketplaceCatalog: Record<string, never>;
   /** GET /readyz */
   getReady: Record<string, never>;
+  /** GET /api/v1/instances/{instanceId}/bindings/identity/environments/{environment} */
+  getSharedIdentityClient: {
+    instanceId: string;
+    environment: 'production' | 'staging';
+  };
   /** GET /api/v1/teams/{teamId}/starter-launch */
   getStarterLaunch: {
     teamId: string;
@@ -930,6 +944,11 @@ export interface ApiParameters {
     teamId: string;
     launchId: string;
   };
+  /** PUT /api/v1/instances/{instanceId}/bindings/identity/environments/{environment} */
+  placeSharedIdentityClient: {
+    instanceId: string;
+    environment: 'production' | 'staging';
+  };
   /** POST /api/v1/attestations */
   postAttestation: Record<string, never>;
   /** POST /api/v1/teams/{teamId}/marketplace/installs */
@@ -953,6 +972,10 @@ export interface ApiParameters {
   /** POST /api/v1/teams/{teamId}/marketplace/releases */
   publishMarketplaceRelease: {
     teamId: string;
+  };
+  /** PUT /api/v1/instances/{instanceId}/capability/identity */
+  publishSharedIdentityCapability: {
+    instanceId: string;
   };
   /** PUT /api/v1/instances/{instanceId}/plan */
   putPlan: {
@@ -1008,6 +1031,11 @@ export interface ApiParameters {
   revokeInvitation: {
     teamId: string;
     invitationId: string;
+  };
+  /** DELETE /api/v1/instances/{instanceId}/bindings/identity/environments/{environment} */
+  revokeSharedIdentityClient: {
+    instanceId: string;
+    environment: 'production' | 'staging';
   };
   /** PUT /api/v1/teams/{teamId}/marketplace/platforms/{platformId}/maintenance */
   setMarketplaceMaintenance: {
@@ -1089,6 +1117,11 @@ export interface ApiRequestBodies {
       into: string[];
     }>;
   };
+  /** PUT /api/v1/instances/{instanceId}/bindings/identity/intent */
+  bindSharedIdentity: {
+    providerInstanceId: string;
+    clientType: 'public' | 'confidential';
+  };
   /** POST /api/v1/instances/{instanceId}/dispatches */
   createDispatch: {
     action?: 'apply' | 'check' | 'drift' | 'suspend' | 'export';
@@ -1146,6 +1179,16 @@ export interface ApiRequestBodies {
     action: 'wipe';
     confirmation: string;
   });
+  /** PUT /api/v1/instances/{instanceId}/bindings/identity/environments/{environment} */
+  placeSharedIdentityClient: {
+    providerEnvironment: 'production' | 'staging';
+    /** Optional initial customer configuration. Seal only the realm manager client ID and secret to the private worker key returned by the owner setup operation. */
+    setup?: {
+      issuer: string;
+      redirectUri: string;
+      realmGrant: string;
+    };
+  };
   /** POST /api/v1/attestations */
   postAttestation: Attestation;
   /** POST /api/v1/teams/{teamId}/marketplace/installs */
@@ -1348,6 +1391,15 @@ export interface ApiResponses {
     '400': Error;
     '401': Error;
     '404': Error;
+  };
+  /** PUT /api/v1/instances/{instanceId}/bindings/identity/intent */
+  bindSharedIdentity: {
+    '200': BindingRecord;
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '409': Error;
   };
   /** POST /api/v1/marketplace/installations/{installationId}/claim */
   claimEnrolledMarketplaceRelease: {
@@ -1663,6 +1715,16 @@ export interface ApiResponses {
     '200': Ready;
     '503': Ready;
   };
+  /** GET /api/v1/instances/{instanceId}/bindings/identity/environments/{environment} */
+  getSharedIdentityClient: {
+    '200': IdentityClientPlacement;
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '409': Error;
+    '503': Error;
+  };
   /** GET /api/v1/teams/{teamId}/starter-launch */
   getStarterLaunch: {
     '200': {
@@ -1699,6 +1761,7 @@ export interface ApiResponses {
       railway: 'connect' | 'connected';
       workerKey: string;
       canWipeData?: boolean;
+      identityPolicyNeedsRecovery?: boolean;
     };
     '401': Error;
     '403': Error;
@@ -1912,6 +1975,16 @@ export interface ApiResponses {
     '404': Error;
     '409': Error;
   };
+  /** PUT /api/v1/instances/{instanceId}/bindings/identity/environments/{environment} */
+  placeSharedIdentityClient: {
+    '200': IdentityClientPlacement;
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '409': Error;
+    '503': Error;
+  };
   /** POST /api/v1/attestations */
   postAttestation: {
     '202': {
@@ -1962,6 +2035,16 @@ export interface ApiResponses {
   /** POST /api/v1/teams/{teamId}/marketplace/releases */
   publishMarketplaceRelease: {
     '204': void;
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '409': Error;
+    '503': Error;
+  };
+  /** PUT /api/v1/instances/{instanceId}/capability/identity */
+  publishSharedIdentityCapability: {
+    '200': CapabilityOffer;
     '400': Error;
     '401': Error;
     '403': Error;
@@ -2147,6 +2230,16 @@ export interface ApiResponses {
     '404': Error;
     '409': Error;
   };
+  /** DELETE /api/v1/instances/{instanceId}/bindings/identity/environments/{environment} */
+  revokeSharedIdentityClient: {
+    '200': IdentityClientPlacement;
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '409': Error;
+    '503': Error;
+  };
   /** PUT /api/v1/teams/{teamId}/marketplace/platforms/{platformId}/maintenance */
   setMarketplaceMaintenance: {
     '204': void;
@@ -2225,6 +2318,7 @@ export interface ApiResponses {
     '204': void;
     '401': Error;
     '404': Error;
+    '409': Error;
   };
   /** POST /api/v1/teams/{teamId}/starter-launch/openbao/unlock */
   unlockStarterOpenBao: {
@@ -2355,6 +2449,8 @@ export const ENDPOINTS = {
   beginStarterRailwayAuthorization: { method: 'post', path: '/api/v1/teams/{teamId}/starter-launch/railway' },
   /** PUT /api/v1/instances/{instanceId}/bindings/{capability} */
   bindCapability: { method: 'put', path: '/api/v1/instances/{instanceId}/bindings/{capability}' },
+  /** PUT /api/v1/instances/{instanceId}/bindings/identity/intent */
+  bindSharedIdentity: { method: 'put', path: '/api/v1/instances/{instanceId}/bindings/identity/intent' },
   /** POST /api/v1/marketplace/installations/{installationId}/claim */
   claimEnrolledMarketplaceRelease: { method: 'post', path: '/api/v1/marketplace/installations/{installationId}/claim' },
   /** POST /api/v1/teams/{teamId}/marketplace/installations/{installationId}/claim */
@@ -2421,6 +2517,8 @@ export const ENDPOINTS = {
   getPublicMarketplaceCatalog: { method: 'get', path: '/api/v1/marketplace/catalog' },
   /** GET /readyz */
   getReady: { method: 'get', path: '/readyz' },
+  /** GET /api/v1/instances/{instanceId}/bindings/identity/environments/{environment} */
+  getSharedIdentityClient: { method: 'get', path: '/api/v1/instances/{instanceId}/bindings/identity/environments/{environment}' },
   /** GET /api/v1/teams/{teamId}/starter-launch */
   getStarterLaunch: { method: 'get', path: '/api/v1/teams/{teamId}/starter-launch' },
   /** GET /api/v1/teams/{teamId}/starter-launch/setup */
@@ -2477,6 +2575,8 @@ export const ENDPOINTS = {
   listTeams: { method: 'get', path: '/api/v1/teams' },
   /** POST /api/v1/teams/{teamId}/marketplace/installation-launches/{launchId}/maintenance */
   maintainHubInstallation: { method: 'post', path: '/api/v1/teams/{teamId}/marketplace/installation-launches/{launchId}/maintenance' },
+  /** PUT /api/v1/instances/{instanceId}/bindings/identity/environments/{environment} */
+  placeSharedIdentityClient: { method: 'put', path: '/api/v1/instances/{instanceId}/bindings/identity/environments/{environment}' },
   /** POST /api/v1/attestations */
   postAttestation: { method: 'post', path: '/api/v1/attestations' },
   /** POST /api/v1/teams/{teamId}/marketplace/installs */
@@ -2489,6 +2589,8 @@ export const ENDPOINTS = {
   publishMarketplacePlatformRelease: { method: 'post', path: '/api/v1/teams/{teamId}/marketplace/platforms/{platformId}/releases' },
   /** POST /api/v1/teams/{teamId}/marketplace/releases */
   publishMarketplaceRelease: { method: 'post', path: '/api/v1/teams/{teamId}/marketplace/releases' },
+  /** PUT /api/v1/instances/{instanceId}/capability/identity */
+  publishSharedIdentityCapability: { method: 'put', path: '/api/v1/instances/{instanceId}/capability/identity' },
   /** PUT /api/v1/instances/{instanceId}/plan */
   putPlan: { method: 'put', path: '/api/v1/instances/{instanceId}/plan' },
   /** PUT /api/v1/instances/{instanceId}/secrets/{name} */
@@ -2513,6 +2615,8 @@ export const ENDPOINTS = {
   revokeCapabilityShare: { method: 'delete', path: '/api/v1/instances/{instanceId}/capability/{capability}/shares/{toTeamId}' },
   /** DELETE /api/v1/teams/{teamId}/invitations/{invitationId} */
   revokeInvitation: { method: 'delete', path: '/api/v1/teams/{teamId}/invitations/{invitationId}' },
+  /** DELETE /api/v1/instances/{instanceId}/bindings/identity/environments/{environment} */
+  revokeSharedIdentityClient: { method: 'delete', path: '/api/v1/instances/{instanceId}/bindings/identity/environments/{environment}' },
   /** PUT /api/v1/teams/{teamId}/marketplace/platforms/{platformId}/maintenance */
   setMarketplaceMaintenance: { method: 'put', path: '/api/v1/teams/{teamId}/marketplace/platforms/{platformId}/maintenance' },
   /** PUT /api/v1/instances/{instanceId}/capability/{capability}/shares */

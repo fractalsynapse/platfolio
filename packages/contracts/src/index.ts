@@ -120,6 +120,7 @@ export {
   type NewCapabilityShare,
 } from './persistence.ts';
 export { checkBindingPolicy, bindingImpact, type BindingRequest, type BindingVerdict } from './binding-policy.ts';
+export { IdentityClientPlacementSchema } from './shared-identity-execution.ts';
 export {
   POLICY,
   PolicyActionSchema,

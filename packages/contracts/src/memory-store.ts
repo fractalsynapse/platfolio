@@ -6,6 +6,7 @@ import {
 import { MarketplaceInstallRecordSchema, type VerifiedMarketplaceInstall } from './marketplace-install.ts';
 import { InstallationJournalSchema, type InstallationJournal } from './installation-journal.ts';
 import { z } from 'zod';
+import { IdentityClientTargetSchema, type IdentityClientTarget } from './shared-identity-execution.ts';
 import type { Attestation } from './attestation.ts';
 import { AttestationRecordSchema, AuditEntrySchema, BindingRecordSchema, CapabilityOfferSchema, CapabilityShareSchema, IdentitySchema, PersonSchema, TeamMemberSchema, DispatchRecordSchema, InstanceEnvironmentStateSchema, InstanceSchema, InvitationSchema, ProviderConnectionSchema, RepoConnectionSchema, TeamSchema, newId,
   HostedStarterSchema, NotificationRuleSchema, rollupState, type NewNotificationRule, type NotificationRule, type HostedStarter, type NewHostedStarter, type HostedAppCheck,
@@ -74,6 +75,7 @@ export class MemoryStore implements Store {
   private readonly offers = new Map<string, CapabilityOffer>();
   private readonly shares = new Map<string, CapabilityShare>();
   private readonly bindings = new Map<string, BindingRecord>();
+  private readonly identityClients = new Map<string, IdentityClientTarget>();
   private readonly attestations = new Map<string, AttestationRecord>();
   private readonly auditLog: AuditEntry[] = [];
   private readonly clock: () => string;
@@ -540,12 +542,18 @@ export class MemoryStore implements Store {
     return [...this.members.values()].filter((m) => m.personId === personId).map((m) => m.teamId);
   }
 
-  async publishCapability(offer: NewCapabilityOffer) {
+  publishCapability(offer: NewCapabilityOffer) { return this.saveCapabilityOffer(offer, false); }
+  ensureCapabilityOffer(offer: NewCapabilityOffer) { return this.saveCapabilityOffer(offer, true); }
+
+  private async saveCapabilityOffer(offer: NewCapabilityOffer, preserve: boolean) {
     if (this.closed) return this.refuse('publishCapability');
     if (!this.instances.has(offer.instanceId)) return err({ code: 'not-found', what: 'instance', id: offer.instanceId });
     const admitted = admit(CapabilityOfferSchema, { ...offer, publishedAt: offer.publishedAt ?? this.clock() }, 'capability offer');
     if (!admitted.accepted) return err({ code: 'conflict', reason: admitted.reason });
-    this.offers.set(`${admitted.value.instanceId}\u0000${admitted.value.capability}`, admitted.value);
+    const key = `${admitted.value.instanceId}\u0000${admitted.value.capability}`;
+    const existing = this.offers.get(key);
+    if (preserve && existing) return ok(copy(existing));
+    this.offers.set(key, admitted.value);
     return ok(admitted.value);
   }
   async getCapabilityOffer(instanceId: string, capability: string) {
@@ -594,13 +602,22 @@ export class MemoryStore implements Store {
     return all.map(copy);
   }
 
-  async bindCapability(binding: NewBinding) {
+  bindCapability(binding: NewBinding) { return this.saveCapabilityBinding(binding, false); }
+  ensureCapabilityBinding(binding: NewBinding) { return this.saveCapabilityBinding(binding, true); }
+
+  private async saveCapabilityBinding(binding: NewBinding, preserve: boolean) {
     if (this.closed) return this.refuse('bindCapability');
     const admitted = admit(BindingRecordSchema, { ...binding, boundAt: binding.boundAt ?? this.clock() }, 'binding');
     if (!admitted.accepted) return err({ code: 'conflict', reason: admitted.reason });
     const b = admitted.value;
     if (!this.instances.has(b.consumerInstanceId)) return err({ code: 'not-found', what: 'instance', id: b.consumerInstanceId });
-    this.bindings.set(`${b.consumerInstanceId}\u0000${b.capability}`, b);
+    const key = `${b.consumerInstanceId}\u0000${b.capability}`;
+    const existing = this.bindings.get(key);
+    if (preserve && existing) return ok(copy(existing));
+    if (b.capability === 'identity' && this.hasIdentityClient(b.consumerInstanceId)) {
+      return err({ code: 'conflict', reason: 'Revoke the identity client before replacing this binding.' });
+    }
+    this.bindings.set(key, b);
     return ok(b);
   }
   async getBinding(consumerInstanceId: string, capability: string) {
@@ -615,10 +632,44 @@ export class MemoryStore implements Store {
   }
   async unbindCapability(consumerInstanceId: string, capability: string) {
     if (this.closed) return this.refuse('unbindCapability');
+    if (capability === 'identity' && this.hasIdentityClient(consumerInstanceId)) {
+      return err({ code: 'conflict', reason: 'Revoke the identity client before removing this binding.' });
+    }
     const key = `${consumerInstanceId}\u0000${capability}`;
     const existed = this.bindings.delete(key);
     if (!existed) return err({ code: 'not-found', what: 'binding', id: key.replace(/\u0000/g, '/') });
     return ok({ removed: true });
+  }
+
+  private hasIdentityClient(consumerInstanceId: string) {
+    return ['production', 'staging'].some((environment) => this.identityClients.has(consumerInstanceId + '\u0000' + environment));
+  }
+
+  async reserveIdentityClient(input: IdentityClientTarget) {
+    const target = IdentityClientTargetSchema.parse(input);
+    const { consumerInstanceId, providerInstanceId, teamId, environment, boundAt } = target;
+    const consumer = this.instances.get(consumerInstanceId);
+    const provider = this.instances.get(providerInstanceId);
+    const binding = this.bindings.get(consumerInstanceId + '\u0000identity');
+    if (this.closed || consumer?.teamId !== teamId || provider?.teamId !== teamId ||
+        [consumer.state, provider.state].some((state) => state === 'deprovisioning' || state === 'removed') ||
+        binding?.providerInstanceId !== providerInstanceId || binding.state !== 'bound' || binding.boundAt !== boundAt) return;
+    const key = consumerInstanceId + '\u0000' + environment;
+    const existing = this.identityClients.get(key);
+    if (existing) return copy(existing);
+    this.identityClients.set(key, target);
+    return copy(target);
+  }
+
+  async getIdentityClient(consumerInstanceId: string, environment: IdentityClientTarget['environment']) {
+    const target = this.identityClients.get(consumerInstanceId + '\u0000' + environment);
+    return target && copy(target);
+  }
+
+  async releaseIdentityClient(input: IdentityClientTarget) {
+    const target = IdentityClientTargetSchema.parse(input);
+    const key = target.consumerInstanceId + '\u0000' + target.environment;
+    if (JSON.stringify(this.identityClients.get(key)) === JSON.stringify(target)) this.identityClients.delete(key);
   }
 
   async createInvitation(input: NewInvitation) {

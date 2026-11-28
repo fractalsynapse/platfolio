@@ -5,6 +5,8 @@ import { createServer } from 'node:http';
 import { join } from 'node:path';
 import { customerLaunchRun } from './customer-launch-run.ts';
 import { customerOpenBao } from './customer-openbao.ts';
+import { customerSharedIdentity, SharedIdentityWorkerError } from './customer-shared-identity.ts';
+import { IdentityClientRequestSchema } from '../packages/contracts/src/shared-identity-execution.ts';
 import { customerMarketplaceConnection, privateMarketplaceOrigin } from './customer-marketplace-connection.ts';
 import { verifyMarketplaceInstall } from './customer-marketplace-install.ts';
 import { customerRailwayOAuth } from './customer-railway-oauth.ts';
@@ -49,7 +51,7 @@ function privateRun(template: PrivateLaunchTemplate) {
   privateRuns.set(template, initialized);
   return initialized;
 }
-const execution = await createKernel({ provider: 'railway', infrastructure: [privateRailwayExecution(team, async () => {
+const hosting = privateRailwayExecution(team, async () => {
   if (await bao.status() !== 'ready') throw new Error('Unlock OpenBao before managing a project');
   return oauth.credential();
 }, async ({ selection, images }) => {
@@ -59,7 +61,9 @@ const execution = await createKernel({ provider: 'railway', infrastructure: [pri
   artifactImages({ origin: ticket.registry }, namespace, images);
   const pins = new Set(images);
   return (image) => pins.has(image) ? { username: ticket.username, password: ticket.password } : undefined;
-})], requiredServices: ['infra'] });
+});
+const sharedIdentity = customerSharedIdentity(bao.identity, fetch, hosting.configureIdentity, bao.openEnvelope);
+const execution = await createKernel({ provider: 'railway', infrastructure: [hosting], requiredServices: ['infra'] });
 const expected = Buffer.from('Bearer ' + workerKey);
 const replyError = { error: 'launcher-setup-unavailable', message: 'Check OpenBao and Railway connection, then try again.' };
 let changingDomain = false;
@@ -83,7 +87,7 @@ const server = createServer({ requestTimeout: 10000 }, (request, response) => {
   }
   if (request.method === 'GET' && request.url === '/status') { reply(200, { status: 'ok' }); return; }
   const auth = Buffer.from(request.headers.authorization ?? '');
-  if (request.method !== 'POST' || request.url !== '/launch' || auth.length !== expected.length || !timingSafeEqual(auth, expected)) {
+  if (request.method !== 'POST' || !['/launch', '/identity'].includes(request.url ?? '') || auth.length !== expected.length || !timingSafeEqual(auth, expected)) {
     reply(404, null);
     return;
   }
@@ -93,7 +97,15 @@ const server = createServer({ requestTimeout: 10000 }, (request, response) => {
       text += String(chunk);
       if (text.length > 512 * 1024) { reply(400, null); return; }
     }
-    const parsed = CustomerHostingCommandSchema.safeParse(JSON.parse(text));
+    const input: unknown = JSON.parse(text);
+    if (request.url === '/identity') {
+      const parsed = IdentityClientRequestSchema.safeParse(input);
+      if (!parsed.success || parsed.data.target.teamId !== team) { reply(404, null); return; }
+      const result = await sharedIdentity(parsed.data);
+      reply(result ? 200 : 409, result ?? null);
+      return;
+    }
+    const parsed = CustomerHostingCommandSchema.safeParse(input);
     if (!parsed.success) { reply(400, null); return; }
     const command = parsed.data;
     switch (command.action) {
@@ -154,7 +166,10 @@ const server = createServer({ requestTimeout: 10000 }, (request, response) => {
       case 'setup': {
         const openBao = await bao.status();
         const railway = openBao === 'ready' ? await oauth.connection() : 'connect';
-        reply(200, { openBao, railway, workerKey: bao.publicKey, canWipeData: !project });
+        const identityPolicyNeedsRecovery = command.body?.identityPolicy && openBao === 'ready' &&
+          await bao.identityPolicyNeedsRecovery().catch(() => false);
+        reply(200, { openBao, railway, workerKey: bao.publicKey, canWipeData: !project,
+          ...(identityPolicyNeedsRecovery ? { identityPolicyNeedsRecovery } : {}) });
         return;
       }
       case 'initialize': reply(200, { recovery: await bao.initialize(command.body.publicKey) }); return;
@@ -240,7 +255,9 @@ const server = createServer({ requestTimeout: 10000 }, (request, response) => {
       }
       default: reply(404, null);
     }
-  })().catch(() => reply(503, replyError));
+  })().catch((error: unknown) => reply(503, request.url === '/identity'
+    ? { message: error instanceof SharedIdentityWorkerError ? error.message : 'The identity operation could not read or write OpenBao or Keycloak.' }
+    : replyError));
 });
 
 // Railway private networking can be IPv6-only on existing environments.

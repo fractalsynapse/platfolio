@@ -964,6 +964,7 @@ paths:
     post:
       operationId: applyInstanceHostingPlan
       summary: Apply the stored plan with the bound hosting provider
+      description: The response waits for provider verification and can take several minutes. Retry the same plan after a dropped connection.
       security: [{ bearerJwt: [] }]
       responses:
         '200':
@@ -2096,6 +2097,34 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /api/v1/instances/{instanceId}/capability/identity:
+    parameters:
+      - { name: instanceId, in: path, required: true, schema: { type: string, minLength: 1 } }
+    put:
+      operationId: publishSharedIdentityCapability
+      summary: Publish the reviewed Shared Identity output contract
+      description: |
+        Reads the built-in Shared Identity release at the instance's saved source revision. Records output
+        names and kinds. An existing compatible offer retains its recorded placement states. Publishing a
+        declaration does not make a client or place a credential.
+      security: [{ bearerJwt: [] }]
+      responses:
+        '200':
+          description: The identity capability offer.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CapabilityOffer' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '503':
+          description: The pinned Shared Identity source could not be read or verified.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
   /api/v1/instances/{instanceId}/capability/{capability}/shares:
     parameters:
       - { name: instanceId, in: path, required: true, schema: { type: string, minLength: 1 } }
@@ -2260,6 +2289,98 @@ paths:
           $ref: '#/components/responses/Unauthenticated'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/v1/instances/{instanceId}/bindings/identity/intent:
+    parameters:
+      - { name: instanceId, in: path, required: true, schema: { type: string, minLength: 1 } }
+    put:
+      operationId: bindSharedIdentity
+      summary: Select a Shared Identity instance for a consumer
+      description: |
+        Selects the same team's reviewed Shared Identity instance with a compatible offer. The server
+        derives the OIDC destination names for the selected client type. The shared binding record
+        protects the provider from removal. A bound record describes intent and carries no credentials
+        or guarantee of runtime activation.
+      security: [{ bearerJwt: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [providerInstanceId, clientType]
+              properties:
+                providerInstanceId: { type: string, minLength: 1, maxLength: 120 }
+                clientType: { type: string, enum: [public, confidential] }
+      responses:
+        '200':
+          description: The existing or newly recorded dependency and destination names.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BindingRecord' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/v1/instances/{instanceId}/bindings/identity/environments/{environment}:
+    parameters:
+      - { name: instanceId, in: path, required: true, schema: { type: string, minLength: 1 } }
+      - { name: environment, in: path, required: true, schema: { type: string, enum: [production, staging] } }
+    get:
+      operationId: getSharedIdentityClient
+      summary: Read the customer worker's credential placement status
+      security: [{ bearerJwt: [] }]
+      responses: &identity-client-responses
+        '200':
+          description: Client placement metadata. Application sign-in is verified separately.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IdentityClientPlacement' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '503':
+          description: The private worker, OpenBao, pinned release source, Keycloak or Railway could not complete verification.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    put:
+      operationId: placeSharedIdentityClient
+      summary: Register a Keycloak client and deliver its configuration
+      description: Uses the retained identity binding and the destination declarations in the consumer release. The customer can configure the application origins and administration grant inside OpenBao or provide a worker-encrypted initial setup. For a marketplace OCI install, the private worker delivers the configuration to the pinned Railway service and verifies a new deployment before reporting placed. Hosted placement can take several minutes.
+      security: [{ bearerJwt: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [providerEnvironment]
+              properties:
+                providerEnvironment: { type: string, enum: [production, staging] }
+                setup:
+                  type: object
+                  description: Optional initial customer configuration. Seal only the realm manager client ID and secret to the private worker key returned by the owner setup operation.
+                  additionalProperties: false
+                  required: [issuer, redirectUri, realmGrant]
+                  properties:
+                    issuer: { type: string, minLength: 1, maxLength: 1024 }
+                    redirectUri: { type: string, minLength: 1, maxLength: 1024 }
+                    realmGrant: { type: string, minLength: 512, maxLength: 512, pattern: '^[a-zA-Z0-9+/=]+$' }
+      responses: *identity-client-responses
+    delete:
+      operationId: revokeSharedIdentityClient
+      summary: Disable the issued client and remove its credential placement
+      description: Disables the exact client, clears the runtime configuration for a marketplace OCI install, and removes its OpenBao placement before releasing the environment reservation. The consumer binding remains until explicitly detached. Hosted revocation can take several minutes.
+      security: [{ bearerJwt: [] }]
+      responses: *identity-client-responses
 
   /api/v1/instances/{instanceId}/consumers:
     parameters:
@@ -3064,7 +3185,7 @@ paths:
       security: [{ bearerJwt: [] }]
       responses:
         '200':
-          description: Current readiness and the worker public encryption key. The Railway connection requires a usable or refreshable authorization.
+          description: Current readiness and the worker public encryption key. The Railway connection requires a usable or refreshable authorization. Older OpenBao policies can be updated separately from normal vault setup.
           content:
             application/json:
               schema:
@@ -3076,6 +3197,7 @@ paths:
                   railway: { type: string, enum: [connect, connected] }
                   workerKey: { type: string }
                   canWipeData: { type: boolean }
+                  identityPolicyNeedsRecovery: { type: boolean }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -3122,7 +3244,7 @@ paths:
       - { name: teamId, in: path, required: true, schema: { type: string } }
     post:
       operationId: unlockStarterOpenBao
-      summary: Unlock OpenBao with recovery material encrypted to the customer worker
+      summary: Restore OpenBao readiness with recovery material encrypted to the customer worker
       security: [{ bearerJwt: [] }]
       requestBody:
         required: true
@@ -3350,6 +3472,14 @@ components:
           example: 'Bearer realm="platfolio", error="invalid_token"'
 
   schemas:
+    IdentityClientPlacement:
+      # GENERATED by scripts/gen-api-spec.ts from IdentityClientPlacementSchema (packages/contracts). Do not hand-edit: pnpm run spec:check fails on a difference, and the prose lives in packages/api-contract/src/spec-annotations.ts.
+      type: object
+      required: [state]
+      properties:
+        state: { type: string, enum: [unconfigured, pending, placed, revoked] }
+        clientId: { type: string, pattern: '^[A-Za-z0-9_-]+$', minLength: 1, maxLength: 128 }
+      additionalProperties: false
     MarketplacePlatformCreation:
       # GENERATED by scripts/gen-api-spec.ts from MarketplacePlatformCreationSchema (packages/contracts). Do not hand-edit: pnpm run spec:check fails on a difference, and the prose lives in packages/api-contract/src/spec-annotations.ts.
       type: object

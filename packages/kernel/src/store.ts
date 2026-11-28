@@ -108,6 +108,7 @@ export class StoreService extends Service<z.infer<typeof StoreConfigSchema>> {
   listIdentities(...args: Parameters<Store['listIdentities']>) { return this.inner.listIdentities(...args); }
   getPersonByIdentity(...args: Parameters<Store['getPersonByIdentity']>) { return this.inner.getPersonByIdentity(...args); }
   publishCapability(...args: Parameters<Store['publishCapability']>) { return this.inner.publishCapability(...args); }
+  ensureCapabilityOffer(...args: Parameters<Store['ensureCapabilityOffer']>) { return this.inner.ensureCapabilityOffer(...args); }
   getCapabilityOffer(...args: Parameters<Store['getCapabilityOffer']>) { return this.inner.getCapabilityOffer(...args); }
   listCapabilityOffers(...args: Parameters<Store['listCapabilityOffers']>) { return this.inner.listCapabilityOffers(...args); }
   shareCapability(...args: Parameters<Store['shareCapability']>) { return this.inner.shareCapability(...args); }
@@ -115,10 +116,14 @@ export class StoreService extends Service<z.infer<typeof StoreConfigSchema>> {
   listCapabilityShares(...args: Parameters<Store['listCapabilityShares']>) { return this.inner.listCapabilityShares(...args); }
   availableOffersForTeam(...args: Parameters<Store['availableOffersForTeam']>) { return this.inner.availableOffersForTeam(...args); }
   bindCapability(...args: Parameters<Store['bindCapability']>) { return this.inner.bindCapability(...args); }
+  ensureCapabilityBinding(...args: Parameters<Store['ensureCapabilityBinding']>) { return this.inner.ensureCapabilityBinding(...args); }
   getBinding(...args: Parameters<Store['getBinding']>) { return this.inner.getBinding(...args); }
   listBindings(...args: Parameters<Store['listBindings']>) { return this.inner.listBindings(...args); }
   listConsumers(...args: Parameters<Store['listConsumers']>) { return this.inner.listConsumers(...args); }
   unbindCapability(...args: Parameters<Store['unbindCapability']>) { return this.inner.unbindCapability(...args); }
+  reserveIdentityClient(...args: Parameters<Store['reserveIdentityClient']>) { return this.inner.reserveIdentityClient(...args); }
+  getIdentityClient(...args: Parameters<Store['getIdentityClient']>) { return this.inner.getIdentityClient(...args); }
+  releaseIdentityClient(...args: Parameters<Store['releaseIdentityClient']>) { return this.inner.releaseIdentityClient(...args); }
   createInvitation(...args: Parameters<Store['createInvitation']>) { return this.inner.createInvitation(...args); }
   getInvitation(...args: Parameters<Store['getInvitation']>) { return this.inner.getInvitation(...args); }
   listInvitations(...args: Parameters<Store['listInvitations']>) { return this.inner.listInvitations(...args); }

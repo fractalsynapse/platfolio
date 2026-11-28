@@ -17,8 +17,16 @@ const recoveryPolicy = `path "${recoveryAttempt}" { capabilities = ["create", "r
 const path = 'customer-launch/data/railway';
 const marketplacePath = 'customer-launch/data/marketplace';
 const clientPath = 'customer-launch/data/railway-client';
+const identityPath = 'customer-launch/data/identity/';
 const workerPolicy = [path, marketplacePath, clientPath].map((entry) =>
-  `path "${entry}" { capabilities = ["create", "read", "update"] }`).join('\n');
+  `path "${entry}" { capabilities = ["create", "read", "update"] }`).concat([
+  `path "${identityPath}providers/*" { capabilities = ["create", "read"] }`,
+  `path "${identityPath}consumers/*" { capabilities = ["read"] }`,
+  `path "${identityPath}inputs/*" { capabilities = ["create", "read"] }`,
+  `path "${identityPath}state/*" { capabilities = ["create", "read", "update"] }`,
+  `path "${identityPath}clients/*" { capabilities = ["create", "read", "update"] }`,
+  'path "customer-launch/metadata/identity/clients/*" { capabilities = ["delete"] }',
+]).join('\n');
 const settings = { padding: constants.RSA_PKCS1_OAEP_PADDING, oaepHash: 'sha256' };
 
 function privateOpenBaoRequest(origin: string) {
@@ -64,6 +72,14 @@ export function customerOpenBao(origin: string, secretId: string, directory: str
     const reply = await request<{ auth?: { client_token?: string } }>('auth/approle/login', { role_id: policy, secret_id: secretId });
     return reply.ok ? reply.data?.auth?.client_token : undefined;
   }
+  async function identityPolicyReady(token: string) {
+    // The reserved path holds no data. A 404 proves the worker may read this part of the mount.
+    const reply = await request(identityPath + 'inputs/_policy_check/staging', undefined, token);
+    if (reply.status === 403) return false;
+    if (reply.status !== 404) throw new Error('OpenBao did not return an empty policy check path');
+    return true;
+  }
+
   async function status(): Promise<BaoState> {
     try {
       const state = await health();
@@ -136,7 +152,12 @@ export function customerOpenBao(origin: string, secretId: string, directory: str
       }
       await waitForActiveStorage();
       if (!await serviceToken()) await configure(data.bootstrap, [data.shares[0]!, data.shares[1]!, data.shares[2]!]);
-      if (!await serviceToken()) throw new Error('OpenBao did not authorize the worker');
+      const token = await serviceToken();
+      if (!token) throw new Error('OpenBao did not authorize the worker');
+      if (!await identityPolicyReady(token)) {
+        await restoreOpenBaoLauncherPolicy(origin, [data.shares[0]!, data.shares[1]!]);
+        if (!await identityPolicyReady(token)) throw new Error('OpenBao did not authorize the worker’s identity paths');
+      }
       const root = await request('auth/token/lookup-self', undefined, data.bootstrap);
       if (root.ok && !(await request('auth/token/revoke-self', {}, data.bootstrap)).ok) throw new Error('OpenBao did not retire the bootstrap credential');
     } finally { changing = false; }
@@ -151,21 +172,45 @@ export function customerOpenBao(origin: string, secretId: string, directory: str
     return { version: stored.data.data.metadata.version, grant: stored.data.data.data };
   }
 
-  async function write(key: string, grant: RailwayGrant | MarketplaceGrant | RailwayOAuthClient, version: number) {
+  async function write(key: string, grant: object, version: number) {
     const token = await serviceToken();
     if (!token || !(await request(key, { options: { cas: version }, data: grant }, token)).ok) {
       throw new Error('OpenBao could not save the provider grant');
     }
   }
 
+  function identityKey(kind: 'providers' | 'consumers' | 'inputs' | 'state' | 'clients', id: string, environment: string) {
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(id) || !['production', 'staging'].includes(environment)) {
+      throw new Error('The identity binding did not match a customer environment');
+    }
+    return `${kind}/${id}/${environment}`;
+  }
+
   return {
     publicKey, status, initialize, unlock, openEnvelope,
+    async identityPolicyNeedsRecovery() {
+      const token = await serviceToken();
+      return token !== undefined && !await identityPolicyReady(token);
+    },
     readGrant: () => read<RailwayGrant>(path),
     writeGrant: (grant: RailwayGrant, version: number) => write(path, grant, version),
     readRailwayClient: () => read<RailwayOAuthClient>(clientPath),
     writeRailwayClient: (client: RailwayOAuthClient, version: number) => write(clientPath, client, version),
     readMarketplaceGrant: () => read<MarketplaceGrant>(marketplacePath),
     writeMarketplaceGrant: (grant: MarketplaceGrant, version: number) => write(marketplacePath, grant, version),
+    identity: {
+      read: <T>(kind: 'providers' | 'consumers' | 'inputs' | 'state' | 'clients', id: string, environment: string) =>
+        read<T>(identityPath + identityKey(kind, id, environment)),
+      write: (kind: 'providers' | 'inputs' | 'state' | 'clients', id: string, environment: string, value: object, version: number) =>
+        write(identityPath + identityKey(kind, id, environment), value, version),
+      async deleteClient(id: string, environment: string) {
+        const token = await serviceToken();
+        const key = identityKey('clients', id, environment);
+        if (!token) throw new Error('Unlock OpenBao before revoking an identity client');
+        const removed = await request('customer-launch/metadata/identity/' + key, undefined, token, 'DELETE');
+        if (!removed.ok && removed.status !== 404) throw new Error('OpenBao could not remove the identity placement');
+      },
+    },
   };
 }
 

@@ -8,7 +8,7 @@
  * surface, so every version bump would classify as a REMOVED declaration and the drift gate would
  * demand a breaking ack for its own arithmetic.
  *
- * Derived from the baseline digest `33300baf3b8b6cac`.
- * MAJOR 7.4.0 -> 8.0.0 (surface diff: 4 removed, 4 widened, 59 added, 0 reordered); acknowledged: The worker and provider contract now accepts a source-free OCI receipt, with a separate OpenAPI operation preserving Git-backed acquisitions and existing pins.
+ * Derived from the baseline digest `b2d843245058dd37`.
+ * MINOR 8.3.0 -> 8.4.0 (surface diff: 0 removed, 0 widened, 1 added, 0 reordered)
  */
-export const CONTRACT_VERSION: string = '8.0.0';
+export const CONTRACT_VERSION: string = '8.4.0';

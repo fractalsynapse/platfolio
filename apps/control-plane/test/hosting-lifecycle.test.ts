@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { IncomingMessage } from 'node:http';
+import { Socket } from 'node:net';
 import { createIdentityFixture, defaultIdentityConfig, FakeInfraProvider, samplePlan, signToken, type InfraPlan } from '@platfolio/contracts';
 import { createKernel, disposeKernel } from '@platfolio/kernel';
 import { buildCapabilities } from '../src/capabilities.ts';
@@ -42,6 +44,18 @@ test('an additional hosting plugin runs a stored instance lifecycle through the 
   assert.equal((await request(base + '/hosting/apply', 'POST')).status, 400);
   assert.equal((await request(base + '/plan', 'PUT', { plan })).status, 200);
   assert.equal((await request(base + '/hosting/apply', 'POST', undefined, 'outsider')).status, 404);
+
+  const raw = new IncomingMessage(new Socket());
+  const setTimeout = t.mock.method(raw, 'setTimeout', () => raw);
+  const path = base + '/hosting/apply';
+  const dispatch = (subject: string) => ctx.server.dispatch({
+    method: 'POST', path, url: path, query: new URLSearchParams(), body: undefined, raw,
+    headers: { authorization: 'Bearer ' + signToken(identity, { subject, scope: 'platfolio.user' }) },
+  });
+  assert.equal((await dispatch('outsider')).status, 404);
+  assert.equal(setTimeout.mock.callCount(), 0);
+  assert.equal((await dispatch('owner')).status, 200);
+  assert.deepEqual(setTimeout.mock.calls.map(({ arguments: args }) => args), [[725_000]]);
 
   const applied = await request(base + '/hosting/apply', 'POST');
   assert.equal(applied.status, 200, await applied.clone().text());

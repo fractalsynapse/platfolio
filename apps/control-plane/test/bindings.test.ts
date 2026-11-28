@@ -6,6 +6,7 @@ import { createKernel, disposeKernel, type KernelContext } from '@platfolio/kern
 import { buildCapabilities } from '../src/capabilities.ts';
 import { createIdentityFixture, defaultIdentityConfig, reasonOf, signToken, type StoreResult } from '@platfolio/contracts';
 import { loadSpec, validateResponse, type SpecDocument } from '@platfolio/api-contract';
+import { SHARED_IDENTITY_RELEASE, templateCatalogEntry } from '@platfolio/manifest';
 
 const spec: SpecDocument = loadSpec(fs.readFileSync(path.resolve(import.meta.dirname, '../openapi.yaml'), 'utf8'));
 const fixture = createIdentityFixture();
@@ -21,6 +22,7 @@ async function start() {
   const ctx = await createKernel({
     provider: 'fake', custody: 'strict', identity: defaultIdentityConfig(fixture), identityKeys: [fixture.jwk],
     store: { driver: 'memory' }, server: { port: 0 },
+    ...(process.env.PLATFOLIO_LIVE_GIT === '1' ? { scm: { driver: 'git' as const } } : {}),
     extensions: buildCapabilities({ build }), requiredServices: ['identity', 'server', 'store', 'extensions'],
   });
   const base = () => `http://127.0.0.1:${String(ctx.server.address.port)}`;
@@ -44,12 +46,10 @@ async function start() {
 }
 
 test('the binding route table is declared and matches the document', () => {
-  const ops = ['listAvailableCapabilities', 'publishCapability', 'shareCapability', 'revokeCapabilityShare', 'listBindings', 'bindCapability', 'unbindCapability', 'listConsumers'];
-  const declared = new Set(ops);
-  for (const op of declared) {
-    assert.ok(ops.includes(op));
-  }
-  assert.equal(ops.length, 8, 'eight binding operations, matching the eight routes the capability registers');
+  const routes = buildCapabilities({ build }).filter(({ id }) => id === 'bindings' || id === 'shared-identity-binding')
+    .flatMap(({ routes }) => routes ?? []);
+  assert.equal(routes.length, 10);
+  for (const { method, path, operationId } of routes) assert.equal(spec.paths?.[path]?.[method.toLowerCase()]?.operationId, operationId);
 });
 
 test('in-team sharing works, and both sides can see the dependency', async () => {
@@ -191,4 +191,123 @@ test('binding routes honour team scope: an outsider gets 404 and learns nothing'
   } finally {
     await disposeKernel(app.ctx);
   }
+});
+
+test('Shared Identity publishes the pinned contract and records a credential-free local dependency', async (t) => {
+  const app = await start();
+  t.after(() => disposeKernel(app.ctx));
+  const { store, scm } = app.ctx;
+  const release = SHARED_IDENTITY_RELEASE;
+  const template = templateCatalogEntry(release.template);
+  const owner = must(await store.resolvePerson({ issuer: fixture.issuer, subject: 'user-conformance' }), 'owner');
+  const team = must(await store.createTeam({ name: 'private-workspace' }), 'team');
+  must(await store.putTeamMember({ teamId: team.id, personId: owner.person.id, role: 'owner' }), 'membership');
+  const source = { repo: template.repo, commitSha: release.revision };
+  const provider = must(await store.createInstance({ teamId: team.id, name: 'shared-identity', template: release.template, templateRef: source, provider: 'fake' }), 'provider');
+  const consumer = must(await store.createInstance({ teamId: team.id, name: 'starter-web', template: 'starter-web' }), 'consumer');
+  const otherTeam = must(await store.createTeam({ name: 'other-workspace' }), 'other team');
+  const otherProvider = must(await store.createInstance({ teamId: otherTeam.id, name: 'shared-identity', template: release.template, templateRef: source }), 'foreign provider');
+
+  const compose = `
+name: shared-identity
+services:
+  keycloak:
+    image: ${release.image.split('@')[0]}
+    command: ["start"]
+    expose: ["8080"]
+    x-platfolio: { public: true }
+x-platfolio:
+  metadata:
+    name: shared-identity
+    version: "${release.version}"
+    title: Shared Identity
+    summary: An application identity provider.
+    kind: web
+    mode: hosted
+  provides:
+    name: identity
+    outputs:
+      - { output: issuer, kind: url }
+      - { output: jwks_uri, kind: url }
+      - { output: client_id, kind: value }
+      - { output: client_secret, kind: secret }
+  resources:
+    database: { name: keycloak-db, kind: postgres }
+  environments:
+    production: { enabled: true, branch: main }
+    staging: { enabled: false }
+    preview: { enabled: false }
+`;
+  const inventory = `
+variables:
+  - { name: KC_BOOTSTRAP_ADMIN_PASSWORD, kind: secret, secret: true, service: keycloak, environments: all }
+`;
+  if (process.env.PLATFOLIO_LIVE_GIT !== '1') {
+    t.mock.method(scm, 'readFile', async (file: Parameters<typeof scm.readFile>[0]) => {
+      assert.deepEqual({ repo: file.repo, commitSha: file.ref }, source);
+      const content = file.path === 'compose.yaml' ? compose : inventory;
+      return { path: file.path, sha: 'b'.repeat(40), size: Buffer.byteLength(content), content };
+    });
+  }
+
+  const providerPath = '/api/v1/instances/' + provider.id;
+  const offerPath = providerPath + '/capability/identity';
+  const intentPath = '/api/v1/instances/' + consumer.id + '/bindings/identity/intent';
+  const publicClient = { providerInstanceId: provider.id, clientType: 'public' };
+  const request = (input: object) => app.call(intentPath, { method: 'PUT', body: JSON.stringify(input) });
+  const denied = await request({ ...publicClient, providerInstanceId: otherProvider.id });
+  assert.equal(denied.status, 404);
+  assert.ok(!denied.text.includes(otherProvider.id));
+  assert.equal((await app.call(offerPath, { method: 'PUT' }, 'outsider')).status, 404);
+  assert.equal((await app.call(offerPath, { method: 'PUT', headers: { authorization: '' } })).status, 401);
+  assert.equal((await request(publicClient)).status, 409);
+
+  const offer = await app.call(offerPath, { method: 'PUT' });
+  assert.equal(offer.status, 200, offer.text);
+  app.againstSpec('publishSharedIdentityCapability', 200, offer.body);
+  const offerRecord = must(await store.getCapabilityOffer(provider.id, 'identity'), 'recorded offer');
+  assert.equal(offerRecord.outputs.length, 4);
+  assert.ok(offerRecord.outputs.every((output) => output.state === 'not-issued'));
+  const incomplete = offerRecord.outputs.filter(({ output }) => output !== 'client_id');
+  must(await store.publishCapability({ ...offerRecord, outputs: incomplete }), 'publish an incomplete manual offer');
+  assert.equal((await request(publicClient)).status, 409);
+  assert.equal((await app.call(offerPath, { method: 'PUT' })).status, 409);
+  assert.deepEqual(must(await store.getCapabilityOffer(provider.id, 'identity'), 'retained manual offer').outputs, incomplete);
+  const placedOutputs = offerRecord.outputs.map((output) => ({ ...output, state: 'issued-and-placed' as const }));
+  must(await store.publishCapability({ ...offerRecord, outputs: placedOutputs }), 'record placement');
+  const retained = await app.call(offerPath, { method: 'PUT' });
+  assert.equal(retained.status, 200, retained.text);
+  assert.deepEqual((retained.body as typeof offerRecord).outputs, placedOutputs);
+
+  const secret = 'binding-credential-must-never-be-reflected';
+  const rejected = await request({ ...publicClient, clientSecret: secret });
+  assert.equal(rejected.status, 400);
+  assert.ok(!rejected.text.includes(secret));
+  const first = await request(publicClient);
+  assert.equal(first.status, 200, first.text);
+  app.againstSpec('bindSharedIdentity', 200, first.body);
+  const binding = must(await store.getBinding(consumer.id, 'identity'), 'recorded binding');
+  assert.deepEqual(binding.destinations, [
+    { output: 'issuer', into: ['OIDC_ISSUER'] },
+    { output: 'jwks_uri', into: ['OIDC_JWKS_URI'] },
+    { output: 'client_id', into: ['OIDC_CLIENT_ID'] },
+  ]);
+  const retry = await request(publicClient);
+  assert.equal(retry.status, 200, retry.text);
+  assert.deepEqual(retry.body, first.body);
+  assert.equal((await request({ ...publicClient, clientType: 'confidential' })).status, 409);
+  assert.equal((await store.listConsumers(provider.id)).length, 1);
+  assert.equal((await app.call(providerPath, { method: 'DELETE' })).status, 409);
+  assert.equal((await app.call(providerPath + '/hosting/removal', { method: 'POST', body: JSON.stringify({ data: 'keep' }) })).status, 409);
+  assert.equal((await store.getInstance(provider.id)).ok, true);
+
+  const removed = await app.call(intentPath.replace(/\/intent$/, ''), { method: 'DELETE' });
+  assert.equal(removed.status, 204);
+  assert.equal((await store.listConsumers(provider.id)).length, 0);
+  assert.equal((await request({ ...publicClient, clientType: 'confidential' })).status, 200);
+  const confidential = must(await store.getBinding(consumer.id, 'identity'), 'confidential binding');
+  assert.deepEqual(confidential.destinations.at(-1), { output: 'client_secret', into: ['OIDC_CLIENT_SECRET'] });
+  const audit = await store.recentAudit();
+  assert.ok(audit.some((entry) => entry.action === 'capability.bind' && entry.target === consumer.id));
+  assert.ok(!JSON.stringify(audit).includes(secret));
 });

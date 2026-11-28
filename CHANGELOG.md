@@ -5,6 +5,37 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+### Fixed — compatibility during a private worker rollout (#288)
+
+The Shared Identity policy status is requested by the control plane. Existing APIs can continue
+to read setup from an updated worker. An updated API also accepts the original setup response
+from an older worker.
+
+### Fixed — allow provider verification to finish over HTTP (#288)
+
+Authorized hosting apply and Shared Identity placement and revocation allow the private worker
+to finish verification after the default 30-second socket timeout would have closed the request.
+
+### Added — Shared Identity delivery to pinned Railway installs (#288)
+
+The private worker can deliver OpenBao’s client configuration to the verified web service in a
+Marketplace OCI install. Placement and revocation verify a new deployment of the same image pin.
+Owners can encrypt an initial application realm manager grant to the private worker instead of
+writing it directly to OpenBao.
+
+### Added — customer-side Shared Identity client placement (#288)
+
+Private installations can register a per-environment Keycloak client and place its configuration in
+customer OpenBao. Retries retain the registered client. A pending or placed client protects the
+original binding until the worker verifies revocation. Owners can apply the updated worker policy
+through the encrypted recovery flow in Connections.
+
+### Added — Shared Identity binding intent (#288)
+
+Teams can publish the reviewed Shared Identity release's output contract and record a same-team
+consumer binding through the API. The existing dependency record protects the provider from
+removal. Client registration and credential placement follow in Phase 2.
+
 ### Fixed — Railway reconnection in private installations (#288)
 
 - Show the Railway connection action when the worker can no longer use or refresh its saved grant.

@@ -77,6 +77,15 @@ export function StarterLaunchSetup({ teamId, setup, refresh }: { readonly teamId
     globalThis.location.assign(url.href);
   }
 
+  const ownerRecoveryInput = <input type="file" accept=".json" disabled={pending} onChange={(event) => {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = '';
+    if (file) void run(async () => {
+      if (file.size > 300) throw new Error('Invalid recovery file');
+      await unlockWith(await file.arrayBuffer());
+    });
+  }} />;
+
   return <>
     <section className="ui-setup-panel" aria-labelledby="setup-openbao-title">
       <div className="ui-workspace-heading">
@@ -85,6 +94,8 @@ export function StarterLaunchSetup({ teamId, setup, refresh }: { readonly teamId
       </div>
       <p>OpenBao keeps app credentials in your Railway project. Keep your recovery file private so you can unlock it after a restart.</p>
       {setup.openBao === 'unreachable' && <p>Check the private OpenBao service and try again.</p>}
+      {setup.openBao === 'ready' && setup.identityPolicyNeedsRecovery &&
+        <p><label>Enable Shared Identity with your saved recovery file {ownerRecoveryInput}</label></p>}
       {setup.openBao !== 'ready' && setup.openBao !== 'unreachable' && <>
         {setup.openBao === 'uninitialized' && phase === 'key' && <>
           <p>Save the owner key first. It lets you retrieve your recovery file if you leave this page during setup.</p>
@@ -103,8 +114,7 @@ export function StarterLaunchSetup({ teamId, setup, refresh }: { readonly teamId
         {setup.openBao !== 'uninitialized' && <>
           {phase === 'key' && <p><label>Retrieve recovery file with your owner key <input type="file" accept=".json" disabled={pending}
             onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ''; if (file) void run(() => restoreKey(file)); }} /></label></p>}
-          <label>Unlock with your saved recovery file <input type="file" accept=".json" disabled={pending}
-            onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ''; if (file) void run(async () => { if (file.size > 300) throw new Error('Invalid recovery file'); await unlockWith(await file.arrayBuffer()); }); }} /></label>
+          <label>Unlock with your saved recovery file {ownerRecoveryInput}</label>
         </>}
       </>}
     </section>

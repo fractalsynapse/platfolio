@@ -35,7 +35,7 @@ const command = <const Action extends string, Body extends z.ZodType>(action: Ac
 
 export const CustomerHostingCommandSchema = z.discriminatedUnion('action', [
   command('report', empty),
-  command('setup', empty),
+  command('setup', z.object({ identityPolicy: z.literal(true).optional() }).strict().optional()),
   command('start', z.object(selectedRelease).strict().optional()),
   command('template-report', z.object({ template: PrivateLaunchTemplateSchema }).strict()),
   command('template-start', z.discriminatedUnion('template', [

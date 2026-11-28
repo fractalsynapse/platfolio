@@ -43,6 +43,9 @@ advertising that hosting option. [Railway private registry requirements](https:/
 
 ## Phase 2 — Service binding and optional federation
 
+The [Phase 2 implementation plan](21-shared-services-phase-two.md) orders the local API,
+customer-side execution, hosted acceptance, and optional identity work.
+
 Connect a consumer to Shared Identity through its private installation. Verify actual sign-in,
 credential placement under customer custody, revocation, and dependent-removal protection. Measure
 connectivity between provider projects before selecting how private services communicate.

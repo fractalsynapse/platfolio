@@ -800,3 +800,42 @@ test('a bound staging launch uses the platform name and can add production witho
   assert.deepEqual([...mock.environments.values()].map(({ name }) => name).sort(), ['production', 'staging']);
   assert.equal(mock.projects.size, 1);
 });
+
+test('identity delivery and revocation only change the approved web service and keep its release pin', async () => {
+  const plan = planWith((input) => {
+    for (const environment of input.environments) {
+      environment.services[0]!.name = 'web';
+      environment.domains = [{ host: 'web.example.test', service: 'web', port: 8080, verificationName: 'test-proof' }];
+    }
+  });
+  const mock = new RailwayMock();
+  const image = IMAGE + '@' + DIGEST;
+  const provider = new RailwayInfraProvider({ credentials: mock, transport: mock, workspaceId: 'ws-1',
+    project: { instanceId: plan.instanceId, name: 'identity-delivery' },
+    registryCredentials: (requested) => requested === image ? { username: 'fixture', password: 'pull-ticket' } : undefined,
+    deployBudget: 20, deployTimeoutMs: 2_000, pollIntervalMs: 1, sleep: async () => {} });
+  const applied = await provider.applyPlan(plan);
+  assert.deepEqual(applied.failures, []);
+  const scope = { instanceId: plan.instanceId, environment: 'staging', image, planHash: plan.planHash, callback: 'https://web.example.test/auth/callback' };
+  const variables = { OIDC_ISSUER: 'https://identity.example.test/realms/apps', OIDC_JWKS_URI: 'https://identity.example.test/certs',
+    OIDC_CLIENT_ID: 'fixture', OIDC_REDIRECT_URI: scope.callback, OIDC_CLIENT_SECRET: 'issued-for-this-binding' };
+  const staging = mock.instances.get(environmentId(mock, 'staging') + ':' + serviceByNames(mock, 'web-staging')!.id)!;
+  const production = mock.instances.get(environmentId(mock, 'production') + ':' + serviceByNames(mock, 'web-production')!.id)!;
+  staging.variables.add('DATABASE_URL');
+  production.variables.add('OIDC_CLIENT_SECRET');
+  await assert.rejects(provider.configureIdentityClient({ ...scope, planHash: 'wrong', variables }), /pinned plan/);
+  await assert.rejects(provider.configureIdentityClient({ ...scope, image: IMAGE, variables }), /running image/);
+  await assert.rejects(provider.configureIdentityClient({ ...scope, callback: 'https://elsewhere.example.test/auth/callback', variables }), /callback/);
+  await assert.rejects(provider.configureIdentityClient({ ...scope, variables: { ...variables, DATABASE_URL: 'wrong' } }), /Invalid OIDC/);
+  assert.equal(mock.operations.filter((operation) => operation.startsWith('variableCollectionUpsert')).length, 0);
+  await provider.configureIdentityClient({ ...scope, variables });
+  assert.ok(Object.keys(variables).every((key) => staging.variables.has(key)));
+  assert.ok(mock.writtenVariables.filter(({ name }) => name.startsWith('OIDC_')).every(({ skipDeploys }) => skipDeploys));
+  await provider.configureIdentityClient(scope);
+  assert.ok(Object.keys(variables).every((key) => !staging.variables.has(key)));
+  assert.ok(staging.variables.has('DATABASE_URL'));
+  assert.ok(production.variables.has('OIDC_CLIENT_SECRET'));
+  assert.equal(staging.image, image);
+  assert.equal(production.image, image);
+  assert.ok(!mock.operations.some((operation) => operation.startsWith('variables:')));
+});
