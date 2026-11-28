@@ -5,8 +5,9 @@ import {
 } from '@platfolio/contracts';
 import { RepositoryReadError } from '@platfolio/contracts';
 import { ScmNotConfiguredError } from '@platfolio/kernel';
-import { buildPlan, enabledEnvironments, FREE_STARTER_RELEASE, MARKETPLACE_RELEASES, SHARED_IDENTITY_RELEASE, STARTER_WORKER_RELEASE, marketplaceCatalog, marketplaceInstaller, parseCompose, readTemplate, templateCatalogEntry, validateIdentitySource, validateStarterSource, validateWorkerSource } from '@platfolio/manifest';
+import { buildPlan, enabledEnvironments, FREE_STARTER_RELEASE, MARKETPLACE_RELEASES, SHARED_IDENTITY_RELEASE, STARTER_WORKER_RELEASE, marketplaceCatalog, marketplaceInstaller, parseCompose, parseComposeDeploymentConfiguration, readTemplate, templateCatalogEntry, validateManifest, validateIdentitySource, validateStarterSource, validateWorkerSource } from '@platfolio/manifest';
 import type { RequestBodyOf } from '@platfolio/api-contract/generated/types';
+import { validateRequestBody } from '@platfolio/api-contract';
 import type { ExtensionDescriptor, KernelContext, Request, Response_, RouteDefinition } from '@platfolio/kernel';
 import { ArtifactRecordSchema, InfraPlanSchema, secretWriteScope } from '@platfolio/contracts';
 import type { customerLaunch } from './customer-launch.ts';
@@ -16,7 +17,7 @@ import { listNotificationMatches } from './notification-rules.ts';
 import type { NotificationDirectory } from './notification-directory.ts';
 import { notificationEmail } from './notification-email.ts';
 import type { StarterLaunch } from './starter-launch.ts';
-import { badRequest, bearerToken, notFound, send, unauthorized } from './respond.ts';
+import { badRequest, bearerToken, notFound, send, spec, unauthorized } from './respond.ts';
 import { installationLaunch } from './installation-launch.ts';
 import { hostingLifecycle } from './hosting-lifecycle.ts';
 import { platformCatalog } from './platform-catalog.ts';
@@ -538,7 +539,16 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
           return badRequest('Choose staging, production, or both.');
         }
         const mainPath = body.value?.path ?? 'compose.yaml';
-        const overlayPath = body.value?.overlayPath ?? 'compose.prod.yaml';
+        let configuration: ReturnType<typeof parseComposeDeploymentConfiguration> | undefined;
+        if (body.value?.configuration !== undefined) {
+          if (!validateRequestBody(spec(), 'registerPlanFromRepository', body.value).ok) return badRequest('Supply valid separate deployment configuration.');
+          try {
+            configuration = parseComposeDeploymentConfiguration(body.value.configuration);
+          } catch {
+            return badRequest('Supply valid separate deployment configuration.');
+          }
+        }
+        const overlayPath = body.value?.overlayPath ?? (configuration ? undefined : 'compose.prod.yaml');
 
         const files: { path: string; blobSha: string; size: number }[] = [];
         const docs: string[] = [];
@@ -549,7 +559,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
           // A missing overlay is a legitimate state: every service may already carry its own digest. Any
           // OTHER read failure is not, and propagates -- "it is not there" and "we could not read it" send an
           // operator to different places, which is the whole lesson of #130.
-          try {
+          if (overlayPath !== undefined) try {
             const overlay = await scope.context.scm.readFile({ repo: pinned.repo, ref: pinned.commitSha, path: overlayPath });
             docs.push(overlay.content);
             files.push({ path: overlay.path, blobSha: overlay.sha, size: overlay.size });
@@ -572,7 +582,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
         // services still require a committed digest, because nobody's pipeline compiles them.
         const artifacts = await scope.context.store.listArtifacts(id);
         const byService = new Map(artifacts.map((a) => [a.service, `${a.image}@${a.digest}` as const]));
-        const parsed = parseCompose(docs, { resolveArtifact: (service) => byService.get(service) });
+        const parsed = parseCompose(docs, { resolveArtifact: (service) => byService.get(service), ...(configuration ? { configuration } : {}) });
         if (!parsed.manifest) {
           return {
             status: 400,
@@ -581,11 +591,18 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
               // Quoted from the renderer rather than paraphrased: it already names the service and the reason
               // (#84's unpinned refusal is the one an operator most needs to read unchanged), and a second
               // voice between a tenant and that reason is how a message becomes a guess.
-              message: parsed.issues.map((issue) => `${issue.path}: ${issue.message}`).join('; ').slice(0, 500),
+              message: parsed.issues.map((issue) => `${issue.path}: ${configuration ? issue.code : issue.message}`).join('; ').slice(0, 500),
             },
           };
         }
 
+        if (configuration) {
+          const deploymentIssues = validateManifest(parsed.manifest);
+          if (deploymentIssues.length) {
+            return { status: 400, body: { error: 'manifest-invalid',
+              message: deploymentIssues.map(({ path, code }) => `${path}: ${code}`).join('; ').slice(0, 500) } };
+          }
+        }
         const enabled = enabledEnvironments(parsed.manifest);
         const disabled = selected?.find((name) => !enabled.includes(name));
         if (disabled) return badRequest(`Environment "${disabled}" is disabled in the platform manifest.`);

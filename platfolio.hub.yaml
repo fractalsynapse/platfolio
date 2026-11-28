@@ -1,0 +1,36 @@
+# CI owns the hub deployment configuration. Project Compose stays independent of this file.
+platform:
+  metadata:
+    name: platfolio-hub
+    version: 0.6.0
+    title: Platfolio Hub
+    summary: Shared identity, marketplace and private Platfolio launches.
+    kind: web
+    mode: development
+  environments:
+    production: { enabled: false }
+    staging: { enabled: true, branch: staging }
+    preview: { enabled: false }
+  resources:
+    database: { name: main, kind: postgres }
+services:
+  api:
+    hosting:
+      public: true
+      references:
+        - { variable: PLATFOLIO_DB_URL, database: main }
+  site:
+    hosting:
+      public: true
+  identity:
+    hosting:
+      public: true
+      references:
+        - { variable: KC_DB_URL_HOST, database: main, output: PGHOST }
+        - { variable: KC_DB_URL_PORT, database: main, output: PGPORT }
+        - { variable: KC_DB_URL_DATABASE, database: main, output: POSTGRES_DB }
+        - { variable: KC_DB_USERNAME, database: main, output: POSTGRES_USER }
+        - { variable: KC_DB_PASSWORD, database: main, output: POSTGRES_PASSWORD }
+      secrets:
+        - { name: PLATFOLIO_INSTALL_OWNER_PASSWORD, source: preserve }
+        - { name: KC_BOOTSTRAP_ADMIN_PASSWORD, source: preserve }

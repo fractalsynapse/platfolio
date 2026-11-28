@@ -305,3 +305,32 @@ test('entrypoint and command compose into one provider start command, in the ord
   assert.ok(parsed2.manifest, JSON.stringify(parsed2.issues));
   assert.equal(buildPlan(parsed2.manifest!, { instanceId: 'i', teamId: 't' }).environments[0]!.services[0]!.command, '/usr/local/bin/app');
 });
+
+test('plain development Compose and separate settings produce a pinned hosted manifest', () => {
+  const compose = `
+services:
+  api:
+    build: .
+    env_file: .env
+    ports: ["127.0.0.1:8080:8080"]
+    volumes: [".:/app"]
+  debugger:
+    image: debugger:latest
+`;
+  const { manifest, issues } = parseCompose(compose, {
+    configuration: {
+      platform: { metadata: { name: 'plain-compose', version: '1.0.0', title: 'Plain Compose', summary: 'Example project.', kind: 'web', mode: 'hosted' } },
+      omitServices: ['debugger'],
+      services: { api: { unset: ['env_file', 'volumes'], hosting: { public: true, domains: ['api.example.com'] } } },
+    },
+    resolveArtifact: () => `ghcr.io/platfolio-fixtures/api:1.0.0@sha256:${DIGEST_PIN}`,
+  });
+  assert.deepEqual(issues, []);
+  assert.ok(manifest);
+  assert.deepEqual(validateManifest(manifest), []);
+  assert.deepEqual(Object.keys(manifest.spec.services), ['api']);
+  assert.equal(manifest.spec.services.api?.digest, 'sha256:' + DIGEST_PIN);
+  assert.equal(manifest.spec.services.api?.port, 8080);
+  assert.equal(buildPlan(manifest, { instanceId: 'test', teamId: 'test' }).environments[0]?.domains[0]?.host, 'api.example.com');
+  assert.match(compose, /env_file: .env/);
+});

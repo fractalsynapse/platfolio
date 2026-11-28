@@ -13,9 +13,32 @@ copy-pasted environment lists that only work on the day they were written. The m
 product's core IP; the admin UI is derivative. It must be reviewable, diffable and machine-validated
 before any customer-facing feature depends on it.
 
+
+## Separate deployment configuration
+
+A project can keep the Docker Compose files it uses for local development. The hosted parser takes
+the Compose document and a separate Platfolio configuration. CI/CD supplies the configuration for
+the hub. The spoke configuration workflow will supply the same model for applications. Platform
+metadata, exposure, domains, secret references and deployment environments belong in that model.
+Deployment-specific image pins and explicit replacements for development-only settings apply to the
+hosted copy in memory. A provider may reject Compose features it cannot represent and identify which
+settings need attention.
+
+The repository planning operation accepts the separate configuration as YAML or JSON in its
+`configuration` field. The document supplies `platform` settings and an optional service map.
+For each service, `hosting` holds Platfolio settings, `compose` replaces Compose service fields
+for hosting, and `unset` removes development-only fields. Use `omitServices` for development-only
+services. The operation reads the Compose file at the existing source pin and records a plan hash
+over the combined result. The spoke configuration screen and the compiled marketplace recipe
+export remain subsequent work.
+
+The existing embedded `x-platfolio` source stays readable for legacy repositories and release
+receipts. A new publication must bind the effective recipe and image pins to its release descriptor.
+A publication or migration must preserve the previously acquired descriptor, recipe and pins.
+
 ## Format status (D29 — this document is becoming an input adapter)
 
-**Accepted 2026-11-09: Docker Compose is the authoring format** ([13](13-compose-first-and-execution.md)). The
+**Docker Compose is the application authoring format** ([13](13-compose-first-and-execution.md)). The
 schema sketched below stays authoritative as the **intermediate model** — Compose parses into it, the
 renderers, validators and `buildPlan` keep consuming it, and nothing downstream changes. What is superseded is
 the idea that a human authors this YAML directly: a platform's source of truth becomes `compose.yaml` plus an
@@ -23,7 +46,7 @@ the idea that a human authors this YAML directly: a platform's source of truth b
 must land on. Where a field below has a Compose-native equivalent (`image`, `build`, `environment`,
 `healthcheck`, volumes, `depends_on`, limits, replicas), Compose wins and the adapter maps it; where it does
 not (environment placement, ownership, custody sources, identity clients, DNS policy, lifecycle, plan,
-release pinning), it lives under `x-platfolio`.
+release pinning), it lives in the separate configuration or legacy `x-platfolio` block.
 
 ## Design rules
 

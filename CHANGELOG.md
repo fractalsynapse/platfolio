@@ -5,6 +5,13 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+### Added — hub and private installation roles (#288)
+
+The staging hub runs its own Keycloak and OpenBao and is deployed through a dedicated CI workflow.
+OpenAPI restricts hub provisioning to the pinned private Platfolio launcher and gives private
+installations the application deployment operations. The hosted renderer accepts separate deployment
+settings alongside normal Docker Compose.
+
 ### Added — optional private hub sign-in (#288)
 
 A private owner can opt in to a dedicated hub OpenID Connect client. Local members link

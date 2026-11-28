@@ -123,6 +123,8 @@ export interface RailwayProviderOptions {
   project?: { instanceId: string; name: string };
   /** Ephemeral credentials from the private worker, scoped to an exact fully qualified image pin. */
   registryCredentials?: (image: string) => { username: string; password: string } | undefined;
+  /** First-party CI can supply an initial value for a declared, absent provider variable. */
+  initialSecret?: (input: { environment: string; service: string; name: string }) => string | undefined;
   /** Engine kind -> Railway Template code; public catalog entries are read by code (#75). */
   databaseTemplates?: Record<string, string>;
   /**
@@ -162,6 +164,7 @@ export class RailwayInfraProvider implements InfraProvider {
   readonly contract: typeof CONTRACT_VERSION = CONTRACT_VERSION;
 
   private readonly credentials: RailwayCredentialSource;
+  private readonly initialSecret: RailwayProviderOptions['initialSecret'];
   private readonly transport: RailwayTransport;
   private readonly workspaceId: string;
   private readonly project: RailwayProviderOptions['project'];
@@ -179,6 +182,7 @@ export class RailwayInfraProvider implements InfraProvider {
 
   constructor(options: RailwayProviderOptions) {
     this.credentials = options.credentials;
+    this.initialSecret = options.initialSecret;
     this.transport = options.transport ?? new HttpRailwayTransport();
     this.workspaceId = options.workspaceId;
     this.project = options.project;
@@ -367,7 +371,7 @@ export class RailwayInfraProvider implements InfraProvider {
           if (entry.literal === undefined) continue;
           await this.upsertVariable(projectId, environmentId, serviceId, entry.name, entry.literal, token);
         }
-        await this.ensureSecrets(projectId, environmentId, serviceId, service, environment.name, failures);
+        await this.ensureSecrets(projectId, environmentId, serviceId, service, environment.name, failures, token);
 
         // Measured on 2026-11-08: ceilings ARE reachable through `serviceInstanceLimitsUpdate`, even
         // though the IaC graph has no field for them. An earlier revision of this provider reported them
@@ -1352,7 +1356,7 @@ export class RailwayInfraProvider implements InfraProvider {
    * put the value in our memory for no reason, and that is the difference between a claim we can keep and
    * one we cannot.
    */
-  private async ensureSecrets(projectId: string, environmentId: string, serviceId: string, service: ServicePlan, envName: string, failures: ApplyResult['failures']): Promise<void> {
+  private async ensureSecrets(projectId: string, environmentId: string, serviceId: string, service: ServicePlan, envName: string, failures: ApplyResult['failures'], token: RailwayCredential): Promise<void> {
     if (service.secrets.length === 0) return;
     const present = new Set(await this.configVariableNames(projectId, environmentId, serviceId));
     for (const secret of service.secrets) {
@@ -1360,6 +1364,15 @@ export class RailwayInfraProvider implements InfraProvider {
         throw new Error(`secret "${secret.name}" declares platfolio-held custody, which the contract forbids (D4: platfolio-held custody was removed before 1.0.0 shipped) (docs/design/03)`);
       }
       if (!present.has(secret.name)) {
+        const initial = this.initialSecret?.({ environment: envName, service: service.name, name: secret.name });
+        if (initial && secret.source === 'preserve') {
+          try {
+            await this.upsertVariable(projectId, environmentId, serviceId, secret.name, initial, token, true);
+          } catch {
+            throw new Error(`Railway rejected the initial value for ${envName}/${service.name}.${secret.name}`);
+          }
+          if ((await this.configVariableNames(projectId, environmentId, serviceId)).includes(secret.name)) continue;
+        }
         failures.push({
           // The environment belongs in the step: with two environments this failure was reported twice under an
           // identical step, which tells a tenant nothing about where to set the value (found by the

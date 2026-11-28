@@ -6,6 +6,49 @@ uses it to host private apps for their own teams. The hub and private installati
 same release, platform description, and installer. Configuration enables the public registry
 and launcher on the hub. The hub can use the same system to operate itself and services it offers.
 
+## Installation roles
+
+[D77 and D78](01-product-and-decisions.md#decision-register) define the official hub and private spoke
+boundary. The role is set by the installation configuration at boot. It is independent of Railway
+environment names, tenant membership, marketplace links and browser navigation.
+
+| Role | Deployment authority | Shared services |
+| --- | --- | --- |
+| Hub | CI/CD provisions the hub. Its product launcher deploys only the pinned, image-only Platfolio spoke package through the installation provider. | The hub owns marketplace publication, acquisition receipts, artifact grants, shared Keycloak identity and the future commerce service. |
+| Private | Local owners deploy starter templates, shared services and hosted applications. Local CI/CD and owners manage their version pins. | Each spoke owns its Keycloak, OpenBao, provider connections and deployed app records. A scoped link enables hub services. |
+
+The Platfolio spoke package is a dedicated release channel outside marketplace listings. An existing
+spoke can update its own pinned control-plane release. The maintainers run their applications through
+an ordinary private spoke linked to the same marketplace. A hub identity proof still requires local
+authorization to access a spoke. Local owner sign-in and recovery work without the hub.
+
+OpenAPI declares role-restricted operations. The composition root selects the routes and Cordis
+extensions for the role before opening the listener. An operation absent from a role returns 404.
+The hub receives no spoke worker or generic tenant hosting provider. Role-less installations remain
+on the legacy compatibility surface during migration.
+
+### Staging rollout
+
+1. Check the OpenAPI role boundary, packaged spoke images and the dry-run hub plan locally.
+2. The Image workflow can deploy the candidate it built from the exact staging push. After
+   configuring the GitHub environment below, set the repository variable `PLATFOLIO_HUB_DEPLOY_ENABLED`
+   to `true` to enable the staging deployment job. The Railway destination is `platfolio-hub` with `staging` as its sole environment.
+   The plan supplies its own site, API, Keycloak, Postgres and private OpenBao with durable Raft
+   storage. The hub issuer and browser clients use the new staging hosts. The workflow uses the
+   GitHub environment `staging-hub`. Set `RAILWAY_WORKSPACE_ID`, `PLATFOLIO_HUB_SITE_HOST`, `PLATFOLIO_HUB_API_HOST`,
+   `PLATFOLIO_HUB_AUTH_HOST` and `PLATFOLIO_INSTALL_OWNER_EMAIL` there as variables. Supply `RAILWAY_TOKEN`,
+   `PLATFOLIO_INSTALL_OWNER_PASSWORD` and `KC_BOOTSTRAP_ADMIN_PASSWORD` as environment secrets.
+   Use the DNS records returned by Railway to complete TLS. Initialize and unseal
+   OpenBao with independently held operator recovery material before placing live hub credentials.
+3. Enable the launcher by setting `PLATFOLIO_RAILWAY_INSTALL_TEMPLATE` and
+   `PLATFOLIO_HUB_RAILWAY_OAUTH_CLIENT` in the same GitHub environment. The callback is the hub
+   API's `/api/v1/hosting/installation-authorization/callback`. CI packages the spoke from the same
+   candidate and checks its digest. Verify that the hub
+   launches one private spoke, the spoke enrolls and deploys a pinned catalog release, and both roles
+   reject the other role's deployment operations. Verify local owner sign-in with the hub unavailable.
+4. Enable the image release gateway and commerce independently after the role and enrollment proof.
+   Existing acquisitions retain the original release identity. Hosted acceptance requires a live run.
+
 ## Where data and authority live
 
 | Owner | Data and authority |

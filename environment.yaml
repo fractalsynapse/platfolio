@@ -33,6 +33,24 @@ variables:
     environments: all
     deployedTo: host:shell
     note: "read by the tenant application (starter-web); platfolio resolves the production value from the database reference"
+  - name: PLATFOLIO_HUB_API_HOST
+    kind: value
+    secret: false
+    environments: [staging]
+    deployedTo: ci:env
+    note: "Public control plane hostname for the staging hub CI plan."
+  - name: PLATFOLIO_HUB_AUTH_HOST
+    kind: value
+    secret: false
+    environments: [staging]
+    deployedTo: ci:env
+    note: "Public Keycloak hostname for the staging hub CI plan."
+  - name: PLATFOLIO_HUB_SITE_HOST
+    kind: value
+    secret: false
+    environments: [staging]
+    deployedTo: ci:env
+    note: "Public site hostname for the staging hub CI plan."
   - name: KC_ADMIN_PASSWORD
     kind: secret
     secret: true
@@ -412,6 +430,13 @@ variables:
     environments: all
     deployedTo: railway:variable
     note: "resolved from the hosted identity capability, not typed (D34)"
+  - name: PLATFOLIO_HUB_DEPLOY_ENABLED
+    kind: value
+    secret: false
+    environments: [staging]
+    enum: ['true', 'false']
+    deployedTo: ci:env
+    note: "Repository variable that can enable the staging hub job after CI and Railway are configured."
   - name: PLATFOLIO_HUB_IDENTITY_ISSUER
     kind: value
     secret: false
@@ -448,6 +473,13 @@ variables:
     environments: all
     deployedTo: host:shell
     note: "the local mailbox reader; absent in production (D46)"
+  - name: PLATFOLIO_INSTALLATION_ROLE
+    kind: value
+    secret: false
+    environments: all
+    enum: [hub, private]
+    deployedTo: railway:variable
+    note: "Selects the API and Cordis operation surface. Unset preserves the role-less legacy surface."
   - name: PLATFOLIO_MARKETPLACE_ENABLED
     kind: value
     secret: false

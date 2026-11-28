@@ -77,7 +77,7 @@ export async function renderRailwayInstaller(candidateFile: string, registryOrig
       }, { port: plan.identity.port, start: '/opt/keycloak/bin/platfolio-entrypoint.sh start-private', health: '/realms/platfolio' }),
       [resourceId(api)]: service(api, apiImage, variables({ ...plan.api.env, ...fromManifest(plan.api), PORT: String(plan.api.port),
         PLATFOLIO_IDENTITY_ISSUER: issuer, PLATFOLIO_IDENTITY_JWKS_URI: issuer + '/protocol/openid-connect/certs',
-        PLATFOLIO_ALLOWED_ORIGINS: publicOrigin(site), PLATFOLIO_SCM_DRIVER: 'git',
+        PLATFOLIO_ALLOWED_ORIGINS: publicOrigin(site), PLATFOLIO_SCM_DRIVER: 'git', PLATFOLIO_INSTALLATION_ROLE: 'private',
         PLATFOLIO_INSTALL_OWNER_SUBJECT: ownerSubject, PLATFOLIO_LAUNCH_TEAM: team, PLATFOLIO_LAUNCH_WORKER_KEY: key,
         PLATFOLIO_LAUNCH_WORKER_URL: 'http://' + privateHost(worker) + ':8080',
       }), { port: plan.api.port, health: plan.api.healthPath ?? '/readyz' }),

@@ -100,3 +100,25 @@ test('the candidate accepts a SemVer release tag only on its exact source commit
   assert.throws(() => resolveCheckoutCandidate(artifact, cwd, '1.2.4'), /Fetch the tag before planning/);
   assert.throws(() => resolveCheckoutCandidate(artifact, cwd, 'staging'), /bare SemVer tag/);
 });
+
+test('the first-party hub candidate builds a staging-only plan with private persistent OpenBao', async () => {
+  const { stagingHubPlan } = await import('../../../scripts/deploy-staging-hub.ts');
+  const digest = '31e2a6a5f9fe7312'.repeat(4);
+  const plan = stagingHubPlan((name) => `ghcr.io/platfolio-fixtures/${name}:candidate@sha256:${digest}`,
+    { site: 'hub.example.com', api: 'api.example.com', identity: 'auth.example.com' }, 'owner@example.com');
+  assert.equal(plan.instanceId, 'hub');
+  assert.deepEqual(plan.environments.map(({ name }) => name), ['staging']);
+  const staging = plan.environments[0]!;
+  assert.deepEqual(staging.services.map(({ name }) => name).sort(), ['api', 'identity', 'openbao', 'site']);
+  assert.equal(staging.databases[0]?.kind, 'postgres');
+  assert.deepEqual(staging.volumes?.map(({ service, mountPath }) => [service, mountPath]), [['openbao', '/openbao/file']]);
+  assert.deepEqual(staging.domains.map(({ service }) => service).sort(), ['api', 'identity', 'site']);
+  assert.equal(staging.services.find(({ name }) => name === 'api')?.env.find(({ name }) =>
+    name === 'PLATFOLIO_IDENTITY_ISSUER')?.literal, 'https://auth.example.com/realms/platfolio');
+  const { RailwayInfraProvider } = await import('../../contracts/src/railway-provider.ts');
+  const credential = { kind: 'workspace' as const, token: 'test' };
+  const provider = new RailwayInfraProvider({ workspaceId: 'test', credentials: {
+    async workspace() { return credential; }, async forEnvironment() { return credential; },
+  } });
+  assert.deepEqual(provider.validatePlan(plan), []);
+});

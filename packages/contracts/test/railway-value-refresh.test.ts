@@ -175,3 +175,28 @@ test('the delivered value never appears in any provider-side record this test ca
 function present_presence_values(p: Record<string, string>): string[] {
   return Object.values(p);
 }
+
+test('CI supplies a declared missing variable once, before deployment', async () => {
+  const mock = new RailwayMock();
+  const plan = planWith();
+  const provided: string[] = [];
+  const provider = new RailwayInfraProvider({
+    credentials: mock, transport: mock, workspaceId: 'ws-1',
+    deployBudget: 20, deployTimeoutMs: 2_000, pollIntervalMs: 1, sleep: async () => {},
+    initialSecret({ environment, service, name }) {
+      provided.push(`${environment}/${service}/${name}`);
+      assert.equal(writesFor(mock, name).some((write) => !write.skipDeploys), false);
+      return 'fixture-initial-value';
+    },
+  });
+  const result = await provider.applyPlan(plan);
+  assert.deepEqual(result.failures, []);
+  assert.deepEqual(provided.sort(), ['production/api/SESSION_KEY', 'staging/api/SESSION_KEY']);
+  assert.equal(writesFor(mock, 'SESSION_KEY').length, 2);
+  assert.ok(writesFor(mock, 'SESSION_KEY').every((write) => write.skipDeploys));
+  assert.ok(!JSON.stringify(result).includes('fixture-initial-value'));
+  const reapplied = await provider.applyPlan({ ...plan, planHash: 'a'.repeat(64) });
+  assert.deepEqual(reapplied.failures, []);
+  assert.equal(provided.length, 2);
+  assert.equal(writesFor(mock, 'SESSION_KEY').length, 2);
+});

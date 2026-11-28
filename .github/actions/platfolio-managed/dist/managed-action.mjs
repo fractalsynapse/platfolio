@@ -25068,7 +25068,7 @@ function date4(params) {
 }
 
 // packages/contracts/src/generated/contract-version.ts
-var CONTRACT_VERSION = "8.5.0";
+var CONTRACT_VERSION = "8.6.0";
 
 // packages/contracts/src/infra.ts
 var CONTRACT_NAME = "infra.provider";
@@ -25929,6 +25929,7 @@ var RailwayInfraProvider = class {
   // as an improvement here. The baseline drift gate caught it as a removal.
   contract = CONTRACT_VERSION;
   credentials;
+  initialSecret;
   transport;
   workspaceId;
   project;
@@ -25944,6 +25945,7 @@ var RailwayInfraProvider = class {
   deploymentsUsed = 0;
   constructor(options) {
     this.credentials = options.credentials;
+    this.initialSecret = options.initialSecret;
     this.transport = options.transport ?? new HttpRailwayTransport();
     this.workspaceId = options.workspaceId;
     this.project = options.project;
@@ -26083,7 +26085,7 @@ var RailwayInfraProvider = class {
           if (entry.literal === void 0) continue;
           await this.upsertVariable(projectId, environmentId, serviceId, entry.name, entry.literal, token);
         }
-        await this.ensureSecrets(projectId, environmentId, serviceId, service, environment.name, failures);
+        await this.ensureSecrets(projectId, environmentId, serviceId, service, environment.name, failures, token);
         if (service.limits) {
           try {
             await this.transport.graphql({
@@ -26895,7 +26897,7 @@ var RailwayInfraProvider = class {
    * put the value in our memory for no reason, and that is the difference between a claim we can keep and
    * one we cannot.
    */
-  async ensureSecrets(projectId, environmentId, serviceId, service, envName, failures) {
+  async ensureSecrets(projectId, environmentId, serviceId, service, envName, failures, token) {
     if (service.secrets.length === 0) return;
     const present = new Set(await this.configVariableNames(projectId, environmentId, serviceId));
     for (const secret of service.secrets) {
@@ -26903,6 +26905,15 @@ var RailwayInfraProvider = class {
         throw new Error(`secret "${secret.name}" declares platfolio-held custody, which the contract forbids (D4: platfolio-held custody was removed before 1.0.0 shipped) (docs/design/03)`);
       }
       if (!present.has(secret.name)) {
+        const initial = this.initialSecret?.({ environment: envName, service: service.name, name: secret.name });
+        if (initial && secret.source === "preserve") {
+          try {
+            await this.upsertVariable(projectId, environmentId, serviceId, secret.name, initial, token, true);
+          } catch {
+            throw new Error(`Railway rejected the initial value for ${envName}/${service.name}.${secret.name}`);
+          }
+          if ((await this.configVariableNames(projectId, environmentId, serviceId)).includes(secret.name)) continue;
+        }
         failures.push({
           // The environment belongs in the step: with two environments this failure was reported twice under an
           // identical step, which tells a tenant nothing about where to set the value (found by the
