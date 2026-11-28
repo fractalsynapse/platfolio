@@ -7,8 +7,8 @@ change; entries describe merged intent, not aspirations.
 
 ### Fixed — probe staging OpenBao with its initialization status path (#288)
 
-Railway checks the private OpenBao service with a plain endpoint path that responds before
-initialization. CI reports a redacted failure as a check annotation for staged rollout diagnosis.
+Railway checks the private OpenBao service on its configured port with a plain endpoint path
+that responds before initialization. CI reports a redacted failure as a check annotation for staged rollout diagnosis.
 
 ### Fixed — apply staging hub dependencies before service startup (#288)
 
