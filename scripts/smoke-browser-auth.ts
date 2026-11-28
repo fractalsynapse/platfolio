@@ -127,6 +127,9 @@ const { values: flags } = parseArgs({
     'ui-origin': { type: 'string', default: process.env.PLATFOLIO_ALLOWED_ORIGINS ?? LOOPBACK_UI_ORIGIN },
     'sign-in-only': { type: 'boolean' },
     'local-owner-profile': { type: 'boolean' },
+    'expect-account-unavailable': { type: 'boolean' },
+    'expect-verified-email': { type: 'boolean' },
+    'expect-profile-attribute': { type: 'string' },
     user: { type: 'string', default: process.env.KC_PKCE_USER ?? 'adrian' },
     password: { type: 'string', default: process.env.KC_USER_PASSWORD ?? 'platfolio-dev-only' },
     'admin-user': { type: 'string', default: process.env.KC_ADMIN_USER ?? 'platfolio-admin' },
@@ -145,6 +148,9 @@ const WEB_CLIENT = WEB_CLIENT_ID;
 const API_CLIENT = API_CLIENT_ID;
 const issuer = `${idp}/realms/${realm}`;
 const focusedSignIn = flags['sign-in-only'] || flags['local-owner-profile'];
+if ((flags['expect-account-unavailable'] || flags['expect-verified-email'] || flags['expect-profile-attribute']) && !flags['local-owner-profile']) {
+  throw new Error('Account expectations require --local-owner-profile');
+}
 if (flags['local-owner-profile'] && (!isLoopback(idp) || !isLoopback(uiOrigin))) {
   throw new Error('The owner profile write smoke runs only against a disposable loopback realm');
 }
@@ -343,9 +349,17 @@ if (focusedSignIn) {
     const account = `${issuer}/account/?userProfileMetadata=false`;
     const headers = { authorization: `Bearer ${accessToken}`, accept: 'application/json' };
     const before = await fetch(account, { headers, redirect: 'error' });
+    if (flags['expect-account-unavailable']) {
+      check('the legacy account is unavailable before upgrade', before.status === 401 || before.status === 403, `HTTP ${before.status}`);
+      report();
+    }
     check('the initial owner can read their imported account', before.ok, `HTTP ${before.status}`);
     if (!before.ok) report();
-    const profile = await before.json() as { username: string; firstName?: string; lastName?: string; email?: string; attributes?: Record<string, string[]> };
+    const profile = await before.json() as { username: string; firstName?: string; lastName?: string; email?: string;
+      emailVerified?: boolean; attributes?: Record<string, string[]> };
+    if (flags['expect-verified-email']) {
+      check('the existing verified email is retained', Boolean(profile.email && profile.emailVerified), 'account response');
+    }
     const displayName = 'Profile verification';
     const saved = await fetch(account, { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, redirect: 'error',
       body: JSON.stringify({ username: profile.username, firstName: profile.firstName, lastName: profile.lastName,
@@ -354,6 +368,12 @@ if (focusedSignIn) {
     const after = await fetch(account, { headers, redirect: 'error' });
     const updated = await after.json().catch(() => undefined) as typeof profile | undefined;
     check('Keycloak persisted the display name', after.ok && updated?.attributes?.[OPERATOR_DISPLAY_NAME_ATTRIBUTE]?.[0] === displayName, `HTTP ${after.status}`);
+    const attribute = flags['expect-profile-attribute'];
+    if (attribute) {
+      const original = profile.attributes?.[attribute];
+      check('a pre-existing custom profile attribute survived', Boolean(original?.length &&
+        JSON.stringify(updated?.attributes?.[attribute]) === JSON.stringify(original)), 'account read-back');
+    }
     report();
   }
   const who = await fetch(`${api}/api/v1/whoami`, { headers: { authorization: `Bearer ${accessToken}` }, redirect: 'error' });

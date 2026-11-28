@@ -352,13 +352,13 @@ assigns team membership independently. The staging and production realms can sel
 independently on the shared identity host.
 
 New Platfolio installations import the Account profile configuration with their operator realm.
-Use `--enable-account-profile` to configure an existing realm in place with its current administrator.
-For an existing imported owner missing the built-in self-service role, also pass
-`--account-profile-user=owner` using the account's current exact username. A new image does
-not replace an existing realm. The operator must apply this repair until an in-place upgrade
-handles the realm configuration automatically.
-The setup maps Keycloak's user-scoped account permission to the Platfolio browser client,
-enables username edits, and adds a display-name field. Run this after any reseeding of the
-browser client. Platfolio reads and saves only the signed-in person's profile through the
+When an operator identity image started by `start-private` is upgraded, Keycloak applies
+the missing Account profile settings in a versioned transaction before it serves requests.
+It retains the existing realm, users, credentials and profile schema. It gives the
+built-in self-service role to local human users who already have the Platfolio API role.
+The migration uses Keycloak's local model and database lock. It requires no administrator
+account and runs once per realm. Sign in again to receive the updated browser claims.
+For separately administered realms, `--enable-account-profile` remains available to the
+realm administrator. Platfolio reads and saves only the signed-in person's profile through the
 issuer's Account REST API. The Password tab starts Keycloak's themed password change and
 returns to Account. The Emails tab shows the verified sign-in address.

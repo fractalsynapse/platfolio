@@ -634,6 +634,8 @@ Platfolio replaces the application service images in place, preserving configura
 service IDs, domains and storage. Database and OpenBao image changes require their own
 upgrade procedure. An update verifies the new deployments and the build served by the site
 and API before recording the release.
+The Keycloak image applies the [operator profile migration](05-identity.md) as it starts.
+Existing owners can sign in again to load Profile and Emails with the new claims.
 
 Removal requires typing the exact project name and affects the whole private installation,
 including all of its environments and stored data. Apps in separate projects are managed
