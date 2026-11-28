@@ -1,3 +1,4 @@
+import type { HubSignInTrust, Identity } from './persistence.ts';
 import {
   MarketplaceAcquisitionReceiptSchema, MarketplacePlatformAliasSchema, MarketplacePlatformDescriptorSchema, MarketplacePublisherPlatformSchema, MarketplaceReleasePublicationSchema,
   type MarketplacePlatformAcquisitionInput, type MarketplacePlatformCreation, type MarketplacePlatformDescriptor, type MarketplaceReleasePublication,
@@ -914,30 +915,27 @@ export class PostgresStore implements Store {
   }
 
   async resolvePerson(input: { issuer: string; subject: string; kind?: Person['kind']; label?: string }) {
-    const existing = await this.pool.query(`SELECT person_id FROM ${this.q('identities')} WHERE issuer = $1 AND subject = $2`, [input.issuer, input.subject]);
-    const found = (existing.rows as Row[])[0];
-    if (found) {
-      const person = await this.getPerson(String(found.person_id));
-      if (person.ok) return ok({ person: person.value, created: false });
-    }
+    const existing = await this.getPersonByIdentity(input.issuer, input.subject);
+    if (existing.ok) return ok({ person: existing.value, created: false });
     const id = newId('person');
+    const client = await this.pool.connect();
+    let linked: StoreResult<Identity>;
     try {
-      await this.pool.query(`INSERT INTO ${this.q('persons')} (id, kind, label) VALUES ($1,$2,$3)`, [id, input.kind ?? 'human', input.label ?? null]);
+      await client.query('BEGIN');
+      await client.query(`INSERT INTO ${this.q('persons')} (id, kind, label) VALUES ($1,$2,$3)`, [id, input.kind ?? 'human', input.label ?? null]);
+      linked = await this.writeIdentity({ personId: id, issuer: input.issuer, subject: input.subject }, client);
+      await client.query(linked.ok ? 'COMMIT' : 'ROLLBACK');
     } catch (error) {
-      // A concurrent first request can win the insert. Re-read instead of failing someone's login, because the
-      // losing request knows the person exists by definition of having looked.
-      if ((error as { code?: string }).code === '23505') {
-        const again = await this.pool.query(`SELECT person_id FROM ${this.q('identities')} WHERE issuer = $1 AND subject = $2`, [input.issuer, input.subject]);
-        const row = (again.rows as Row[])[0];
-        if (row) {
-          const person = await this.getPerson(String(row.person_id));
-          if (person.ok) return ok({ person: person.value, created: false });
-        }
-      }
+      await client.query('ROLLBACK').catch(() => {});
       throw error;
+    } finally {
+      client.release();
     }
-    const linked = await this.linkIdentity({ personId: id, issuer: input.issuer, subject: input.subject });
-    if (!linked.ok) return err({ code: 'conflict', reason: `identity link refused: ${reasonOf(linked)}` });
+    if (!linked.ok) {
+      // A concurrent first sign-in may have linked the proof while this transaction was opening.
+      const winner = await this.getPersonByIdentity(input.issuer, input.subject);
+      return winner.ok ? ok({ person: winner.value, created: false }) : err({ code: 'conflict', reason: `identity link refused: ${reasonOf(linked)}` });
+    }
     const created = await this.getPerson(id);
     return created.ok ? ok({ person: created.value, created: true }) : err({ code: 'conflict', reason: reasonOf(created) });
   }
@@ -959,23 +957,39 @@ export class PostgresStore implements Store {
   }
 
   async linkIdentity(input: { personId: string; issuer: string; subject: string }) {
+    return this.writeIdentity(input, this.pool);
+  }
+
+  private async writeIdentity(input: { personId: string; issuer: string; subject: string }, db: Pick<Pool, 'query'>) {
     const admitted = admit(IdentitySchema, { ...input, verifiedAt: new Date().toISOString() }, 'identity');
     if (!admitted.accepted) return err({ code: 'conflict', reason: admitted.reason });
     const i = admitted.value;
     try {
-      await this.pool.query(
-        `INSERT INTO ${this.q('identities')} (issuer, subject, person_id, verified_at) VALUES ($1,$2,$3,$4)
-         ON CONFLICT (issuer, subject) DO UPDATE SET person_id = EXCLUDED.person_id, verified_at = now()`,
-        [i.issuer, i.subject, i.personId, i.verifiedAt]);
+      const { rows } = await db.query(
+        `INSERT INTO ${this.q('identities')} AS stored (issuer, subject, person_id, verified_at) VALUES ($1,$2,$3,$4)
+         ON CONFLICT (issuer, subject) DO UPDATE SET verified_at = EXCLUDED.verified_at
+         WHERE stored.person_id = EXCLUDED.person_id RETURNING verified_at`,
+        [i.issuer, i.subject, i.personId, i.verifiedAt],
+      );
+      return rows[0] ? ok({ ...i, verifiedAt: iso(rows[0].verified_at) }) : err({ code: 'conflict', reason: 'identity already linked' });
     } catch (error) {
       if ((error as { code?: string }).code === '23503') return err({ code: 'not-found', what: 'person', id: i.personId });
       throw error;
     }
-    return ok(i);
   }
 
   async unlinkIdentity(issuer: string, subject: string) {
-    const removed = await this.pool.query(`DELETE FROM ${this.q('identities')} WHERE issuer = $1 AND subject = $2`, [issuer, subject]);
+    return this.removeIdentity(issuer, subject);
+  }
+
+  async unlinkOwnedIdentity(issuer: string, subject: string, personId: string) {
+    return this.removeIdentity(issuer, subject, personId);
+  }
+
+  private async removeIdentity(issuer: string, subject: string, expectedPersonId?: string) {
+    const removed = await this.pool.query(
+      `DELETE FROM ${this.q('identities')} WHERE issuer = $1 AND subject = $2 AND ($3::text IS NULL OR person_id = $3)`,
+      [issuer, subject, expectedPersonId ?? null]);
     if ((removed.rowCount ?? 0) === 0) return err({ code: 'not-found', what: 'identity', id: `${issuer}/${subject}` });
     return ok({ removed: true });
   }
@@ -993,6 +1007,24 @@ export class PostgresStore implements Store {
     const row = rows[0];
     if (!row) return err({ code: 'not-found', what: 'person', id: `${issuer}/${subject}` });
     return this.getPerson(String(row.person_id));
+  }
+
+  async getHubSignIn(teamId: string) {
+    const { rows } = await this.pool.query<{ issuer: string; client_id: string }>(
+      `SELECT issuer, client_id FROM ${this.q('hub_sign_in')} WHERE team_id = $1`, [teamId]);
+    const row = rows[0];
+    return row && { issuer: row.issuer, clientId: row.client_id };
+  }
+
+  async setHubSignIn(teamId: string, trust: HubSignInTrust | undefined) {
+    if (!trust) {
+      await this.pool.query(`DELETE FROM ${this.q('hub_sign_in')} WHERE team_id = $1`, [teamId]);
+      return;
+    }
+    await this.pool.query(
+      `INSERT INTO ${this.q('hub_sign_in')} (team_id, issuer, client_id) VALUES ($1,$2,$3)
+       ON CONFLICT (team_id) DO UPDATE SET issuer = EXCLUDED.issuer, client_id = EXCLUDED.client_id`,
+      [teamId, trust.issuer, trust.clientId]);
   }
 
   async createInvitation(input: NewInvitation) {

@@ -544,3 +544,28 @@ test('the browser never reaches for the network or a timer itself (§9.2, by con
   assert.ok(!/setTimeout\(|setInterval\(/.test(code), 'the refresh schedule is computed by the imported refreshAt and armed by whoever owns a timer (11 §9.2: no timer-based polling outside the freshness primitive)');
   assert.ok(!/\bdocument\.|localStorage|\bnavigator\./.test(code), 'the handoff store is injected precisely so this file never names a storage API');
 });
+
+test('a hub callback is bound to the chosen issuer and client without changing local sign-in', async () => {
+  const h = harness();
+  const hub = { issuer: 'https://hub.example.test/realms/marketplace', clientId: 'private-fixture', scope: 'openid platfolio.hub-sign-in' };
+  const begin = async () => {
+    const url = new URL(await h.source.begin(undefined, undefined, hub));
+    assert.equal(url.origin, new URL(hub.issuer).origin);
+    assert.equal(url.searchParams.get('client_id'), hub.clientId);
+    return new URLSearchParams({ state: url.searchParams.get('state')!, code: 'CODE' });
+  };
+  assert.equal(await h.source.complete(await begin(), undefined, { ...hub, clientId: 'another-installation' }), 'refused');
+  assert.equal(h.requests.length, 0);
+  const wrongIssuer = await begin();
+  wrongIssuer.set('iss', ISSUER);
+  assert.equal(await h.source.complete(wrongIssuer, undefined, hub), 'refused');
+  assert.equal(h.requests.length, 0);
+  assert.equal(await h.source.complete(await begin(), undefined, hub), 'signed-in');
+  assert.equal(h.requests[0]?.url, endpointsForIssuer(hub.issuer).token);
+  await h.source.refresh();
+  assert.equal(h.requests[1]?.form.client_id, hub.clientId);
+  assert.equal(h.requests[1]?.url, endpointsForIssuer(hub.issuer).token);
+  await signIn(h);
+  assert.equal(h.requests[2]?.url, endpointsForIssuer(ISSUER).token);
+  assert.equal(h.requests[2]?.form.client_id, WEB_CLIENT_ID);
+});

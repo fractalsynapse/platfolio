@@ -9,6 +9,8 @@ import {
   type Jwk,
   type KeySource,
   type VerificationResult,
+  type VerificationSuccess,
+  type Person,
 } from '@platfolio/contracts';
 /**
  * The `identity.provider` capability as a stable `ctx.identity` service.
@@ -28,12 +30,15 @@ export const misconfigured = (): VerificationResult => ({
   message: 'identity has no key source attached; configure PLATFOLIO_IDENTITY_JWKS_URI (or attach a key set at the composition root). Refusing rather than serving unauthenticated traffic.',
 });
 
+type AlternateUserProof = (token: string) => Promise<(VerificationSuccess & { person: Person }) | undefined>;
+
 export class IdentityService extends Service<z.infer<typeof IdentityConfigSchema>> {
   static inject = [] as const;
   static provide = 'identity' as const;
   static Config = IdentityConfigSchema;
 
   private attached: IdentityProvider | undefined;
+  private alternateUserProof: AlternateUserProof | undefined;
   readonly config: IdentityConfig;
 
   constructor(ctx: Context, config: IdentityConfig) {
@@ -58,6 +63,16 @@ export class IdentityService extends Service<z.infer<typeof IdentityConfigSchema
 
   attachKeySource(source: KeySource): void {
     this.attached = new JwksIdentityProvider({ config: this.config, keySource: source });
+  }
+
+  attachAlternateUserProof(proof: AlternateUserProof): void {
+    this.alternateUserProof = proof;
+  }
+
+  async verifyUserAccessToken(token: string) {
+    const local = await this.verifyAccessToken(token);
+    if (local.ok) return local;
+    return await this.alternateUserProof?.(token) ?? local;
   }
 
   get attached_(): boolean {

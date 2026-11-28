@@ -412,6 +412,18 @@ variables:
     environments: all
     deployedTo: railway:variable
     note: "resolved from the hosted identity capability, not typed (D34)"
+  - name: PLATFOLIO_HUB_IDENTITY_ISSUER
+    kind: value
+    secret: false
+    environments: all
+    deployedTo: tenant:to-supply
+    note: "Optional exact hub Keycloak realm issuer configured by a private operator"
+  - name: PLATFOLIO_HUB_IDENTITY_CLIENT
+    kind: value
+    secret: false
+    environments: all
+    deployedTo: tenant:to-supply
+    note: "Optional dedicated public hub client for this installation"
   - name: PLATFOLIO_IDENTITY_REALM
     kind: value
     secret: false

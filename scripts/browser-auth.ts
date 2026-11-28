@@ -192,4 +192,6 @@ export const AUDIT_DETAIL_KEYS_ALLOWLIST = [
   'capability', 'toTeamId', 'providerInstanceId', 'email', 'role', 'sent', 'personId', 'reason', 'name',
   // A normalized public hostname. The DNS verification value stays out of the audit row.
   'hostname',
+  // The private owner's boolean hub sign-in choice. Neither identity proof is recorded.
+  'enabled',
 ] as const;

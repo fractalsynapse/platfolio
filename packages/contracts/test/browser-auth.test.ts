@@ -238,7 +238,7 @@ test('D4: no control-plane audit detail key is token-shaped (the API has nowhere
   assert.deepEqual(unknown, [], `audit detail keys outside the allowlist (add them to scripts/browser-auth.ts and say why, or rename): ${unknown.join(', ')}`);
 });
 
-test('D4: the API surface accepts no token as data -- the only credential channel is the Authorization header', () => {
+test('D4: the API surface accepts tokens only in credential headers', () => {
   const spec = fs.readFileSync(path.join(root, 'apps/control-plane/openapi.yaml'), 'utf8');
   const propertyNames = [...spec.matchAll(/^\s{2,}([A-Za-z_][\w-]*):/gm)].map((m) => m[1]!);
   assert.ok(propertyNames.length > 40, `the scan read ${String(propertyNames.length)} keys from openapi.yaml -- it has stopped reading`);

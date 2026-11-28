@@ -155,9 +155,34 @@ the original request if an older worker rejects the policy status option.
 
 ## 2D — Optional hub sign-in and application registration
 
-Give a private installation owner an explicit opt-in to accept hub sign-in. Link verified issuer and
-subject proofs and have the local owner grant roles. Verify that a marketplace account alone conveys
-no local access and that local owner login stays available through a hub outage. Design end-user app
-registration separately, with an explicitly registered client, independent audiences, and app-owned
-roles. Use [the private installation identity model](18-hub-and-private-installations.md) for the
+The private workspace owner turns hub sign-in on using their local account. The customer
+configures a trusted hub Keycloak issuer and a dedicated client for this installation. The
+saved opt-in is bound to that exact issuer and client, and authentication checks both the
+audience and authorized party. Local issuer verification remains independent of this path.
+
+A signed-in local member links their own hub identity by presenting both verified proofs.
+Compare issuer and subject and preserve the original local person and roles. A hub-only
+account creates no local person or membership. Disabling hub sign-in or removing local
+workspace membership blocks access through the hub. The local account can unlink its proof
+without reaching the hub.
+
+Configure `PLATFOLIO_HUB_IDENTITY_ISSUER` and `PLATFOLIO_HUB_IDENTITY_CLIENT` on the
+private API. Register that public client in the hub Keycloak realm with PKCE S256, the private
+site's exact `/callback` redirect and web origin, and an access-token audience matching the
+dedicated client ID. Assign the `platfolio.hub-sign-in` client scope and retain the `basic`
+scope so access tokens contain a subject. Disable direct grants and service accounts.
+[Keycloak access-token subject mapping](https://www.keycloak.org/docs/26.8.1/server_admin/)
+
+The private owner enables or disables access with `PUT /api/v1/teams/{teamId}/hub-sign-in`.
+The local member sends their local bearer token in `Authorization` and the dedicated hub
+access token in `X-Platfolio-Hub-Proof` to `PUT /api/v1/me/hub-identity`. Use the local bearer
+token to unlink a proof with `DELETE /api/v1/me/hub-identity/{subject}`. The sign-in page
+shows the hub option after the local API reports it enabled.
+
+Run `pnpm exec tsx scripts/smoke-hub-sign-in.ts` to verify the flow using separate local
+Keycloak containers and PostgreSQL. The check denies the unlinked hub account, links both
+proofs, stops the test hub, then completes a fresh local owner sign-in and opt-out.
+
+End-user app registration uses separate clients, audiences, and app-owned roles. Use
+[the private installation identity model](18-hub-and-private-installations.md) for the
 account-linking boundary. Payments and managed release promotion are later phases.

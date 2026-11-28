@@ -27,14 +27,17 @@ test('the shipped spec is internally true', () => {
   const publicOps = ops.filter((o) => Array.isArray(o.security) && o.security.length === 0).map((o) => o.operationId).sort();
   assert.deepEqual(publicOps, [
     'completeHubInstallationAuthorization', 'completeStarterRailwayAuthorization', 'getHealth',
-    'getPublicMarketplaceCatalog', 'getReady', 'getStatus', 'getVersion',
+    'getHubSignIn', 'getPublicMarketplaceCatalog', 'getReady', 'getStatus', 'getVersion',
     'listMarketplacePlatformReleases', 'listMarketplacePlatforms',
-  ], 'only the public catalog, operational probes, build identity and state-bound OAuth callbacks are unauthenticated');
+  ], 'only public catalog and sign-in discovery, operational probes, build identity and state-bound OAuth callbacks are unauthenticated');
   const installationOperations = new Set(['redeemMarketplaceEnrollment', 'claimEnrolledMarketplaceRelease', 'getEnrolledMarketplaceCatalog', 'acquireMarketplacePlatformRelease', 'acquireMarketplaceArtifactRelease', 'issueMarketplacePullGrant']);
   for (const guarded of ops.filter((o) => !publicOps.includes(o.operationId))) {
     const scheme = installationOperations.has(guarded.operationId) ? 'marketplaceCredential' : 'bearerJwt';
-    assert.deepEqual(guarded.security, [scheme], `${guarded.operationId} must declare exactly ${scheme}`);
+    const expected = guarded.operationId === 'linkMyHubIdentity' ? [scheme, 'hubIdentityProof'] : [scheme];
+    assert.deepEqual(guarded.security, expected, `${guarded.operationId} must declare exactly ${expected.join(' and ')}`);
   }
+  assert.deepEqual(spec.paths['/api/v1/me/hub-identity'].put.security, [{ bearerJwt: [], hubIdentityProof: [] }],
+    'account linking requires both proofs in the same security requirement');
   // Every operation declares at least one 4xx or states it is bodiless, so no path can only ever succeed.
   const keys = declaredResponseKeys(spec);
   for (const op of ops) {

@@ -32,7 +32,7 @@ export function identityClient(route: typeof scoped, worker?: ReturnType<typeof 
       ['PUT', put, 'marketplace.manage', 'place'],
       ['DELETE', del, 'marketplace.manage', 'revoke'],
     ] as const).map(([method, operation, policy, action]) =>
-      route(method, path, operation, policy, async ({ teamId, context, claims, personId }, request, params) => {
+      route(method, path, operation, policy, async ({ teamId, context, personId }, request, params) => {
         if (!worker || worker.teamId !== teamId) return notFound('private identity binding', '');
         const env = IdentityEnvironmentSchema.safeParse(params.environment);
         if (!env.success) return badRequest('Choose a production or staging environment.');
@@ -123,7 +123,7 @@ export function identityClient(route: typeof scoped, worker?: ReturnType<typeof 
         }
         if (!target || target.teamId !== teamId) return send(operation, 200, { state: action === 'revoke' ? 'revoked' : 'unconfigured' });
         if (action !== 'status') request.raw?.setTimeout?.(privateOperationTimeoutMs + 5_000);
-        const result = await worker.identity({ action, target, controlPlaneIssuer: claims.issuer, ...(railway ? { railway } : {}), ...(setup ? { setup } : {}) });
+        const result = await worker.identity({ action, target, controlPlaneIssuer: context.identity.config.issuer, ...(railway ? { railway } : {}), ...(setup ? { setup } : {}) });
         if (result.status === 409) return conflict(operation, 'The client changed, is revoked, or has an operation in progress.');
         if (!result.placement) return unavailable(operation, 'Check OpenBao, Keycloak and the connected hosting workspace, then retry.');
         if (result.placement.state === 'revoked') {

@@ -6,9 +6,10 @@ interface WorkspaceEntryProps {
   readonly beginning: boolean;
   readonly problem: string;
   readonly begin: () => void;
+  readonly beginHub?: () => void;
 }
 
-export function WorkspaceEntry({ completing, beginning, problem, begin }: WorkspaceEntryProps): React.ReactElement {
+export function WorkspaceEntry({ completing, beginning, problem, begin, beginHub }: WorkspaceEntryProps): React.ReactElement {
   return <>
     <PublicHeader />
     <main className="ui-workspace-panel ui-auth-card">
@@ -16,6 +17,7 @@ export function WorkspaceEntry({ completing, beginning, problem, begin }: Worksp
       {problem && <p role="alert">{problem}</p>}
       {completing ? <p role="status">Completing sign-in…</p>
         : <WorkspaceAction type="button" variant="primary" disabled={beginning} onClick={begin}>{beginning ? 'Opening sign-in…' : 'Sign in'}</WorkspaceAction>}
+      {beginHub && !completing && <WorkspaceAction type="button" disabled={beginning} onClick={beginHub}>Sign in with hub account</WorkspaceAction>}
     </main>
   </>;
 }

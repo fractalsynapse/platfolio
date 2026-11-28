@@ -1,7 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Workspace, WorkspaceEntry, createShellContext, workspacePaths, workspaceReturnPath } from '@platfolio/ui';
+import { Workspace, WorkspaceEntry, createShellContext, isHubSignInCallback, workspacePaths, workspaceReturnPath } from '@platfolio/ui';
 import { endpointsForIsland, runtimeConfigFrom, type SitePublicConfig } from '../lib/site-config.ts';
 import { browserCapabilities } from '../lib/browser-capabilities.ts';
+import type { HubSignIn, ShellContext } from '@platfolio/ui';
+
+async function discoverHub(shell: ShellContext): Promise<HubSignIn | undefined> {
+  const result = await shell.transport.call('getHubSignIn', { params: {} });
+  if (result.ok && result.value.enabled && result.value.issuer && result.value.clientId && result.value.scope) {
+    const { issuer, clientId, scope } = result.value;
+    return { issuer, clientId, scope };
+  }
+}
 
 interface DashboardIslandProps {
   readonly config: SitePublicConfig;
@@ -16,6 +25,14 @@ export default function DashboardIsland({ config, callback }: DashboardIslandPro
   const [completing, setCompleting] = useState(callback === true);
   const [beginning, setBeginning] = useState(false);
   const exchanged = useRef(false);
+  const [hub, setHub] = useState<HubSignIn>();
+
+  useEffect(() => {
+    if (signedIn || completing) return;
+    let current = true;
+    void discoverHub(shell).then((option) => { if (current) setHub(option); }).catch(() => {});
+    return () => { current = false; };
+  }, [shell, signedIn, completing]);
 
   useEffect(() => {
     const restore = () => setPathname(globalThis.location.pathname);
@@ -33,25 +50,42 @@ export default function DashboardIsland({ config, callback }: DashboardIslandPro
       setCompleting(false);
       return;
     }
-    void shell.auth.complete(params, (destination) => {
+    void (async () => {
+      const hubCallback = isHubSignInCallback(params);
+      const option = hubCallback ? await discoverHub(shell) : undefined;
+      let destination: string = workspacePaths.home;
+      const status = await shell.auth.complete(params, path => { destination = path; }, option);
       globalThis.history.replaceState(null, '', destination);
       setPathname(destination);
-    }).then((status) => {
-      if (status === 'signed-in') setSignedIn(true);
-      else setProblem('Sign-in could not finish. Try again.');
-    }).catch(() => setProblem('Sign-in could not finish. Try again.')).finally(() => setCompleting(false));
+      if (status !== 'signed-in') {
+        setProblem('Sign-in could not finish. Try again.');
+        return;
+      }
+      if (hubCallback && !(await shell.transport.call('getCurrentPerson', { params: {} }, shell.auth)).ok) {
+        shell.auth.signOut();
+        setProblem('This hub account has no private access. Sign in with your private account.');
+        return;
+      }
+      setSignedIn(true);
+    })().catch(() => {
+      globalThis.history.replaceState(null, '', workspacePaths.home);
+      setPathname(workspacePaths.home);
+      setProblem('Sign-in could not finish. Try again.');
+    }).finally(() => setCompleting(false));
   }, [shell, callback]);
 
-  const begin = () => {
+  const beginSignIn = (provider?: HubSignIn) => {
     if (beginning) return;
     setProblem('');
     setBeginning(true);
     const target = workspaceReturnPath(pathname) ?? workspacePaths.home;
-    void shell.auth.begin(target).then((url) => globalThis.location.assign(url))
+    void shell.auth.begin(target, undefined, provider).then((url) => globalThis.location.assign(url))
       .catch(() => { setBeginning(false); setProblem('Sign-in could not start. Try again.'); });
   };
 
-  if (!signedIn) return <WorkspaceEntry begin={begin} completing={completing} beginning={beginning} problem={problem} />;
+  const begin = () => beginSignIn();
+  if (!signedIn) return <WorkspaceEntry begin={begin} completing={completing} beginning={beginning} problem={problem}
+    {...(hub ? { beginHub: () => beginSignIn(hub) } : {})} />;
 
   const navigate = (path: string) => {
     if (path === pathname || !workspaceReturnPath(path)) return;

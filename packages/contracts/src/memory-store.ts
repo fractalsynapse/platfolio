@@ -1,3 +1,4 @@
+import type { HubSignInTrust } from './persistence.ts';
 import {
   marketplacePlatformDescriptorDigest, MarketplacePlatformDescriptorSchema, MarketplacePublisherPlatformSchema,
   type MarketplacePlatformAcquisition, type MarketplacePlatformAcquisitionInput, type MarketplacePlatformAcquisitionRecord, type MarketplacePlatformAlias,
@@ -71,6 +72,7 @@ export class MemoryStore implements Store {
   private readonly artifacts = new Map<string, ArtifactRecord>();
   private readonly persons = new Map<string, Person>();
   private readonly identities = new Map<string, Identity>();
+  private readonly hubSignIn = new Map<string, HubSignInTrust>();
   private readonly members = new Map<string, TeamMember>();
   private readonly offers = new Map<string, CapabilityOffer>();
   private readonly shares = new Map<string, CapabilityShare>();
@@ -466,7 +468,10 @@ export class MemoryStore implements Store {
     if (!person.accepted) return err({ code: 'conflict', reason: person.reason });
     this.persons.set(person.value.id, person.value);
     const linked = await this.linkIdentity({ personId: person.value.id, issuer: input.issuer, subject: input.subject });
-    if (!linked.ok) return err({ code: 'conflict', reason: `identity link refused: ${reasonOf(linked)}` });
+    if (!linked.ok) {
+      this.persons.delete(person.value.id);
+      return err({ code: 'conflict', reason: `identity link refused: ${reasonOf(linked)}` });
+    }
     return ok({ person: copy(person.value), created: true });
   }
   async getPerson(id: string) {
@@ -481,13 +486,24 @@ export class MemoryStore implements Store {
     if (!this.persons.has(input.personId)) return err({ code: 'not-found', what: 'person', id: input.personId });
     const admitted = admit(IdentitySchema, { ...input, verifiedAt: this.clock() }, 'identity');
     if (!admitted.accepted) return err({ code: 'conflict', reason: admitted.reason });
-    this.identities.set(`${admitted.value.issuer}\u0000${admitted.value.subject}`, admitted.value);
-    return ok(admitted.value);
+    const key = `${admitted.value.issuer}\u0000${admitted.value.subject}`;
+    const existing = this.identities.get(key);
+    if (existing && existing.personId !== input.personId) return err({ code: 'conflict', reason: 'identity already linked' });
+    this.identities.set(key, admitted.value);
+    return ok(copy(admitted.value));
   }
   async unlinkIdentity(issuer: string, subject: string) {
+    return this.removeIdentity(issuer, subject);
+  }
+
+  async unlinkOwnedIdentity(issuer: string, subject: string, personId: string) {
+    return this.removeIdentity(issuer, subject, personId);
+  }
+
+  private async removeIdentity(issuer: string, subject: string, expectedPersonId?: string) {
     const key = `${issuer}\u0000${subject}`;
     const personId = this.identities.get(key)?.personId;
-    const existed = this.identities.delete(key);
+    const existed = (expectedPersonId === undefined || personId === expectedPersonId) && this.identities.delete(key);
     if (!existed) return err({ code: 'not-found', what: 'identity', id: `${issuer}/${subject}` });
     if (personId) {
       const preference = this.notificationEmail.get(personId);
@@ -502,6 +518,16 @@ export class MemoryStore implements Store {
     const identity = this.identities.get(`${issuer}\u0000${subject}`);
     const person = identity ? this.persons.get(identity.personId) : undefined;
     return person ? ok(copy(person)) : err({ code: 'not-found', what: 'person', id: `${issuer}/${subject}` });
+  }
+
+  async getHubSignIn(teamId: string) {
+    return copy(this.hubSignIn.get(teamId));
+  }
+
+  async setHubSignIn(teamId: string, trust: HubSignInTrust | undefined) {
+    if (!this.teams.has(teamId)) throw new Error('Hub sign-in requires an existing workspace');
+    if (trust) this.hubSignIn.set(teamId, copy(trust));
+    else this.hubSignIn.delete(teamId);
   }
 
   async putTeamMember(member: Omit<TeamMember, 'addedAt'> & { addedAt?: string }) {

@@ -105,8 +105,11 @@ export class StoreService extends Service<z.infer<typeof StoreConfigSchema>> {
   listPersons() { return this.inner.listPersons(); }
   linkIdentity(...args: Parameters<Store['linkIdentity']>) { return this.inner.linkIdentity(...args); }
   unlinkIdentity(...args: Parameters<Store['unlinkIdentity']>) { return this.inner.unlinkIdentity(...args); }
+  unlinkOwnedIdentity(...args: Parameters<Store['unlinkOwnedIdentity']>) { return this.inner.unlinkOwnedIdentity(...args); }
   listIdentities(...args: Parameters<Store['listIdentities']>) { return this.inner.listIdentities(...args); }
   getPersonByIdentity(...args: Parameters<Store['getPersonByIdentity']>) { return this.inner.getPersonByIdentity(...args); }
+  getHubSignIn(...args: Parameters<Store['getHubSignIn']>) { return this.inner.getHubSignIn(...args); }
+  setHubSignIn(...args: Parameters<Store['setHubSignIn']>) { return this.inner.setHubSignIn(...args); }
   publishCapability(...args: Parameters<Store['publishCapability']>) { return this.inner.publishCapability(...args); }
   ensureCapabilityOffer(...args: Parameters<Store['ensureCapabilityOffer']>) { return this.inner.ensureCapabilityOffer(...args); }
   getCapabilityOffer(...args: Parameters<Store['getCapabilityOffer']>) { return this.inner.getCapabilityOffer(...args); }
