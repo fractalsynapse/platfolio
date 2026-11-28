@@ -32,6 +32,7 @@ public final class OperatorProfileMigration implements EventListenerProviderFact
     private static final String REALM = "platfolio";
     private static final String MIGRATION = "platfolio.operatorProfile";
     private static final int VERSION = 1;
+    private boolean migrate;
 
     public record Policy(String apiClientId, String apiRole, String webClientId, String accountClientId,
             String accountRole, ProtocolMapperRepresentation apiScope,
@@ -43,7 +44,9 @@ public final class OperatorProfileMigration implements EventListenerProviderFact
     }
 
     @Override
-    public void init(Config.Scope config) {}
+    public void init(Config.Scope config) {
+        migrate = config.getBoolean("migrate", false);
+    }
 
     @Override
     public void close() {}
@@ -59,7 +62,7 @@ public final class OperatorProfileMigration implements EventListenerProviderFact
 
     @Override
     public void postInit(KeycloakSessionFactory factory) {
-        if (!Boolean.getBoolean("platfolio.migrateOperatorRealm")) return;
+        if (!migrate) return;
         factory.register(event -> {
             if (event instanceof PostMigrationEvent) {
                 var policy = readPolicy();

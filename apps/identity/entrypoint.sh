@@ -54,9 +54,7 @@ if [ "${1:-}" = start-private ]; then
   fi
   mkdir -p /opt/keycloak/data/import
   cp "/opt/keycloak/platfolio-private/$realm.json" /opt/keycloak/data/import/platfolio-realm.json
-  JAVA_OPTS_APPEND="${JAVA_OPTS_APPEND:+$JAVA_OPTS_APPEND }-Dplatfolio.migrateOperatorRealm=true"
-  export JAVA_OPTS_APPEND
-  exec /opt/keycloak/bin/kc.sh start --import-realm "$@"
+  exec /opt/keycloak/bin/kc.sh start --import-realm --spi-events-listener--platfolio-operator-profile-migration--migrate=true "$@"
 fi
 
 exec /opt/keycloak/bin/kc.sh "$@"

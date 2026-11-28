@@ -57,13 +57,6 @@ variables:
     environments: [development]
     deployedTo: host:shell
     note: "referenced by scripts/seed-identity.ts, scripts/smoke-identity.ts"
-  - name: JAVA_OPTS_APPEND
-    kind: value
-    secret: false
-    environments: all
-    service: identity
-    deployedTo: railway:variable
-    note: "Optional Keycloak JVM options. The start-private entrypoint appends the local operator realm migration switch."
   - name: KC_ADMIN_USER
     kind: value
     secret: false
