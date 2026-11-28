@@ -152,7 +152,7 @@ jobs:
             | .users[0].attributes.upgradeFixture = ["retained"]
             | .components["org.keycloak.userprofile.UserProfileProvider"][0].config["kc.user.profile.config"][0] |=
                 (fromjson | .attributes |= (map(select(.name != "platfolioDisplayName")) + [
-                  {name:"upgradeFixture", permissions:{view:["admin","user"],edit:["admin","user"]}}
+                  {name:"upgradeFixture", permissions:{view:["admin","user"],edit:["admin","user"]} }
                 ]) | tojson)
             | .clients |= map(if has("protocolMappers") then .protocolMappers |=
                 (map(select(.name | startswith("platfolio-account-") | not))
