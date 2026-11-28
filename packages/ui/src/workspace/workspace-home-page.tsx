@@ -13,8 +13,8 @@ import { useOperation } from '../sdk/use-operation.ts';
 const params = {};
 
 export function WorkspaceHomePage(): React.ReactElement {
-  const { teams, invitations } = useWorkspaceModel();
-  const instances = useOperation('listInstances', { params, enabled: teams.data.length > 0 });
+  const { teams, invitations, hub } = useWorkspaceModel();
+  const instances = useOperation('listInstances', { params, enabled: !hub && teams.data.length > 0 });
   const clock = useClock();
   const invitationCount = invitations.state.status === 'loaded' ? invitations.state.data.length : 0;
   const now = clock().toISOString();
@@ -28,7 +28,9 @@ export function WorkspaceHomePage(): React.ReactElement {
   }
   return <>
     <Breadcrumbs items={[{ label: 'Home', href: '/' }, { label: 'Your teams' }]} />
-    <WorkspaceHeading title="Your teams"><p>Choose a team to view its platform instances.</p></WorkspaceHeading>
+    <WorkspaceHeading title="Your teams"><p>{hub
+      ? 'Choose a team to manage its private Platfolio installations.'
+      : 'Choose a team to view its platform instances.'}</p></WorkspaceHeading>
     <div className="ui-workspace-page-actions">
       <WorkspaceLink className="ui-workspace-primary ui-hit-primary" href={workspacePaths.createTeam}>Create team</WorkspaceLink>
     </div>

@@ -21,14 +21,23 @@ import { OperationState } from './operation-state.tsx';
 
 const params = {};
 export function TeamWorkspace(): React.ReactElement {
-  const { route } = useWorkspaceModel();
+  const { route, hub } = useWorkspaceModel();
   const team = useWorkspaceTeam();
-  const { state, reload } = useOperation('listInstances', { params });
+  const { state, reload } = useOperation('listInstances', { params, enabled: !hub });
   const members = useOperation('listTeamMembers', {
     params: React.useMemo(() => ({ teamId: team.teamId }), [team.teamId]),
     key: `team-roster-${team.teamId}`, enabled: route.kind === 'team' && team.role === 'owner',
   });
   const clock = useClock();
+  if (hub) return <>
+    <WorkspaceHeading title={route.kind === 'team-activity' ? 'Team activity' : 'Team workspace'}><p>{team.name}</p></WorkspaceHeading>
+    <TeamTabs team={team} current={route.kind === 'team-activity' ? 'activity' : 'apps'} />
+    {route.kind === 'team' && team.role === 'owner' && <WorkspacePanel title="Private Platfolio installations">
+      <p>Launch a private workspace or manage its marketplace connection.</p>
+      <WorkspaceLink className="ui-workspace-primary ui-hit-primary" href={workspacePaths.teamConnections(team.name)}>Manage installations</WorkspaceLink>
+    </WorkspacePanel>}
+    <TeamActivity key={team.teamId} team={team} apps={[]} />
+  </>;
   if (state.status !== 'loaded') return <OperationState status={state.status} pending="Loading apps…" retry={reload}
     failed={<>Couldn’t load this team’s apps. {state.status === 'failed' && ageLabel(state.freshness, clock().toISOString()).text}</>} />;
 

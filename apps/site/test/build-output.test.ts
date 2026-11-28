@@ -102,6 +102,12 @@ test('the site serves the Platfolio logo and declares its favicon on public and 
   assert.deepEqual([icon[6], icon[22], icon[38]], [16, 32, 48]);
 });
 
+test('public navigation has real sign-in and hosting guide destinations', () => {
+  assert.match(readPage('/sign-in'), /url=\/dashboard/i);
+  assert.match(readPage('/docs'), /<h1>Hosting guide<\/h1>/);
+  assert.match(readPage('/docs/self-host'), /<h2>Verify a restore<\/h2>/);
+});
+
 test('the public template catalog and details are prerendered without React hydration', () => {
   const catalog = readPage('/templates');
   assert.match(catalog, /<h1>Templates<\/h1>/);

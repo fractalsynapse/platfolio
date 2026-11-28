@@ -112,6 +112,8 @@
  */
 import { parseArgs } from 'node:util';
 import { API_CLIENT_ID, LOGIN_SCOPES, LOOPBACK_UI_ORIGIN, PKCE_CHALLENGE_ATTRIBUTE, PKCE_METHOD, REQUIRED_SCOPE, WEB_CLIENT_ID, browserClientMappers, codeChallenge, createPkcePair, endSessionUrl, isPkceVerifier, refreshSkewSeconds } from './browser-auth.ts';
+import { isLoopback } from './identity-credentials.ts';
+import { OPERATOR_DISPLAY_NAME_ATTRIBUTE } from '../apps/identity/src/operator-profile.ts';
 
 const { values: flags } = parseArgs({
   options: {
@@ -124,6 +126,7 @@ const { values: flags } = parseArgs({
     // `compose.dev.yaml`, which name the same origin.
     'ui-origin': { type: 'string', default: process.env.PLATFOLIO_ALLOWED_ORIGINS ?? LOOPBACK_UI_ORIGIN },
     'sign-in-only': { type: 'boolean' },
+    'local-owner-profile': { type: 'boolean' },
     user: { type: 'string', default: process.env.KC_PKCE_USER ?? 'adrian' },
     password: { type: 'string', default: process.env.KC_USER_PASSWORD ?? 'platfolio-dev-only' },
     'admin-user': { type: 'string', default: process.env.KC_ADMIN_USER ?? 'platfolio-admin' },
@@ -141,7 +144,11 @@ const redirectUri = `${uiOrigin}/callback`;
 const WEB_CLIENT = WEB_CLIENT_ID;
 const API_CLIENT = API_CLIENT_ID;
 const issuer = `${idp}/realms/${realm}`;
-if (flags['sign-in-only'] && (!process.env.KC_PKCE_USER || !process.env.KC_USER_PASSWORD)) {
+const focusedSignIn = flags['sign-in-only'] || flags['local-owner-profile'];
+if (flags['local-owner-profile'] && (!isLoopback(idp) || !isLoopback(uiOrigin))) {
+  throw new Error('The owner profile write smoke runs only against a disposable loopback realm');
+}
+if (focusedSignIn && (!process.env.KC_PKCE_USER || !process.env.KC_USER_PASSWORD)) {
   throw new Error('The candidate sign-in check needs KC_PKCE_USER and KC_USER_PASSWORD for a smoke user');
 }
 
@@ -258,7 +265,7 @@ async function authorize(opts: {
     // we got is what stops a refusal from being read as a silent success.
     const action = /<form id="kc-form-login"[^>]*action="([^"]+)"/.exec(html)?.[1];
     if (!action) return { verifier, params: {}, loginPageShown: false, status: 200, page: html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200) };
-    if (flags['sign-in-only'] && new URL(action.replace(/&amp;/g, '&')).origin !== new URL(issuer).origin) {
+    if (focusedSignIn && new URL(action.replace(/&amp;/g, '&')).origin !== new URL(issuer).origin) {
       throw new Error('The candidate sign-in form points outside its configured issuer');
     }
     loginPageShown = true;
@@ -282,9 +289,9 @@ async function authorize(opts: {
     target = new URL(l, target);
   }
   const params = Object.fromEntries(target.searchParams.entries());
-  const stateMismatch = (flags['sign-in-only'] || params.state) && params.state !== state
+  const stateMismatch = (focusedSignIn || params.state) && params.state !== state
     ? `sent ${state}, got ${params.state ?? '(missing)'}` : undefined;
-  if (flags['sign-in-only'] && target.origin + target.pathname !== redirectUri) {
+  if (focusedSignIn && target.origin + target.pathname !== redirectUri) {
     throw new Error('The candidate sign-in did not redirect to its configured callback');
   }
   return { verifier, ...(params.code === undefined ? {} : { code: params.code }), params, loginPageShown, status: r.status, ...(stateMismatch === undefined ? {} : { stateMismatch }) };
@@ -320,7 +327,7 @@ check('discovery: issuer is the realm under test', disc.issuer === issuer, `${di
 check('discovery: S256 is offered', disc.code_challenge_methods_supported.includes('S256'), JSON.stringify(disc.code_challenge_methods_supported));
 check('discovery: an end_session_endpoint exists', typeof disc.end_session_endpoint === 'string' && disc.end_session_endpoint.length > 0, disc.end_session_endpoint);
 
-if (flags['sign-in-only']) {
+if (focusedSignIn) {
   const origin = new URL(issuer).origin;
   if (disc.issuer !== issuer || [disc.authorization_endpoint, disc.token_endpoint].some((endpoint) => new URL(endpoint).origin !== origin)) {
     throw new Error('Candidate sign-in discovered endpoints outside its configured issuer');
@@ -332,6 +339,23 @@ if (flags['sign-in-only']) {
   const accessToken = token.j.access_token;
   check('candidate exchanged the code with its PKCE verifier', token.status === 200 && typeof accessToken === 'string', `HTTP ${token.status}`);
   if (typeof accessToken !== 'string' || token.status !== 200) report();
+  if (flags['local-owner-profile']) {
+    const account = `${issuer}/account/?userProfileMetadata=false`;
+    const headers = { authorization: `Bearer ${accessToken}`, accept: 'application/json' };
+    const before = await fetch(account, { headers, redirect: 'error' });
+    check('the initial owner can read their imported account', before.ok, `HTTP ${before.status}`);
+    if (!before.ok) report();
+    const profile = await before.json() as { username: string; firstName?: string; lastName?: string; email?: string; attributes?: Record<string, string[]> };
+    const displayName = 'Profile verification';
+    const saved = await fetch(account, { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, redirect: 'error',
+      body: JSON.stringify({ username: profile.username, firstName: profile.firstName, lastName: profile.lastName,
+        email: profile.email, attributes: { ...profile.attributes, [OPERATOR_DISPLAY_NAME_ATTRIBUTE]: [displayName] } }) });
+    check('the initial owner can save a display name', saved.ok, `HTTP ${saved.status}`);
+    const after = await fetch(account, { headers, redirect: 'error' });
+    const updated = await after.json().catch(() => undefined) as typeof profile | undefined;
+    check('Keycloak persisted the display name', after.ok && updated?.attributes?.[OPERATOR_DISPLAY_NAME_ATTRIBUTE]?.[0] === displayName, `HTTP ${after.status}`);
+    report();
+  }
   const who = await fetch(`${api}/api/v1/whoami`, { headers: { authorization: `Bearer ${accessToken}` }, redirect: 'error' });
   check('candidate API accepted the browser access token', who.status === 200, `HTTP ${who.status}`);
   report();

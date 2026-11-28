@@ -9,8 +9,10 @@ import { accountTabs, workspacePaths } from './routes.ts';
 import { SectionNav } from './section-nav.tsx';
 import { WorkspaceHeading } from './workspace-heading.tsx';
 import { Breadcrumbs } from './breadcrumbs.tsx';
+import { WorkspaceNavigationContext } from './navigation.ts';
 
 export function AccountWorkspace({ tab }: { readonly tab: keyof typeof accountTabs }): React.ReactElement {
+  const hub = React.useContext(WorkspaceNavigationContext)?.installationRole === 'hub';
   return <>
     <Breadcrumbs items={[{ label: 'Home', href: '/' }, { label: 'Account' }]} />
     <WorkspaceHeading title="Account" />
@@ -19,7 +21,7 @@ export function AccountWorkspace({ tab }: { readonly tab: keyof typeof accountTa
       {tab === 'notifications' ? <WorkspacePanel title="Notification routing" form>
         <Stack>
           <NotificationEmailPreference />
-          <WorkspaceLink href={workspacePaths.notifications} className="ui-workspace-secondary ui-hit-primary">Manage notification rules</WorkspaceLink>
+          {!hub && <WorkspaceLink href={workspacePaths.notifications} className="ui-workspace-secondary ui-hit-primary">Manage notification rules</WorkspaceLink>}
         </Stack>
       </WorkspacePanel> : tab === 'password' ? <AccountPassword /> : <AccountIdentity key={tab} tab={tab} />}
     </div>

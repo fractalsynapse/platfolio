@@ -47,6 +47,7 @@ import react from '@astrojs/react';
  */
 export default defineConfig({
   output: 'static',
+  redirects: { '/sign-in': '/dashboard' },
   // D47: a deploy's address, not a source constant. Unset means the site has no absolute origin, and
   // `apps/site/src/lib/site-config.ts` reports that as a configuration failure instead of inventing one.
   site: process.env['PLATFOLIO_SITE_ORIGIN'],

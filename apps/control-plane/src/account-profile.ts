@@ -1,7 +1,8 @@
 import type { ExtensionDescriptor, KernelContext, Request, Response_ } from '@platfolio/kernel';
 import { badRequest, bearerToken, send, unauthorized } from './respond.ts';
+import { OPERATOR_DISPLAY_NAME_ATTRIBUTE } from '../../identity/src/operator-profile.ts';
 
-export const OPERATOR_DISPLAY_NAME_ATTRIBUTE = 'platfolioDisplayName';
+export { OPERATOR_DISPLAY_NAME_ATTRIBUTE };
 
 export interface AccountIssuer {
   readonly issuer: string;

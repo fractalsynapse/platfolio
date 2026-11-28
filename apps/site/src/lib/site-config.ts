@@ -56,6 +56,7 @@ export interface SiteConfig {
   readonly siteOrigin: string;
   readonly clientId: string;
   readonly scope: string;
+  readonly installationRole?: 'hub' | 'private';
 }
 
 /** The variable names this app reads. `environment.yaml` is generated from these spellings (D58). */
@@ -64,6 +65,7 @@ export const SITE_VARIABLES = {
   apiUrl: 'PLATFOLIO_URL',
   issuer: 'PLATFOLIO_IDENTITY_ISSUER',
   clientId: 'PLATFOLIO_WEB_CLIENT_ID',
+  installationRole: 'PLATFOLIO_INSTALLATION_ROLE',
 } as const;
 
 export class SiteConfigError extends Error {
@@ -147,6 +149,7 @@ export function resolveSiteConfig(env: Readonly<Record<string, string | undefine
   const siteOrigin = httpUrl(required(env, SITE_VARIABLES.siteOrigin), SITE_VARIABLES.siteOrigin);
   const apiBaseUrl = httpUrl(required(env, SITE_VARIABLES.apiUrl), SITE_VARIABLES.apiUrl);
   const issuerBaseUrl = httpUrl(required(env, SITE_VARIABLES.issuer), SITE_VARIABLES.issuer);
+  const role = env[SITE_VARIABLES.installationRole]?.trim();
 
   for (const [name, value] of Object.entries({ [SITE_VARIABLES.siteOrigin]: siteOrigin, [SITE_VARIABLES.apiUrl]: apiBaseUrl, [SITE_VARIABLES.issuer]: issuerBaseUrl })) {
     if (value !== undefined && value.startsWith('http://') && !isLoopback(value)) {
@@ -165,7 +168,13 @@ export function resolveSiteConfig(env: Readonly<Record<string, string | undefine
     // environment, rather than editing this file (which would be a second copy of the client's identity).
     clientId: env[SITE_VARIABLES.clientId]?.trim() || WEB_CLIENT_ID,
     scope: LOGIN_SCOPES,
+    ...(role ? { installationRole: installationRole(role) } : {}),
   };
+}
+
+function installationRole(value: string): 'hub' | 'private' {
+  if (value === 'hub' || value === 'private') return value;
+  throw new SiteConfigError('Invalid Platfolio installation role', 'use hub or private');
 }
 
 /**
@@ -174,13 +183,7 @@ export function resolveSiteConfig(env: Readonly<Record<string, string | undefine
  * **public information**. Nothing credential-shaped belongs in it (D4), and `isTokenShapedName` is what the
  * auth-boundary test uses to keep it that way.
  */
-export interface SitePublicConfig {
-  readonly apiBaseUrl: string;
-  readonly issuerBaseUrl: string;
-  readonly siteOrigin: string;
-  readonly clientId: string;
-  readonly scope: string;
-}
+export type SitePublicConfig = SiteConfig;
 
 export const publicConfigOf = (config: SiteConfig): SitePublicConfig => ({
   apiBaseUrl: config.apiBaseUrl,
@@ -188,6 +191,7 @@ export const publicConfigOf = (config: SiteConfig): SitePublicConfig => ({
   siteOrigin: config.siteOrigin,
   clientId: config.clientId,
   scope: config.scope,
+  ...(config.installationRole ? { installationRole: config.installationRole } : {}),
 });
 
 /**
@@ -212,6 +216,7 @@ export interface RuntimeSiteConfig {
   readonly issuerBaseUrl?: string;
   readonly siteOrigin?: string;
   readonly clientId?: string;
+  readonly installationRole?: 'hub' | 'private';
 }
 
 export function runtimeConfigFrom(scope: unknown): RuntimeSiteConfig | undefined {
@@ -219,7 +224,7 @@ export function runtimeConfigFrom(scope: unknown): RuntimeSiteConfig | undefined
   const injected = (scope as Record<string, unknown>)[RUNTIME_CONFIG_GLOBAL];
   if (typeof injected !== 'object' || injected === null) return undefined;
   const out: Record<string, string> = {};
-  for (const key of ['apiBaseUrl', 'issuerBaseUrl', 'siteOrigin', 'clientId'] as const) {
+  for (const key of ['apiBaseUrl', 'issuerBaseUrl', 'siteOrigin', 'clientId', 'installationRole'] as const) {
     const value = (injected as Record<string, unknown>)[key];
     if (typeof value !== 'string' || value.trim() === '') continue;
     // Validated as it is read, not after the merge. A container that wrote a host-less URL or a client id with a
@@ -240,6 +245,7 @@ export function runtimeConfigFrom(scope: unknown): RuntimeSiteConfig | undefined
  */
 export function runtimeOverlayShape(key: keyof RuntimeSiteConfig, value: string): string {
   const label = `${RUNTIME_CONFIG_GLOBAL}.${key}`;
+  if (key === 'installationRole') return installationRole(value);
   if (key === 'clientId') {
     if (!/^[A-Za-z0-9._-]{1,128}$/.test(value)) {
       throw new SiteConfigError(`${label} is not a client name: "${value}"`, 'a realm client id is an opaque slug; anything else is a URL that arrived in the wrong field');
@@ -265,11 +271,13 @@ export function endpointsForIsland(baked: SitePublicConfig, injected: RuntimeSit
   // No validation pass here on purpose. `runtimeConfigFrom` already checked every field it let through, with the
   // build's own `httpUrl` and the same loopback rule; a second copy in the merge would be two answers for one
   // question, and the kind that drift -- the merge would be the one nobody tests because the reader is red first.
+  const role = injected.installationRole ?? baked.installationRole;
   return {
     apiBaseUrl: injected.apiBaseUrl ?? baked.apiBaseUrl,
     issuerBaseUrl: injected.issuerBaseUrl ?? baked.issuerBaseUrl,
     siteOrigin: injected.siteOrigin ?? baked.siteOrigin,
     clientId: injected.clientId ?? baked.clientId,
     scope: baked.scope,
+    ...(role ? { installationRole: role } : {}),
   };
 }

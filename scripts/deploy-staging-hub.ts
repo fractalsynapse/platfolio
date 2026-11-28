@@ -42,10 +42,11 @@ export function stagingHubPlan(resolveArtifact: (service: string) => string, hos
     throw new Error('Hub Compose did not render: ' + parsed.issues.map(({ path, code }) => path + ' ' + code).join(', '));
   }
   const manifest = parsed.manifest;
+  const role = { PLATFOLIO_INSTALLATION_ROLE: 'hub' };
   const settings = {
-    api: { host: api, env: { PLATFOLIO_INSTALLATION_ROLE: 'hub', PLATFOLIO_ALLOWED_ORIGINS: siteOrigin,
+    api: { host: api, env: { ...role, PLATFOLIO_ALLOWED_ORIGINS: siteOrigin,
       PLATFOLIO_IDENTITY_ISSUER: issuer, PLATFOLIO_IDENTITY_JWKS_URI: issuer + '/protocol/openid-connect/certs', ...launcher } },
-    site: { host: site, env: { PLATFOLIO_SITE_ORIGIN: siteOrigin, PLATFOLIO_URL: apiOrigin, PLATFOLIO_IDENTITY_ISSUER: issuer } },
+    site: { host: site, env: { ...role, PLATFOLIO_SITE_ORIGIN: siteOrigin, PLATFOLIO_URL: apiOrigin, PLATFOLIO_IDENTITY_ISSUER: issuer } },
     identity: { host: identity, env: { KC_HOSTNAME: identityOrigin, KC_HOSTNAME_STRICT: 'true',
       PLATFOLIO_SITE_ORIGIN: siteOrigin, PLATFOLIO_INSTALL_OWNER_EMAIL: ownerEmail } },
   };

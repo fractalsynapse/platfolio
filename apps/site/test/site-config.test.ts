@@ -41,7 +41,7 @@ const OK = {
   [SITE_VARIABLES.issuer]: 'https://auth.platfolio.example/realms/platfolio',
 };
 
-test('the four names this app reads are the four the registry declares (D58: one registry per platform)', () => {
+test('each site variable is declared in the environment registry', () => {
   const registry = fs.readFileSync(path.join(ROOT, 'environment.yaml'), 'utf8');
   for (const [field, name] of Object.entries(SITE_VARIABLES)) {
     assert.ok(
@@ -53,7 +53,7 @@ test('the four names this app reads are the four the registry declares (D58: one
 
 test('a missing variable is refused by name, and the message carries no value', () => {
   for (const [field, name] of Object.entries(SITE_VARIABLES)) {
-    if (field === 'clientId') continue; // optional by design: the policy constant is its default
+    if (field === 'clientId' || field === 'installationRole') continue;
     const env = { ...OK };
     delete env[name as keyof typeof env];
     assert.throws(
@@ -66,6 +66,15 @@ test('a missing variable is refused by name, and the message carries no value', 
       `${name} unset must fail rather than build a site pointed at an invented origin`,
     );
   }
+});
+
+test('the public runtime overlay carries only a recognized installation role', () => {
+  const baked = publicConfigOf(resolveSiteConfig(OK));
+  assert.equal(endpointsForIsland(baked, runtimeConfigFrom({
+    [RUNTIME_CONFIG_GLOBAL]: { installationRole: 'hub' },
+  })).installationRole, 'hub');
+  assert.throws(() => runtimeConfigFrom({ [RUNTIME_CONFIG_GLOBAL]: { installationRole: 'other' } }), SiteConfigError);
+  assert.equal(endpointsForIsland(baked, undefined).installationRole, undefined);
 });
 
 test('a relative or non-http scheme is refused, because a token must not be sent to `file:`', () => {

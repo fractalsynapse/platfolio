@@ -66,6 +66,12 @@ enrollment responses carry only the data needed for the hub feature. The install
 whether to share a public template or any other public content. The hub has no provider grant,
 repository write access, or automatic code upgrade capability inside a private installation.
 
+The dashboard uses the deployment role when choosing pages and API reads. Hub teams see
+their members, activity, private Platfolio launcher and marketplace connections. The hub
+catalog describes releases users can install from a private workspace. App inventory,
+app notifications and application deployment controls belong to the private workspace.
+Both roles use their own Keycloak realm for local users’ Account profile.
+
 Installed apps, local sign-in, credential rotation, and deployment from available artifacts
 continue after unlinking or during a hub outage. New marketplace claims and downloads that
 require the registry depend on its availability. Registry clients can cache or mirror public

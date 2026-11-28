@@ -351,7 +351,12 @@ receives the existing Platfolio API role. It lets verified registrants enter the
 assigns team membership independently. The staging and production realms can select the theme
 independently on the shared identity host.
 
-Use `--enable-account-profile` on a realm to make the Platfolio Account page editable.
+New Platfolio installations import the Account profile configuration with their operator realm.
+Use `--enable-account-profile` to configure an existing realm in place with its current administrator.
+For an existing imported owner missing the built-in self-service role, also pass
+`--account-profile-user=owner` using the account's current exact username. A new image does
+not replace an existing realm. The operator must apply this repair until an in-place upgrade
+handles the realm configuration automatically.
 The setup maps Keycloak's user-scoped account permission to the Platfolio browser client,
 enables username edits, and adds a display-name field. Run this after any reseeding of the
 browser client. Platfolio reads and saves only the signed-in person's profile through the

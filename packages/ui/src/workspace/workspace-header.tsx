@@ -14,9 +14,10 @@ interface WorkspaceHeaderProps {
   readonly invitationCount?: number | undefined;
   readonly displayName?: string | undefined;
   readonly signOut: () => void;
+  readonly hub?: boolean;
 }
 
-export function WorkspaceHeader({ teams, team, invitationCount, displayName, signOut }: WorkspaceHeaderProps): React.ReactElement {
+export function WorkspaceHeader({ teams, team, invitationCount, displayName, signOut, hub = false }: WorkspaceHeaderProps): React.ReactElement {
   const active = teams.find(({ name }) => name === team) ?? teams[0];
   return <header className="ui-workspace-header">
     <div className="ui-workspace-header-inner">
@@ -24,7 +25,7 @@ export function WorkspaceHeader({ teams, team, invitationCount, displayName, sig
       <a className="ui-workspace-item ui-hit-primary" href="/">Home</a>
       <a className="ui-workspace-item ui-hit-primary" href={templatePaths.catalog}>Templates</a>
       {active && <div className="ui-workspace-menu-section">
-        {teamSectionLinks(active, undefined, true).map(({ href, label }) =>
+        {teamSectionLinks(active, undefined, true, hub).map(({ href, label }) =>
           <WorkspaceLink key={href} className="ui-workspace-item ui-hit-primary" href={href}>{label}</WorkspaceLink>)}
       </div>}
     </WorkspaceMenu>
@@ -36,7 +37,7 @@ export function WorkspaceHeader({ teams, team, invitationCount, displayName, sig
       </WorkspaceMenu>
       <WorkspaceMenu kind="avatar" align="end" hover label="Account menu" trigger={<WorkspaceAvatar name={displayName} />}>
         <WorkspaceLink className="ui-workspace-item ui-hit-primary" href={workspacePaths.account}>Account</WorkspaceLink>
-        <WorkspaceLink className="ui-workspace-item ui-hit-primary" href={workspacePaths.notifications}>Notifications</WorkspaceLink>
+        {!hub && <WorkspaceLink className="ui-workspace-item ui-hit-primary" href={workspacePaths.notifications}>Notifications</WorkspaceLink>}
         <WorkspaceLink className="ui-workspace-item ui-hit-primary" href={workspacePaths.home}>Your teams</WorkspaceLink>
         <WorkspaceLink className="ui-workspace-item ui-hit-primary" href={workspacePaths.invitations}>
           Invitations{invitationCount ? ` (${invitationCount})` : ''}
