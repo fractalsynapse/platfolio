@@ -105,6 +105,15 @@ export function accountProfile(authorize: Authorize, issuer?: AccountIssuer): Ex
             const body = await response.json().catch(() => undefined) as SuccessOf<'getAccountEmails'> | undefined;
             return { ...send(operationId, 200, body), headers: { 'cache-control': 'no-store' } };
           }
+          case 404: {
+            // Older externally administered realms still provide the primary email through Account.
+            const account = method === 'GET' ? await read(credential) : undefined;
+            if (!account) return unavailable();
+            const email = account.email;
+            return { ...send(operationId, 200, { selfVerification: false, multipleEmails: false,
+              addresses: email ? [{ email, primary: true, verified: account.emailVerified === true }] : [],
+            }), headers: { 'cache-control': 'no-store' } };
+          }
           case 400: return badRequest('The verification code is invalid or expired. Request a new one and try again.');
           case 401: return unauthorized('account-permission');
           case 403: return send(operationId, 403, { error: 'email-action-disabled', message: 'Multiple emails are disabled for this installation.' });

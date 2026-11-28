@@ -16,9 +16,10 @@ test('profile edits use the caller’s own issuer credential and preserve their 
   const request: typeof fetch = async (url, init) => {
     calls++;
     const endpoint = new URL(url as URL);
-    assert.equal(endpoint.href.split('?')[0], issuer + '/account/');
     assert.equal(init?.redirect, 'error');
     assert.equal(new Headers(init?.headers).get('authorization'), `Bearer ${bearer}`);
+    if (endpoint.href === issuer + '/platfolio-account-email/addresses') return new Response(null, { status: 404 });
+    assert.equal(endpoint.href.split('?')[0], issuer + '/account/');
     if (init?.method === 'GET') return Response.json(profile);
     assert.equal(init?.method, 'POST');
     const body = JSON.parse(String(init?.body));
@@ -51,6 +52,11 @@ test('profile edits use the caller’s own issuer credential and preserve their 
     assert.equal(result.headers.get('cache-control'), 'no-store');
     assert.deepEqual(await result.json(), { username: 'updated', displayName: 'Operator', email: previous.email, emailVerified: true, avatarUrl });
     assert.equal(calls, 3);
+    const legacy = await fetch(api.replace('/profile', '/emails'), { headers });
+    assert.equal(legacy.status, 200);
+    assert.deepEqual(await legacy.json(), { selfVerification: false, multipleEmails: false,
+      addresses: [{ email: previous.email, primary: true, verified: true }],
+    });
   } finally {
     await disposeKernel(context);
   }
