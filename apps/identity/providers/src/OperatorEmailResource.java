@@ -241,7 +241,10 @@ public final class OperatorEmailResource implements RealmResourceProviderFactory
             if (auth == null || !WEB_CLIENT.equals(auth.token().getIssuedFor())) return null;
             var account = auth.token().getResourceAccess("account");
             var user = auth.user();
+            var api = realm.getClientByClientId("platfolio-api");
+            var role = api == null ? null : api.getRole("platfolio.user");
             return account != null && account.isUserInRole("manage-account") && user.isEnabled()
+                && role != null && user.hasRole(role)
                 && user.getServiceAccountClientLink() == null && user.getFederationLink() == null ? user : null;
         }
 
