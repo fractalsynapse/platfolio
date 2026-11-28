@@ -24,6 +24,11 @@ not the only allowed one.
 4. **Domain operations are free.** They consume no deployment, so polling is cheap: check every status tick
    and offer an explicit "check now". This is the one part of provisioning where we can be generous.
 
+The private spoke's Domains screen is where app owners get provider-issued instructions. Show the
+record name, type, value and zone, followed by verification and HTTPS status and a way to check again.
+Starter Web already exposes this for a custom hostname. Extending the same checklist to other
+public app and service deployments is part of the spoke configuration workflow.
+
 ## Where a domain is defined
 
 Split by who owns the knowledge:

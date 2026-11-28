@@ -5,6 +5,11 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+### Fixed — apply staging hub dependencies before service startup (#288)
+
+Hub CI configures the start commands and health checks on new services, then wires Postgres and
+mounts OpenBao storage before starting the hub. A retry can recover an unhealthy staging apply.
+
 ### Added — hub and private installation roles (#288)
 
 The staging hub runs its own Keycloak and OpenBao and is deployed through a dedicated CI workflow.

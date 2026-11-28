@@ -839,3 +839,44 @@ test('identity delivery and revocation only change the approved web service and 
   assert.equal(production.image, image);
   assert.ok(!mock.operations.some((operation) => operation.startsWith('variables:')));
 });
+
+test('hub CI configures the fresh service and attaches resources before its first deployment', async () => {
+  const mock = new RailwayMock();
+  const calls: Parameters<RailwayMock['graphql']>[0][] = [];
+  const provider = new RailwayInfraProvider({
+    credentials: mock, workspaceId: 'ws-1', deployAfterResources: true,
+    transport: {
+      graphql(input) {
+        calls.push(input);
+        return mock.graphql(input);
+      },
+    },
+    deployBudget: 20, deployTimeoutMs: 2_000, pollIntervalMs: 1, sleep: async () => {},
+  });
+  const plan = planWith((value) => {
+    value.environments = value.environments.filter(({ name }) => name === 'staging');
+    const staging = value.environments[0]!;
+    staging.databases = [{ name: 'main', kind: 'postgres' }];
+    staging.volumes = [{ name: 'data', service: 'api', mountPath: '/state' }];
+    staging.services[0]!.command = 'run-service';
+    staging.services[0]!.references = [{ database: 'main', variable: 'DATABASE_URL' }];
+  });
+  const applied = await provider.applyPlan(plan);
+  assert.deepEqual(applied.failures, []);
+  assert.ok(applied.verified);
+  const deployment = calls.findIndex(({ operation }) => operation === 'serviceInstanceDeploy');
+  assert.ok(deployment > 0);
+  const before = calls.slice(0, deployment);
+  const update = before.find(({ operation }) => operation === 'serviceInstanceUpdate');
+  assert.match(JSON.stringify(update?.variables), /"startCommand":"run-service"/);
+  assert.ok(before.some(({ operation }) => operation === 'templateDeployV2'));
+  assert.ok(before.some(({ operation, variables }) => operation === 'variableUpsert' && JSON.stringify(variables).includes('main-staging.DATABASE_URL')));
+  assert.ok(before.some(({ operation }) => operation === 'volumeCreate'));
+  const stages = [...mock.environments.values()];
+  assert.deepEqual(stages.map(({ name }) => name), ['staging']);
+  const instance = mock.instances.get(`${stages[0]!.id}:${serviceByNames(mock, 'api-staging')!.id}`)!;
+  instance.status = 'CRASHED';
+  const resumed = await provider.applyPlan(plan);
+  assert.ok(resumed.verified, 'the same plan can restart a previously crashed service');
+  assert.equal(mock.templateDeploys.length, 1, 'resume reuses the existing database');
+});
