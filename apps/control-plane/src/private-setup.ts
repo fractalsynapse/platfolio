@@ -2,6 +2,7 @@ import { validateRequestBody } from '@platfolio/api-contract';
 import type { RequestBodyOf } from '@platfolio/api-contract/generated/types';
 import { SmtpEmailTransport } from '@platfolio/contracts';
 import type { ExtensionDescriptor, RouteDefinition } from '@platfolio/kernel';
+import { installationOwnerHash } from '../../../packages/ui/src/web/installation-owner-policy.ts';
 import type { scoped } from './capabilities.ts';
 import { badRequest, notFound, send, spec } from './respond.ts';
 
@@ -65,7 +66,7 @@ export function privateSetup(route: typeof scoped, config?: Configuration, reque
           const call = await admin();
           const [realm, owner] = await Promise.all([readRealm(call), readOwner(call)]);
           return send('getPrivateSetup', 200, { smtpRequired: true, smtpConfigured: verified(realm),
-            temporaryPasswordActive: owner.requiredActions?.includes('UPDATE_PASSWORD') === true });
+            temporaryPasswordActive: owner.requiredActions?.includes(installationOwnerHash.requiredAction) === true });
         } catch { return blocked; }
       } },
       route('PUT', '/api/v1/teams/{teamId}/setup/smtp', 'configurePrivateSmtp', 'team.member.manage', async (scope, request) => {
@@ -79,7 +80,7 @@ export function privateSetup(route: typeof scoped, config?: Configuration, reque
         try {
           const call = await admin();
           const [realm, owner] = await Promise.all([readRealm(call), readOwner(call)]);
-          if (!owner.email || owner.requiredActions?.includes('UPDATE_PASSWORD')) return badRequest('Finish changing the owner password first.');
+          if (!owner.email || owner.requiredActions?.includes(installationOwnerHash.requiredAction)) return badRequest('Finish changing the owner password first.');
           const smtp = transport(input);
           try {
             if (!(await smtp.send({ to: [owner.email], subject: 'Private Platfolio email setup',
