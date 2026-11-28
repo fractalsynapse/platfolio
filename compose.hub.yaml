@@ -7,10 +7,11 @@ services:
     image: quay.io/openbao/openbao:2.7.0@sha256:71156a1c6623a5fa3f5e61b0c6a8ead0faf0df29a778339188443551995d1315
     entrypoint: ['docker-entrypoint.sh']
     command: ['server']
-    expose: ['8200']
+    expose: [&openbao-port '8200']
     healthcheck:
       test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:8200/v1/sys/init']
     environment:
+      PORT: *openbao-port
       RAILWAY_RUN_UID: '0'
       BAO_LOCAL_CONFIG: '{"disable_mlock":true,"api_addr":"http://openbao-staging.railway.internal:8200","cluster_addr":"http://openbao-staging.railway.internal:8201","storage":{"raft":{"path":"/openbao/file","node_id":"hub-staging"}},"listener":{"tcp":{"address":"[::]:8200","tls_disable":true}}}'
     volumes:
