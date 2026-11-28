@@ -4,7 +4,7 @@
  * hand, because every line reproduces from the specification.
  *
  * Source: apps/control-plane/openapi.yaml (OpenAPI 3.1.0, info.version 0.1.0)
- * Input digest: sha256/de6a37193c0de26a
+ * Input digest: sha256/e6600375a7fd7770
  *
  * Reproduce it with `pnpm run api:types`. `pnpm run api:types:check` fails when this file stops matching
  * what the committed spec produces, which is the only way a generated type deserves to be trusted.
@@ -18,6 +18,16 @@
  * measured, not reasoned from habit). Someone who wants both should write `import type { Error as ApiError }`,
  * or reach for the whole surface with `import type * as Api` and use `Api.Error`.
  */
+
+export interface AccountEmails {
+  selfVerification: boolean;
+  multipleEmails: boolean;
+  addresses: Array<{
+    email: string;
+    primary: boolean;
+    verified: boolean;
+  }>;
+}
 
 export interface ApplyResult {
   instanceId: string;
@@ -728,6 +738,10 @@ export interface ApiParameters {
     iss?: string;
     error?: string;
   };
+  /** PUT /api/v1/teams/{teamId}/setup/smtp */
+  configurePrivateSmtp: {
+    teamId: string;
+  };
   /** PUT /api/v1/teams/{teamId}/marketplace/installations/{installationId} */
   connectMarketplaceInstallation: {
     teamId: string;
@@ -777,6 +791,13 @@ export interface ApiParameters {
   enrollPrivateMarketplaceConnection: {
     teamId: string;
   };
+  /** DELETE /api/v1/teams/{teamId}/marketplace/installation-launches/{launchId} */
+  forgetHubInstallation: {
+    teamId: string;
+    launchId: string;
+  };
+  /** GET /api/v1/me/emails */
+  getAccountEmails: Record<string, never>;
   /** GET /api/v1/me/profile */
   getAccountProfile: Record<string, never>;
   /** GET /api/v1/me */
@@ -801,6 +822,12 @@ export interface ApiParameters {
   getHostedStarterBrand: {
     instanceId: string;
     environment: string;
+  };
+  /** GET /api/v1/teams/{teamId}/marketplace/installation-launches/{launchId}/first-sign-in/{environment} */
+  getHubInstallationFirstSignIn: {
+    teamId: string;
+    launchId: string;
+    environment: 'staging' | 'production';
   };
   /** GET /api/v1/teams/{teamId}/marketplace/installation-launches/{launchId} */
   getHubInstallationLaunch: {
@@ -836,6 +863,8 @@ export interface ApiParameters {
   getPrivateMarketplaceConnection: {
     teamId: string;
   };
+  /** GET /api/v1/setup */
+  getPrivateSetup: Record<string, never>;
   /** GET /api/v1/marketplace/catalog */
   getPublicMarketplaceCatalog: Record<string, never>;
   /** GET /readyz */
@@ -1025,6 +1054,8 @@ export interface ApiParameters {
   reportArtifact: {
     instanceId: string;
   };
+  /** POST /api/v1/me/email-actions */
+  requestAccountEmailAction: Record<string, never>;
   /** DELETE /api/v1/instances/{instanceId}/capability/{capability}/shares/{toTeamId} */
   revokeCapabilityShare: {
     instanceId: string;
@@ -1079,6 +1110,8 @@ export interface ApiParameters {
   unlockStarterOpenBao: {
     teamId: string;
   };
+  /** POST /api/v1/me/emails */
+  updateAccountEmails: Record<string, never>;
   /** PUT /api/v1/me/profile */
   updateAccountProfile: Record<string, never>;
   /** PUT /api/v1/instances/{instanceId}/environments/{environment}/configuration/starter-brand */
@@ -1133,6 +1166,14 @@ export interface ApiRequestBodies {
   bindSharedIdentity: {
     providerInstanceId: string;
     clientType: 'public' | 'confidential';
+  };
+  /** PUT /api/v1/teams/{teamId}/setup/smtp */
+  configurePrivateSmtp: {
+    host: string;
+    port: number;
+    user: string;
+    password: string;
+    from: string;
   };
   /** POST /api/v1/instances/{instanceId}/dispatches */
   createDispatch: {
@@ -1273,6 +1314,10 @@ export interface ApiRequestBodies {
     sourceRef?: string;
     version?: string;
   };
+  /** POST /api/v1/me/email-actions */
+  requestAccountEmailAction: {
+    action: 'verify-primary' | 'reset-password';
+  };
   /** PUT /api/v1/teams/{teamId}/marketplace/platforms/{platformId}/maintenance */
   setMarketplaceMaintenance: MarketplaceMaintenanceInput;
   /** PUT /api/v1/instances/{instanceId}/capability/{capability}/shares */
@@ -1299,10 +1344,21 @@ export interface ApiRequestBodies {
   unlockStarterOpenBao: {
     recovery: string;
   };
+  /** POST /api/v1/me/emails */
+  updateAccountEmails: ({
+    action: 'add' | 'make-primary' | 'remove';
+    email: string;
+  } | {
+    action: 'verify';
+    email: string;
+    code: string;
+  });
   /** PUT /api/v1/me/profile */
   updateAccountProfile: {
     username: string;
     displayName: string;
+    /** HTTPS image URL or an empty string to remove it. */
+    avatarUrl?: string;
   };
   /** PUT /api/v1/instances/{instanceId}/environments/{environment}/configuration/starter-brand */
   updateHostedStarterBrand: StarterBrandChange;
@@ -1457,6 +1513,15 @@ export interface ApiResponses {
     '303': void;
     '404': Error;
   };
+  /** PUT /api/v1/teams/{teamId}/setup/smtp */
+  configurePrivateSmtp: {
+    '204': void;
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '503': void;
+  };
   /** PUT /api/v1/teams/{teamId}/marketplace/installations/{installationId} */
   connectMarketplaceInstallation: {
     '204': void;
@@ -1568,6 +1633,21 @@ export interface ApiResponses {
     '409': Error;
     '503': Error;
   };
+  /** DELETE /api/v1/teams/{teamId}/marketplace/installation-launches/{launchId} */
+  forgetHubInstallation: {
+    '204': void;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '409': Error;
+  };
+  /** GET /api/v1/me/emails */
+  getAccountEmails: {
+    '200': AccountEmails;
+    '401': Error;
+    '403': Error;
+    '503': void;
+  };
   /** GET /api/v1/me/profile */
   getAccountProfile: {
     '200': {
@@ -1575,6 +1655,7 @@ export interface ApiResponses {
       displayName: string;
       email: string;
       emailVerified: boolean;
+      avatarUrl?: string;
     };
     '401': Error;
     '403': Error;
@@ -1635,6 +1716,16 @@ export interface ApiResponses {
     '409': Error;
     '503': Error;
   };
+  /** GET /api/v1/teams/{teamId}/marketplace/installation-launches/{launchId}/first-sign-in/{environment} */
+  getHubInstallationFirstSignIn: {
+    '200': {
+      temporaryPassword: string;
+    };
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '503': void;
+  };
   /** GET /api/v1/teams/{teamId}/marketplace/installation-launches/{launchId} */
   getHubInstallationLaunch: {
     '200': HubInstallationLaunch;
@@ -1647,6 +1738,7 @@ export interface ApiResponses {
     '200': {
       provider: string;
       revision: string;
+      managedFirstSignIn?: boolean;
     };
     '401': Error;
     '403': Error;
@@ -1732,6 +1824,15 @@ export interface ApiResponses {
     '403': Error;
     '404': Error;
     '503': Error;
+  };
+  /** GET /api/v1/setup */
+  getPrivateSetup: {
+    '200': {
+      smtpRequired: boolean;
+      smtpConfigured: boolean;
+      temporaryPasswordActive: boolean;
+    };
+    '503': void;
   };
   /** GET /api/v1/marketplace/catalog */
   getPublicMarketplaceCatalog: {
@@ -2249,6 +2350,16 @@ export interface ApiResponses {
     '403': Error;
     '404': Error;
   };
+  /** POST /api/v1/me/email-actions */
+  requestAccountEmailAction: {
+    '204': void;
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '409': Error;
+    '429': void;
+    '503': void;
+  };
   /** DELETE /api/v1/instances/{instanceId}/capability/{capability}/shares/{toTeamId} */
   revokeCapabilityShare: {
     '200': {
@@ -2372,6 +2483,16 @@ export interface ApiResponses {
     '404': Error;
     '503': Error;
   };
+  /** POST /api/v1/me/emails */
+  updateAccountEmails: {
+    '200': AccountEmails;
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '409': Error;
+    '429': void;
+    '503': void;
+  };
   /** PUT /api/v1/me/profile */
   updateAccountProfile: {
     '200': {
@@ -2379,6 +2500,7 @@ export interface ApiResponses {
       displayName: string;
       email: string;
       emailVerified: boolean;
+      avatarUrl?: string;
     };
     '400': Error;
     '401': Error;
@@ -2511,6 +2633,8 @@ export const ENDPOINTS = {
   completeHubInstallationAuthorization: { method: 'get', path: '/api/v1/hosting/installation-authorization/callback' },
   /** GET /api/v1/railway/callback */
   completeStarterRailwayAuthorization: { method: 'get', path: '/api/v1/railway/callback' },
+  /** PUT /api/v1/teams/{teamId}/setup/smtp */
+  configurePrivateSmtp: { method: 'put', path: '/api/v1/teams/{teamId}/setup/smtp' },
   /** PUT /api/v1/teams/{teamId}/marketplace/installations/{installationId} */
   connectMarketplaceInstallation: { method: 'put', path: '/api/v1/teams/{teamId}/marketplace/installations/{installationId}' },
   /** POST /api/v1/instances/{instanceId}/dispatches */
@@ -2535,6 +2659,10 @@ export const ENDPOINTS = {
   disconnectMarketplaceInstallation: { method: 'delete', path: '/api/v1/teams/{teamId}/marketplace/installations/{installationId}' },
   /** POST /api/v1/teams/{teamId}/marketplace/connection */
   enrollPrivateMarketplaceConnection: { method: 'post', path: '/api/v1/teams/{teamId}/marketplace/connection' },
+  /** DELETE /api/v1/teams/{teamId}/marketplace/installation-launches/{launchId} */
+  forgetHubInstallation: { method: 'delete', path: '/api/v1/teams/{teamId}/marketplace/installation-launches/{launchId}' },
+  /** GET /api/v1/me/emails */
+  getAccountEmails: { method: 'get', path: '/api/v1/me/emails' },
   /** GET /api/v1/me/profile */
   getAccountProfile: { method: 'get', path: '/api/v1/me/profile' },
   /** GET /api/v1/me */
@@ -2549,6 +2677,8 @@ export const ENDPOINTS = {
   getHostedAppStatus: { method: 'get', path: '/api/v1/instances/{instanceId}/status' },
   /** GET /api/v1/instances/{instanceId}/environments/{environment}/configuration/starter-brand */
   getHostedStarterBrand: { method: 'get', path: '/api/v1/instances/{instanceId}/environments/{environment}/configuration/starter-brand' },
+  /** GET /api/v1/teams/{teamId}/marketplace/installation-launches/{launchId}/first-sign-in/{environment} */
+  getHubInstallationFirstSignIn: { method: 'get', path: '/api/v1/teams/{teamId}/marketplace/installation-launches/{launchId}/first-sign-in/{environment}' },
   /** GET /api/v1/teams/{teamId}/marketplace/installation-launches/{launchId} */
   getHubInstallationLaunch: { method: 'get', path: '/api/v1/teams/{teamId}/marketplace/installation-launches/{launchId}' },
   /** GET /api/v1/teams/{teamId}/marketplace/installation-offer */
@@ -2567,6 +2697,8 @@ export const ENDPOINTS = {
   getMyNotificationEmail: { method: 'get', path: '/api/v1/me/notification-email' },
   /** GET /api/v1/teams/{teamId}/marketplace/connection */
   getPrivateMarketplaceConnection: { method: 'get', path: '/api/v1/teams/{teamId}/marketplace/connection' },
+  /** GET /api/v1/setup */
+  getPrivateSetup: { method: 'get', path: '/api/v1/setup' },
   /** GET /api/v1/marketplace/catalog */
   getPublicMarketplaceCatalog: { method: 'get', path: '/api/v1/marketplace/catalog' },
   /** GET /readyz */
@@ -2667,6 +2799,8 @@ export const ENDPOINTS = {
   removeTeamMember: { method: 'delete', path: '/api/v1/teams/{teamId}/members/{personId}' },
   /** POST /api/v1/instances/{instanceId}/artifacts */
   reportArtifact: { method: 'post', path: '/api/v1/instances/{instanceId}/artifacts' },
+  /** POST /api/v1/me/email-actions */
+  requestAccountEmailAction: { method: 'post', path: '/api/v1/me/email-actions' },
   /** DELETE /api/v1/instances/{instanceId}/capability/{capability}/shares/{toTeamId} */
   revokeCapabilityShare: { method: 'delete', path: '/api/v1/instances/{instanceId}/capability/{capability}/shares/{toTeamId}' },
   /** DELETE /api/v1/teams/{teamId}/invitations/{invitationId} */
@@ -2689,6 +2823,8 @@ export const ENDPOINTS = {
   unlinkMyHubIdentity: { method: 'delete', path: '/api/v1/me/hub-identity/{subject}' },
   /** POST /api/v1/teams/{teamId}/starter-launch/openbao/unlock */
   unlockStarterOpenBao: { method: 'post', path: '/api/v1/teams/{teamId}/starter-launch/openbao/unlock' },
+  /** POST /api/v1/me/emails */
+  updateAccountEmails: { method: 'post', path: '/api/v1/me/emails' },
   /** PUT /api/v1/me/profile */
   updateAccountProfile: { method: 'put', path: '/api/v1/me/profile' },
   /** PUT /api/v1/instances/{instanceId}/environments/{environment}/configuration/starter-brand */

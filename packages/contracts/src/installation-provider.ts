@@ -45,6 +45,8 @@ export interface InstallationRecovery {
   projectId?: string;
   verified: readonly InstallationEnvironment[];
   submitted: readonly InstallationEnvironment[];
+  firstSignIn?(environment: InstallationEnvironment): Promise<Required<Pick<InstallationLaunchInput, 'verifier' | 'salt'>>>;
+  observeApiOrigin?(environment: InstallationEnvironment, origin: string): void;
   beforeWrite(environment?: InstallationEnvironment): Promise<void>;
 }
 export interface InstallationAuthorizationRequest {

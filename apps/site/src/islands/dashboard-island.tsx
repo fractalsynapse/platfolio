@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Workspace, WorkspaceEntry, createShellContext, isHubSignInCallback, workspacePaths, workspaceReturnPath } from '@platfolio/ui';
+import { PrivateSetupGate, Workspace, WorkspaceEntry, createShellContext, isHubSignInCallback, workspacePaths, workspaceReturnPath } from '@platfolio/ui';
 import { endpointsForIsland, runtimeConfigFrom, type SitePublicConfig } from '../lib/site-config.ts';
 import { browserCapabilities } from '../lib/browser-capabilities.ts';
 import type { HubSignIn, ShellContext } from '@platfolio/ui';
@@ -22,11 +22,20 @@ export default function DashboardIsland({ config, callback }: DashboardIslandPro
   const shell = useMemo(() => createShellContext(endpoints, browserCapabilities()), [endpoints]);
   const [pathname, setPathname] = useState(() => globalThis.location.pathname);
   const [signedIn, setSignedIn] = useState(() => shell.auth.signedIn());
+  const shouldResume = !callback && !signedIn && !!workspaceReturnPath(pathname);
   const [problem, setProblem] = useState('');
-  const [completing, setCompleting] = useState(callback === true);
+  const [completing, setCompleting] = useState(callback === true || shouldResume);
   const [beginning, setBeginning] = useState(false);
   const exchanged = useRef(false);
+  const attemptedResume = useRef(false);
   const [hub, setHub] = useState<HubSignIn>();
+
+  useEffect(() => {
+    if (!shouldResume || attemptedResume.current) return;
+    attemptedResume.current = true;
+    void shell.auth.begin(pathname, 'resume').then((url) => globalThis.location.replace(url))
+      .catch(() => setCompleting(false));
+  }, [shell, shouldResume, pathname]);
 
   useEffect(() => {
     if (signedIn || completing) return;
@@ -58,6 +67,7 @@ export default function DashboardIsland({ config, callback }: DashboardIslandPro
       const status = await shell.auth.complete(params, path => { destination = path; }, option);
       globalThis.history.replaceState(null, '', destination);
       setPathname(destination);
+      if (status === 'interaction-required') return;
       if (status !== 'signed-in') {
         setProblem('Sign-in could not finish. Try again.');
         return;
@@ -95,7 +105,7 @@ export default function DashboardIsland({ config, callback }: DashboardIslandPro
     globalThis.scrollTo(0, 0);
   };
   const signOut = () => globalThis.location.assign(shell.auth.signOut() ?? '/');
-  const changePassword = async () => globalThis.location.assign(await shell.auth.begin(workspacePaths.accountPassword, 'UPDATE_PASSWORD'));
-  return shell.wrap(<Workspace pathname={pathname} navigate={navigate} signIn={begin} signOut={signOut} changePassword={changePassword}
-    {...(endpoints.installationRole ? { installationRole: endpoints.installationRole } : {})} />);
+  const workspace = <Workspace pathname={pathname} navigate={navigate} signIn={begin} signOut={signOut}
+    {...(endpoints.installationRole ? { installationRole: endpoints.installationRole } : {})} />;
+  return shell.wrap(endpoints.installationRole === 'private' ? <PrivateSetupGate>{workspace}</PrivateSetupGate> : workspace);
 }

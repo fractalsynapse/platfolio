@@ -160,3 +160,4 @@ export { WorkspacePanel } from './workspace/workspace-panel.tsx';
 export { TemplateCard } from './workspace/template-card.tsx';
 export { describeTemplate, templatePaths, TEMPLATE_CATEGORIES } from './workspace/template-presentation.ts';
 export { MainContext } from './layout/main-context.tsx';
+export { PrivateSetupGate } from './workspace/private-setup-gate.tsx';

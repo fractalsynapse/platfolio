@@ -47,7 +47,7 @@ export function stagingHubPlan(resolveArtifact: (service: string) => string, hos
     api: { host: api, env: { ...role, PLATFOLIO_ALLOWED_ORIGINS: siteOrigin,
       PLATFOLIO_IDENTITY_ISSUER: issuer, PLATFOLIO_IDENTITY_JWKS_URI: issuer + '/protocol/openid-connect/certs', ...launcher } },
     site: { host: site, env: { ...role, PLATFOLIO_SITE_ORIGIN: siteOrigin, PLATFOLIO_URL: apiOrigin, PLATFOLIO_IDENTITY_ISSUER: issuer } },
-    identity: { host: identity, env: { KC_HOSTNAME: identityOrigin, KC_HOSTNAME_STRICT: 'true',
+    identity: { host: identity, env: { KC_HOSTNAME: identityOrigin, KC_HOSTNAME_STRICT: 'true', 'PLATFOLIO_ACCOUNT_POLICY': 'public',
       PLATFOLIO_SITE_ORIGIN: siteOrigin, PLATFOLIO_INSTALL_OWNER_EMAIL: ownerEmail } },
   };
   for (const [name, { host, env }] of Object.entries(settings)) {

@@ -25,6 +25,7 @@ import { privateMarketplaceInstall } from './private-marketplace-install.ts';
 import { sharedIdentityBinding } from './shared-identity-binding.ts';
 import { identityClient, hasIdentityClient } from './identity-client.ts';
 import { hubSignIn } from './hub-sign-in.ts';
+import { privateSetup } from './private-setup.ts';
 import type { ArtifactConfig } from './marketplace-artifacts.ts';
 import { accountProfile, type AccountIssuer } from './account-profile.ts';
 import { customHostname } from '../../../packages/contracts/src/railway-domains.ts';
@@ -56,6 +57,8 @@ export interface CapabilityDeps {
   customerLaunch?: ReturnType<typeof customerLaunch>;
   hubIdentity?: HubSignInTrust;
   hubIdentityFetch?: typeof fetch;
+  privateSetup?: Parameters<typeof privateSetup>[1];
+  hubBootstrapKey?: string;
 }
 
 const nowOf = (deps: CapabilityDeps): Date => (deps.now?.() ?? new Date());
@@ -1737,13 +1740,15 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
     }],
   };
 
-  return [core, instances, hostingLifecycle(scoped), dispatches, audit, teams, bindings, sharedIdentityBinding(scoped), identityClient(scoped, customer), invitations, secrets, controller, marketplace,
+  const setup = privateSetup(scoped, deps.privateSetup, deps.hubIdentityFetch);
+  const extensions = [core, instances, hostingLifecycle(scoped), dispatches, audit, teams, bindings, sharedIdentityBinding(scoped), identityClient(scoped, customer), invitations, secrets, controller, marketplace,
     privateMarketplaceInstall(scoped, customer),
     platformCatalog(deps.marketplaceEnabled ?? false, scoped, (suffix, operationId, handle) => registryRoute(registryPath + suffix, operationId, handle), deps.artifacts, customer),
-    installationLaunch(scoped, deps.installation), privateMarketplace, launcher, catalog, availability, notifications,
+    installationLaunch(scoped, deps.installation, deps.hubBootstrapKey, deps.hubIdentityFetch), privateMarketplace, launcher, catalog, availability, notifications,
     notificationEmail(authorizeLocal, now, deps.notificationDirectory, deps.invitationOrigin),
     accountProfile(authorizeLocal, deps.accountIssuer),
-    hubSignIn(scoped, deps.marketplaceEnabled ? undefined : deps.customerLaunch?.teamId, deps.hubIdentity, deps.hubIdentityFetch)];
+    hubSignIn(scoped, deps.marketplaceEnabled ? undefined : deps.customerLaunch?.teamId, deps.hubIdentity, deps.hubIdentityFetch), setup.extension];
+  return extensions.map((extension) => ({ ...extension, ...(extension.routes ? { routes: extension.routes.map(setup.guard) } : {}) }));
 }
 
 export type { VerifiedClaims };

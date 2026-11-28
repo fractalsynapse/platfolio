@@ -11,8 +11,10 @@ RUN mkdir /realm \
          > /realm/platfolio-operator-profile.json \
     && for owner in '' '-with-verifier'; do \
          for mail in '' '-with-mail'; do \
-           node --experimental-strip-types --disable-warning=ExperimentalWarning apps/identity/src/private-operator-realm.ts \
-             ${owner:+--owner-verifier} ${mail:+--password-recovery} > "/realm/platfolio-realm$owner$mail.json" || exit; \
+           for setup in '' '-with-setup'; do \
+             node --experimental-strip-types --disable-warning=ExperimentalWarning apps/identity/src/private-operator-realm.ts \
+               ${owner:+--owner-verifier} ${mail:+--password-recovery} ${setup:+--with-setup} > "/realm/platfolio-realm$owner$mail$setup.json" || exit; \
+           done; \
          done; \
        done
 
@@ -23,7 +25,7 @@ COPY --from=keycloak /opt/keycloak/lib/lib/boot /keycloak-boot
 COPY --from=private-realm /realm/platfolio-operator-profile.json ./resources/
 COPY apps/identity/providers/src/ ./src/
 RUN mkdir classes \
-    && javac --release 21 -cp '/keycloak-libs/*:/keycloak-boot/*' -d classes src/OperatorProfileMigration.java \
+    && javac --release 21 -cp '/keycloak-libs/*:/keycloak-boot/*' -d classes src/*.java \
     && jar --create --file /operator-profile.jar -C classes . -C src META-INF -C resources .
 
 FROM keycloak

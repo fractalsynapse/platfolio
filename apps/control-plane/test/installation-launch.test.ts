@@ -16,6 +16,8 @@ test('a hub owner launches through the selected plugin without exposing the gran
   let executions = 0;
   let maintenanceCalls = 0;
   let interrupt = true;
+  let temporaryPasswordActive = true;
+  const apiOrigin = 'https://' + ['private-fixture', 'up', 'railway', 'app'].join('.');
   let unblock!: () => void;
   const provisioned = new Promise<void>((resolve) => { unblock = resolve; });
   const input = {
@@ -46,10 +48,12 @@ test('a hub owner launches through the selected plugin without exposing the gran
             if (value.environments.includes('production')) {
               assert.deepEqual(recovery.verified, ['staging']);
               assert.equal(recovery.projectId, 'project-id');
+              recovery.observeApiOrigin?.('production', apiOrigin);
               await observer.environment('production', 'https://production.example.test');
             } else {
               assert.deepEqual(recovery.submitted, ['staging']);
               assert.equal(recovery.projectId, 'project-id');
+              recovery.observeApiOrigin?.('staging', apiOrigin);
               await observer.environment('staging', 'https://private.example.test');
             }
             await observer.step('Create project', 'READY');
@@ -79,6 +83,11 @@ test('a hub owner launches through the selected plugin without exposing the gran
     extensions: buildCapabilities({
       build: { version: null, commit: '0'.repeat(40), buildTime: new Date(0).toISOString() },
       marketplaceEnabled: true, installation: { provider: installationProvider, returnTo: 'https://hub.example.test' },
+      hubBootstrapKey: 'development-test-key-'.repeat(3),
+      hubIdentityFetch: async (url) => {
+        assert.equal(url, apiOrigin + '/api/v1/setup');
+        return Response.json({ smtpRequired: true, smtpConfigured: false, temporaryPasswordActive });
+      },
     }),
   });
   let app = await boot();
@@ -176,7 +185,17 @@ test('a hub owner launches through the selected plugin without exposing the gran
     assert.equal(expanded.projectId, 'project-id');
     assert.deepEqual(expanded.environments.map(({ name }) => name), ['staging', 'production']);
     assert.equal(executions, 3);
+    const firstSignIn = status + '/first-sign-in/staging';
+    assert.equal((await call(firstSignIn, 'GET', 'member')).status, 403);
+    assert.equal((await call(firstSignIn, 'GET', 'other')).status, 404);
+    const revealed = await call(firstSignIn);
+    assert.equal(revealed.status, 200);
+    assert.equal(revealed.headers.get('cache-control'), 'no-store');
+    assert.match((await revealed.json() as { temporaryPassword: string }).temporaryPassword, /^[A-Za-z0-9_-]{43}$/);
+    temporaryPasswordActive = false;
+    assert.equal((await call(firstSignIn)).status, 404);
     const maintenance = status + '/maintenance';
+    assert.equal((await call(status, 'DELETE', 'owner')).status, 409);
     assert.equal((await call(maintenance, 'POST', 'member', { action: 'wipe', confirmation: input.name })).status, 403);
     assert.equal((await call(maintenance, 'POST', 'owner', { action: 'wipe', confirmation: input.name })).status, 409);
     installationProvider.revision = 'd'.repeat(40);
@@ -192,6 +211,9 @@ test('a hub owner launches through the selected plugin without exposing the gran
     assert.equal((await call(maintenance, 'POST', 'owner', { action: 'wipe', confirmation: input.name })).status, 202);
     assert.deepEqual((await waitFor('removed')).environments, []);
     assert.equal((await call(route, 'POST', 'owner', { installationId: id })).status, 404);
+    assert.equal((await call(status, 'DELETE', 'member')).status, 403);
+    assert.equal((await call(status, 'DELETE', 'owner')).status, 204);
+    assert.equal((await call(status, 'GET', 'owner')).status, 404);
     assert.equal(maintenanceCalls, 2);
     const audit = await call('/api/v1/teams/' + teamId + '/activity').then((response) => response.text());
     assert.ok(!audit.includes(input.verifier));

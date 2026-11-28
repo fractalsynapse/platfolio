@@ -331,6 +331,16 @@ export const COMPONENT_RULES = [
     why: 'Give the account menu a compact fallback avatar.',
   },
   {
+    selector: '.ui-workspace-avatar:has(img)',
+    declarations: ['place-content: stretch;', 'overflow: hidden;'],
+    why: 'Clip a profile image to the avatar shape.',
+  },
+  {
+    selector: '.ui-workspace-avatar img',
+    declarations: ['inline-size: 100%;', 'block-size: 100%;', 'min-block-size: 0;', 'object-fit: cover;'],
+    why: 'Keep profile images inside the avatar bounds.',
+  },
+  {
     selector: '.ui-workspace-avatar-head',
     declarations: ['inline-size: 0.4em;', 'aspect-ratio: 1;', 'border-radius: 50%;', 'background: currentColor;'],
     why: 'Form the head of a generic account icon.',

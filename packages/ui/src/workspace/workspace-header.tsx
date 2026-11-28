@@ -13,11 +13,12 @@ interface WorkspaceHeaderProps {
   readonly team?: string | undefined;
   readonly invitationCount?: number | undefined;
   readonly displayName?: string | undefined;
+  readonly avatarUrl?: string | undefined;
   readonly signOut: () => void;
   readonly hub?: boolean;
 }
 
-export function WorkspaceHeader({ teams, team, invitationCount, displayName, signOut, hub = false }: WorkspaceHeaderProps): React.ReactElement {
+export function WorkspaceHeader({ teams, team, invitationCount, displayName, avatarUrl, signOut, hub = false }: WorkspaceHeaderProps): React.ReactElement {
   const active = teams.find(({ name }) => name === team) ?? teams[0];
   return <header className="ui-workspace-header">
     <div className="ui-workspace-header-inner">
@@ -35,7 +36,7 @@ export function WorkspaceHeader({ teams, team, invitationCount, displayName, sig
           className="ui-workspace-item ui-hit-primary" aria-current={active?.name === item.name ? 'true' : undefined}>{item.name}</WorkspaceLink>)
           : <span className="ui-workspace-item">No teams available</span>}
       </WorkspaceMenu>
-      <WorkspaceMenu kind="avatar" align="end" hover label="Account menu" trigger={<WorkspaceAvatar name={displayName} />}>
+      <WorkspaceMenu kind="avatar" align="end" hover label="Account menu" trigger={<WorkspaceAvatar name={displayName} imageUrl={avatarUrl} />}>
         <WorkspaceLink className="ui-workspace-item ui-hit-primary" href={workspacePaths.account}>Account</WorkspaceLink>
         {!hub && <WorkspaceLink className="ui-workspace-item ui-hit-primary" href={workspacePaths.notifications}>Notifications</WorkspaceLink>}
         <WorkspaceLink className="ui-workspace-item ui-hit-primary" href={workspacePaths.home}>Your teams</WorkspaceLink>

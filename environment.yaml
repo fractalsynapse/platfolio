@@ -480,6 +480,13 @@ variables:
     enum: [hub, private]
     deployedTo: railway:variable
     note: "Selects the API and Cordis operation surface and the site's workspace navigation. Unset preserves the role-less legacy surface."
+  - name: PLATFOLIO_ACCOUNT_POLICY
+    kind: value
+    secret: false
+    environments: all
+    enum: [public, managed]
+    deployedTo: railway:variable
+    note: "Operator Keycloak policy. The hub selects public in each environment. New spokes default to managed and can opt into public account registration."
   - name: PLATFOLIO_MARKETPLACE_ENABLED
     kind: value
     secret: false
@@ -532,6 +539,20 @@ variables:
     required: false
     deployedTo: railway:variable
     note: "Salt for the private Keycloak bootstrap verifier."
+  - name: PLATFOLIO_PRIVATE_SETUP_KEY
+    kind: secret
+    secret: true
+    environments: all
+    required: false
+    deployedTo: railway:variable
+    note: "Installation-local Keycloak realm setup credential, referenced by the private API."
+  - name: PLATFOLIO_HUB_BOOTSTRAP_KEY
+    kind: secret
+    secret: true
+    environments: all
+    required: false
+    deployedTo: railway:variable
+    note: "Hub key for deriving per-environment first sign-in passwords. Keep stable while an installation has an active first sign-in."
   - name: PLATFOLIO_LAUNCH_APP_PROJECT
     kind: value
     secret: false

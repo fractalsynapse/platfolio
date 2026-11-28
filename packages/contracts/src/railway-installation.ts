@@ -121,7 +121,10 @@ async function readyOrigin(access: RailwayAccess, projectId: string, environment
           }).catch(() => false);
         return healthy ? { logical, origin } : undefined;
       }));
-      if (origins.every(Boolean)) return origins.find((result) => result?.logical === 'site')!.origin;
+      if (origins.every(Boolean)) return {
+        site: origins.find((result) => result?.logical === 'site')!.origin,
+        api: origins.find((result) => result?.logical === 'api')!.origin,
+      };
     }
     await sleep(5000);
   }
@@ -175,8 +178,9 @@ async function createInstallation(access: RailwayAccess, config: RailwayInstalla
   const { step, project, environment } = observe;
   await step('Verify the pinned installer', 'WORKING');
   const { templateId, serializedConfig } = await pinnedInstaller(access, config);
-  const plans = input.environments.filter((name) => !recovery?.verified.includes(name))
-    .map((name) => ({ name, config: forEnvironment(serializedConfig, name, input) }));
+  const plans = await Promise.all(input.environments.filter((name) => !recovery?.verified.includes(name))
+    .map(async (name) => ({ name, config: forEnvironment(serializedConfig, name,
+      { ...input, ...await recovery?.firstSignIn?.(name) }) })));
   await step('Verify the pinned installer', 'READY');
 
   const { name, workspaceId } = input;
@@ -224,7 +228,8 @@ async function createInstallation(access: RailwayAccess, config: RailwayInstalla
       await deployRailwayTemplate(access, { projectId: id, environmentId: placement.id, workspaceId, templateId, serializedConfig: plan.config });
     }
     const origin = await readyOrigin(access, id, placement.id, plan.name, plan.config, request, sleep);
-    await environment(plan.name, origin);
+    recovery?.observeApiOrigin?.(plan.name, origin.api);
+    await environment(plan.name, origin.site);
     await step(label, 'READY');
   }
 }
@@ -314,5 +319,5 @@ async function maintainInstallation(access: RailwayAccess, config: RailwayInstal
     await observe.step(label, 'READY');
   }
   const origin = await readyOrigin(access, project.id, placement.id, action.environment, plan, request, sleep, config.revision);
-  await observe.environment(action.environment, origin);
+  await observe.environment(action.environment, origin.site);
 }

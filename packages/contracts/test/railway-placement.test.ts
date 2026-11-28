@@ -85,6 +85,34 @@ test('production and staging both get suffixed names from the same plan -- nothi
   assert.equal(mock.operations.filter((o) => o === 'serviceCreate:project').length, 2, 'each environment created its own');
 });
 
+test('a staging-only project starts with one environment and can add production without replacing staging', async () => {
+  const { provider, mock } = harness();
+  const initial = planWith((plan) => {
+    plan.environments = plan.environments.filter(({ name }) => name === 'staging');
+  });
+  assert.deepEqual((await provider.applyPlan(initial)).failures, []);
+  assert.deepEqual([...mock.environments.values()].map(({ name }) => name), ['staging']);
+  const stagingId = environmentId(mock, 'staging');
+  const stagingServiceId = serviceByNames(mock, 'api-staging')!.id;
+
+  const expanded = planWith((plan) => { plan.planHash = 'b'.repeat(16); });
+  assert.deepEqual((await provider.applyPlan(expanded)).failures, []);
+  assert.equal(mock.projects.size, 1);
+  assert.deepEqual([...mock.environments.values()].map(({ name }) => name).sort(), ['production', 'staging']);
+  assert.equal(environmentId(mock, 'staging'), stagingId);
+  assert.equal(serviceByNames(mock, 'api-staging')!.id, stagingServiceId);
+});
+
+test('a production-only plan creates exactly one production environment', async () => {
+  const { provider, mock } = harness();
+  const plan = planWith((plan) => {
+    plan.environments = plan.environments.filter(({ name }) => name === 'production');
+  });
+  assert.deepEqual((await provider.applyPlan(plan)).failures, []);
+  assert.deepEqual([...mock.environments.values()].map(({ name }) => name), ['production']);
+  assert.deepEqual(serviceNames(mock), ['api-production']);
+});
+
 /**
  * The re-apply is the case the observational rule existed to serve: it must not rename, replace or duplicate
  * anything. Determinism makes that a property of the rule rather than of the read.

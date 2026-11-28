@@ -4,13 +4,13 @@ import { RAILWAY_AUTHORIZATION_CALLBACK } from '../packages/contracts/src/custom
 import { createHash } from 'node:crypto';
 import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
+import type { EnvName } from '../packages/manifest/src/environments.ts';
 import { customerControlPlanePlan } from './launch-customer-control-plane.ts';
 import { openBaoConfig, openBaoData, openBaoImage, openBaoStart, workerData, workerStart } from './customer-installation-topology.ts';
 import { resolveCheckoutCandidate } from './platform-candidate.ts';
 
 const databaseImage = 'postgres:17.11@sha256:ff87138949ad9a46f32ff23bd6852b52ce024a13dffe9b4087be98292cdd3b4f';
 const databaseVolume = '/var/lib/postgresql/data';
-const { database, identity, site, api, worker, vault } = customerInstallationNames('staging');
 const reference = (service: string, variable: string) => '${{' + service + '.' + variable + '}}';
 const publicOrigin = (service: string) => 'https://' + reference(service, 'RAILWAY_PUBLIC_DOMAIN');
 const privateHost = (service: string) => reference(service, 'RAILWAY_PRIVATE_DOMAIN');
@@ -48,10 +48,11 @@ function service(name: string, image: string, values: Record<string, TemplateVar
   };
 }
 
-export async function renderRailwayInstaller(candidateFile: string, registryOrigin: string) {
+export async function renderRailwayInstaller(candidateFile: string, registryOrigin: string, environment: EnvName = 'staging') {
   const registry = new URL(registryOrigin);
   if (registry.protocol !== 'https:' || registry.origin !== registryOrigin) throw new Error('Use an exact HTTPS marketplace origin');
   const plan = await customerControlPlanePlan(candidateFile);
+  const { database, identity, site, api, worker, vault } = customerInstallationNames(environment);
   const issuer = publicOrigin(identity) + '/realms/platfolio';
   const ownerSubject = reference(identity, 'PLATFOLIO_INSTALL_OWNER_SUBJECT');
   const apiImage = plan.api.image + '@' + plan.api.digest;
@@ -71,18 +72,21 @@ export async function renderRailwayInstaller(candidateFile: string, registryOrig
       [resourceId(identity)]: service(identity, plan.identity.image + '@' + plan.identity.digest, {
         ...variables({ ...plan.identity.env, ...fromManifest(plan.identity), PORT: String(plan.identity.port), KC_HOSTNAME: publicOrigin(identity),
           KC_HOSTNAME_STRICT: 'true', PLATFOLIO_SITE_ORIGIN: publicOrigin(site),
-          PLATFOLIO_INSTALL_OWNER_SUBJECT: subject, PLATFOLIO_INSTALL_OWNER_PASSWORD: secret,
+          PLATFOLIO_INSTALL_OWNER_SUBJECT: subject, PLATFOLIO_INSTALL_OWNER_PASSWORD: secret, PLATFOLIO_PRIVATE_SETUP_KEY: secret,
         }),
         PLATFOLIO_INSTALL_OWNER_EMAIL: { defaultValue: '', description: 'The email address for the first Platfolio owner.' },
+        'PLATFOLIO_ACCOUNT_POLICY': { defaultValue: 'managed', description: 'Use managed for administrator-approved users or public for self-service accounts.' },
       }, { port: plan.identity.port, start: '/opt/keycloak/bin/platfolio-entrypoint.sh start-private', health: '/realms/platfolio' }),
       [resourceId(api)]: service(api, apiImage, variables({ ...plan.api.env, ...fromManifest(plan.api), PORT: String(plan.api.port),
         PLATFOLIO_IDENTITY_ISSUER: issuer, PLATFOLIO_IDENTITY_JWKS_URI: issuer + '/protocol/openid-connect/certs',
         PLATFOLIO_ALLOWED_ORIGINS: publicOrigin(site), PLATFOLIO_SCM_DRIVER: 'git', PLATFOLIO_INSTALLATION_ROLE: 'private',
         PLATFOLIO_INSTALL_OWNER_SUBJECT: ownerSubject, PLATFOLIO_LAUNCH_TEAM: team, PLATFOLIO_LAUNCH_WORKER_KEY: key,
+        PLATFOLIO_PRIVATE_SETUP_KEY: reference(identity, 'PLATFOLIO_PRIVATE_SETUP_KEY'),
         PLATFOLIO_LAUNCH_WORKER_URL: 'http://' + privateHost(worker) + ':8080',
       }), { port: plan.api.port, health: plan.api.healthPath ?? '/readyz' }),
       [resourceId(site)]: service(site, plan.site.image + '@' + plan.site.digest, variables({ ...plan.site.env, PORT: String(plan.site.port),
         PLATFOLIO_SITE_ORIGIN: publicOrigin(site), PLATFOLIO_URL: publicOrigin(api), PLATFOLIO_IDENTITY_ISSUER: issuer,
+        PLATFOLIO_INSTALLATION_ROLE: 'private',
       }), { port: plan.site.port, health: plan.site.healthPath ?? '/status' }),
       [resourceId(vault)]: service(vault, openBaoImage, variables({ RAILWAY_RUN_UID: '0', BAO_LOCAL_CONFIG: openBaoConfig(privateHost(vault), vault) }),
         { start: openBaoStart, volume: openBaoData }),
@@ -100,10 +104,12 @@ export async function renderRailwayInstaller(candidateFile: string, registryOrig
 }
 
 if (import.meta.url === 'file://' + process.argv[1]) {
-  const { values } = parseArgs({ options: { candidate: { type: 'string' }, registry: { type: 'string' } } });
+  const { values } = parseArgs({ options: { candidate: { type: 'string' }, registry: { type: 'string' }, environment: { type: 'string' } } });
   if (!values.candidate || !values.registry) throw new Error('Pass --candidate and --registry to render the installer');
   resolveCheckoutCandidate(values.candidate, fileURLToPath(new URL('..', import.meta.url)));
-  const installer = await renderRailwayInstaller(values.candidate, values.registry);
+  const environment = values.environment ?? 'staging';
+  if (environment !== 'staging' && environment !== 'production') throw new Error('Choose staging or production');
+  const installer = await renderRailwayInstaller(values.candidate, values.registry, environment);
   // Railway expands references in its own variables. Preserve the JSON until the hub decodes it.
   process.stdout.write(JSON.stringify(installer, null, 2).replaceAll('$', '\\u0024') + '\n');
 }

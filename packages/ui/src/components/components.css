@@ -3,7 +3,7 @@
  * packages/ui/src/components/style.ts and it is the only one.
  *
  * Source: packages/ui/src/components/style.ts
- * Input digest: sha256/a2abaae4fe80c8b3
+ * Input digest: sha256/61371a253bf1bc69
  *
  * Reproduce with `pnpm run ui:css`; `pnpm run ui:css:check` fails when this stops matching the module. The
  * numbers in here are not literals: they reference the custom properties in ../tokens.css, which is what makes
@@ -453,6 +453,20 @@
   color: var(--ui-color-accent);
   font-size: 0.78rem;
   font-weight: 750;
+}
+
+/* Clip a profile image to the avatar shape. */
+.ui-workspace-avatar:has(img) {
+  place-content: stretch;
+  overflow: hidden;
+}
+
+/* Keep profile images inside the avatar bounds. */
+.ui-workspace-avatar img {
+  inline-size: 100%;
+  block-size: 100%;
+  min-block-size: 0;
+  object-fit: cover;
 }
 
 /* Form the head of a generic account icon. */

@@ -96,6 +96,12 @@ export class MemoryStore implements Store {
     return row?.teamId === teamId && row.personId === personId ? copy(row) : undefined;
   }
 
+  async forgetInstallationJournal(teamId: string, personId: string, id: string, version: number): Promise<boolean> {
+    const current = this.installationJournals.get(id);
+    return Boolean(current?.removedAt && !current.maintenance && current.teamId === teamId && current.personId === personId && current.version === version &&
+      this.installationJournals.delete(id));
+  }
+
   async saveInstallationJournal(next: InstallationJournal): Promise<boolean> {
     const result = InstallationJournalSchema.safeParse(next);
     if (this.closed || !result.success) return false;

@@ -5,6 +5,14 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+### Added — public account self-service (#288)
+
+Set a profile avatar URL, verify email addresses, promote a verified address to
+primary, and request a password reset link from Account. Hub deployments select
+the public policy and open registration when their realm has SMTP. Spokes default
+to administrator-managed registration. Dashboard entry attempts to resume an
+existing local identity session before offering sign-in.
+
 ### Fixed — repair Account profiles during private installation upgrades (#288)
 
 The new identity image updates the existing Keycloak operator realm in place so
@@ -33,6 +41,13 @@ The staging hub runs its own Keycloak and OpenBao and is deployed through a dedi
 OpenAPI restricts hub provisioning to the pinned private Platfolio launcher and gives private
 installations the application deployment operations. The hosted renderer accepts separate deployment
 settings alongside normal Docker Compose.
+
+### Added — private owner and email setup (#288)
+
+Connections can reveal the temporary password for a new private environment until the
+owner changes it. New private workspaces require a verified SMTP relay for password recovery
+before regular workspace operations open. Owners can manage the relay from Account → Emails
+and forget a private installation after its removal is verified.
 
 ### Added — optional private hub sign-in (#288)
 
