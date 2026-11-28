@@ -168,7 +168,12 @@ public final class OperatorProfileMigration implements EventListenerProviderFact
         }
         boolean mailConfigured = !realm.getSmtpConfig().getOrDefault("host", "").isBlank();
         realm.setRegistrationAllowed(open && mailConfigured);
-        realm.setVerifyEmail(open && mailConfigured);
+        // New registrations must verify, while upgrades leave existing unverified operators able to sign in.
+        var verification = realm.getRequiredActionProviderByAlias(UserModel.RequiredAction.VERIFY_EMAIL.name());
+        if (verification != null && verification.isDefaultAction() != open) {
+            verification.setDefaultAction(open);
+            realm.updateRequiredActionProvider(verification);
+        }
         if (open) {
             realm.setResetPasswordAllowed(mailConfigured);
             realm.setDuplicateEmailsAllowed(false);

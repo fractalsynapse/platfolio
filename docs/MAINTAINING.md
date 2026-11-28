@@ -124,6 +124,7 @@ With the public policy, exercise registration, verification of the primary addre
 and verifying a secondary address, promoting it, and password reset with a staging mailbox.
 Use the promoted address for the next sign-in and check that reloading Account resumes the
 signed-in session. Verify password recovery on a disposable operator account.
+Existing unverified operators can keep signing in and request verification from Account.
 
 To enable notification emails, create a confidential Keycloak service client in that
 installation's operator realm. Add the built-in optional client scope `kc-admin-api`
