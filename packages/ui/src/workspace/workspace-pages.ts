@@ -20,6 +20,8 @@ import type { WorkspaceRoute } from './routes.ts';
 const props = z.object({}).strict();
 const starterReads = ['getStarterLaunch', 'listInstallableTemplates', 'startStarterLaunch', 'removeStarterLaunch'] as const;
 const setupReads = ['getStarterLaunchSetup', 'initializeStarterOpenBao', 'unlockStarterOpenBao', 'beginStarterRailwayAuthorization'] as const;
+const hubLaunchReads = ['getHubInstallationOffer', 'listHubInstallationLaunches', 'authorizeHubInstallation',
+  'getHubInstallationLaunch', 'startHubInstallation', 'maintainHubInstallation'] as const;
 const instanceReads = ['listInstances'] as const;
 const environmentReads = [...instanceReads, 'getInstanceEnvironment'] as const;
 
@@ -41,13 +43,13 @@ export const workspacePages = {
   'workspace.account-notifications': page('workspace.account-notifications', 'Account notifications', AccountPage,
     ['getMyNotificationEmail', 'updateMyNotificationEmail']),
   'workspace.templates': page('workspace.templates', 'Choose template', TemplatesPage, ['listInstallableTemplates'], true),
-  'workspace.team-launch': page('workspace.team-launch', 'Set up Starter Web', StarterSetupPage, [...starterReads, ...setupReads], true),
+  'workspace.team-launch': page('workspace.team-launch', 'Set up a platform', StarterSetupPage, [...starterReads, ...setupReads, ...hubLaunchReads], true),
   'workspace.team-members': page('workspace.team-members', 'Team members', TeamMembershipPage,
     ['listTeamMembers', 'updateTeamMemberRole', 'removeTeamMember'], true),
   'workspace.team-invitations': page('workspace.team-invitations', 'Team invitations', TeamMembershipPage,
     ['listInvitations', 'createInvitation', 'revokeInvitation'], true),
   'workspace.team-connections': page('workspace.team-connections', 'Connections', ConnectionsPage,
-    [...setupReads, 'getHubInstallationOffer', 'listHubInstallationLaunches', 'authorizeHubInstallation', 'getHubInstallationLaunch', 'startHubInstallation', 'maintainHubInstallation', 'listMarketplaceInstallations', 'issueMarketplaceEnrollment',
+    [...setupReads, ...hubLaunchReads, 'listMarketplaceInstallations', 'issueMarketplaceEnrollment',
       'disconnectMarketplaceInstallation', 'getPrivateMarketplaceConnection', 'enrollPrivateMarketplaceConnection'], true),
   'workspace.team': page('workspace.team', 'Team workspace', TeamWorkspace, [...instanceReads, 'listTeamActivity', 'listTeamMembers']),
   'workspace.team-activity': page('workspace.team-activity', 'Activity', TeamWorkspace, [...instanceReads, 'listTeamActivity']),

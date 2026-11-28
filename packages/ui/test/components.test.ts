@@ -107,6 +107,7 @@ function render(componentId: string, props: Record<string, unknown>, bus: Signal
   const refresh = () => undefined;
   const mounted = route ? React.createElement(WorkspaceModelContext.Provider, { value: {
     route,
+    hub: false,
     team: SAMPLE_TEAMS[0],
     teams: { operation: 'listTeams', params: {}, status: 'loaded', data: [...SAMPLE_TEAMS], freshness: SAMPLE_FRESHNESS },
     reloadTeams: refresh,

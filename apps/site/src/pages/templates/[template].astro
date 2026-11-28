@@ -21,7 +21,7 @@ const source = `https://github.com/${entry.repo}`;
   </Fragment>
   <div data-release-template={entry.name} data-release-repo={entry.repo}>
     <div class="ui-workspace-page-actions">
-      <span data-release-install hidden><a class="ui-workspace-primary ui-hit-primary" href={workspacePaths.home}>Choose a team to install</a></span>
+      <a data-release-install hidden class="ui-workspace-primary ui-hit-primary" href={workspacePaths.home}>Choose a team to install</a>
       <a class="ui-workspace-secondary ui-hit-primary" href={templatePaths.catalog}>All templates</a>
     </div>
     <MainContext>

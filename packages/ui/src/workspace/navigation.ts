@@ -6,6 +6,7 @@ export interface WorkspaceNavigation {
   readonly signIn: () => void;
   readonly signOut: () => void;
   readonly changePassword?: () => Promise<void>;
+  readonly installationRole?: 'hub' | 'private';
 }
 
 export const WorkspaceNavigationContext = createContext<WorkspaceNavigation | null>(null);

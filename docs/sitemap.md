@@ -1,6 +1,6 @@
 # Platfolio site map
 
-This map describes the route design for the free private-hosting milestone. The React workspace implements the team list, team workspace, instance and environment overviews, and the starter launch pilot. The [interactive mockup](design/mockup/README.md) and [wireframes](design/wireframes/README.md) show the remaining workflows.
+This map describes the route design for the free private-hosting milestone. The hub offers marketplace browsing, private Platfolio launch, and team administration. Private workspaces manage apps, instances, and environments. The [interactive mockup](design/mockup/README.md) and [wireframes](design/wireframes/README.md) show the remaining workflows.
 
 ## What the site is for
 
@@ -27,14 +27,17 @@ The Platfolio menu groups platform links above team links. The avatar menu conta
 | `/docs` | MVP | Give users the minimum guidance to connect, operate, and leave Platfolio. |
 | `/docs/self-host` | MVP | Explain how to run a supported platform locally with Docker Compose from the same manifest, including how to verify a standalone restore. |
 | `/docs/api` | Later | Provide a web reference derived from the OpenAPI contract. |
-| `/sign-in` | MVP | Start Keycloak sign-in and preserve the intended in-site destination. Include an account-creation path for new users. |
+| `/sign-in` | MVP | Open dashboard sign-in. Direct dashboard links return to their authorized destination after Keycloak sign-in. Account creation appears when the operator realm enables it. |
 | `/callback` | MVP | Complete the browser sign-in exchange and open the requested dashboard route with the in-memory session available to the dashboard. |
 | `/dashboard` | MVP | Show the signed-in person's teams and give a new user a clear path to create one. Surface invitations when that flow is enabled. |
 | `/dashboard/create-team` | MVP | Create a team and establish its slug and initial owner. Continue to instance setup. |
 | `/dashboard/launch` | MVP | Show setup progress, prerequisites, and a downloadable diagnostic report. On the hub, prepare and enroll a private installation. On the private workspace, launch the pinned free app once the customer has connected Railway. |
 | `/dashboard/invitations` | Later | Show and accept invitations matched to the person's verified email before team membership exists. |
-| `/dashboard/notifications` | Proposed | Create personal rules for apps on the signed-in person’s teams. Choose a kind of event, an environment or all environments, and a verified email destination. Pause, edit, or remove a rule. |
-| `/dashboard/account` | Later | Profile manages username, display name, and photo. Emails manages verified addresses and the primary email. Password shows the change form. Notifications manages the default and optional per-team destinations. Keycloak handles required authentication in the Platfolio login theme. |
+| `/dashboard/notifications` | Private | Create and manage personal rules for apps on the signed-in person’s teams, with an event type, environment scope, and email delivery settings. |
+| `/dashboard/account` | Both | Edit the local Keycloak username and display name. The avatar shows initials from the display name. |
+| `/dashboard/account/emails` | Both | Show the primary sign-in address and Keycloak verification status. |
+| `/dashboard/account/password` | Both | Start the Keycloak password change and return to Account. |
+| `/dashboard/account/notifications` | Both | Show email delivery availability. Private workspaces also link to app notification rules. |
 
 Use the [published template catalog](../packages/manifest/src/template-catalog.ts) as the source for template content. The account and sign-in routes are for Platfolio operators. Tenant applications use their own configured identity systems. See the [identity architecture](design/05-identity.md).
 
@@ -48,8 +51,8 @@ Paths in this table are relative to `/dashboard/teams/:team`. The team pages sha
 
 | Path suffix | Scope | Purpose |
 | --- | --- | --- |
-| `/` | MVP | Show the team profile with instances, verified deployment activity, and recent hosting operations. Link deployment entries directly to the scoped run or verification evidence. |
-| `/create-instance` | MVP | Choose a template, connect the team's GitHub repository and Railway workspace, name the instance, and configure the environments. Review the proposed resources and install pull request handoff. Continue to the instance's setup page once its record exists. |
+| `/` | MVP | Show the team's activity. On the hub, owners can open private installation management. In a private workspace, show instances and deployment activity. |
+| `/create-instance` | Private | Choose a template and a pinned release. Continue to setup in the private workspace. |
 | `/publish-template` | Later | Let a team owner select a source platform and revision, describe the included materials, and preview the listing before publishing. |
 | `/members` | Later | Show the roster and roles. Owners can review role changes and removals. The owner-only Invitations tab separates active invitations from history and shows email status in both views. |
 | `/settings` | Later | Show the stable URL Name first and the editable Display name below it. |
@@ -60,7 +63,7 @@ The selected repository and Railway project are visible on the instance. The ins
 
 ## Instance workspace
 
-Paths in this table are relative to `/dashboard/teams/:team/instances/:instance`.
+Paths in this table are relative to `/dashboard/teams/:team/instances/:instance`. Instance and environment pages require a private workspace with a visible instance.
 
 | Path suffix | Scope | Purpose |
 | --- | --- | --- |

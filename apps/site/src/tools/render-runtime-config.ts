@@ -69,6 +69,7 @@ function collect(env: Readonly<Record<string, string | undefined>>): Record<stri
     ['apiBaseUrl', SITE_VARIABLES.apiUrl],
     ['issuerBaseUrl', SITE_VARIABLES.issuer],
     ['clientId', SITE_VARIABLES.clientId],
+    ['installationRole', SITE_VARIABLES.installationRole],
   ] as const) {
     const value = (env[name] ?? '').trim();
     if (value === '') continue; // empty means "no override", and for the client id "use the policy default"

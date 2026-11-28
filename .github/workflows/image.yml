@@ -112,6 +112,28 @@ jobs:
           grep -q 'Set the private site origin' identity-missing-input.log
           echo "image=$IDENTITY_IMAGE" >> "$GITHUB_OUTPUT"
 
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: '.nvmrc'
+
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+
+      - name: Smoke test the imported operator account
+        env:
+          IDENTITY_IMAGE: ${{ steps.identity.outputs.image }}
+        run: |
+          export PLATFOLIO_INSTALL_OWNER_PASSWORD="$(node -p 'require("node:crypto").randomBytes(32).toString("base64url")')"
+          docker run -d --rm --name identity-profile-smoke --publish 127.0.0.1::8080 \
+            -e PLATFOLIO_INSTALL_OWNER_PASSWORD -e PLATFOLIO_INSTALL_OWNER_EMAIL=owner@platfolio.test \
+            -e PLATFOLIO_SITE_ORIGIN=http://127.0.0.1:4321 "$IDENTITY_IMAGE" \
+            start-private --db=dev-file --http-enabled=true --hostname-strict=false
+          trap 'docker stop identity-profile-smoke >/dev/null' EXIT
+          origin="http://$(docker port identity-profile-smoke 8080/tcp)"
+          curl --fail --silent --retry 30 --retry-delay 2 --retry-all-errors --max-time 5 "$origin/realms/platfolio" >/dev/null
+          KC_PKCE_USER=owner KC_USER_PASSWORD="$PLATFOLIO_INSTALL_OWNER_PASSWORD" \
+            pnpm run identity:pkce:smoke --local-owner-profile --base="$origin" --ui-origin=http://127.0.0.1:4321
+
       # The image answers its own healthcheck during the run, so a green job means the container serves --
       # not merely that it assembled. This is the difference the project keeps insisting on.
       - name: Fail-closed check (no identity config, the container must refuse to start)

@@ -109,7 +109,7 @@ export function browserClientShape(uiOrigins: readonly string[]): BrowserClientS
  * security property: the control plane can tell a person's session from a machine's grant in every audit row,
  * and neither token substitutes for the other.
  */
-export function browserClientMappers(): ProtocolMapperShape[] {
+export function browserClientMappers(accountProfile = false): ProtocolMapperShape[] {
   return [
     {
       name: 'platfolio-web-audience',
@@ -138,10 +138,24 @@ export function browserClientMappers(): ProtocolMapperShape[] {
         'usermodel.clientRoleMapping.clientId': API_CLIENT_ID,
         'claim.name': 'scope',
         'jsonType.label': 'String',
-        multivalued: 'true',
+        multivalued: accountProfile ? 'false' : 'true',
         'access.token.claim': 'true',
         'id.token.claim': 'false',
       },
     },
+  ];
+}
+
+export const keycloakAccountClient = 'account';
+export const keycloakManageOwnAccount = 'manage-account';
+
+export function accountProfileMappers(): ProtocolMapperShape[] {
+  const common = { 'id.token.claim': 'false', 'access.token.claim': 'true', 'userinfo.token.claim': 'false' };
+  return [
+    { name: 'platfolio-account-audience', protocol: 'openid-connect', protocolMapper: 'oidc-audience-mapper', consentRequired: false,
+      config: { ...common, 'included.client.audience': keycloakAccountClient } },
+    { name: 'platfolio-account-roles', protocol: 'openid-connect', protocolMapper: 'oidc-usermodel-client-role-mapper', consentRequired: false,
+      config: { ...common, 'usermodel.clientRoleMapping.clientId': keycloakAccountClient, 'claim.name': 'resource_access.account.roles',
+        'jsonType.label': 'String', multivalued: 'true' } },
   ];
 }

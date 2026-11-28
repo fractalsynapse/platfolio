@@ -73,7 +73,7 @@ export function AccountIdentity({ tab }: { readonly tab: 'profile' | 'emails' })
         </form>}
       </>}
     </WorkspacePanel>
-    {state.status === 'loaded' && (tab === 'profile' ? <WorkspacePanel title="Profile photo" context>
+    {state.status === 'loaded' && (tab === 'profile' ? <WorkspacePanel title="Profile avatar" context>
       <div className="ui-profile-avatar"><WorkspaceAvatar name={state.data.displayName} /></div>
     </WorkspacePanel> : <WorkspacePanel title="Sign-in address" context>
       <p>Sign in with your username{state.data.email ? ' or your primary email address.' : '.'}</p>

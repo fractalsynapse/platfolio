@@ -12,6 +12,7 @@ interface WorkspaceModel {
   readonly reloadTeams: () => void;
   readonly invitations: UseOperationResult<'listMyInvitations'>;
   readonly profile: UseOperationResult<'getAccountProfile'>;
+  readonly hub: boolean;
 }
 
 export const WorkspaceModelContext = React.createContext<WorkspaceModel | null>(null);

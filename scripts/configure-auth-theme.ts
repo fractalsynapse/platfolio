@@ -1,8 +1,9 @@
 import { parseArgs } from 'node:util';
 import { API_CLIENT_ID, REQUIRED_SCOPE, WEB_CLIENT_ID } from './browser-auth.ts';
 import { isLoopback, LOOPBACK_CREDENTIAL, resolveCredential } from './identity-credentials.ts';
-import { OPERATOR_DISPLAY_NAME_ATTRIBUTE } from '../apps/control-plane/src/account-profile.ts';
+import { operatorDisplayName } from '../apps/identity/src/operator-profile.ts';
 import { passwordResetAttributes } from '../apps/identity/src/password-recovery.ts';
+import { accountProfileMappers, keycloakAccountClient, keycloakManageOwnAccount } from './keycloak-browser-client.ts';
 
 const { values } = parseArgs({ options: {
   base: { type: 'string', default: process.env.KC_BASE ?? 'http://localhost:8081' },
@@ -11,6 +12,7 @@ const { values } = parseArgs({ options: {
   'enable-self-service': { type: 'boolean' },
   'enable-password-recovery': { type: 'boolean' },
   'enable-account-profile': { type: 'boolean' },
+  'account-profile-user': { type: 'string', multiple: true },
   'local-mailpit': { type: 'boolean' },
 } });
 
@@ -21,6 +23,9 @@ if (!realm || !/^[a-z0-9][a-z0-9-]*$/.test(realm) || realm === 'master') throw n
 if (base.username || base.password || base.pathname !== '/' || base.search || base.hash ||
     (!local && (base.protocol !== 'https:' || !values['allow-remote']))) throw new Error('Use a Keycloak origin. Hosted origins require HTTPS and --allow-remote.');
 const enableRecovery = values['enable-self-service'] || values['enable-password-recovery'];
+if (values['account-profile-user']?.length && !values['enable-account-profile']) {
+  throw new Error('--account-profile-user requires --enable-account-profile');
+}
 if (values['local-mailpit'] && (!local || !enableRecovery)) throw new Error('--local-mailpit requires a loopback origin and password recovery');
 
 const credential = resolveCredential({
@@ -86,11 +91,22 @@ const web = await client(WEB_CLIENT_ID);
 const consoleClient = await findClient('account-console');
 const patch: RealmSettings = { loginTheme: theme };
 if (values['enable-account-profile']) {
-  const account = await client('account');
+  const account = await client(keycloakAccountClient);
   const scopePath = `${basePath}/clients/${web.id}/scope-mappings/clients/${account.id}`;
-  const manage = await (await request(`${basePath}/clients/${account.id}/roles/manage-account`)).json() as Role;
+  const manage = await (await request(`${basePath}/clients/${account.id}/roles/${keycloakManageOwnAccount}`)).json() as Role;
   const mapped = await (await request(scopePath)).json() as Role[];
   if (!mapped.some(({ id }) => id === manage.id)) await request(scopePath, 'POST', [manage]);
+
+  for (const username of values['account-profile-user'] ?? []) {
+    const query = new URLSearchParams({ username, exact: 'true' });
+    const users = await (await request(`${basePath}/users?${query}`)).json() as { id: string }[];
+    if (users.length !== 1) throw new Error('Select an exact local username for account profile access');
+    const mapping = `${basePath}/users/${users[0]!.id}/role-mappings/clients/${account.id}`;
+    const roles = await (await request(mapping + '/composite')).json() as Role[];
+    if (!roles.some(({ id }) => id === manage.id)) await request(mapping, 'POST', [manage]);
+    const verified = await (await request(mapping + '/composite')).json() as Role[];
+    if (!verified.some(({ id }) => id === manage.id)) throw new Error('Keycloak did not grant the selected user access to their own account');
+  }
 
   const mapperPath = `${basePath}/clients/${web.id}/protocol-mappers/models`;
   const existing = await (await request(mapperPath)).json() as Mapper[];
@@ -102,15 +118,7 @@ if (values['enable-account-profile']) {
     ...platfolioScope, config: { ...platfolioScope.config, multivalued: 'false' },
   });
 
-  const common = { 'id.token.claim': 'false', 'access.token.claim': 'true', 'userinfo.token.claim': 'false' };
-  const desired: Mapper[] = [
-    { name: 'platfolio-account-audience', protocol: 'openid-connect', protocolMapper: 'oidc-audience-mapper',
-      config: { ...common, 'included.client.audience': 'account' } },
-    { name: 'platfolio-account-roles', protocol: 'openid-connect', protocolMapper: 'oidc-usermodel-client-role-mapper',
-      config: { ...common, 'usermodel.clientRoleMapping.clientId': 'account', 'claim.name': 'resource_access.account.roles',
-        'jsonType.label': 'String', multivalued: 'true' } },
-  ];
-  for (const mapper of desired) {
+  for (const mapper of accountProfileMappers()) {
     const saved = existing.find(({ name }) => name === mapper.name);
     await request(saved?.id ? `${mapperPath}/${saved.id}` : mapperPath, saved?.id ? 'PUT' : 'POST',
       saved?.id ? { ...mapper, id: saved.id } : mapper);
@@ -119,12 +127,9 @@ if (values['enable-account-profile']) {
   const profilePath = `${basePath}/users/profile`;
   const profile = await (await request(profilePath)).json() as { attributes?: { name: string; permissions?: { edit?: string[]; view?: string[] } }[] };
   if (!Array.isArray(profile.attributes)) throw new Error('The realm did not return its user profile configuration');
-  const displayName = profile.attributes.find(({ name }) => name === OPERATOR_DISPLAY_NAME_ATTRIBUTE);
+  const displayName = profile.attributes.find(({ name }) => name === operatorDisplayName.name);
   if (!displayName) await request(profilePath, 'PUT', {
-    ...profile, attributes: [...profile.attributes, {
-      name: OPERATOR_DISPLAY_NAME_ATTRIBUTE, displayName: 'Display name', validations: { length: { max: 100 } },
-      permissions: { view: ['admin', 'user'], edit: ['admin', 'user'] }, multivalued: false,
-    }],
+    ...profile, attributes: [...profile.attributes, operatorDisplayName],
   });
   else if (!displayName.permissions?.edit?.includes('user') || !displayName.permissions?.view?.includes('user')) {
     throw new Error('The installed display-name field needs user read and edit permission');

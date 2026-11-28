@@ -1,4 +1,4 @@
-import { createPublicMarketplaceCatalog } from '@platfolio/ui';
+import { createPublicMarketplaceCatalog, workspacePaths } from '@platfolio/ui';
 import { runtimeConfigFrom } from './site-config.ts';
 
 export function showPublicTemplateReleases(catalog: HTMLElement, afterRefresh?: () => void): void {
@@ -8,8 +8,9 @@ export function showPublicTemplateReleases(catalog: HTMLElement, afterRefresh?: 
   status.textContent = 'Checking published releases…';
 
   let client: ReturnType<typeof createPublicMarketplaceCatalog>;
+  const runtime = runtimeConfigFrom(globalThis);
   try {
-    client = createPublicMarketplaceCatalog(runtimeConfigFrom(globalThis)?.apiBaseUrl ?? catalog.dataset.catalogApi ?? '');
+    client = createPublicMarketplaceCatalog(runtime?.apiBaseUrl ?? catalog.dataset.catalogApi ?? '');
   } catch {
     status.textContent = 'Published releases are unavailable. Try again shortly.';
     return;
@@ -49,8 +50,12 @@ export function showPublicTemplateReleases(catalog: HTMLElement, afterRefresh?: 
         for (const content of entry.querySelectorAll<HTMLElement>('[data-release-only]')) {
           content.hidden = !release;
         }
-        for (const link of entry.querySelectorAll<HTMLElement>('[data-release-install]')) {
+        for (const link of entry.querySelectorAll<HTMLAnchorElement>('[data-release-install]')) {
           link.hidden = release?.installable !== true;
+          if (runtime?.installationRole === 'hub') {
+            link.href = workspacePaths.launch;
+            link.textContent = 'Launch private Platfolio';
+          }
         }
       }
 

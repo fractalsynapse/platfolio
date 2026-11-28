@@ -10,20 +10,21 @@ import { MarketplaceConnection } from './marketplace-connection.tsx';
 import { WorkspaceLink } from './workspace-link.tsx';
 import { workspacePaths } from './routes.ts';
 
-export function TeamConnections({ teamId, teamName }: { readonly teamId: string; readonly teamName: string }) {
+export function TeamConnections({ teamId, teamName, hub }: { readonly teamId: string; readonly teamName: string; readonly hub: boolean }) {
   const params = React.useMemo(() => ({ teamId }), [teamId]);
-  const setup = useOperation('getStarterLaunchSetup', { params, key: `starter-setup-${teamId}` });
+  const setup = useOperation('getStarterLaunchSetup', { params, key: `starter-setup-${teamId}`, enabled: !hub });
   const clock = useClock();
+  if (hub || (setup.state.status === 'failed' && setup.state.error.status === 404)) return <section aria-label="Private installations and marketplace connections">
+    <Stack>
+      <HubInstallationLaunch key={`offer-${teamId}`} teamId={teamId} />
+      <HubMarketplaceInstallations key={teamId} teamId={teamId} />
+    </Stack>
+  </section>;
   return <section aria-label="Private installation connections"><Stack>
     {setup.state.status === 'pending' && <p role="status">Checking installation connections…</p>}
-    {setup.state.status === 'failed' && (setup.state.error.status === 404
-      ? <>
-        <HubInstallationLaunch key={`offer-${teamId}`} teamId={teamId} />
-        <HubMarketplaceInstallations key={teamId} teamId={teamId} />
-      </>
-      : <p role="status">Couldn’t check the installation connection.{' '}
+    {setup.state.status === 'failed' && <p role="status">Couldn’t check the installation connection.{' '}
         <WorkspaceAction type="button" onClick={setup.reload}>Try again</WorkspaceAction>
-      </p>)}
+      </p>}
     {setup.state.status === 'loaded' && <>
       <h2>Set up Platfolio</h2>
       <p>Set up secret storage, connect Railway, then connect to the marketplace to install templates.</p>

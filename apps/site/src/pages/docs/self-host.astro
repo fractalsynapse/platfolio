@@ -1,0 +1,15 @@
+---
+import Page from '../../layouts/page.astro';
+---
+<Page title="Self-hosting with Docker Compose — Platfolio">
+  <article class="ui-prose">
+    <h1>Self-hosting with Docker Compose</h1>
+    <ol>
+      <li>Open the platform’s pinned release from the <a href="/templates">catalog</a>. Read the repository’s setup instructions and required configuration.</li>
+      <li>Use the Compose file from that revision. If the project supplies a development overlay, include it as a second <code>-f</code> argument. Supply local credentials separately from Compose.</li>
+      <li>Run <code>docker compose up -d</code> with the options in the project’s setup instructions. Check the services with <code>docker compose ps</code> and verify the app or worker behaves as expected.</li>
+    </ol>
+    <h2>Verify a restore</h2>
+    <p>Keep the deployed revision, configuration, necessary image artifacts and a tested data backup. Restore the backup to separate storage, start the same revision, and confirm that a known record or job is present before relying on the restored deployment.</p>
+  </article>
+</Page>

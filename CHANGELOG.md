@@ -5,6 +5,12 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+### Fixed — make the staging hub workspace role-aware (#288)
+
+The hub shows its private Platfolio launcher and marketplace connections. App deployment
+and app notification controls appear in private workspaces. New operator realms grant the
+signed-in user the Keycloak account access that powers Profile and Emails.
+
 ### Fixed — probe staging OpenBao with its initialization status path (#288)
 
 Railway checks the private OpenBao service on its configured port with a plain endpoint path

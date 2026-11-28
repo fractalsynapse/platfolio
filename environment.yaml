@@ -479,7 +479,7 @@ variables:
     environments: all
     enum: [hub, private]
     deployedTo: railway:variable
-    note: "Selects the API and Cordis operation surface. Unset preserves the role-less legacy surface."
+    note: "Selects the API and Cordis operation surface and the site's workspace navigation. Unset preserves the role-less legacy surface."
   - name: PLATFOLIO_MARKETPLACE_ENABLED
     kind: value
     secret: false

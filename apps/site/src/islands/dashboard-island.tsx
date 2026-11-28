@@ -18,7 +18,8 @@ interface DashboardIslandProps {
 }
 
 export default function DashboardIsland({ config, callback }: DashboardIslandProps) {
-  const shell = useMemo(() => createShellContext(endpointsForIsland(config, runtimeConfigFrom(globalThis)), browserCapabilities()), [config]);
+  const endpoints = useMemo(() => endpointsForIsland(config, runtimeConfigFrom(globalThis)), [config]);
+  const shell = useMemo(() => createShellContext(endpoints, browserCapabilities()), [endpoints]);
   const [pathname, setPathname] = useState(() => globalThis.location.pathname);
   const [signedIn, setSignedIn] = useState(() => shell.auth.signedIn());
   const [problem, setProblem] = useState('');
@@ -95,5 +96,6 @@ export default function DashboardIsland({ config, callback }: DashboardIslandPro
   };
   const signOut = () => globalThis.location.assign(shell.auth.signOut() ?? '/');
   const changePassword = async () => globalThis.location.assign(await shell.auth.begin(workspacePaths.accountPassword, 'UPDATE_PASSWORD'));
-  return shell.wrap(<Workspace pathname={pathname} navigate={navigate} signIn={begin} signOut={signOut} changePassword={changePassword} />);
+  return shell.wrap(<Workspace pathname={pathname} navigate={navigate} signIn={begin} signOut={signOut} changePassword={changePassword}
+    {...(endpoints.installationRole ? { installationRole: endpoints.installationRole } : {})} />);
 }

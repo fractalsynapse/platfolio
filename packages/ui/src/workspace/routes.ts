@@ -56,9 +56,10 @@ export const teamSections = {
   connections: { label: 'Connections', href: workspacePaths.teamConnections, owner: true, menu: true },
 } as const;
 
-export function teamSectionLinks(team: { name: string; role: string }, current?: keyof typeof teamSections, menu = false) {
+export function teamSectionLinks(team: { name: string; role: string }, current?: keyof typeof teamSections, menu = false, hub = false) {
   return Object.entries(teamSections).flatMap(([id, entry]) =>
-    (entry.owner && team.role !== 'owner') || (menu && !entry.menu) ? [] : [{ href: entry.href(team.name), label: entry.label, current: current === id }]);
+    (entry.owner && team.role !== 'owner') || (menu && !entry.menu) || (hub && id === 'templates')
+      ? [] : [{ href: entry.href(team.name), label: entry.label, current: current === id }]);
 }
 
 export type WorkspaceRoute =
@@ -75,6 +76,10 @@ export type WorkspaceRoute =
   | { kind: 'instance-setup'; team: string; instance: string }
   | { kind: 'instance-status'; team: string; instance: string }
   | { kind: 'environment'; team: string; instance: string; environment: string; tab: EnvironmentTab };
+
+export function isPrivateWorkspaceRoute(route: WorkspaceRoute): boolean {
+  return 'instance' in route || route.kind === 'team-launch' || route.kind === 'templates' || route.kind === 'notifications';
+}
 
 const staticRoutes = {
   home: workspacePaths.home, 'create-team': workspacePaths.createTeam, invitations: workspacePaths.invitations,
