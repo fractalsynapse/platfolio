@@ -5,6 +5,12 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+### Added — optional private hub sign-in (#288)
+
+A private owner can opt in to a dedicated hub OpenID Connect client. Local members link
+their own accounts using both verified identities. Local membership controls access, and
+private owner authentication remains independent of the hub.
+
 ### Fixed — compatibility during a private worker rollout (#288)
 
 The Shared Identity policy status is requested by the control plane. Existing APIs can continue

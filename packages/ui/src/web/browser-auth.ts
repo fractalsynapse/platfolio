@@ -50,6 +50,7 @@ import { workspacePaths, workspaceReturnPath } from '../workspace/routes.ts';
  * custom-paths discovery document (Keycloak's realm URL determines the endpoints here, because the realm URL is
  * the configuration the deploy supplies). No UI: this file is auth plumbing, and `/callback` is its only caller.
  */
+import type { SuccessOf } from '@platfolio/api-contract/generated/types';
 import {
   CALLBACK_PATH,
   HANDOFF_KEYS,
@@ -224,11 +225,19 @@ export function createTokenBag(): TokenBag {
   };
 }
 
+export type HubSignIn = Required<Pick<SuccessOf<'getHubSignIn'>, 'issuer' | 'clientId' | 'scope'>>;
+
+const hubStatePrefix = 'hub.';
+
+export function isHubSignInCallback(params: URLSearchParams): boolean {
+  return params.get('state')?.startsWith(hubStatePrefix) === true;
+}
+
 export interface BrowserAuthSource {
   /** The `AuthSource` the SDK consumes. */
   readonly token: () => Promise<string>;
-  readonly begin: (returnPath?: string, action?: 'UPDATE_PASSWORD') => Promise<string>;
-  readonly complete: (params: URLSearchParams, onSignedIn?: (returnPath: string) => void) => Promise<'signed-in' | 'no-handoff' | 'state-mismatch' | 'refused'>;
+  readonly begin: (returnPath?: string, action?: 'UPDATE_PASSWORD', hub?: HubSignIn) => Promise<string>;
+  readonly complete: (params: URLSearchParams, onSignedIn?: (returnPath: string) => void, hub?: HubSignIn) => Promise<'signed-in' | 'no-handoff' | 'state-mismatch' | 'refused'>;
   readonly refresh: () => Promise<'refreshed' | 'no-refresh-token' | 'refused'>;
   readonly signedIn: () => boolean;
   /** The URL a person should land on after the issuer ends the session; the bag is emptied first. */
@@ -251,7 +260,10 @@ export function createBrowserAuthSource(
 ): BrowserAuthSource {
   const clientId = config.clientId ?? WEB_CLIENT_ID;
   const scope = config.scope ?? LOGIN_SCOPES;
-  const endpoints = endpointsForIssuer(config.issuerBaseUrl);
+  const local = { endpoints: endpointsForIssuer(config.issuerBaseUrl), clientId };
+  let active = local;
+  const hubTag = async (hub: HubSignIn) => hubStatePrefix + base64Url(await deps.digest(
+    new TextEncoder().encode(JSON.stringify([hub.issuer, hub.clientId, hub.scope])))) + '.';
   const now = deps.now ?? (() => Date.now());
   const bag = createTokenBag();
   const callbackUrl = `${config.siteOrigin.replace(/\/$/, '')}${CALLBACK_PATH}`;
@@ -261,8 +273,8 @@ export function createBrowserAuthSource(
   const HANDOFF = HANDOFF_KEYS;
   let cleared: readonly string[] = [];
 
-  const post = async (form: Readonly<Record<string, string>>): Promise<TokenSet> => {
-    const response = await deps.request(endpoints.token, form);
+  const post = async (endpoint: string, form: Readonly<Record<string, string>>): Promise<TokenSet> => {
+    const response = await deps.request(endpoint, form);
     if (response.status !== 200) throw new Error(`the issuer refused the token exchange (${String(response.status)})`);
     return JSON.parse(response.body) as TokenSet;
   };
@@ -281,7 +293,7 @@ export function createBrowserAuthSource(
     const refresh = held?.refresh;
     if (refresh === undefined) return 'no-refresh-token';
     try {
-      const tokens = await post({ grant_type: 'refresh_token', client_id: clientId, refresh_token: refresh });
+      const tokens = await post(active.endpoints.token, { grant_type: 'refresh_token', client_id: active.clientId, refresh_token: refresh });
       bag.set(tokens, now());
       return 'refreshed';
     } catch {
@@ -293,27 +305,28 @@ export function createBrowserAuthSource(
 
   return {
     config: { clientId, scope, callbackUrl },
-    begin: async (returnPath, action) => {
+    begin: async (returnPath, action, hub) => {
+      const endpoints = hub ? endpointsForIssuer(hub.issuer) : local.endpoints;
       const verifier = createVerifierWith(deps.random);
       const pair = await pkceChallengeWith(deps.digest, verifier);
-      const state = base64Url(deps.random(24));
+      const state = (hub ? await hubTag(hub) : '') + base64Url(deps.random(24));
       // The handoff is written, not kept: the navigation that follows discards this module's memory.
       deps.handoff.write(HANDOFF.verifier, pair.verifier);
       const destination = workspaceReturnPath(returnPath);
       // The issuer receives only the nonce. The validated route stays in the tab's read-once state record.
       deps.handoff.write(HANDOFF.state, destination ? `${state}:${destination}` : state);
       const authorize = new URL(endpoints.authorize);
-      authorize.searchParams.set('client_id', clientId);
+      authorize.searchParams.set('client_id', hub?.clientId ?? clientId);
       authorize.searchParams.set('redirect_uri', callbackUrl);
       authorize.searchParams.set('response_type', 'code');
-      authorize.searchParams.set('scope', scope);
+      authorize.searchParams.set('scope', hub?.scope ?? scope);
       authorize.searchParams.set('state', state);
       authorize.searchParams.set('code_challenge_method', PKCE_METHOD);
       authorize.searchParams.set('code_challenge', pair.challenge);
       if (action) authorize.searchParams.set('kc_action', action);
       return authorize.toString();
     },
-    complete: async (params, onSignedIn) => {
+    complete: async (params, onSignedIn, hub) => {
       const state = params.get('state');
       const code = params.get('code');
       const storedState = deps.handoff.read(HANDOFF.state);
@@ -325,14 +338,20 @@ export function createBrowserAuthSource(
       if (state === null || state !== nonce) return 'state-mismatch';
       if (code === null || code === '') return 'refused';
       const pair = await pkceChallengeWith(deps.digest, verifier);
-      const tokens = await post({
+      const isHub = nonce.startsWith(hubStatePrefix);
+      if (isHub && (!hub || !nonce.startsWith(await hubTag(hub)))) return 'refused';
+      const selected = isHub && hub ? { endpoints: endpointsForIssuer(hub.issuer), clientId: hub.clientId } : local;
+      const returnedIssuer = params.get('iss');
+      if (returnedIssuer !== null && returnedIssuer !== (isHub ? hub?.issuer : config.issuerBaseUrl)) return 'refused';
+      const tokens = await post(selected.endpoints.token, {
         grant_type: 'authorization_code',
-        client_id: clientId,
+        client_id: selected.clientId,
         code,
         redirect_uri: callbackUrl,
         code_verifier: pair.verifier,
       });
       bag.set(tokens, now());
+      active = selected;
       onSignedIn?.(workspaceReturnPath(returnPath) ?? workspacePaths.home);
       return 'signed-in';
     },
@@ -372,7 +391,7 @@ export function createBrowserAuthSource(
       const held = bag.get();
       cleared = bag.clear();
       if (held?.idToken === undefined) return undefined;
-      return endSessionUrl({ endSessionEndpoint: endpoints.endSession, idToken: held.idToken, postLogoutRedirectUri: callbackUrl, clientId });
+      return endSessionUrl({ endSessionEndpoint: active.endpoints.endSession, idToken: held.idToken, postLogoutRedirectUri: callbackUrl, clientId: active.clientId });
     },
     clearedOnSignOut: () => cleared,
   };

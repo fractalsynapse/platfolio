@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import {
   AttestationSchema, GitScm, MarketplaceReleasePublicationSchema, MarketplaceReleaseSelectionSchema, NotificationRuleSchema, StarterBrandChangeSchema, checkBindingPolicy, CONTRACT_NAME, CONTRACT_VERSION, DispatchIntentSchema, HostingProviderIdSchema, InstanceSchema, PrivateLaunchTemplateSchema, type PrivateLaunchTemplate, RAILWAY_AUTHORIZATION_CALLBACK,
-  reasonOf, decide, checkInvitationAcceptance, bindingImpact, normaliseName, rollupState, type BindingRecord, type CapabilityOffer, type PolicyAction, type VerifiedClaims,
+  reasonOf, decide, checkInvitationAcceptance, bindingImpact, normaliseName, rollupState, type BindingRecord, type CapabilityOffer, type HubSignInTrust, type Person, type PolicyAction, type VerificationResult, type VerifiedClaims,
 } from '@platfolio/contracts';
 import { RepositoryReadError } from '@platfolio/contracts';
 import { ScmNotConfiguredError } from '@platfolio/kernel';
@@ -23,6 +23,7 @@ import { platformCatalog } from './platform-catalog.ts';
 import { privateMarketplaceInstall } from './private-marketplace-install.ts';
 import { sharedIdentityBinding } from './shared-identity-binding.ts';
 import { identityClient, hasIdentityClient } from './identity-client.ts';
+import { hubSignIn } from './hub-sign-in.ts';
 import type { ArtifactConfig } from './marketplace-artifacts.ts';
 import { accountProfile, type AccountIssuer } from './account-profile.ts';
 import { customHostname } from '../../../packages/contracts/src/railway-domains.ts';
@@ -52,6 +53,8 @@ export interface CapabilityDeps {
   notificationDirectory?: NotificationDirectory;
   starterLaunch?: StarterLaunch;
   customerLaunch?: ReturnType<typeof customerLaunch>;
+  hubIdentity?: HubSignInTrust;
+  hubIdentityFetch?: typeof fetch;
 }
 
 const nowOf = (deps: CapabilityDeps): Date => (deps.now?.() ?? new Date());
@@ -61,18 +64,26 @@ const registryCredentialPattern = /^[A-Za-z0-9_-]{43}$/;
 const digestCredential = (credential: string): string => createHash('sha256').update(credential).digest('hex');
 
 /** A request-time authorizer: the identity capability is read from the context, never captured at boot. */
-async function authorize(context: KernelContext, request: Request): Promise<{ ok: true; claims: VerifiedClaims } | { ok: false; response: Response_ }> {
+async function authorize(context: KernelContext, request: Request, localOnly = false): Promise<{ ok: true; claims: VerifiedClaims; person?: Person } | { ok: false; response: Response_ }> {
     const token = bearerToken(request.headers.authorization);
     if (!token) return { ok: false, response: unauthorized('no-credentials') };
     // Authentication first, authorization second: a token that is genuine but unscoped is a 403, and calling
     // that a 401 would make the spec's 403 unreachable and the refusal unreadable.
-    const result = await context.identity.verifyAccessToken(token);
+    const result: VerificationResult & { person?: Person } = await (localOnly ? context.identity.verifyAccessToken(token) : context.identity.verifyUserAccessToken(token));
     if (result.ok === false) return { ok: false, response: unauthorized(result) };
-    if (!result.claims.scope.includes(REQUIRED_SCOPE)) {
+    const person = result.person;
+    if (!person && !result.claims.scope.includes(REQUIRED_SCOPE)) {
       return { ok: false, response: { status: 403, body: { error: 'insufficient-scope', message: `token lacks the ${REQUIRED_SCOPE} scope` } } };
     }
-    return { ok: true, claims: result.claims };
+    return { ok: true, claims: result.claims, ...(person ? { person } : {}) };
 }
+
+function authorizedPerson(context: KernelContext, auth: { claims: VerifiedClaims; person?: Person }) {
+  return auth.person ? Promise.resolve({ ok: true as const, value: { person: auth.person, created: false } }) :
+    context.store.resolvePerson({ issuer: auth.claims.issuer, subject: auth.claims.subject });
+}
+
+const authorizeLocal = (context: KernelContext, request: Request) => authorize(context, request, true);
 
 type Body<T> = { ok: true; value: T | undefined } | { ok: false; error: string };
 
@@ -100,7 +111,7 @@ async function resolveScope(context: KernelContext, request: Request, params: Re
   // #177: the verified claims resolve to a **person**, and membership is read from the person. Keying teams
   // off a bare `sub` made two realms that mint the same subject string the same person, and left no way to
   // attach a machine client. The issuer here comes from the verified claims, so a caller cannot name one.
-  const resolved = await context.store.resolvePerson({ issuer: auth.claims.issuer, subject: auth.claims.subject });
+  const resolved = await authorizedPerson(context, auth);
   if (resolved.ok === false) return { ok: false, response: { status: 503, body: { error: 'principal-unresolved', message: reasonOf(resolved) } } };
   const person = resolved.value.person;
   const teams = await context.store.teamsForPerson(person.id);
@@ -285,7 +296,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
           actionFor('listInstances', 'instance.read');
           const auth = await authorize(context, request);
           if (auth.ok === false) return auth.response;
-          const resolved = await context.store.resolvePerson({ issuer: auth.claims.issuer, subject: auth.claims.subject });
+          const resolved = await authorizedPerson(context, auth);
           if (resolved.ok === false) return { status: 503, body: { error: 'principal-unresolved', message: reasonOf(resolved) } };
           const teams = await context.store.teamsForPerson(resolved.value.person.id);
           // Filtered by membership, not by "there is only one team in the demo". An outsider sees an empty
@@ -345,7 +356,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
         handle: async (request, _params, context) => {
           const auth = await authorize(context, request);
           if (auth.ok === false) return auth.response;
-          const resolved = await context.store.resolvePerson({ issuer: auth.claims.issuer, subject: auth.claims.subject });
+          const resolved = await authorizedPerson(context, auth);
           if (resolved.ok === false) return { status: 503, body: { error: 'principal-unresolved', message: reasonOf(resolved) } };
           const { person } = resolved.value;
           const identities = await context.store.listIdentities(person.id);
@@ -807,7 +818,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
         if (auth.ok === false) return auth.response;
         const limit = Number(request.query.get('limit') ?? 50);
         if (!Number.isInteger(limit) || limit < 1 || limit > 200) return badRequest('limit must be between 1 and 200');
-        const resolved = await context.store.resolvePerson({ issuer: auth.claims.issuer, subject: auth.claims.subject });
+        const resolved = await authorizedPerson(context, auth);
           if (resolved.ok === false) return { status: 503, body: { error: 'principal-unresolved', message: reasonOf(resolved) } };
           const teams = await context.store.teamsForPerson(resolved.value.person.id);
         const apps = (await Promise.all(teams.map((teamId) => context.store.listInstances(teamId)))).flat();
@@ -909,7 +920,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
         handle: async (request, _params, context) => {
           const auth = await authorize(context, request);
           if (auth.ok === false) return auth.response;
-          const resolved = await context.store.resolvePerson({ issuer: auth.claims.issuer, subject: auth.claims.subject });
+          const resolved = await authorizedPerson(context, auth);
           if (resolved.ok === false) return { status: 503, body: { error: 'principal-unresolved', message: reasonOf(resolved) } };
           const teams = await context.store.teamsForPerson(resolved.value.person.id);
           const wanted = request.query.get('capability') ?? undefined;
@@ -1061,7 +1072,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
       {
         method: 'GET', path: '/api/v1/me/invitations', operationId: 'listMyInvitations',
         handle: async (request, _params, context) => {
-          const auth = await authorize(context, request);
+          const auth = await authorizeLocal(context, request);
           if (auth.ok === false) return auth.response;
           const email = auth.claims.email;
           const verified = auth.claims.emailVerified;
@@ -1083,7 +1094,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
       {
         method: 'POST', path: '/api/v1/me/invitations/{invitationId}/accept', operationId: 'acceptInvitation',
         handle: async (request, params, context) => {
-          const auth = await authorize(context, request);
+          const auth = await authorizeLocal(context, request);
           if (auth.ok === false) return auth.response;
           const found = await context.store.findInvitationsForEmail(auth.claims.email ?? '');
           const invitation = found.find((i) => i.id === params.invitationId) ?? null;
@@ -1102,7 +1113,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
             if (verdict.ok === false) return { status: verdict.error.code === 'not-found' ? 404 : 409, body: { error: verdict.error.code, message: reasonOf(verdict.error) } };
             return notFound('invitation', params.invitationId ?? '');
           }
-          const resolved = await context.store.resolvePerson({ issuer: auth.claims.issuer, subject: auth.claims.subject });
+          const resolved = await authorizedPerson(context, auth);
           if (resolved.ok === false) return { status: 503, body: { error: 'principal-unresolved', message: reasonOf(resolved) } };
           const accepted = await context.store.acceptInvitation(invitation.id, resolved.value.person.id);
           if (accepted.ok === false) return { status: accepted.code === 'not-found' ? 404 : 409, body: { error: accepted.code, message: reasonOf(accepted) } };
@@ -1156,7 +1167,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
         handle: async (request, _params, context) => {
           const auth = await authorize(context, request);
           if (auth.ok === false) return auth.response;
-          const resolved = await context.store.resolvePerson({ issuer: auth.claims.issuer, subject: auth.claims.subject });
+          const resolved = await authorizedPerson(context, auth);
           if (resolved.ok === false) return { status: 503, body: { error: 'principal-unresolved', message: reasonOf(resolved) } };
           const teamIds = await context.store.teamsForPerson(resolved.value.person.id);
           const rows: Array<{ teamId: string; name: string; role: 'owner' | 'member' }> = [];
@@ -1177,7 +1188,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
           const parsed = bodyOf<{ name?: unknown }>(request);
           if (parsed.ok === false) return badRequest(parsed.error);
           if (typeof parsed.value?.name !== 'string' || parsed.value.name.trim().length === 0) return badRequest('name is required');
-          const resolved = await context.store.resolvePerson({ issuer: auth.claims.issuer, subject: auth.claims.subject });
+          const resolved = await authorizedPerson(context, auth);
           if (resolved.ok === false) return { status: 503, body: { error: 'principal-unresolved', message: reasonOf(resolved) } };
           const personId = resolved.value.person.id;
           // Normalised here so the 409 message names the address the caller will actually type, and refused by
@@ -1655,7 +1666,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
         async handle(request, _params, context) {
           const auth = await authorize(context, request);
           if (!auth.ok) return auth.response;
-          const resolved = await context.store.resolvePerson({ issuer: auth.claims.issuer, subject: auth.claims.subject });
+          const resolved = await authorizedPerson(context, auth);
           if (!resolved.ok) return { status: 503, body: { error: 'principal-unresolved', message: reasonOf(resolved) } };
           return send('listMyNotifications', 200, await listNotificationMatches(context.store, resolved.value.person.id));
         },
@@ -1713,8 +1724,9 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
     privateMarketplaceInstall(scoped, customer),
     platformCatalog(deps.marketplaceEnabled ?? false, scoped, (suffix, operationId, handle) => registryRoute(registryPath + suffix, operationId, handle), deps.artifacts, customer),
     installationLaunch(scoped, deps.installation), privateMarketplace, launcher, catalog, availability, notifications,
-    notificationEmail(authorize, now, deps.notificationDirectory, deps.invitationOrigin),
-    accountProfile(authorize, deps.accountIssuer)];
+    notificationEmail(authorizeLocal, now, deps.notificationDirectory, deps.invitationOrigin),
+    accountProfile(authorizeLocal, deps.accountIssuer),
+    hubSignIn(scoped, deps.marketplaceEnabled ? undefined : deps.customerLaunch?.teamId, deps.hubIdentity, deps.hubIdentityFetch)];
 }
 
 export type { VerifiedClaims };

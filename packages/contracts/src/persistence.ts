@@ -366,6 +366,8 @@ export const IdentitySchema = z.object({
 }).strict();
 export type Identity = z.infer<typeof IdentitySchema>;
 
+export type HubSignInTrust = { issuer: string; clientId: string };
+
 
 /**
  * One environment's state. The instance keeps a rollup field for compatibility and for "is this thing
@@ -679,8 +681,11 @@ export interface Store {
   /** A person may hold several proofs; dropping one must not orphan the teams the person belongs to. */
   linkIdentity(input: { personId: string; issuer: string; subject: string }): Promise<StoreResult<Identity>>;
   unlinkIdentity(issuer: string, subject: string): Promise<StoreResult<{ removed: boolean }>>;
+  unlinkOwnedIdentity(issuer: string, subject: string, personId: string): Promise<StoreResult<{ removed: boolean }>>;
   listIdentities(personId: string): Promise<Identity[]>;
   getPersonByIdentity(issuer: string, subject: string): Promise<StoreResult<Person>>;
+  getHubSignIn(teamId: string): Promise<HubSignInTrust | undefined>;
+  setHubSignIn(teamId: string, trust: HubSignInTrust | undefined): Promise<void>;
 
   // ---------- membership ----------
   putTeamMember(member: Omit<TeamMember, 'addedAt'> & { addedAt?: string }): Promise<StoreResult<TeamMember>>;

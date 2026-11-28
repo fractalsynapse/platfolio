@@ -136,6 +136,83 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Version' }
 
+  /api/v1/auth/hub:
+    get:
+      operationId: getHubSignIn
+      summary: Discover enabled hub sign-in for this private installation
+      security: []
+      responses:
+        '200':
+          description: Whether this installation accepts a configured hub identity. The issuer and client are published only when enabled.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [enabled]
+                properties:
+                  enabled: { type: boolean }
+                  issuer: { type: string, format: uri }
+                  clientId: { type: string, minLength: 1 }
+                  scope: { type: string, minLength: 1 }
+        '503':
+          description: The private installation could not confirm its local sign-in setting.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/teams/{teamId}/hub-sign-in:
+    parameters:
+      - { name: teamId, in: path, required: true, schema: { type: string } }
+    put:
+      operationId: updateHubSignIn
+      summary: Enable or disable the configured hub for private sign-in
+      description: A private workspace owner authenticated by the local issuer controls this setting. The installation configures the trusted issuer and its dedicated client outside this request.
+      security: [{ bearerJwt: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [enabled]
+              properties:
+                enabled: { type: boolean }
+      responses:
+        '204': { description: The setting was saved. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/v1/me/hub-identity:
+    put:
+      operationId: linkMyHubIdentity
+      summary: Link a verified hub identity to the signed-in local account
+      description: The local identity must already be a member of this private workspace. Both access tokens must verify independently. The operation grants no membership or role and never links by email.
+      security: [{ bearerJwt: [], hubIdentityProof: [] }]
+      responses:
+        '204': { description: The proof was linked or already belonged to this account. }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/v1/me/hub-identity/{subject}:
+    parameters:
+      - { name: subject, in: path, required: true, schema: { type: string, minLength: 1 } }
+    delete:
+      operationId: unlinkMyHubIdentity
+      summary: Revoke a linked hub identity using the local account
+      security: [{ bearerJwt: [] }]
+      responses:
+        '204': { description: The caller's hub proof is absent. The local identity and roles remain. }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   /api/v1/whoami:
     get:
       operationId: getWhoami
@@ -3413,6 +3490,11 @@ paths:
 
 components:
   securitySchemes:
+    hubIdentityProof:
+      type: apiKey
+      in: header
+      name: X-Platfolio-Hub-Proof
+      description: Bearer access token issued for this private installation's dedicated hub client.
     marketplaceCredential:
       type: http
       scheme: bearer

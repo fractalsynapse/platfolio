@@ -58,6 +58,7 @@ export {
   type IdentityReport,
   type TokenOptions,
 } from './identity-conformance.ts';
+export type { HubSignInTrust, Person } from './persistence.ts';
 export {
   STORE_CONTRACT,
   STORE_CONTRACT_VERSION,

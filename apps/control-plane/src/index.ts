@@ -3,7 +3,7 @@ import { createKernel, disposeKernel, type KernelContext } from '@platfolio/kern
 import { railwayInstallationProvider, type RailwayInstallationConfig } from '../../../packages/contracts/src/railway-installation.ts';
 import { installationAuthorizationCallback } from './installation-launch.ts';
 import type { InstallationProvider } from '../../../packages/contracts/src/installation-provider.ts';
-import { EndpointKeySource, IdentityConfigSchema, redactCredentialShaped } from '@platfolio/contracts';
+import { EndpointKeySource, IdentityConfigSchema, redactCredentialShaped, type HubSignInTrust } from '@platfolio/contracts';
 import { ROUTE_MANIFEST } from './routes.ts';
 import { buildCapabilities } from './capabilities.ts';
 import { describeAllowedOriginsConfig, parseAllowedOrigins, type CorsBootConfig } from './cors.ts';
@@ -12,6 +12,7 @@ import { customerLaunch, customerLaunchConfig, privateHostingPlugin, type Custom
 import { isReleaseTag } from './release-tag.ts';
 import { keycloakNotificationDirectory } from './notification-directory.ts';
 import { artifactConfigFromEnv, type ArtifactConfig } from './marketplace-artifacts.ts';
+import { hubProofHeader, hubSignInConfig } from './hub-sign-in.ts';
 
 export { ROUTE_MANIFEST };
 export { ALLOWED_ORIGINS_ENV, describeAllowedOriginsConfig, parseAllowedOrigins, type CorsBootConfig } from './cors.ts';
@@ -27,6 +28,7 @@ export interface BootConfig {
   starterLaunch?: StarterLaunch;
   infrastructure?: readonly import('@platfolio/kernel').HostingPlugin[];
   customerLaunch?: CustomerLaunchConfig;
+  hubIdentity?: HubSignInTrust;
   jwksUri?: string;
   host: string;
   port: number;
@@ -102,7 +104,9 @@ export function configFromEnv(env: NodeJS.ProcessEnv): BootConfig {
   if (releaseTag !== null && !isReleaseTag(releaseTag)) {
     throw new Error('control-plane cannot start: PLATFOLIO_RELEASE_TAG must be a bare SemVer tag');
   }
+  const hubIdentity = hubSignInConfig(env.PLATFOLIO_HUB_IDENTITY_ISSUER, env.PLATFOLIO_HUB_IDENTITY_CLIENT);
   return {
+    ...(hubIdentity ? { hubIdentity } : {}),
     issuer: env.PLATFOLIO_IDENTITY_ISSUER as string,
     audience: env.PLATFOLIO_IDENTITY_AUDIENCE as string,
     marketplaceEnabled: env.PLATFOLIO_MARKETPLACE_ENABLED === 'true',
@@ -246,6 +250,10 @@ export async function boot(config: BootConfig, fetchImpl: typeof fetch = fetch) 
   }
   const ownerSubject = config.customerLaunch?.ownerSubject;
   const installationTeamId = config.customerLaunch?.teamId;
+  const hubIdentity = config.hubIdentity && hubSignInConfig(config.hubIdentity.issuer, config.hubIdentity.clientId);
+  if (hubIdentity && (!installationTeamId || config.marketplaceEnabled || !storeUrl || hubIdentity.issuer === config.issuer)) {
+    throw new Error('Hub identity requires a private workspace with a database and a distinct issuer');
+  }
   if (ownerSubject && (!storeUrl || config.marketplaceEnabled || !installationTeamId)) {
     throw new Error('First owner setup requires a private installation and persistent storage');
   }
@@ -279,7 +287,8 @@ export async function boot(config: BootConfig, fetchImpl: typeof fetch = fetch) 
     // scm forwarding bug happened: a choice computed by configuration that never reaches the runtime is a choice
     // that exists only in the operator's head. An empty list is passed through rather than dropped, so "no list"
     // has one spelling all the way down to the transport.
-    server: { host: config.host, port: config.port, cors: { allowedOrigins: [...config.cors?.allowedOrigins ?? []] } },
+    server: { host: config.host, port: config.port, cors: { allowedOrigins: [...config.cors?.allowedOrigins ?? []],
+      ...(hubIdentity ? { allowedHeaders: ['authorization', 'content-type', hubProofHeader] } : {}) } },
     extensions: [
       ...(ownerSubject && installationTeamId ? [{
         id: 'installation-owner',
@@ -308,6 +317,7 @@ export async function boot(config: BootConfig, fetchImpl: typeof fetch = fetch) 
         ...(config.cors?.allowedOrigins.length === 1 ? { invitationOrigin: config.cors.allowedOrigins[0]! } : {}),
         ...(config.starterLaunch ? { starterLaunch: config.starterLaunch } : {}),
         ...(launch ? { customerLaunch: launch } : {}),
+        ...(hubIdentity ? { hubIdentity, hubIdentityFetch: fetchImpl } : {}),
       }),
     ],
     requiredServices: ['identity', 'server', 'store', 'extensions'],

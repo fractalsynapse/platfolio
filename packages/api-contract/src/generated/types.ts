@@ -4,7 +4,7 @@
  * hand, because every line reproduces from the specification.
  *
  * Source: apps/control-plane/openapi.yaml (OpenAPI 3.1.0, info.version 0.1.0)
- * Input digest: sha256/f59e32e7ed5cb98b
+ * Input digest: sha256/d550994ef253e93b
  *
  * Reproduce it with `pnpm run api:types`. `pnpm run api:types:check` fails when this file stops matching
  * what the committed spec produces, which is the only way a generated type deserves to be trusted.
@@ -811,6 +811,8 @@ export interface ApiParameters {
   getHubInstallationOffer: {
     teamId: string;
   };
+  /** GET /api/v1/auth/hub */
+  getHubSignIn: Record<string, never>;
   /** GET /api/v1/instances/{instanceId} */
   getInstance: {
     instanceId: string;
@@ -876,6 +878,8 @@ export interface ApiParameters {
     teamId: string;
     platformId: string;
   };
+  /** PUT /api/v1/me/hub-identity */
+  linkMyHubIdentity: Record<string, never>;
   /** GET /api/v1/audit */
   listAudit: {
     limit?: number;
@@ -1067,6 +1071,10 @@ export interface ApiParameters {
     instanceId: string;
     capability: string;
   };
+  /** DELETE /api/v1/me/hub-identity/{subject} */
+  unlinkMyHubIdentity: {
+    subject: string;
+  };
   /** POST /api/v1/teams/{teamId}/starter-launch/openbao/unlock */
   unlockStarterOpenBao: {
     teamId: string;
@@ -1077,6 +1085,10 @@ export interface ApiParameters {
   updateHostedStarterBrand: {
     instanceId: string;
     environment: string;
+  };
+  /** PUT /api/v1/teams/{teamId}/hub-sign-in */
+  updateHubSignIn: {
+    teamId: string;
   };
   /** PUT /api/v1/me/notification-email */
   updateMyNotificationEmail: Record<string, never>;
@@ -1292,6 +1304,10 @@ export interface ApiRequestBodies {
   };
   /** PUT /api/v1/instances/{instanceId}/environments/{environment}/configuration/starter-brand */
   updateHostedStarterBrand: StarterBrandChange;
+  /** PUT /api/v1/teams/{teamId}/hub-sign-in */
+  updateHubSignIn: {
+    enabled: boolean;
+  };
   /** PUT /api/v1/me/notification-email */
   updateMyNotificationEmail: {
     enabled: boolean;
@@ -1634,6 +1650,16 @@ export interface ApiResponses {
     '403': Error;
     '404': Error;
   };
+  /** GET /api/v1/auth/hub */
+  getHubSignIn: {
+    '200': {
+      enabled: boolean;
+      issuer?: string;
+      clientId?: string;
+      scope?: string;
+    };
+    '503': Error;
+  };
   /** GET /api/v1/instances/{instanceId} */
   getInstance: {
     '200': InstanceResponse;
@@ -1821,6 +1847,14 @@ export interface ApiResponses {
     '403': Error;
     '404': Error;
     '503': Error;
+  };
+  /** PUT /api/v1/me/hub-identity */
+  linkMyHubIdentity: {
+    '204': void;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '409': Error;
   };
   /** GET /api/v1/audit */
   listAudit: {
@@ -2320,6 +2354,13 @@ export interface ApiResponses {
     '404': Error;
     '409': Error;
   };
+  /** DELETE /api/v1/me/hub-identity/{subject} */
+  unlinkMyHubIdentity: {
+    '204': void;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+  };
   /** POST /api/v1/teams/{teamId}/starter-launch/openbao/unlock */
   unlockStarterOpenBao: {
     '204': void;
@@ -2353,6 +2394,15 @@ export interface ApiResponses {
     '404': Error;
     '409': Error;
     '503': Error;
+  };
+  /** PUT /api/v1/teams/{teamId}/hub-sign-in */
+  updateHubSignIn: {
+    '204': void;
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '404': Error;
+    '409': Error;
   };
   /** PUT /api/v1/me/notification-email */
   updateMyNotificationEmail: {
@@ -2501,6 +2551,8 @@ export const ENDPOINTS = {
   getHubInstallationLaunch: { method: 'get', path: '/api/v1/teams/{teamId}/marketplace/installation-launches/{launchId}' },
   /** GET /api/v1/teams/{teamId}/marketplace/installation-offer */
   getHubInstallationOffer: { method: 'get', path: '/api/v1/teams/{teamId}/marketplace/installation-offer' },
+  /** GET /api/v1/auth/hub */
+  getHubSignIn: { method: 'get', path: '/api/v1/auth/hub' },
   /** GET /api/v1/instances/{instanceId} */
   getInstance: { method: 'get', path: '/api/v1/instances/{instanceId}' },
   /** GET /api/v1/instances/{instanceId}/environments/{environment} */
@@ -2537,6 +2589,8 @@ export const ENDPOINTS = {
   issueMarketplacePullGrant: { method: 'post', path: '/api/v1/marketplace/installations/{installationId}/pulls' },
   /** POST /api/v1/teams/{teamId}/marketplace/platforms/{platformId}/uploads */
   issueMarketplaceUploadGrant: { method: 'post', path: '/api/v1/teams/{teamId}/marketplace/platforms/{platformId}/uploads' },
+  /** PUT /api/v1/me/hub-identity */
+  linkMyHubIdentity: { method: 'put', path: '/api/v1/me/hub-identity' },
   /** GET /api/v1/audit */
   listAudit: { method: 'get', path: '/api/v1/audit' },
   /** GET /api/v1/capabilities */
@@ -2629,12 +2683,16 @@ export const ENDPOINTS = {
   triggerDispatch: { method: 'post', path: '/api/v1/instances/{instanceId}/dispatches/{dispatchId}/trigger' },
   /** DELETE /api/v1/instances/{instanceId}/bindings/{capability} */
   unbindCapability: { method: 'delete', path: '/api/v1/instances/{instanceId}/bindings/{capability}' },
+  /** DELETE /api/v1/me/hub-identity/{subject} */
+  unlinkMyHubIdentity: { method: 'delete', path: '/api/v1/me/hub-identity/{subject}' },
   /** POST /api/v1/teams/{teamId}/starter-launch/openbao/unlock */
   unlockStarterOpenBao: { method: 'post', path: '/api/v1/teams/{teamId}/starter-launch/openbao/unlock' },
   /** PUT /api/v1/me/profile */
   updateAccountProfile: { method: 'put', path: '/api/v1/me/profile' },
   /** PUT /api/v1/instances/{instanceId}/environments/{environment}/configuration/starter-brand */
   updateHostedStarterBrand: { method: 'put', path: '/api/v1/instances/{instanceId}/environments/{environment}/configuration/starter-brand' },
+  /** PUT /api/v1/teams/{teamId}/hub-sign-in */
+  updateHubSignIn: { method: 'put', path: '/api/v1/teams/{teamId}/hub-sign-in' },
   /** PUT /api/v1/me/notification-email */
   updateMyNotificationEmail: { method: 'put', path: '/api/v1/me/notification-email' },
   /** PUT /api/v1/instances/{instanceId}/notification-rules/{ruleId} */

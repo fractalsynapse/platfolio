@@ -529,6 +529,14 @@ const expectErr = (result: { ok: boolean; value?: unknown } & Partial<StoreError
     if (twin.person.id === first.person.id) {
       return { status: 'fail', detail: 'two issuers that mint the same sub were collapsed into one person -- the exact defect this change removes' };
     }
+    const concurrentProof = { issuer: 'https://idp-a.test/realms/t', subject: 'concurrent-' + randomUUID() };
+    const before = (await store.listPersons()).length;
+    const parallel = (await Promise.all([store.resolvePerson(concurrentProof), store.resolvePerson(concurrentProof)]))
+      .map(result => mustOk(result, 'parallel first sign-in'));
+    if (parallel[0]!.person.id !== parallel[1]!.person.id || parallel.filter(({ created }) => created).length !== 1 ||
+        (await store.listPersons()).length !== before + 1) {
+      return { status: 'fail', detail: 'concurrent sign-ins did not resolve to a single person' };
+    }
     const identitiesA = await store.listIdentities(first.person.id);
     if (identitiesA.length !== 1) return { status: 'fail', detail: `person A lists ${String(identitiesA.length)} identities` };
 
@@ -548,6 +556,17 @@ const expectErr = (result: { ok: boolean; value?: unknown } & Partial<StoreError
     const person = mustOk(await store.resolvePerson({ issuer: 'https://first.test', subject: 'p1' }), 'first proof');
     mustOk(await store.putTeamMember({ teamId: team.id, personId: person.person.id, role: 'member' }), 'member');
     mustOk(await store.linkIdentity({ personId: person.person.id, issuer: 'https://second.test', subject: 'p1' }), 'second proof');
+
+    const other = mustOk(await store.resolvePerson({ issuer: 'https://first.test', subject: 'p2' }), 'unrelated local person');
+    const conflicting = await store.linkIdentity({ personId: other.person.id, issuer: 'https://second.test', subject: 'p1' });
+    if (conflicting.ok || conflicting.code !== 'conflict') return { status: 'fail', detail: 'an existing proof was reassigned' };
+    if (await store.getHubSignIn(team.id)) return { status: 'fail', detail: 'hub sign-in started enabled' };
+    const trust = { issuer: 'https://second.test', clientId: 'private-fixture' };
+    await store.setHubSignIn(team.id, trust);
+    const saved = await store.getHubSignIn(team.id);
+    if (saved?.issuer !== trust.issuer || saved.clientId !== trust.clientId) return { status: 'fail', detail: 'hub opt-in was not saved' };
+    await store.setHubSignIn(team.id, undefined);
+    if (await store.getHubSignIn(team.id)) return { status: 'fail', detail: 'hub opt-out remained enabled' };
 
     const viaSecond = mustOk(await store.getPersonByIdentity('https://second.test', 'p1'), 'resolve by second proof');
     if (viaSecond.id !== person.person.id) return { status: 'fail', detail: 'the second proof resolved to a different person' };
