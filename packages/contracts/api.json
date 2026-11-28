@@ -1,8 +1,8 @@
 {
   "schema": 1,
-  "version": "8.3.0",
-  "bump": "MINOR 8.2.0 -> 8.3.0 (surface diff: 0 removed, 0 widened, 22 added, 0 reordered)",
-  "digest": "a8ddd28a213bca3e",
+  "version": "8.4.0",
+  "bump": "MINOR 8.3.0 -> 8.4.0 (surface diff: 0 removed, 0 widened, 1 added, 0 reordered)",
+  "digest": "b2d843245058dd37",
   "declarations": [
     "attestation.d.ts: action: z.ZodEnum<{",
     "attestation.d.ts: action: z.ZodEnum<{",
@@ -339,7 +339,7 @@
     "customer-hosting-commands.d.ts: body: z.ZodObject<{",
     "customer-hosting-commands.d.ts: body: z.ZodObject<{",
     "customer-hosting-commands.d.ts: body: z.ZodOptional<z.ZodObject<{",
-    "customer-hosting-commands.d.ts: body: z.ZodOptional<z.ZodObject<{}, z.core.$strict>>;",
+    "customer-hosting-commands.d.ts: body: z.ZodOptional<z.ZodObject<{",
     "customer-hosting-commands.d.ts: body: z.ZodOptional<z.ZodObject<{}, z.core.$strict>>;",
     "customer-hosting-commands.d.ts: body: z.ZodOptional<z.ZodObject<{}, z.core.$strict>>;",
     "customer-hosting-commands.d.ts: body: z.ZodOptional<z.ZodObject<{}, z.core.$strict>>;",
@@ -395,6 +395,7 @@
     "customer-hosting-commands.d.ts: id: z.ZodString;",
     "customer-hosting-commands.d.ts: id: z.ZodString;",
     "customer-hosting-commands.d.ts: id: z.ZodString;",
+    "customer-hosting-commands.d.ts: identityPolicy: z.ZodOptional<z.ZodLiteral<true>>;",
     "customer-hosting-commands.d.ts: image: z.ZodString;",
     "customer-hosting-commands.d.ts: images: z.ZodArray<z.ZodString>;",
     "customer-hosting-commands.d.ts: images: z.ZodArray<z.ZodString>;",

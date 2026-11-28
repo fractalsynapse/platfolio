@@ -136,9 +136,22 @@ On retry, the verified release receipt resolved to the same plan hash on the exi
 Authorized hosting apply, placement, and revocation now allow the worker's verification window
 to finish before the socket times out.
 
-The production-like private installation kept its existing release during this run. Updating
-that installation's worker and checking cold recovery during a hub outage remain separate
-operational checks.
+### Cold recovery while the hub is unavailable
+
+The Shared Identity smoke connects the isolated installation to an unreachable HTTPS
+marketplace origin. It verifies that the connection and catalog report unavailability. The
+private API and worker restart, and OpenBao starts sealed from its original Raft volume. The
+owner reopens the vault through the encrypted recovery endpoint. The worker retains the
+provider connection and returns the existing Keycloak client from the saved binding.
+
+Starter Web cold starts from its retained image digest in a separate local registry and signs in
+through the recovered client. Revocation disables the client and removes its vault placement.
+This check uses a customer-controlled artifact copy and a reachable application issuer. Initial
+marketplace acquisition and pulls that depend on the marketplace remain subject to its availability.
+
+An updated worker sends Shared Identity policy status only when the API asks for it. This keeps
+the original private API's setup response valid during the worker rollout. A new API retries
+the original request if an older worker rejects the policy status option.
 
 ## 2D — Optional hub sign-in and application registration
 

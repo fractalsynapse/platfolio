@@ -12,7 +12,7 @@ import { createKernel, disposeKernel } from '../packages/kernel/src/index.ts';
 import { readTemplate, SHARED_IDENTITY_RELEASE, templateCatalogEntry } from '../packages/manifest/src/index.ts';
 import { buildCapabilities } from '../apps/control-plane/src/capabilities.ts';
 import { customerLaunch } from '../apps/control-plane/src/customer-launch.ts';
-import { openBaoImage } from './customer-installation-topology.ts';
+import { openBaoConfig, openBaoData, openBaoImage } from './customer-installation-topology.ts';
 import { withReleaseSource } from './source-release-upload.ts';
 
 const checkout = process.argv[2];
@@ -62,15 +62,47 @@ async function requireStatus(response: Response, expected: number, stage: string
 }
 const http = (url: string, init?: RequestInit) => fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(120_000), ...init });
 
+let vaultVolume: string | undefined;
 let api: Awaited<ReturnType<typeof createKernel>> | undefined;
 let stage = 'start local services';
 try {
   const kcAdminPassword = secret();
-  const root = secret();
   const baoWorkerSecret = secret();
   const workerKey = secret();
   const kc = run(SHARED_IDENTITY_RELEASE.image, 8080, { KC_BOOTSTRAP_ADMIN_USERNAME: 'local-admin', KC_BOOTSTRAP_ADMIN_PASSWORD: kcAdminPassword }, 'start-dev');
-  const bao = run(openBaoImage, 8200, { BAO_DEV_ROOT_TOKEN_ID: root, BAO_DEV_LISTEN_ADDRESS: '0.0.0.0:8200' }, 'server', '-dev');
+  const vaultPort = await freePort();
+  const marketplaceOrigin = 'https://127.0.0.1:' + await freePort();
+  vaultVolume = docker(['volume', 'create']);
+  const vaultConfig = { BAO_LOCAL_CONFIG: openBaoConfig('127.0.0.1', 'shared-identity-smoke') };
+  function startVault() {
+    const container = docker(['run', '--detach', '--rm', '--publish', '127.0.0.1:' + vaultPort + ':8200',
+      '--volume', vaultVolume + ':' + openBaoData, '-e', 'BAO_LOCAL_CONFIG', openBaoImage, 'server'], vaultConfig);
+    containers.push(container);
+    return container;
+  }
+  let vaultContainer = startVault();
+  const bao = 'http://127.0.0.1:' + vaultPort;
+  async function expectVaultState(expected: number) {
+    for (let attempt = 0; attempt < 90; attempt++) {
+      try {
+        if ((await http(bao + '/v1/sys/health')).status === expected) return;
+      } catch {}
+      await delay(500);
+    }
+    assert.fail('OpenBao did not reach status ' + expected);
+  }
+  await expectVaultState(501);
+  const init = await requireStatus(await http(bao + '/v1/sys/init', {
+    method: 'PUT', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ secret_shares: 3, secret_threshold: 2 }),
+  }), 200, 'initialize isolated Raft storage');
+  const { keys_base64: shares, root_token: root } = await init.json() as { keys_base64: string[]; root_token: string };
+  for (const key of shares.slice(0, 2)) {
+    await requireStatus(await http(bao + '/v1/sys/unseal', {
+      method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key }),
+    }), 200, 'unseal the fixture vault for initial placement');
+  }
+  await expectVaultState(200);
   const pgPassword = secret();
   const database = run('postgres:17.11', 5432, { POSTGRES_PASSWORD: pgPassword });
   const registry = run('registry:3', 5000);
@@ -139,6 +171,8 @@ try {
   await vaultPut('sys/auth/approle', { type: 'approle' });
   const mount = 'customer-launch/data/identity/';
   const policy = (placement: boolean) => [
+    'path "customer-launch/data/marketplace" { capabilities = ["read"] }',
+    'path "customer-launch/data/railway" { capabilities = ["read"] }',
     `path "${mount}providers/*" { capabilities = ["create", "read"] }`,
     `path "${mount}consumers/*" { capabilities = ["read"] }`,
     `path "${mount}inputs/*" { capabilities = ["create", "read"] }`,
@@ -150,13 +184,18 @@ try {
   await vaultPut('auth/approle/role/platfolio-launcher', { token_policies: ['platfolio-launcher'], token_no_default_policy: true, token_type: 'batch' });
   await vaultPut('auth/approle/role/platfolio-launcher/role-id', { role_id: 'platfolio-launcher' });
   await requireStatus(await vault('auth/approle/role/platfolio-launcher/custom-secret-id', { secret_id: baoWorkerSecret }), 200, 'bootstrap app role');
+  await requireStatus(await vault('customer-launch/data/marketplace', { data: { hub: marketplaceOrigin,
+    installationId: '00000000-0000-4000-8000-000000000001', credential: secret(), claimed: true } }), 200, 'save fixture hub connection');
+  await requireStatus(await vault('customer-launch/data/railway', { data: {
+    access: 'fixture-workspace-access', refresh: 'fixture-workspace-refresh', expires: Date.now() + 3_600_000,
+  } }), 200, 'save fixture provider connection');
   async function startWorker() {
     const child = spawn(process.execPath, ['--import', 'tsx', 'scripts/customer-installation-worker.ts'], {
       stdio: 'ignore',
       env: { ...process.env, PORT: String(workerPort), HOST: '127.0.0.1', PLATFOLIO_LAUNCH_TEAM: teamId,
         PLATFOLIO_LAUNCH_WORKER_KEY: workerKey, PLATFOLIO_LAUNCH_STATE_DIR: workDir, PLATFOLIO_OPENBAO_WORKER_SECRET: baoWorkerSecret,
         PLATFOLIO_OPENBAO_URL: bao, PLATFOLIO_RAILWAY_OAUTH_CALLBACK: 'https://private.example.test/api/v1/railway/callback',
-        RAILWAY_WORKSPACE_ID: 'local-fixture', PLATFOLIO_REGISTRY_ORIGIN: '' },
+        RAILWAY_WORKSPACE_ID: 'local-fixture', PLATFOLIO_REGISTRY_ORIGIN: marketplaceOrigin },
     });
     processes.push(child);
     await waitFor(workerOrigin + '/status', 'private worker');
@@ -179,17 +218,22 @@ try {
   const identity = createIdentityFixture();
   const controlToken = signToken(identity, { scope: 'platfolio.user', subject: 'owner' });
   const connectionString = 'postgresql://postgres:' + pgPassword + '@' + new URL(database).host + '/postgres';
-  api = await createKernel({
-    provider: 'fake', identity: defaultIdentityConfig(identity), identityKeys: [identity.jwk], scm: { driver: 'git' },
-    store: { driver: 'postgres', connectionString, migrate: true }, server: { port: 0 },
-    extensions: buildCapabilities({ build: { version: null, commit: revision, buildTime: new Date().toISOString() },
-      customerLaunch: customerLaunch({ teamId, workerUrl: workerOrigin, workerKey, siteOrigin: appOrigin }, fetch) }),
-  });
-  const fallback = api.scm.readFile.bind(api.scm);
-  api.scm.readFile = async (file) => {
-    if (file.repo !== starter.repo) return fallback(file);
-    return readLocal(file);
-  };
+  const apiPort = await freePort();
+  async function startControlPlane() {
+    const running = await createKernel({
+      provider: 'fake', identity: defaultIdentityConfig(identity), identityKeys: [identity.jwk], scm: { driver: 'git' },
+      store: { driver: 'postgres', connectionString, migrate: true }, server: { port: apiPort },
+      extensions: buildCapabilities({ build: { version: null, commit: revision, buildTime: new Date().toISOString() },
+        customerLaunch: customerLaunch({ teamId, workerUrl: workerOrigin, workerKey, siteOrigin: appOrigin }, fetch) }),
+    });
+    const fallback = running.scm.readFile.bind(running.scm);
+    running.scm.readFile = async (file) => {
+      if (file.repo !== starter.repo) return fallback(file);
+      return readLocal(file);
+    };
+    return running;
+  }
+  api = await startControlPlane();
   const owner = value(await api.store.resolvePerson({ issuer: identity.issuer, subject: 'owner' }));
   value(await api.store.seedInstallationTeam({ id: teamId, name: 'workspace', personId: owner.person.id }));
   const provider = value(await api.store.createInstance({ teamId, name: 'shared-identity', template: 'shared-identity',
@@ -252,18 +296,68 @@ try {
 
   stage = 'sign in to the built Starter Web application';
   await vaultPut('sys/policies/acl/starter-web', { policy: `path "${clientPath}" { capabilities = ["read"] }` });
-  const appToken = await requireStatus(await vault('auth/token/create', { policies: ['starter-web'], no_default_policy: true, ttl: '5m' }), 200, 'give app read access to its placement');
+  const appToken = await requireStatus(await vault('auth/token/create-orphan', { policies: ['starter-web'], no_default_policy: true, ttl: '15m' }), 200, 'give app read access to its placement');
   const { auth } = await appToken.json() as { auth: { client_token: string } };
   await requireStatus(await vault(providerPath, undefined, auth.client_token), 403, 'application token has no access to realm administration');
+  stage = 'recover private services with the marketplace unreachable';
+  const teamPath = apiOrigin + '/api/v1/teams/' + teamId;
+  const ownerRequest = (path: string, options: RequestInit = {}) => http(path, {
+    ...options, headers: { authorization: 'Bearer ' + controlToken, ...(options.body ? { 'content-type': 'application/json' } : {}) },
+  });
+  const marketplace = async () => (await requireStatus(await ownerRequest(teamPath + '/marketplace/connection'), 200,
+    'read the local connection status')).json() as Promise<{ state: string }>;
+  assert.equal((await marketplace()).state, 'unavailable');
+  await requireStatus(await http(apiOrigin + '/api/v1/marketplace/platforms'), 503, 'marketplace catalog unreachable');
+  docker(['stop', vaultContainer]);
+  vaultContainer = startVault();
+  await expectVaultState(503);
+  const store = api.store;
+  await disposeKernel(api);
+  await store.close();
+  api = await startControlPlane();
+  await new Promise<void>((stopped) => { worker.once('exit', () => stopped()); worker.kill(); });
+  worker = await startWorker();
+  const readSetup = async () => (await requireStatus(await ownerRequest(teamPath + '/starter-launch/setup'), 200,
+    'read setup from the restarted private worker')).json() as Promise<{ openBao: string; railway: string; workerKey: string }>;
+  const sealed = await readSetup();
+  assert.equal(sealed.openBao, 'sealed');
+  assert.equal((await marketplace()).state, 'openbao-required');
+  assert.notEqual(sealed.workerKey, sealingKey);
+  const workerPublicKey = createPublicKey({ key: Buffer.from(sealed.workerKey, 'base64'), format: 'der', type: 'spki' });
+  const envelope = publicEncrypt({ key: workerPublicKey, padding: constants.RSA_PKCS1_OAEP_PADDING, oaepHash: 'sha256' },
+    Buffer.from(JSON.stringify({ shares, bootstrap: root }))).toString('base64');
+  await requireStatus(await ownerRequest(teamPath + '/starter-launch/openbao/unlock', {
+    method: 'POST', body: JSON.stringify({ recovery: envelope }),
+  }), 204, 'recover OpenBao with owner shares');
+  const restored = await readSetup();
+  assert.equal(restored.openBao, 'ready');
+  assert.equal(restored.railway, 'connected');
+  await requireStatus(await vault('auth/token/lookup-self'), 403, 'verify bootstrap credential retirement');
+  assert.equal((await marketplace()).state, 'unavailable');
+  assert.deepEqual(await (await requireStatus(await place(), 200, 'reuse the existing client with the marketplace unavailable')).json(), placementStatus);
+  assert.deepEqual(await applicationClients(), firstClients);
+  console.log('The private API, worker and OpenBao recovered from disk while the marketplace stayed unavailable.');
+
+  stage = 'cold-start the retained application and sign in';
+  assert.ok((await api.store.listArtifacts(consumer.id)).some((artifact) =>
+    artifact.service === 'web' && artifact.image === image && artifact.digest === digest && artifact.sourceRef === revision));
   const placed = await requireStatus(await vault(clientPath, undefined, auth.client_token), 200, 'load app credential');
   const { data: { data: env } } = await placed.json() as { data: { data: Record<string, string> } };
   assert.equal(env.OIDC_CLIENT_ID, placementStatus.clientId);
   assert.ok(env.OIDC_CLIENT_SECRET);
   assert.ok(!(JSON.stringify(await api.store.recentAudit())).includes(env.OIDC_CLIENT_SECRET), 'Control-plane audit carries no client secret');
   const runtime = { ...env, HOST: '127.0.0.1', PORT: String(appPort) };
-  const appContainer = docker(['run', '--detach', '--rm', '--network', 'host', ...Object.keys(runtime).flatMap((key) => ['-e', key]), image + '@' + digest], runtime);
-  containers.push(appContainer);
+  const startApp = () => {
+    const id = docker(['run', '--detach', '--rm', '--network', 'host', '--pull=always',
+      ...Object.keys(runtime).flatMap((key) => ['-e', key]), image + '@' + digest], runtime);
+    containers.push(id);
+    return id;
+  };
+  const appContainer = startApp();
   await waitFor(appOrigin + '/healthz', 'Starter Web');
+  docker(['stop', appContainer]);
+  assert.notEqual(startApp(), appContainer);
+  await waitFor(appOrigin + '/healthz', 'Starter Web cold restart');
   const cookies = (response: Response) => response.headers.getSetCookie().map((cookie) => cookie.split(';')[0]).join('; ');
   const start = await requireStatus(await http(appOrigin + '/login'), 302, 'start application sign-in');
   const authorization = new URL(start.headers.get('location')!);
@@ -307,5 +401,6 @@ try {
   }
   for (const child of processes) child.kill();
   for (const id of containers.reverse()) { try { docker(['stop', id]); } catch {} }
+  if (vaultVolume) try { docker(['volume', 'rm', vaultVolume]); } catch {}
   rmSync(workDir, { recursive: true, force: true });
 }

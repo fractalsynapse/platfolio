@@ -1431,7 +1431,9 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
   const unavailable = () => ({ status: 503, body: { error: 'launcher-setup-unavailable', message: 'Check the customer worker, OpenBao and Railway connection, then try again.' } });
   const relay = async (teamId: string, operation: string, action: Parameters<NonNullable<typeof customer>['call']>[0], body?: object) => {
     if (!customer || customer.teamId !== teamId) return notFound('launch', 'starter');
-    const output = await customer.call(action, body);
+    let output = await customer.call(action, body);
+    // Older workers reject the opt-in. Their original setup reply still describes the existing installation.
+    if (action === 'setup' && !output.ok && output.status === 400) output = await customer.call('setup');
     if (!output.ok && output.status === 409 && (action === 'start' || action === 'template-start')) {
       return { status: 409, body: { error: 'marketplace-release-unavailable',
         message: 'Check Marketplace in Connections, then open Choose template and select an available release.' } };
@@ -1602,7 +1604,7 @@ export function buildCapabilities(deps: CapabilityDeps): ExtensionDescriptor[] {
           : relay(teamId, 'removeStarterLaunch', 'remove', { data: body.value.data });
       }),
       scoped('GET', launchPath + '/setup', 'getStarterLaunchSetup', 'marketplace.manage',
-        async ({ teamId }) => relay(teamId, 'getStarterLaunchSetup', 'setup')),
+        async ({ teamId }) => relay(teamId, 'getStarterLaunchSetup', 'setup', { identityPolicy: true })),
       scoped('POST', launchPath + '/openbao', 'initializeStarterOpenBao', 'marketplace.manage', async ({ teamId }, request) => {
         const body = bodyOf<{ publicKey?: unknown }>(request);
         const key = body.ok ? body.value?.publicKey : undefined;

@@ -5,6 +5,12 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+### Fixed — compatibility during a private worker rollout (#288)
+
+The Shared Identity policy status is requested by the control plane. Existing APIs can continue
+to read setup from an updated worker. An updated API also accepts the original setup response
+from an older worker.
+
 ### Fixed — allow provider verification to finish over HTTP (#288)
 
 Authorized hosting apply and Shared Identity placement and revocation allow the private worker
