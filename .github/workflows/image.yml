@@ -134,6 +134,67 @@ jobs:
           KC_PKCE_USER=owner KC_USER_PASSWORD="$PLATFOLIO_INSTALL_OWNER_PASSWORD" \
             pnpm run identity:pkce:smoke --local-owner-profile --base="$origin" --ui-origin=http://127.0.0.1:4321
 
+      - name: Smoke test an existing operator realm upgrade
+        env:
+          IDENTITY_IMAGE: ${{ steps.identity.outputs.image }}
+        run: |
+          export PLATFOLIO_INSTALL_OWNER_PASSWORD="$(node -p 'require("node:crypto").randomBytes(32).toString("base64url")')"
+          export PLATFOLIO_SITE_ORIGIN=http://127.0.0.1:4321
+          export PLATFOLIO_INSTALL_OWNER_EMAIL=owner@platfolio.test
+          export PLATFOLIO_INSTALL_OWNER_SUBJECT="$(node -p 'require("node:crypto").randomUUID()')"
+          export KC_PKCE_USER=operator-before-upgrade KC_USER_PASSWORD="$PLATFOLIO_INSTALL_OWNER_PASSWORD"
+          legacy_realm="$RUNNER_TEMP/platfolio-realm.json"
+          docker run --rm --entrypoint cat "$IDENTITY_IMAGE" /opt/keycloak/platfolio-private/platfolio-realm.json | jq '
+            del(.clientScopeMappings.account, .users[0].clientRoles.account)
+            | .editUsernameAllowed = false
+            | .users[0].username = "operator-before-upgrade"
+            | .users[0].emailVerified = true
+            | .users[0].attributes.upgradeFixture = ["retained"]
+            | .components["org.keycloak.userprofile.UserProfileProvider"][0].config["kc.user.profile.config"][0] |=
+                (fromjson | .attributes |= (map(select(.name != "platfolioDisplayName")) + [
+                  {name:"upgradeFixture", permissions:{view:["admin","user"],edit:["admin","user"]} }
+                ]) | tojson)
+            | .clients |= map(if has("protocolMappers") then .protocolMappers |=
+                (map(select(.name | startswith("platfolio-account-") | not))
+                  | map(if .name == "platfolio-web-scopes" then .config.multivalued = "true" else . end))
+              else . end)
+          ' > "$legacy_realm"
+          docker network create identity-upgrade-smoke
+          cleanup() {
+            docker stop identity-upgrade-legacy identity-upgrade-repaired-1 identity-upgrade-repaired-2 identity-upgrade-db >/dev/null 2>&1 || true
+            docker network rm identity-upgrade-smoke >/dev/null
+          }
+          trap cleanup EXIT
+          docker run -d --rm --name identity-upgrade-db --network identity-upgrade-smoke \
+            -e POSTGRES_DB=keycloak -e POSTGRES_PASSWORD=local-fixture-only postgres:17.11
+          for attempt in $(seq 1 15); do
+            if docker exec identity-upgrade-db pg_isready -h 127.0.0.1 -U postgres -d keycloak; then break; fi
+            sleep 1
+          done
+          start_identity() {
+            docker run -d --rm --name "$identity" --network identity-upgrade-smoke --publish 127.0.0.1::8080 \
+              -e KC_DB=postgres -e KC_DB_URL_HOST=identity-upgrade-db -e KC_DB_URL_DATABASE=keycloak \
+              -e KC_DB_USERNAME=postgres -e KC_DB_PASSWORD=local-fixture-only \
+              -e PLATFOLIO_SITE_ORIGIN -e PLATFOLIO_INSTALL_OWNER_EMAIL -e PLATFOLIO_INSTALL_OWNER_PASSWORD -e PLATFOLIO_INSTALL_OWNER_SUBJECT "$@"
+          }
+          smoke() {
+            local origin="http://$(docker port "$identity" 8080/tcp)"
+            curl --fail --silent --retry 30 --retry-delay 2 --retry-all-errors --max-time 5 "$origin/realms/platfolio" >/dev/null
+            pnpm run identity:pkce:smoke --local-owner-profile --base="$origin" --ui-origin="$PLATFOLIO_SITE_ORIGIN" "$@"
+          }
+          identity=identity-upgrade-legacy
+          start_identity --mount "type=bind,source=$legacy_realm,target=/opt/keycloak/data/import/platfolio-realm.json,readonly" \
+            "$IDENTITY_IMAGE" start --import-realm --http-enabled=true --hostname-strict=false
+          smoke --expect-account-unavailable
+          for attempt in 1 2; do
+            docker stop "$identity" >/dev/null
+            identity="identity-upgrade-repaired-$attempt"
+            start_identity "$IDENTITY_IMAGE" start-private --http-enabled=true --hostname-strict=false
+            smoke --expect-verified-email --expect-profile-attribute=upgradeFixture
+            count="$(docker logs "$identity" 2>&1 | grep -c 'Platfolio operator profile migration 1 applied' || true)"
+            test "$count" -eq "$((2 - attempt))"
+          done
+
       # The image answers its own healthcheck during the run, so a green job means the container serves --
       # not merely that it assembled. This is the difference the project keeps insisting on.
       - name: Fail-closed check (no identity config, the container must refuse to start)

@@ -5,6 +5,12 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+### Fixed — repair Account profiles during private installation upgrades (#288)
+
+The new identity image updates the existing Keycloak operator realm in place so
+Profile and Emails work after the owner signs in again. The upgrade preserves the
+owner's account, password, email verification and custom profile fields.
+
 ### Fixed — make the staging hub workspace role-aware (#288)
 
 The hub shows its private Platfolio launcher and marketplace connections. App deployment
