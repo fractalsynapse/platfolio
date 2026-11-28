@@ -244,5 +244,3 @@ export function defineComponent<P extends object>(contract: ComponentContract<P>
     slots: Object.freeze([...contract.slots]),
   });
 }
-
-export const bus = new EventTarget();
