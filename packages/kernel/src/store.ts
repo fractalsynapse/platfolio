@@ -62,6 +62,7 @@ export class StoreService extends Service<z.infer<typeof StoreConfigSchema>> {
   listInstallationJournals(...args: Parameters<Store['listInstallationJournals']>) { return this.inner.listInstallationJournals(...args); }
   getInstallationJournal(...args: Parameters<Store['getInstallationJournal']>) { return this.inner.getInstallationJournal(...args); }
   saveInstallationJournal(...args: Parameters<Store['saveInstallationJournal']>) { return this.inner.saveInstallationJournal(...args); }
+  forgetInstallationJournal(...args: Parameters<Store['forgetInstallationJournal']>) { return this.inner.forgetInstallationJournal(...args); }
   connectMarketplaceInstallation(...args: Parameters<Store['connectMarketplaceInstallation']>) { return this.inner.connectMarketplaceInstallation(...args); }
   listMarketplaceInstallations(...args: Parameters<Store['listMarketplaceInstallations']>) { return this.inner.listMarketplaceInstallations(...args); }
   marketplaceInstallationConnected(...args: Parameters<Store['marketplaceInstallationConnected']>) { return this.inner.marketplaceInstallationConnected(...args); }

@@ -7,6 +7,7 @@ import type { InstallationJournal } from '../../../packages/contracts/src/instal
 import type { Store } from '@platfolio/contracts';
 import type { scoped } from './capabilities.ts';
 import { badRequest, notFound, send, spec } from './respond.ts';
+import { installationBootstrap } from './installation-bootstrap.ts';
 
 const collection = '/api/v1/teams/{teamId}/marketplace/installation-launches';
 export const installationAuthorizationCallback = '/api/v1/hosting/installation-authorization/callback';
@@ -43,7 +44,7 @@ function projectProgress(row?: InstallationJournal, session?: Session): Progress
 }
 
 function runInstallation(store: Pick<Store, 'saveInstallationJournal'>, initial: InstallationJournal,
-  active: Set<() => void>, operation: JournalOperation) {
+  active: Set<() => void>, operation: JournalOperation, apiOrigins?: Map<string, string>) {
   let journal = initial;
   let queue = Promise.resolve();
   let stopped = false;
@@ -75,7 +76,8 @@ function runInstallation(store: Pick<Store, 'saveInstallationJournal'>, initial:
         return {};
       }
       if (!row.requested.includes(name) || previous) throw new Error('The provider reported an unexpected environment');
-      return { environments: [...row.environments, { name, origin, revision: row.revision }] };
+      const apiOrigin = apiOrigins?.get(name);
+      return { environments: [...row.environments, { name, origin, ...(apiOrigin ? { apiOrigin } : {}), revision: row.revision }] };
     }),
   };
   const heartbeat = setInterval(() => void checkpoint().catch(stop), leaseMs / 4);
@@ -118,7 +120,9 @@ function runInstallation(store: Pick<Store, 'saveInstallationJournal'>, initial:
   })();
 }
 
-export function installationLaunch(scopedRoute: typeof scoped, config?: { provider: InstallationProvider; returnTo: string }): ExtensionDescriptor {
+export function installationLaunch(scopedRoute: typeof scoped, config?: { provider: InstallationProvider; returnTo: string },
+  key?: string, request: typeof fetch = fetch): ExtensionDescriptor {
+  const bootstrap = key && installationBootstrap(key);
   const sessions = new Map<string, Session>();
   const active = new Set<() => void>();
   function prune() {
@@ -148,7 +152,8 @@ export function installationLaunch(scopedRoute: typeof scoped, config?: { provid
     },
     routes: [
       scopedOwner('GET', '/api/v1/teams/{teamId}/marketplace/installation-offer', 'getHubInstallationOffer', 'marketplace.manage', async () =>
-        send('getHubInstallationOffer', 200, { provider: config!.provider.id, revision: config!.provider.revision })),
+        send('getHubInstallationOffer', 200, { provider: config!.provider.id, revision: config!.provider.revision,
+          ...(bootstrap ? { managedFirstSignIn: true } : {}) })),
       scopedOwner('GET', collection, 'listHubInstallationLaunches', 'marketplace.manage', async ({ context, teamId, personId }) => {
         const journals = await context.store.listInstallationJournals(teamId, personId);
         return { ...send('listHubInstallationLaunches', 200, journals.map((row) => ({
@@ -179,6 +184,30 @@ export function installationLaunch(scopedRoute: typeof scoped, config?: { provid
         const session = visible(id, teamId, personId);
         const journal = await context.store.getInstallationJournal(teamId, personId, id);
         return journal || session ? result('getHubInstallationLaunch', 200, projectProgress(journal, session)) : absent();
+      }),
+      scopedOwner('DELETE', collection + '/{launchId}', 'forgetHubInstallation', 'marketplace.manage', async ({ teamId, personId, context }, _req, params) => {
+        const id = params.launchId ?? '';
+        const row = await context.store.getInstallationJournal(teamId, personId, id);
+        if (!row) return absent();
+        if (!row.removedAt || row.maintenance) return conflict('Verify the installation removal before deleting its record.');
+        if (!await context.store.forgetInstallationJournal(teamId, personId, id, row.version)) return conflict('Installation history changed. Try again.');
+        sessions.delete(id);
+        return { status: 204, body: undefined };
+      }),
+      scopedOwner('GET', collection + '/{launchId}/first-sign-in/{environment}', 'getHubInstallationFirstSignIn', 'marketplace.manage', async ({ teamId, personId, context }, _req, params) => {
+        const row = await context.store.getInstallationJournal(teamId, personId, params.launchId ?? '');
+        const name = params.environment;
+        if (!bootstrap || !row || row.removedAt || (name !== 'staging' && name !== 'production') || !row.managedFirstSignIn?.includes(name)) return absent();
+        const origin = row.environments.find((item) => item.name === name)?.apiOrigin;
+        if (!origin || !/^https:\/\/[a-z0-9-]+\.up\.railway\.app$/.test(origin)) return absent();
+        try {
+          const response = await request(origin + '/api/v1/setup', { redirect: 'error', signal: AbortSignal.timeout(4000) });
+          if (!response.ok) throw new Error('Private setup status is unavailable');
+          const setup = await response.json() as SuccessOf<'getPrivateSetup'>;
+          return setup.temporaryPasswordActive === true && setup.smtpRequired === true
+            ? { ...send('getHubInstallationFirstSignIn', 200, { temporaryPassword: bootstrap.password(row, name) }), headers: noCache }
+            : absent();
+        } catch { return { status: 503, body: { error: 'private-setup-unavailable', message: 'Could not confirm private sign-in status. Try again.' } }; }
       }),
       scopedOwner('PUT', collection + '/{launchId}', 'startHubInstallation', 'marketplace.manage', async ({ teamId, personId, context }, request, params) => {
         const id = params.launchId ?? '';
@@ -213,6 +242,7 @@ export function installationLaunch(scopedRoute: typeof scoped, config?: { provid
             submitted: row?.submitted ?? [],
             environments: row?.environments.map((entry) => ({ ...entry, revision: entry.revision ?? row.revision })) ?? [],
             events: row?.events ?? [],
+            ...(bootstrap ? { managedFirstSignIn: [...new Set([...row?.managedFirstSignIn ?? [], ...environments.filter((environment) => !row?.submitted.includes(environment))])] } : {}),
             version: row ? row.version + 1 : 0, leaseUntil: leaseDeadline(),
           };
           const audit = await context.store.appendAudit({ actorKind: 'user', actorRef: personId, action: 'installation.launch.request',
@@ -222,14 +252,18 @@ export function installationLaunch(scopedRoute: typeof scoped, config?: { provid
           }
           sessions.delete(id);
           const recover = grant.recover.bind(grant);
+          const apiOrigins = new Map<string, string>();
           runInstallation(context.store, journal, active, (observer, _beforeWrite, checkpoint) =>
             recover({ ...input, environments: journal.requested }, observer, {
               id: journal.id,
               ...(journal.projectId ? { projectId: journal.projectId } : {}),
               verified: journal.environments.map(({ name }) => name), submitted: journal.submitted,
+              observeApiOrigin: (environment, origin) => { apiOrigins.set(environment, origin); },
+              ...(bootstrap ? { firstSignIn: async (environment: typeof journal.requested[number]) =>
+                journal.managedFirstSignIn?.includes(environment) ? bootstrap.verifier(journal, environment) : { verifier: input.verifier, salt: input.salt } } : {}),
               beforeWrite: (environment) => checkpoint((current) => environment
                 ? { submitted: [...new Set([...current.submitted, environment])] } : {}),
-            }));
+            }), apiOrigins);
           return result('startHubInstallation', 202, projectProgress(journal));
         } finally {
           delete session.starting;

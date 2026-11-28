@@ -42,6 +42,10 @@ info:
     `TeamWithRole`, `Version`, `Whoami`, `Error`) stay hand-written, and are listed with a reason in
     `UNMATCHED_COMPONENTS`.
 
+    A private installation with email setup enabled returns HTTP 503 with error
+    `private-smtp-required` for workspace operations until its owner verifies the relay.
+    Health, identity and setup endpoints are available during onboarding.
+
   contact:
     name: platfolio
 servers:
@@ -135,6 +139,57 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Version' }
+
+  /api/v1/setup:
+    get:
+      operationId: getPrivateSetup
+      summary: Discover whether the private installation is ready for normal use
+      description: Reports setup flags for this installation without exposing identity or mail settings.
+      security: []
+      responses:
+        '200':
+          description: Installation setup requirements.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [smtpRequired, smtpConfigured, temporaryPasswordActive]
+                properties:
+                  smtpRequired: { type: boolean }
+                  smtpConfigured: { type: boolean }
+                  temporaryPasswordActive: { type: boolean }
+        '503': { description: Private identity setup status is unavailable. }
+
+  /api/v1/teams/{teamId}/setup/smtp:
+    parameters:
+      - { name: teamId, in: path, required: true, schema: { type: string, minLength: 1 } }
+    put:
+      operationId: configurePrivateSmtp
+      summary: Verify and configure the private owner's SMTP relay
+      description: Requires the local owner. Sends a test message before enabling account recovery. The relay password is written only to local Keycloak.
+      security: [{ bearerJwt: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [host, port, user, password, from]
+              properties:
+                host: { type: string, minLength: 1, maxLength: 253, pattern: '^[a-zA-Z0-9][a-zA-Z0-9.\-]*$' }
+                port: { type: integer, minimum: 1, maximum: 65535 }
+                user: { type: string, minLength: 1, maxLength: 254 }
+                password: { type: string, minLength: 1, maxLength: 1024, writeOnly: true }
+                from: { type: string, format: email, maxLength: 254 }
+      responses:
+        '204': { description: SMTP accepted the test message and private Keycloak accepted the settings. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { description: Could not verify or configure the relay. }
 
   /api/v1/auth/hub:
     get:
@@ -2638,6 +2693,7 @@ paths:
                 properties:
                   provider: { type: string, minLength: 1 }
                   revision: { type: string, pattern: '^[0-9a-f]{40}$' }
+                  managedFirstSignIn: { type: boolean }
         '404': { $ref: '#/components/responses/NotFound' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
@@ -2695,6 +2751,16 @@ paths:
     parameters:
       - { name: teamId, in: path, required: true, schema: { type: string } }
       - { name: launchId, in: path, required: true, schema: { type: string, format: uuid } }
+    delete:
+      operationId: forgetHubInstallation
+      summary: Delete the owner's verified-removed installation record
+      security: [{ bearerJwt: [] }]
+      responses:
+        '204': { description: The removed installation record was deleted. }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
     get:
       operationId: getHubInstallationLaunch
       summary: Read the owner's installation launch progress
@@ -2729,6 +2795,32 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/v1/teams/{teamId}/marketplace/installation-launches/{launchId}/first-sign-in/{environment}:
+    parameters:
+      - { name: teamId, in: path, required: true, schema: { type: string, minLength: 1 } }
+      - { name: launchId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: environment, in: path, required: true, schema: { type: string, enum: [staging, production] } }
+    get:
+      operationId: getHubInstallationFirstSignIn
+      summary: Reveal the launch owner's still-active first sign-in password
+      description: Reveals the one-time password only while private Keycloak requires the initial password change. Responses must never be cached.
+      security: [{ bearerJwt: [] }]
+      responses:
+        '200':
+          description: Temporary password for the local owner.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [temporaryPassword]
+                properties:
+                  temporaryPassword: { type: string, pattern: '^[A-Za-z0-9_-]{43}$' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { description: The private installation could not confirm the password is still active. }
 
   /api/v1/teams/{teamId}/marketplace/installation-launches/{launchId}/maintenance:
     parameters:

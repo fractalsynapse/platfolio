@@ -20,6 +20,7 @@ export function HubInstallationLaunch({ teamId }: { readonly teamId: string }) {
   const params = React.useMemo(() => ({ teamId }), [teamId]);
   const offer = useOperation('getHubInstallationOffer', { params, key: 'installation-offer-' + teamId });
   const offeredRevision = offer.state.status === 'loaded' ? offer.state.data.revision : undefined;
+  const managedFirstSignIn = offer.state.status === 'loaded' && offer.state.data.managedFirstSignIn === true;
   const [activeId, setActiveId] = React.useState('');
   const journals = useOperation('listHubInstallationLaunches', { params, enabled: offer.state.status === 'loaded' });
   const history = journals.state.status === 'loaded' ? journals.state.data : [];
@@ -27,10 +28,13 @@ export function HubInstallationLaunch({ teamId }: { readonly teamId: string }) {
   const authorize = useCommand('authorizeHubInstallation');
   const start = useCommand('startHubInstallation');
   const maintain = useCommand('maintainHubInstallation');
+  const forget = useCommand('forgetHubInstallation');
+  const reveal = useCommand('getHubInstallationFirstSignIn');
   const [maintenance, setMaintenance] = React.useState<MaintenanceChoice>();
   const [consent, setConsent] = React.useState<SuccessOf<'authorizeHubInstallation'>>();
   const [workspace, setWorkspace] = React.useState('');
   const [firstSignIn, setFirstSignIn] = React.useState<{ credential: Awaited<ReturnType<typeof createInstallationOwner>>; saved: boolean }>();
+  const [revealed, setRevealed] = React.useState<{ id: string; password: string }>();
   const [pending, setPending] = React.useState(false);
   const [problem, setProblem] = React.useState('');
   const fieldId = React.useId();
@@ -55,6 +59,7 @@ export function HubInstallationLaunch({ teamId }: { readonly teamId: string }) {
     setWorkspace('');
     setMaintenance(operation);
     setFirstSignIn(undefined);
+    setRevealed(undefined);
     setConsent({ ...result.value, authorizationUrl: url.href });
     setActiveId(result.value.id);
     if (result.value.id === activeId) progress.reload();
@@ -66,12 +71,12 @@ export function HubInstallationLaunch({ teamId }: { readonly teamId: string }) {
     const environments = selection?.state === 'failed' ? selection.requested : environmentChoices.filter((name) => form.has(name));
     if (environments.length === 0) { setProblem('Choose staging, production, or both.'); return; }
     await run(async () => {
-      if (!firstSignIn) {
+      if (!managedFirstSignIn && !firstSignIn) {
         setFirstSignIn({ credential: await createInstallationOwner(), saved: false });
         return;
       }
-      if (!firstSignIn.saved) { setProblem('Save the first sign-in file before launching.'); return; }
-      const { verifier, salt } = firstSignIn.credential;
+      if (firstSignIn && !firstSignIn.saved) { setProblem('Save the first sign-in file before launching.'); return; }
+      const { verifier, salt } = firstSignIn?.credential ?? await createInstallationOwner();
       const result = await start({ params: launchParams, body: {
         workspaceId: selection?.workspaceId ?? (workspace || report?.workspaces[0]?.id || ''),
         name: selection?.name ?? String(form.get('name') ?? ''),
@@ -127,6 +132,7 @@ export function HubInstallationLaunch({ teamId }: { readonly teamId: string }) {
             <div className="ui-workspace-links">
               <WorkspaceAction onClick={() => {
                 if (row.id !== activeId) setFirstSignIn(undefined);
+                setRevealed(undefined);
                 setActiveId(row.id);
                 setConsent(undefined);
                 setMaintenance(undefined);
@@ -140,6 +146,12 @@ export function HubInstallationLaunch({ teamId }: { readonly teamId: string }) {
                   onClick={() => void run(() => prepare(row.id, { action: 'update', environment: name, revision: offeredRevision }))}>Update {name}</WorkspaceAction>)}
               {row.canRemove && row.state !== 'running' && <WorkspaceAction disabled={pending}
                 onClick={() => void run(() => prepare(row.id, { action: 'wipe' }))}>Remove installation</WorkspaceAction>}
+              {row.state === 'removed' && <WorkspaceAction disabled={pending} onClick={() => void run(async () => {
+                const result = await forget({ params: { teamId, launchId: row.id } });
+                if (!result.ok) { setProblem(result.error.message); return; }
+                if (activeId === row.id) setActiveId('');
+                journals.reload();
+              })}>Forget removed installation</WorkspaceAction>}
             </div>
           </li>)}
         </ul>}
@@ -189,7 +201,7 @@ export function HubInstallationLaunch({ teamId }: { readonly teamId: string }) {
             saved: firstSignIn.saved, change: (saved) => setFirstSignIn({ ...firstSignIn, saved }),
           }} />}
           <WorkspaceAction variant="primary" type="submit" disabled={pending || Boolean(firstSignIn && !firstSignIn.saved)}>
-            {!firstSignIn ? 'Prepare first sign-in' : selection?.state === 'failed' ? 'Continue setup' : selection ? 'Add environment' : 'Launch Platfolio'}
+            {!managedFirstSignIn && !firstSignIn ? 'Prepare first sign-in' : selection?.state === 'failed' ? 'Continue setup' : selection ? 'Add environment' : 'Launch Platfolio'}
           </WorkspaceAction>
         </form>}
         {firstSignIn && !consent && report?.state === 'ready' && <InstallationFirstSignIn password={firstSignIn.credential.password} />}
@@ -203,9 +215,18 @@ export function HubInstallationLaunch({ teamId }: { readonly teamId: string }) {
             : 'Setup did not finish. Check the progress and try a new authorization.'}{' '}
             {!selection && <WorkspaceAction disabled={pending} onClick={() => void run(() => prepare())}>Try again</WorkspaceAction>}</p>}
           {report.environments.length > 0 && <ul className="ui-workspace-list">
-            {report.environments.map(({ name, origin }) => <li key={name}><a href={origin}>Open {name} Platfolio</a></li>)}
+            {report.environments.map(({ name, origin }) => <li key={name}>
+              <a href={origin}>Open {name} Platfolio</a>
+              {managedFirstSignIn && <WorkspaceAction disabled={pending} onClick={() => void run(async () => {
+                setRevealed(undefined);
+                const result = await reveal({ params: { ...launchParams, environment: name } });
+                if (!result.ok) { setProblem(result.error.status === 404 ? 'The first sign-in password is no longer available.' : result.error.message); return; }
+                setRevealed({ id: activeId, password: result.value.temporaryPassword });
+              })}>Show {name} first sign-in password</WorkspaceAction>}
+            </li>)}
           </ul>}
-          {report.state === 'ready' && !firstSignIn && <p>For first sign-in, use the saved password file from setup. If the password change timed out, open the installation above and start sign-in again.</p>}
+          {revealed?.id === activeId && <InstallationFirstSignIn password={revealed.password} />}
+          {report.state === 'ready' && !managedFirstSignIn && !firstSignIn && <p>For first sign-in, use the saved password file from setup.</p>}
           <LaunchProgress report={report} />
           {progress.state.status === 'loaded' && <p className="ui-workspace-meta">{ageLabel(progress.state.freshness, clock().toISOString()).text}</p>}
         </>}

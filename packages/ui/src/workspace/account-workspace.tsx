@@ -9,8 +9,17 @@ import { accountTabs, workspacePaths } from './routes.ts';
 import { SectionNav } from './section-nav.tsx';
 import { WorkspaceHeading } from './workspace-heading.tsx';
 import { Breadcrumbs } from './breadcrumbs.tsx';
+import { useOperation } from '../sdk/use-operation.ts';
+import { PrivateSmtpForm } from './private-smtp-form.tsx';
+
+const params = {};
 
 export function AccountWorkspace({ tab }: { readonly tab: keyof typeof accountTabs }): React.ReactElement {
+  const setup = useOperation('getPrivateSetup', { params, enabled: tab === 'emails' });
+  const managesSmtp = setup.state.status === 'loaded' && setup.state.data.smtpRequired;
+  const person = useOperation('getCurrentPerson', { params, enabled: managesSmtp });
+  const owner = person.state.status === 'loaded' && person.state.data.teams.find(({ role }) => role === 'owner');
+  const [saved, setSaved] = React.useState(false);
   return <>
     <Breadcrumbs items={[{ label: 'Home', href: '/' }, { label: 'Account' }]} />
     <WorkspaceHeading title="Account" />
@@ -22,6 +31,10 @@ export function AccountWorkspace({ tab }: { readonly tab: keyof typeof accountTa
           <WorkspaceLink href={workspacePaths.notifications} className="ui-workspace-secondary ui-hit-primary">Manage notification rules</WorkspaceLink>
         </Stack>
       </WorkspacePanel> : tab === 'password' ? <AccountPassword /> : <AccountIdentity key={tab} tab={tab} />}
+      {tab === 'emails' && managesSmtp && owner && <WorkspacePanel title="Private SMTP relay" form>
+        <PrivateSmtpForm teamId={owner.teamId} confirmed={() => { setSaved(true); setup.reload(); }} />
+        {saved && <p role="status">SMTP relay verified and saved.</p>}
+      </WorkspacePanel>}
     </div>
   </>;
 }

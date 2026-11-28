@@ -3,7 +3,8 @@ import { InstallationLaunchInputSchema } from './installation-provider.ts';
 
 const installationEnvironment = InstallationLaunchInputSchema.shape.environments.element;
 const safeId = z.string().min(1).max(128).regex(/^[A-Za-z0-9_/-]+$/);
-const readyEnvironment = z.object({ name: installationEnvironment, origin: z.url({ protocol: /^https$/ }), revision: z.string().regex(/^[a-f0-9]{40}$/).optional() }).strict();
+const readyEnvironment = z.object({ name: installationEnvironment, origin: z.url({ protocol: /^https$/ }),
+  apiOrigin: z.url({ protocol: /^https$/ }).optional(), revision: z.string().regex(/^[a-f0-9]{40}$/).optional() }).strict();
 
 export const InstallationJournalSchema = z.object({
   id: z.uuid(),
@@ -17,6 +18,7 @@ export const InstallationJournalSchema = z.object({
   projectId: safeId.optional(),
   submitted: z.array(installationEnvironment).max(2),
   environments: z.array(readyEnvironment).max(2),
+  managedFirstSignIn: z.array(installationEnvironment).max(2).optional(),
   events: z.array(z.object({
     at: z.iso.datetime(),
     step: z.string().min(1).max(120),

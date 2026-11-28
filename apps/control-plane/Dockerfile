@@ -41,6 +41,7 @@ COPY packages/contracts ./packages/contracts
 COPY packages/kernel ./packages/kernel
 COPY packages/api-contract ./packages/api-contract
 COPY packages/manifest ./packages/manifest
+COPY packages/ui/src/web/installation-owner-policy.ts ./packages/ui/src/web/installation-owner-policy.ts
 COPY apps/control-plane ./apps/control-plane
 COPY scripts/customer-installation-worker.ts scripts/customer-launch-run.ts scripts/customer-openbao.ts scripts/customer-railway-oauth.ts scripts/customer-railway.ts scripts/launch-starter-app.ts scripts/launch-shared-identity.ts scripts/launch-starter-worker.ts scripts/source-release-upload.ts ./scripts/
 COPY scripts/customer-marketplace-connection.ts scripts/customer-installation-topology.ts scripts/customer-shared-identity.ts ./scripts/

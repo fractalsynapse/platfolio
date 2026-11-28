@@ -52,6 +52,16 @@ if [ "${1:-}" = start-private ]; then
     : "${PLATFOLIO_SMTP_PASSWORD:?Set the private mail relay password}"
     realm=$realm-with-mail
   fi
+  if [ -n "${PLATFOLIO_PRIVATE_SETUP_KEY:-}" ]; then
+    case "$PLATFOLIO_PRIVATE_SETUP_KEY" in
+      *[!a-zA-Z0-9_-]*) echo 'Use a generated URL-safe private setup grant' >&2; exit 1 ;;
+    esac
+    if [ "${#PLATFOLIO_PRIVATE_SETUP_KEY}" -lt 32 ]; then
+      echo 'Use a generated private setup grant of at least 32 characters' >&2
+      exit 1
+    fi
+    realm=$realm-with-setup
+  fi
   mkdir -p /opt/keycloak/data/import
   cp "/opt/keycloak/platfolio-private/$realm.json" /opt/keycloak/data/import/platfolio-realm.json
   exec /opt/keycloak/bin/kc.sh start --import-realm "$@"

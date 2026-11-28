@@ -71,7 +71,7 @@ export async function renderRailwayInstaller(candidateFile: string, registryOrig
       [resourceId(identity)]: service(identity, plan.identity.image + '@' + plan.identity.digest, {
         ...variables({ ...plan.identity.env, ...fromManifest(plan.identity), PORT: String(plan.identity.port), KC_HOSTNAME: publicOrigin(identity),
           KC_HOSTNAME_STRICT: 'true', PLATFOLIO_SITE_ORIGIN: publicOrigin(site),
-          PLATFOLIO_INSTALL_OWNER_SUBJECT: subject, PLATFOLIO_INSTALL_OWNER_PASSWORD: secret,
+          PLATFOLIO_INSTALL_OWNER_SUBJECT: subject, PLATFOLIO_INSTALL_OWNER_PASSWORD: secret, PLATFOLIO_PRIVATE_SETUP_KEY: secret,
         }),
         PLATFOLIO_INSTALL_OWNER_EMAIL: { defaultValue: '', description: 'The email address for the first Platfolio owner.' },
       }, { port: plan.identity.port, start: '/opt/keycloak/bin/platfolio-entrypoint.sh start-private', health: '/realms/platfolio' }),
@@ -79,6 +79,7 @@ export async function renderRailwayInstaller(candidateFile: string, registryOrig
         PLATFOLIO_IDENTITY_ISSUER: issuer, PLATFOLIO_IDENTITY_JWKS_URI: issuer + '/protocol/openid-connect/certs',
         PLATFOLIO_ALLOWED_ORIGINS: publicOrigin(site), PLATFOLIO_SCM_DRIVER: 'git',
         PLATFOLIO_INSTALL_OWNER_SUBJECT: ownerSubject, PLATFOLIO_LAUNCH_TEAM: team, PLATFOLIO_LAUNCH_WORKER_KEY: key,
+        PLATFOLIO_PRIVATE_SETUP_KEY: reference(identity, 'PLATFOLIO_PRIVATE_SETUP_KEY'),
         PLATFOLIO_LAUNCH_WORKER_URL: 'http://' + privateHost(worker) + ':8080',
       }), { port: plan.api.port, health: plan.api.healthPath ?? '/readyz' }),
       [resourceId(site)]: service(site, plan.site.image + '@' + plan.site.digest, variables({ ...plan.site.env, PORT: String(plan.site.port),

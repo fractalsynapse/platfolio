@@ -25068,7 +25068,7 @@ function date4(params) {
 }
 
 // packages/contracts/src/generated/contract-version.ts
-var CONTRACT_VERSION = "8.5.0";
+var CONTRACT_VERSION = "8.6.0";
 
 // packages/contracts/src/infra.ts
 var CONTRACT_NAME = "infra.provider";
@@ -27973,7 +27973,12 @@ var InstallationLaunchInputSchema = external_exports.object({
 // packages/contracts/src/installation-journal.ts
 var installationEnvironment2 = InstallationLaunchInputSchema.shape.environments.element;
 var safeId = external_exports.string().min(1).max(128).regex(/^[A-Za-z0-9_/-]+$/);
-var readyEnvironment = external_exports.object({ name: installationEnvironment2, origin: external_exports.url({ protocol: /^https$/ }), revision: external_exports.string().regex(/^[a-f0-9]{40}$/).optional() }).strict();
+var readyEnvironment = external_exports.object({
+  name: installationEnvironment2,
+  origin: external_exports.url({ protocol: /^https$/ }),
+  apiOrigin: external_exports.url({ protocol: /^https$/ }).optional(),
+  revision: external_exports.string().regex(/^[a-f0-9]{40}$/).optional()
+}).strict();
 var InstallationJournalSchema = external_exports.object({
   id: external_exports.uuid(),
   teamId: safeId,
@@ -27986,6 +27991,7 @@ var InstallationJournalSchema = external_exports.object({
   projectId: safeId.optional(),
   submitted: external_exports.array(installationEnvironment2).max(2),
   environments: external_exports.array(readyEnvironment).max(2),
+  managedFirstSignIn: external_exports.array(installationEnvironment2).max(2).optional(),
   events: external_exports.array(external_exports.object({
     at: external_exports.iso.datetime(),
     step: external_exports.string().min(1).max(120),
