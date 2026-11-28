@@ -5,6 +5,11 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+### Fixed — allow provider verification to finish over HTTP (#288)
+
+Authorized hosting apply and Shared Identity placement and revocation allow the private worker
+to finish verification after the default 30-second socket timeout would have closed the request.
+
 ### Added — Shared Identity delivery to pinned Railway installs (#288)
 
 The private worker can deliver OpenBao’s client configuration to the verified web service in a

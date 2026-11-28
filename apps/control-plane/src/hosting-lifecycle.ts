@@ -2,6 +2,7 @@ import { HostingRemovalRequestSchema, InfraPlanSchema, KEEP_DATA_FEATURE, PINNED
 import type { ExtensionDescriptor, Response_ } from '@platfolio/kernel';
 import type { scoped as scopedRoute } from './capabilities.ts';
 import { badRequest, notFound, send } from './respond.ts';
+import { privateOperationTimeoutMs } from './customer-launch.ts';
 import { hasIdentityClient } from './identity-client.ts';
 
 export function hostingLifecycle(scoped: typeof scopedRoute): ExtensionDescriptor {
@@ -43,7 +44,7 @@ export function hostingLifecycle(scoped: typeof scopedRoute): ExtensionDescripto
           return send('redeployHostedStarter', 202, { state: 'requested' });
         } catch { return providerUnavailable(); }
       }),
-      scoped('POST', '/api/v1/instances/{instanceId}/hosting/apply', 'applyInstanceHostingPlan', 'instance.dispatch', async (scope, _request, params) => {
+      scoped('POST', '/api/v1/instances/{instanceId}/hosting/apply', 'applyInstanceHostingPlan', 'instance.dispatch', async (scope, request, params) => {
         const id = params.instanceId ?? '';
         const { store, infra } = scope.context;
         const instance = await store.getInstance(id);
@@ -61,6 +62,7 @@ export function hostingLifecycle(scoped: typeof scopedRoute): ExtensionDescripto
         if (hostingOperations.has(id)) return operationConflict('This instance already has a hosting operation in progress.');
         hostingOperations.add(id);
         try {
+          request.raw?.setTimeout?.(privateOperationTimeoutMs + 5_000);
           const result = await provider.applyPlan(parsed.data);
           if (result.instanceId !== id || result.planHash !== parsed.data.planHash) return providerUnavailable();
           await store.updateInstanceState(id, result.verified ? 'live' : 'failed',

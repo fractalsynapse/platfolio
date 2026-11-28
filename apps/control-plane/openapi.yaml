@@ -964,6 +964,7 @@ paths:
     post:
       operationId: applyInstanceHostingPlan
       summary: Apply the stored plan with the bound hosting provider
+      description: The response waits for provider verification and can take several minutes. Retry the same plan after a dropped connection.
       security: [{ bearerJwt: [] }]
       responses:
         '200':
@@ -2352,7 +2353,7 @@ paths:
     put:
       operationId: placeSharedIdentityClient
       summary: Register a Keycloak client and deliver its configuration
-      description: Uses the retained identity binding and the destination declarations in the consumer release. The customer can configure the application origins and administration grant inside OpenBao or provide a worker-encrypted initial setup. For a marketplace OCI install, the private worker delivers the configuration to the pinned Railway service and verifies a new deployment before reporting placed.
+      description: Uses the retained identity binding and the destination declarations in the consumer release. The customer can configure the application origins and administration grant inside OpenBao or provide a worker-encrypted initial setup. For a marketplace OCI install, the private worker delivers the configuration to the pinned Railway service and verifies a new deployment before reporting placed. Hosted placement can take several minutes.
       security: [{ bearerJwt: [] }]
       requestBody:
         required: true
@@ -2377,7 +2378,7 @@ paths:
     delete:
       operationId: revokeSharedIdentityClient
       summary: Disable the issued client and remove its credential placement
-      description: Disables the exact client, clears the runtime configuration for a marketplace OCI install, and removes its OpenBao placement before releasing the environment reservation. The consumer binding remains until explicitly detached.
+      description: Disables the exact client, clears the runtime configuration for a marketplace OCI install, and removes its OpenBao placement before releasing the environment reservation. The consumer binding remains until explicitly detached. Hosted revocation can take several minutes.
       security: [{ bearerJwt: [] }]
       responses: *identity-client-responses
 

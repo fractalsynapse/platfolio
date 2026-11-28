@@ -117,10 +117,28 @@ as `setup.realmGrant` with the application realm `setup.issuer` and the consumer
 Later placements can omit the setup fields. Existing manager grants can be rotated directly in
 customer OpenBao. A release or callback change requires revoking the previous placement first.
 
-Starter Web 0.1.1 was published to the staging marketplace as a separate release. The existing
-0.1.0 install continues to use its original image pin. Hosted sign-in, removal refusal with an
-active dependency, runtime revocation, and cold recovery with the hub unavailable require
-separate hosted acceptance.
+### Hosted acceptance on 2026-11-27
+
+An isolated control plane and private OpenBao worker applied the exact Starter Web 0.1.1
+Marketplace bundle in a separate Railway project in Internal Platfolio. Railway hosted Starter
+Web and Keycloak in distinct projects. The API refused to remove Shared Identity with a live
+consumer. Placement started a new deployment, a repeated placement kept that deployment, and an
+HTTPS authorization-code sign-in established a Starter Web session.
+
+Revocation disabled the Keycloak client, removed its OpenBao placement, and refreshed the
+application at the same image digest. Keycloak refused a fresh sign-in through the old client.
+The restarted app returned 404 for its login route, and Railway reported all five OIDC variable
+names absent. The private Platfolio deployment and existing Starter Web 0.1.0 install retained
+their deployment IDs and image pins throughout.
+
+The first apply hit the API's 30-second socket timeout after the provider had accepted the plan.
+On retry, the verified release receipt resolved to the same plan hash on the existing project.
+Authorized hosting apply, placement, and revocation now allow the worker's verification window
+to finish before the socket times out.
+
+The production-like private installation kept its existing release during this run. Updating
+that installation's worker and checking cold recovery during a hub outage remain separate
+operational checks.
 
 ## 2D — Optional hub sign-in and application registration
 

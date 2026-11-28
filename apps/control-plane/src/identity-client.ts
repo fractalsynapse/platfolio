@@ -6,7 +6,7 @@ import type { ExtensionDescriptor } from '@platfolio/kernel';
 import { InfraPlanSchema, type Store } from '@platfolio/contracts';
 import { IdentityClientTargetSchema, IdentityEnvironmentSchema, type IdentityClientTarget, type IdentityClientRequest } from '../../../packages/contracts/src/shared-identity-execution.ts';
 import type { scoped } from './capabilities.ts';
-import type { customerLaunch } from './customer-launch.ts';
+import { privateOperationTimeoutMs, type customerLaunch } from './customer-launch.ts';
 import { badRequest, notFound, send, spec } from './respond.ts';
 
 const path = '/api/v1/instances/{instanceId}/bindings/identity/environments/{environment}';
@@ -122,6 +122,7 @@ export function identityClient(route: typeof scoped, worker?: ReturnType<typeof 
           }
         }
         if (!target || target.teamId !== teamId) return send(operation, 200, { state: action === 'revoke' ? 'revoked' : 'unconfigured' });
+        if (action !== 'status') request.raw?.setTimeout?.(privateOperationTimeoutMs + 5_000);
         const result = await worker.identity({ action, target, controlPlaneIssuer: claims.issuer, ...(railway ? { railway } : {}), ...(setup ? { setup } : {}) });
         if (result.status === 409) return conflict(operation, 'The client changed, is revoked, or has an operation in progress.');
         if (!result.placement) return unavailable(operation, 'Check OpenBao, Keycloak and the connected hosting workspace, then retry.');

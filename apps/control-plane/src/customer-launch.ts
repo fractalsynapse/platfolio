@@ -3,6 +3,8 @@ import { ApplyResultSchema, CONTRACT_VERSION, KEEP_DATA_FEATURE, PINNED_RELEASE_
 import type { HostingPlugin } from '@platfolio/kernel';
 import { IdentityClientPlacementSchema, IdentityClientRequestSchema, type IdentityClientRequest } from '../../../packages/contracts/src/shared-identity-execution.ts';
 
+export const privateOperationTimeoutMs = 720_000;
+
 export interface CustomerLaunchConfig {
   teamId: string;
   workerUrl: string;
@@ -42,7 +44,7 @@ export function customerLaunch(config: CustomerLaunchConfig, request: typeof fet
       if (command.target.teamId !== config.teamId) return { status: 404 };
       try {
         const response = await request(config.workerUrl + '/identity', {
-          method: 'POST', redirect: 'error', signal: AbortSignal.timeout(command.action === 'status' ? 120_000 : 720_000),
+          method: 'POST', redirect: 'error', signal: AbortSignal.timeout(command.action === 'status' ? 120_000 : privateOperationTimeoutMs),
           headers: { authorization: 'Bearer ' + config.workerKey, 'content-type': 'application/json' },
           body: JSON.stringify(command),
         });
@@ -56,7 +58,7 @@ export function customerLaunch(config: CustomerLaunchConfig, request: typeof fet
       if (!command.success) return { ok: false as const, status: 400 };
       try {
         const response = await request(config.workerUrl + '/launch', {
-          method: 'POST', redirect: 'error', signal: AbortSignal.timeout(action === 'hosting-apply' ? 720_000
+          method: 'POST', redirect: 'error', signal: AbortSignal.timeout(action === 'hosting-apply' ? privateOperationTimeoutMs
             : ['initialize', 'unlock', 'callback', 'hosting-remove', 'marketplace-verify-install'].includes(action) ? 120_000 : 15000),
           headers: { authorization: 'Bearer ' + config.workerKey, 'content-type': 'application/json' },
           body: JSON.stringify(command.data),
