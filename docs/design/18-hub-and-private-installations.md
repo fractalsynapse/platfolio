@@ -35,8 +35,8 @@ on the legacy compatibility surface during migration.
    to `true` to enable the staging deployment job. The Railway destination is `platfolio-hub` with `staging` as its sole environment.
    The plan supplies its own site, API, Keycloak, Postgres and private OpenBao with durable Raft
    storage. CI configures start commands and health checks, wires database references and mounts
-   persistent storage before it starts the hub services. OpenBao reports liveness through its seal
-   status endpoint. Initialization and unsealing still require the operator's recovery procedure. The hub issuer and browser clients use
+   persistent storage before it starts the hub services. OpenBao reports liveness through its
+   initialization status endpoint. Initialization and unsealing still require the operator's recovery procedure. The hub issuer and browser clients use
    the new staging hosts. The workflow uses the
    GitHub environment `staging-hub`. Set `RAILWAY_WORKSPACE_ID`, `PLATFOLIO_HUB_SITE_HOST`, `PLATFOLIO_HUB_API_HOST`,
    `PLATFOLIO_HUB_AUTH_HOST` and `PLATFOLIO_INSTALL_OWNER_EMAIL` there as variables. Supply `RAILWAY_TOKEN`,

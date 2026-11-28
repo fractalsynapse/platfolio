@@ -5,7 +5,7 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
-### Fixed — probe staging OpenBao with its seal status path (#288)
+### Fixed — probe staging OpenBao with its initialization status path (#288)
 
 Railway checks the private OpenBao service with a plain endpoint path that responds before
 initialization. CI reports a redacted failure as a check annotation for staged rollout diagnosis.
