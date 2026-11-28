@@ -4,8 +4,7 @@ import { railwayInstallationProvider, type RailwayInstallationConfig } from '../
 import { installationAuthorizationCallback } from './installation-launch.ts';
 import type { InstallationProvider } from '../../../packages/contracts/src/installation-provider.ts';
 import { EndpointKeySource, IdentityConfigSchema, redactCredentialShaped, type HubSignInTrust } from '@platfolio/contracts';
-import { ROUTE_MANIFEST } from './routes.ts';
-import { buildCapabilities } from './capabilities.ts';
+import { ROUTE_MANIFEST, capabilitiesForRole, type InstallationRole } from './routes.ts';
 import { describeAllowedOriginsConfig, parseAllowedOrigins, type CorsBootConfig } from './cors.ts';
 import type { StarterLaunch } from './starter-launch.ts';
 import { customerLaunch, customerLaunchConfig, privateHostingPlugin, type CustomerLaunchConfig } from './customer-launch.ts';
@@ -20,6 +19,7 @@ export { ALLOWED_ORIGINS_ENV, describeAllowedOriginsConfig, parseAllowedOrigins,
 export interface BootConfig {
   issuer: string;
   audience: string;
+  role?: InstallationRole;
   marketplaceEnabled?: boolean;
   artifacts?: ArtifactConfig;
   marketplacePublisherTeam?: string;
@@ -61,20 +61,26 @@ export function configFromEnv(env: NodeJS.ProcessEnv): BootConfig {
   // variables by scanning configuration for that shape, and a name that only ever appears as a constant is a
   // name the registry cannot see. The constant and this spelling are kept identical by the test that uses both.
   const allowedOrigins = parseAllowedOrigins(env.PLATFOLIO_ALLOWED_ORIGINS);
+  const role = env.PLATFOLIO_INSTALLATION_ROLE;
+  if (role !== undefined && role !== 'hub' && role !== 'private') throw new Error('PLATFOLIO_INSTALLATION_ROLE must be hub or private');
+  if (role === 'hub' && (env.PLATFOLIO_LAUNCH_WORKER_URL || env.PLATFOLIO_LAUNCH_WORKER_KEY || env.PLATFOLIO_LAUNCH_TEAM)) {
+    throw new Error('The hub cannot use a private deployment worker');
+  }
+  const marketplaceEnabled = role ? role === 'hub' : env.PLATFOLIO_MARKETPLACE_ENABLED === 'true';
   const launcher = customerLaunchConfig(env, allowedOrigins);
   const templateCode = env.PLATFOLIO_RAILWAY_INSTALL_TEMPLATE;
   const templateDigest = env.PLATFOLIO_RAILWAY_INSTALL_CONFIG_SHA;
   const revision = env.PLATFOLIO_RAILWAY_INSTALL_REVISION;
   const installerJson = env.PLATFOLIO_RAILWAY_INSTALL_CONFIG_JSON;
   const artifacts = artifactConfigFromEnv(env);
-  if (artifacts && env.PLATFOLIO_MARKETPLACE_ENABLED !== 'true') throw new Error('Artifact registry delivery requires a marketplace hub');
+  if (artifacts && !marketplaceEnabled) throw new Error('Artifact registry delivery requires a marketplace hub');
   const clientId = env.PLATFOLIO_HUB_RAILWAY_OAUTH_CLIENT;
   const callbackValue = env.PLATFOLIO_HUB_RAILWAY_OAUTH_CALLBACK;
   const returnTo = allowedOrigins[0];
   let installation: BootConfig['installation'];
   if (templateDigest || clientId || callbackValue || installerJson) {
     const callback = callbackValue && new URL(callbackValue);
-    if (env.PLATFOLIO_MARKETPLACE_ENABLED !== 'true' || !returnTo || !clientId || !callback ||
+    if (!marketplaceEnabled || (role === 'hub' && !installerJson) || !returnTo || !clientId || !callback ||
         callback.protocol !== 'https:' || callback.username || callback.password || callback.search || callback.hash ||
         callback.pathname !== installationAuthorizationCallback || !templateCode || !/^[a-zA-Z0-9_-]{6,64}$/.test(templateCode) ||
         !templateDigest || !/^[0-9a-f]{64}$/.test(templateDigest) || !revision || !/^[0-9a-f]{40}$/.test(revision)) {
@@ -109,7 +115,8 @@ export function configFromEnv(env: NodeJS.ProcessEnv): BootConfig {
     ...(hubIdentity ? { hubIdentity } : {}),
     issuer: env.PLATFOLIO_IDENTITY_ISSUER as string,
     audience: env.PLATFOLIO_IDENTITY_AUDIENCE as string,
-    marketplaceEnabled: env.PLATFOLIO_MARKETPLACE_ENABLED === 'true',
+    ...(role ? { role } : {}),
+    marketplaceEnabled,
     ...(artifacts ? { artifacts } : {}),
     ...(env.PLATFOLIO_MARKETPLACE_PUBLISHER_TEAM ? { marketplacePublisherTeam: env.PLATFOLIO_MARKETPLACE_PUBLISHER_TEAM } : {}),
     ...(launcher ? { customerLaunch: launcher } : {}),
@@ -236,6 +243,13 @@ export async function boot(config: BootConfig, fetchImpl: typeof fetch = fetch) 
     ...(config.jwksUri ? { jwksUri: config.jwksUri } : {}),
     allowedAlgorithms: ['RS256'],
   });
+  const marketplaceEnabled = config.role ? config.role === 'hub' : config.marketplaceEnabled ?? false;
+  if (config.role === 'hub' && (config.customerLaunch || config.starterLaunch || config.hubIdentity || config.infrastructure?.length)) {
+    throw new Error('The hub cannot use private deployment or identity capabilities');
+  }
+  if (config.role === 'private' && (config.installation || config.installationProvider || config.artifacts)) {
+    throw new Error('Private installations cannot provide hub launch or artifact services');
+  }
   const storeUrl = process.env.PLATFOLIO_DB_URL;
   // A control plane with no database is a development mode, not a broken one -- but it has to say so. The
   // previous shape omitted the `store` config entirely when PLATFOLIO_DB_URL was unset, so the Store service
@@ -251,10 +265,10 @@ export async function boot(config: BootConfig, fetchImpl: typeof fetch = fetch) 
   const ownerSubject = config.customerLaunch?.ownerSubject;
   const installationTeamId = config.customerLaunch?.teamId;
   const hubIdentity = config.hubIdentity && hubSignInConfig(config.hubIdentity.issuer, config.hubIdentity.clientId);
-  if (hubIdentity && (!installationTeamId || config.marketplaceEnabled || !storeUrl || hubIdentity.issuer === config.issuer)) {
+  if (hubIdentity && (!installationTeamId || marketplaceEnabled || !storeUrl || hubIdentity.issuer === config.issuer)) {
     throw new Error('Hub identity requires a private workspace with a database and a distinct issuer');
   }
-  if (ownerSubject && (!storeUrl || config.marketplaceEnabled || !installationTeamId)) {
+  if (ownerSubject && (!storeUrl || marketplaceEnabled || !installationTeamId)) {
     throw new Error('First owner setup requires a private installation and persistent storage');
   }
   const installation = config.installationProvider ?? (config.installation && {
@@ -271,7 +285,7 @@ export async function boot(config: BootConfig, fetchImpl: typeof fetch = fetch) 
     return { selection: { platformId, version, descriptorDigest }, images };
   })] : []);
   const ctx = await createKernel({
-    ...(infrastructure.length === 0 && config.infrastructure === undefined && !storeUrl
+    ...(config.role !== 'hub' && infrastructure.length === 0 && config.infrastructure === undefined && !storeUrl
       ? { provider: 'fake' }
       : { provider: 'railway', infrastructure }),
     custody: 'strict',
@@ -305,12 +319,12 @@ export async function boot(config: BootConfig, fetchImpl: typeof fetch = fetch) 
           if (!team.ok) throw new Error('Could not create the first installation workspace');
         },
       }] : []),
-      ...buildCapabilities({
+      ...capabilitiesForRole({
         build: config.build,
-        marketplaceEnabled: config.marketplaceEnabled ?? false,
+        marketplaceEnabled,
         ...(config.artifacts ? { artifacts: config.artifacts } : {}),
         ...(config.marketplacePublisherTeam ? { marketplacePublisherTeam: config.marketplacePublisherTeam } : {}),
-        ...(config.marketplaceEnabled && installation ? { installation } : {}),
+        ...(marketplaceEnabled && installation ? { installation } : {}),
         accountIssuer: { issuer: config.issuer, request: fetchImpl },
         ...(config.notificationDirectory ? { notificationDirectory: keycloakNotificationDirectory(config.issuer,
           config.notificationDirectory.client, config.notificationDirectory.secret, fetchImpl) } : {}),
@@ -318,7 +332,7 @@ export async function boot(config: BootConfig, fetchImpl: typeof fetch = fetch) 
         ...(config.starterLaunch ? { starterLaunch: config.starterLaunch } : {}),
         ...(launch ? { customerLaunch: launch } : {}),
         ...(hubIdentity ? { hubIdentity, hubIdentityFetch: fetchImpl } : {}),
-      }),
+      }, config.role),
     ],
     requiredServices: ['identity', 'server', 'store', 'extensions'],
   });

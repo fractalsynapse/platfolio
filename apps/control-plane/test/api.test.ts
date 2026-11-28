@@ -416,3 +416,41 @@ test('stopping the runtime stops the controller interval -- the disposer is load
   await disposeKernel(app.ctx);
   await assert.rejects(() => fetch(`http://127.0.0.1:${String(port)}/healthz`), 'the listener must close with the fiber');
 });
+
+test('installation roles register only the allowed provisioning routes', async () => {
+  const { capabilitiesForRole } = await import('../src/routes.ts');
+  const cases = [
+    ['hub', 'createInstance', 'startHubInstallation'],
+    ['private', 'startHubInstallation', 'createInstance'],
+  ] as const;
+  for (const [role, denied, permitted] of cases) {
+    const extensions = capabilitiesForRole({ build, marketplaceEnabled: role === 'hub' }, role);
+    const registered = new Set(extensions.flatMap(({ routes }) => routes?.map(({ operationId }) => operationId) ?? []));
+    assert.ok(registered.has('getPublicMarketplaceCatalog'));
+    assert.ok(registered.has(permitted));
+    assert.ok(!registered.has(denied));
+    const context = await createKernel({
+      provider: 'fake', custody: 'strict', identity: defaultIdentityConfig(fixture), identityKeys: [fixture.jwk],
+      store: { driver: 'memory' }, server: { port: 0 }, extensions, requiredServices: ['server', 'extensions'],
+    });
+    try {
+      const operation = operationsOf(spec).find(({ operationId }) => operationId === denied)!;
+      const pathname = operation.path.replace(/\{[^}]+\}/g, 'unlisted');
+      const response = await fetch(`http://127.0.0.1:${context.server.address.port}${pathname}`, {
+        method: operation.method, headers: { authorization: `Bearer ${scoped()}` },
+      });
+      assert.equal(response.status, 404);
+      assert.match((await response.json() as { message: string }).message, /^no route for /);
+    } finally {
+      await disposeKernel(context);
+    }
+  }
+});
+
+test('explicit role overrides the legacy marketplace switch and rejects a hub with a private worker', () => {
+  const env = { PLATFOLIO_IDENTITY_ISSUER: fixture.issuer, PLATFOLIO_IDENTITY_AUDIENCE: 'platfolio-api' };
+  assert.ok(configFromEnv({ ...env, PLATFOLIO_INSTALLATION_ROLE: 'hub' }).marketplaceEnabled);
+  assert.equal(configFromEnv({ ...env, PLATFOLIO_INSTALLATION_ROLE: 'private', PLATFOLIO_MARKETPLACE_ENABLED: 'true' }).marketplaceEnabled, false);
+  assert.throws(() => configFromEnv({ ...env, PLATFOLIO_INSTALLATION_ROLE: 'spoke' }), /must be hub or private/);
+  assert.throws(() => configFromEnv({ ...env, PLATFOLIO_INSTALLATION_ROLE: 'hub', PLATFOLIO_LAUNCH_WORKER_URL: 'http://worker:8080' }), /cannot use a private deployment worker/);
+});

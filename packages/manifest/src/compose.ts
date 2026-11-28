@@ -1,4 +1,5 @@
 import { parse as parseYaml } from 'yaml';
+import { z } from 'zod';
 import { ManifestSchema, type Manifest } from './schema.ts';
 
 /**
@@ -31,8 +32,25 @@ export interface ParsedCompose { manifest?: Manifest; issues: ComposeIssue[] }
  * there is nothing to report and the document must pin the digest. That asymmetry is the whole rule, and why
  * the resolver is keyed by service name and returns either a full `image@digest` or nothing.
  */
+const record = z.record(z.string(), z.unknown());
+const deploymentConfiguration = z.object({
+  platform: record,
+  omitServices: z.array(z.string().min(1)).optional(),
+  services: z.record(z.string(), z.object({
+    hosting: record.optional(),
+    compose: record.optional(),
+    unset: z.array(z.string().min(1)).optional(),
+  }).strict()).optional(),
+}).strict();
+
+export function parseComposeDeploymentConfiguration(text: string) {
+  return deploymentConfiguration.parse(parseYaml(text, { uniqueKeys: true }));
+}
+
 export interface ComposeOptions {
   resolveArtifact?: (service: string) => string | undefined;
+  /** Hosted settings provided independently of the project's Compose files. */
+  configuration?: z.infer<typeof deploymentConfiguration>;
 }
 
 /** Compose service keys we map. Anything absent from both lists is reported as unknown, not ignored. */
@@ -154,7 +172,7 @@ export function parseCompose(texts: string | string[], options: ComposeOptions =
   if (issues.length) return { issues };
 
   const merged: Rec = {};
-  const services: Rec = {};
+  const services: Rec = Object.create(null);
   for (const doc of docs) {
     const docServices = isRec(doc.services) ? doc.services : {};
     for (const [name, svc] of Object.entries(docServices)) {
@@ -170,12 +188,33 @@ export function parseCompose(texts: string | string[], options: ComposeOptions =
     for (const [k, v] of Object.entries(doc)) if (k !== 'services') merged[k] = v;
   }
 
-  const xp = isRec(merged['x-platfolio']) ? merged['x-platfolio'] as Rec : {};
+  for (const name of options.configuration?.omitServices ?? []) {
+    if (!Object.hasOwn(services, name)) {
+      issues.push({ path: `configuration.omitServices.${name}`, code: 'compose-service-missing', message: 'The omitted service is absent from Compose.' });
+    }
+    delete services[name];
+  }
+  for (const [name, settings] of Object.entries(options.configuration?.services ?? {})) {
+    if (!Object.hasOwn(services, name)) {
+      issues.push({ path: `configuration.services.${name}`, code: 'compose-service-missing', message: 'The hosting configuration names a service absent from Compose.' });
+      continue;
+    }
+    const service = { ...services[name] as Rec };
+    for (const field of settings.unset ?? []) delete service[field];
+    const override = settings.compose ?? {};
+    if (Object.hasOwn(override, 'x-platfolio')) {
+      issues.push({ path: `configuration.services.${name}.compose`, code: 'compose-hosting-in-override', message: 'Supply Platfolio settings in hosting.' });
+      continue;
+    }
+    services[name] = { ...service, ...override, ...(settings.hosting ? { 'x-platfolio': settings.hosting } : {}) };
+  }
+
+  const xp = options.configuration?.platform ?? (isRec(merged['x-platfolio']) ? merged['x-platfolio'] as Rec : {});
   const requires = isRec(xp.requires) ? xp.requires as Rec : {};
   const resources = isRec(xp.resources) ? xp.resources as Rec : {};
   const meta = isRec(xp.metadata) ? xp.metadata as Rec : {};
 
-  const outServices: Rec = {};
+  const outServices: Rec = Object.create(null);
   // Declared separately from the mounts discovered below, and copied: this array was the *same object* as
   // resources.volumes, so every mount pushed into it mutated the declaration. The dedupe then compared a
   // list against itself and reported one volume where the author wrote two views of one disk.
@@ -216,7 +255,7 @@ export function parseCompose(texts: string | string[], options: ComposeOptions =
     // A built service takes its artifact from the resolver when one exists. A committed digest is still
     // honoured, because the CLI and the plan cache have no resolver; what changed is that the committed digest
     // is no longer REQUIRED for a fork to be installable (D54).
-    const image = (isBuilt ? options.resolveArtifact?.(name) : undefined) ?? committed;
+    const image = (isBuilt || options.configuration ? options.resolveArtifact?.(name) : undefined) ?? committed;
     if (!image) {
       issues.push({ path: `services.${name}.image`, code: isBuilt ? 'no-artifact' : 'compose-image-unpinned',
         message: isBuilt
@@ -312,7 +351,7 @@ export function parseCompose(texts: string | string[], options: ComposeOptions =
       ...(isRec(xp.provides) ? { provides: xp.provides } : {}),
       ...(Array.isArray(xp.capabilities) ? { capabilities: xp.capabilities } : {}),
       identity,
-      environments: isRec(xp.environments) ? xp.environments : { production: { enabled: true }, staging: { enabled: false } },
+      environments: isRec(xp.environments) ? xp.environments : { production: { enabled: true }, staging: { enabled: false }, preview: { enabled: false } },
       resources: { ...resources, volumes: mergeVolumes({ volumes: declaredVolumes }, mounts as { name: string; service: string; mountPath: string }[]) },
       services: outServices,
       dns: isRec(xp.dns) ? xp.dns : {},

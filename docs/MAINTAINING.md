@@ -126,6 +126,10 @@ that realm. It confirms the active account's primary address before each send.
 
 ## Two realms, one Keycloak (D56)
 
+Use the [staging hub workflow](design/18-hub-and-private-installations.md#staging-rollout) for
+the first-party `platfolio-hub` project. The following topology describes the role-less deployment
+profile retained during migration.
+
 platfolio's production and staging control planes share the hosted identity service -- one container, one
 database, one certificate, `auth.platfolio.dev` -- and are separated by **realm**:
 

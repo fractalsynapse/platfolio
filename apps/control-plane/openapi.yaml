@@ -57,6 +57,7 @@ paths:
   /status:
     get:
       operationId: getStatus
+      x-platfolio-role: shared
       tags: [operational]
       summary: Check that the API is serving requests
       description: Fixed liveness response for deployment probes.
@@ -80,6 +81,7 @@ paths:
   /healthz:
     get:
       operationId: getHealth
+      x-platfolio-role: shared
       tags: [operational]
       summary: Liveness
       description: |
@@ -98,6 +100,7 @@ paths:
   /readyz:
     get:
       operationId: getReady
+      x-platfolio-role: shared
       tags: [operational]
       summary: Readiness, per dependency, with honest absence
       description: |
@@ -123,6 +126,7 @@ paths:
   /version:
     get:
       operationId: getVersion
+      x-platfolio-role: shared
       tags: [operational]
       summary: Report the release version, build commit and provider contract
       description: |
@@ -139,6 +143,7 @@ paths:
   /api/v1/auth/hub:
     get:
       operationId: getHubSignIn
+      x-platfolio-role: private
       summary: Discover enabled hub sign-in for this private installation
       security: []
       responses:
@@ -166,6 +171,7 @@ paths:
       - { name: teamId, in: path, required: true, schema: { type: string } }
     put:
       operationId: updateHubSignIn
+      x-platfolio-role: private
       summary: Enable or disable the configured hub for private sign-in
       description: A private workspace owner authenticated by the local issuer controls this setting. The installation configures the trusted issuer and its dedicated client outside this request.
       security: [{ bearerJwt: [] }]
@@ -190,6 +196,7 @@ paths:
   /api/v1/me/hub-identity:
     put:
       operationId: linkMyHubIdentity
+      x-platfolio-role: private
       summary: Link a verified hub identity to the signed-in local account
       description: The local identity must already be a member of this private workspace. Both access tokens must verify independently. The operation grants no membership or role and never links by email.
       security: [{ bearerJwt: [], hubIdentityProof: [] }]
@@ -205,6 +212,7 @@ paths:
       - { name: subject, in: path, required: true, schema: { type: string, minLength: 1 } }
     delete:
       operationId: unlinkMyHubIdentity
+      x-platfolio-role: private
       summary: Revoke a linked hub identity using the local account
       security: [{ bearerJwt: [] }]
       responses:
@@ -216,6 +224,7 @@ paths:
   /api/v1/whoami:
     get:
       operationId: getWhoami
+      x-platfolio-role: shared
       tags: [identity]
       summary: Echo the claims of the verified token — the smallest proof that verification works
       description: |
@@ -252,6 +261,7 @@ paths:
   /api/v1/me:
     get:
       operationId: getCurrentPerson
+      x-platfolio-role: shared
       summary: The person behind this token, their proofs, and their teams
       description: |
         The CLI needs this before anything else: `platfolio login` ends by asking who the platform thinks I
@@ -276,6 +286,7 @@ paths:
   /api/v1/me/notifications:
     get:
       operationId: listMyNotifications
+      x-platfolio-role: shared
       summary: Read your rules and recent matching events for current memberships
       security: [{ bearerJwt: [] }]
       responses:
@@ -306,6 +317,7 @@ paths:
   /api/v1/me/notification-email:
     get:
       operationId: getMyNotificationEmail
+      x-platfolio-role: shared
       summary: Read your email delivery preference
       security: [{ bearerJwt: [] }]
       responses:
@@ -329,6 +341,7 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
     put:
       operationId: updateMyNotificationEmail
+      x-platfolio-role: shared
       summary: Receive matching notifications at your verified primary address
       security: [{ bearerJwt: [] }]
       requestBody:
@@ -352,6 +365,7 @@ paths:
       - { name: instanceId, in: path, required: true, schema: { type: string } }
     post:
       operationId: createNotificationRule
+      x-platfolio-role: private
       summary: Follow an app event for all environments or one selected environment
       security: [{ bearerJwt: [] }]
       requestBody: &notification-rule-body
@@ -387,6 +401,7 @@ paths:
       - { name: ruleId, in: path, required: true, schema: { type: string } }
     put:
       operationId: updateNotificationRule
+      x-platfolio-role: private
       summary: Update or pause one of your own rules on this app
       security: [{ bearerJwt: [] }]
       requestBody: *notification-rule-body
@@ -399,6 +414,7 @@ paths:
         '409': *notification-rule-conflict
     delete:
       operationId: deleteNotificationRule
+      x-platfolio-role: private
       summary: Remove one of your own rules on this app
       security: [{ bearerJwt: [] }]
       responses:
@@ -410,6 +426,7 @@ paths:
   /api/v1/me/profile:
     get:
       operationId: getAccountProfile
+      x-platfolio-role: shared
       summary: Read the signed-in operator's account profile
       security: [{ bearerJwt: [] }]
       responses:
@@ -435,6 +452,7 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
     put:
       operationId: updateAccountProfile
+      x-platfolio-role: shared
       summary: Change the signed-in operator's username and display name
       description: The operation uses the caller's own account permission. Email ownership and password changes are separate identity operations.
       security: [{ bearerJwt: [] }]
@@ -465,6 +483,7 @@ paths:
       - { name: teamId, in: path, required: true, schema: { type: string, minLength: 1 } }
     get:
       operationId: listInvitations
+      x-platfolio-role: shared
       summary: Pending and historic invitations for a team
       description: |
         Owner-only, and deliberately so: a pending invitation carries an email address, and showing that to
@@ -485,6 +504,7 @@ paths:
           $ref: '#/components/responses/NotFound'
     post:
       operationId: createInvitation
+      x-platfolio-role: shared
       summary: Invite a person by address, and send the mail that tells them
       description: |
         An invitation is an intent that someone should become a member (D44). It is NOT a membership: no
@@ -548,6 +568,7 @@ paths:
       - { name: invitationId, in: path, required: true, schema: { type: string, minLength: 1 } }
     delete:
       operationId: revokeInvitation
+      x-platfolio-role: shared
       summary: Withdraw a pending invitation
       description: |
         An accepted invitation cannot be revoked, because at that point it is a membership: remove the member
@@ -573,6 +594,7 @@ paths:
   /api/v1/me/invitations:
     get:
       operationId: listMyInvitations
+      x-platfolio-role: shared
       summary: Invitations addressed to the email my identity provider asserts
       description: |
         The claim path, and the reason there is no token in an invitation. The address is read from verified
@@ -602,6 +624,7 @@ paths:
       - { name: invitationId, in: path, required: true, schema: { type: string, minLength: 1 } }
     post:
       operationId: acceptInvitation
+      x-platfolio-role: shared
       summary: Accept an invitation addressed to my verified address
       description: |
         The body is empty on purpose. Everything that decides this -- who I am, which address the IdP asserts,
@@ -642,6 +665,7 @@ paths:
   /api/v1/templates:
     get:
       operationId: listInstallableTemplates
+      x-platfolio-role: shared
       summary: List pinned free releases and installer availability
       security: [{ bearerJwt: [] }]
       responses:
@@ -663,6 +687,7 @@ paths:
   /api/v1/marketplace/catalog:
     get:
       operationId: getPublicMarketplaceCatalog
+      x-platfolio-role: shared
       summary: Browse the latest public template releases
       security: []
       responses:
@@ -680,6 +705,7 @@ paths:
   /api/v1/marketplace/platforms:
     get:
       operationId: listMarketplacePlatforms
+      x-platfolio-role: shared
       summary: Browse published platforms and their latest releases
       description: Public hub catalog. This operation grants no artifact, installation, or provider access.
       security: []
@@ -706,6 +732,7 @@ paths:
         schema: { type: string, minLength: 1, maxLength: 128 }
     get:
       operationId: listMarketplacePlatformReleases
+      x-platfolio-role: shared
       summary: List the published releases of a platform
       description: Releases are ordered newest version first. A newer release does not replace an older pin.
       security: []
@@ -729,6 +756,7 @@ paths:
       - { name: teamId, in: path, required: true, schema: { type: string } }
     get:
       operationId: listTeamMembers
+      x-platfolio-role: shared
       summary: List memberships for the team's owner
       security: [{ bearerJwt: [] }]
       responses:
@@ -757,6 +785,7 @@ paths:
       - { name: personId, in: path, required: true, schema: { type: string } }
     patch:
       operationId: updateTeamMemberRole
+      x-platfolio-role: shared
       summary: Change another member's role
       security: [{ bearerJwt: [] }]
       requestBody:
@@ -782,6 +811,7 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
     delete:
       operationId: removeTeamMember
+      x-platfolio-role: shared
       summary: Remove another member from this team
       security: [{ bearerJwt: [] }]
       responses: *membership-change-responses
@@ -789,6 +819,7 @@ paths:
   /api/v1/teams:
     get:
       operationId: listTeams
+      x-platfolio-role: shared
       summary: The teams this person belongs to, with the role each membership carries
       description: |
         The CLI's first screen after login (`platfolio teams list`). Derived from membership rows joined to
@@ -814,6 +845,7 @@ paths:
           $ref: '#/components/responses/Unauthenticated'
     post:
       operationId: createTeam
+      x-platfolio-role: shared
       summary: Create a team and become its owner
       description: |
         D44's other half: in an open SaaS, adding a teammate cannot be an admin task, and creating the team in
@@ -861,6 +893,7 @@ paths:
   /api/v1/instances:
     get:
       operationId: listInstances
+      x-platfolio-role: private
       summary: The caller's platforms, oldest first
       description: |
         Filtered by team membership, never returned whole. Ordered by creation, not by recency: a tenant's
@@ -883,6 +916,7 @@ paths:
           $ref: '#/components/responses/Unauthenticated'
     post:
       operationId: createInstance
+      x-platfolio-role: private
       summary: Begin hosting a platform
       description: |
         Creates a record; provisioning is the controllers job. An instance is not "live" because this returned
@@ -935,6 +969,7 @@ paths:
   /api/v1/instances/{instanceId}:
     delete:
       operationId: destroyInstance
+      x-platfolio-role: private
       summary: Remove the managed service -- owner-only, and refused while anything depends on it
       description: |
         The reason #176 exists. `GET /api/v1/instances/{id}/consumers` answers "what breaks if I remove this",
@@ -986,6 +1021,7 @@ paths:
         schema: { type: string, minLength: 1 }
     get:
       operationId: getInstance
+      x-platfolio-role: private
       summary: One instance, as recorded
       security:
         - bearerJwt: []
@@ -1008,6 +1044,7 @@ paths:
       - { name: instanceId, in: path, required: true, schema: { type: string, minLength: 1 } }
     get:
       operationId: getInstanceHostingState
+      x-platfolio-role: private
       summary: Read the bound hosting provider state
       security: [{ bearerJwt: [] }]
       responses:
@@ -1040,6 +1077,7 @@ paths:
       - { name: instanceId, in: path, required: true, schema: { type: string, minLength: 1 } }
     post:
       operationId: applyInstanceHostingPlan
+      x-platfolio-role: private
       summary: Apply the stored plan with the bound hosting provider
       description: The response waits for provider verification and can take several minutes. Retry the same plan after a dropped connection.
       security: [{ bearerJwt: [] }]
@@ -1073,6 +1111,7 @@ paths:
       - { name: instanceId, in: path, required: true, schema: { type: string, minLength: 1 } }
     post:
       operationId: removeInstanceHosting
+      x-platfolio-role: private
       summary: Stop workloads and keep storage or permanently remove the bound hosting resources
       security: [{ bearerJwt: [] }]
       requestBody:
@@ -1111,6 +1150,7 @@ paths:
       - { name: environment, in: path, required: true, schema: { type: string } }
     get:
       operationId: getHostedStarterBrand
+      x-platfolio-role: private
       summary: Read the public header label from the verified Starter Web staging app
       security: [{ bearerJwt: [] }]
       responses:
@@ -1140,6 +1180,7 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
     put:
       operationId: updateHostedStarterBrand
+      x-platfolio-role: private
       summary: Deploy a public header label to the existing Starter Web staging app
       security: [{ bearerJwt: [] }]
       requestBody:
@@ -1171,6 +1212,7 @@ paths:
       - { name: environment, in: path, required: true, schema: { type: string } }
     get:
       operationId: listHostedCustomDomains
+      x-platfolio-role: private
       summary: Read custom domains and DNS instructions from the approved hosting project
       security: [{ bearerJwt: [] }]
       responses:
@@ -1200,6 +1242,7 @@ paths:
       - { name: hostname, in: path, required: true, schema: { type: string, minLength: 3, maxLength: 253 } }
     put:
       operationId: attachHostedCustomDomain
+      x-platfolio-role: private
       summary: Attach a custom hostname to the approved web service
       security: [{ bearerJwt: [] }]
       responses:
@@ -1216,6 +1259,7 @@ paths:
         '503': *hosted-domain-unavailable
     delete:
       operationId: detachHostedCustomDomain
+      x-platfolio-role: private
       summary: Remove a custom hostname from the approved web service
       security: [{ bearerJwt: [] }]
       responses:
@@ -1233,6 +1277,7 @@ paths:
       - { name: environment, in: path, required: true, schema: { type: string } }
     post:
       operationId: redeployHostedStarter
+      x-platfolio-role: private
       summary: Redeploy an installed marketplace release at its saved pin in the existing staging project
       description: The private hosting plugin reuses the recorded project and storage. Follow app setup for provider verification.
       security: [{ bearerJwt: [] }]
@@ -1267,6 +1312,7 @@ paths:
       - { name: environment, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 60 } }
     get:
       operationId: getInstanceEnvironment
+      x-platfolio-role: private
       summary: Read the environment's planned services, domains, and deployment reports
       description: Secret names are included. Values and private credential material are excluded. A planned domain is not a report of public availability.
       security: [{ bearerJwt: [] }]
@@ -1323,6 +1369,7 @@ paths:
         schema: { type: string, minLength: 1 }
     put:
       operationId: putPlan
+      x-platfolio-role: private
       summary: Record the desired state and the digest a runner must satisfy
       description: |
         The plan is stored with the digest `buildPlan` computed for it. The API does not re-derive a hash: a
@@ -1373,6 +1420,7 @@ paths:
         schema: { type: string, minLength: 1 }
     post:
       operationId: registerPlanFromRepository
+      x-platfolio-role: private
       summary: Build and record the desired state from the tenant's own repository
       description: |
         The missing middle (#172). Until now the plan arrived already built, which meant a human holding a
@@ -1417,6 +1465,10 @@ paths:
                     every service in `path` already carries a digest; otherwise the refusal says which service
                     is unpinned.
                   default: compose.prod.yaml
+                configuration:
+                  type: string
+                  maxLength: 65536
+                  description: YAML or JSON with separate Platfolio deployment settings. Commit references and secret names only.
                 environments:
                   type: array
                   description: Environments to plan. Omit to include every enabled environment.
@@ -1515,6 +1567,7 @@ paths:
         schema: { type: string, minLength: 1 }
     post:
       operationId: triggerDispatch
+      x-platfolio-role: private
       summary: Ask the tenant's own repository to run the work platfolio just decided
       description: |
         The other half of the middle. Creating a dispatch records platfolio's INTENT; nothing happens until the
@@ -1605,6 +1658,7 @@ paths:
         schema: { type: string, minLength: 1 }
     post:
       operationId: reportArtifact
+      x-platfolio-role: private
       summary: Report what the platform's own build published
       description: |
         The release pipeline's one required interaction with platfolio (D54), and the reason a fork needs no
@@ -1689,6 +1743,7 @@ paths:
         schema: { type: string, minLength: 1 }
     get:
       operationId: listSecretPresence
+      x-platfolio-role: private
       summary: Which declared credentials are filled in -- presence, never value
       description: |
         Presence is the only claim platfolio can honestly make about a secret (D4, D53). The provider redacts
@@ -1760,6 +1815,7 @@ paths:
         schema: { type: string, minLength: 1, maxLength: 120 }
     put:
       operationId: putSecret
+      x-platfolio-role: private
       summary: Deliver one credential into the tenant's own provider environment
       description: |
         Write-through, not custody (D53). The value crosses this request and goes to the provider: platfolio does
@@ -1862,6 +1918,7 @@ paths:
         schema: { type: string, minLength: 1 }
     post:
       operationId: createDispatch
+      x-platfolio-role: private
       summary: Issue a single-use instruction for the managed workflow
       description: |
         Returns the dispatch intent the workflow passes to GitHub as inputs. The nonce is the freshness token
@@ -1912,6 +1969,7 @@ paths:
         schema: { type: string, minLength: 1 }
     get:
       operationId: getDispatchPlan
+      x-platfolio-role: private
       summary: The plan a runner is authorised to apply -- exactly once
       description: |
         Consumes the dispatch. A second read is a replay, not a retry: it answers 409 so a duplicated or
@@ -1949,6 +2007,7 @@ paths:
   /api/v1/attestations:
     post:
       operationId: postAttestation
+      x-platfolio-role: private
       summary: A runner reports what happened
       description: |
         Accepted once per dispatch, and only if it agrees with that dispatch on nonce, plan hash, action and
@@ -1999,6 +2058,7 @@ paths:
         schema: { type: string, minLength: 1 }
     get:
       operationId: getLatestAttestation
+      x-platfolio-role: private
       summary: The most recent result for this instance, newest first
       description: |
         A claim that agrees with something is still only a claim: the control plane verifies against the
@@ -2025,6 +2085,7 @@ paths:
       - { name: instanceId, in: path, required: true, schema: { type: string } }
     get:
       operationId: getHostedAppStatus
+      x-platfolio-role: private
       summary: Read the latest availability and outage updates for a hosted app
       security: [{ bearerJwt: [] }]
       responses:
@@ -2059,6 +2120,7 @@ paths:
       - { name: teamId, in: path, required: true, schema: { type: string } }
     get:
       operationId: listTeamActivity
+      x-platfolio-role: shared
       summary: Read recent operations for one team and its apps
       security: [{ bearerJwt: [] }]
       responses:
@@ -2076,6 +2138,7 @@ paths:
   /api/v1/audit:
     get:
       operationId: listAudit
+      x-platfolio-role: shared
       summary: What the platform did to the caller's platforms, and who did it
       description: |
         Newest first, bounded by `limit`, and filtered to rows about instances the caller's teams own -- an
@@ -2106,6 +2169,7 @@ paths:
   /api/v1/capabilities:
     get:
       operationId: listAvailableCapabilities
+      x-platfolio-role: private
       summary: What this team may bind to right now
       description: |
         The caller's own offers plus anything another team has shared with them (D42). Discovery is the
@@ -2131,6 +2195,7 @@ paths:
       - { name: instanceId, in: path, required: true, schema: { type: string, minLength: 1 } }
     post:
       operationId: publishCapability
+      x-platfolio-role: private
       summary: Record that this instance offers a capability to other platforms
       description: |
         Publishing is what makes an instance a shared service rather than a private one (D42): the manifest
@@ -2179,6 +2244,7 @@ paths:
       - { name: instanceId, in: path, required: true, schema: { type: string, minLength: 1 } }
     put:
       operationId: publishSharedIdentityCapability
+      x-platfolio-role: private
       summary: Publish the reviewed Shared Identity output contract
       description: |
         Reads the built-in Shared Identity release at the instance's saved source revision. Records output
@@ -2211,6 +2277,7 @@ paths:
     # invites two sources of truth), and a revoke that cannot say *which* share it means is a foot-gun.
     put:
       operationId: shareCapability
+      x-platfolio-role: private
       summary: Let another team bind to this capability
       description: |
         The explicit grant behind D42. A capability that is merely reachable is not offered: without this row,
@@ -2254,6 +2321,7 @@ paths:
         description: The team whose grant is withdrawn, or `*` for the open offer.
     delete:
       operationId: revokeCapabilityShare
+      x-platfolio-role: private
       summary: Withdraw a share without breaking the consumer that already relies on it
       description: |
         Revocation ages existing bindings to `stale` rather than deleting them (D42): a running application keeps
@@ -2284,6 +2352,7 @@ paths:
       - { name: instanceId, in: path, required: true, schema: { type: string, minLength: 1 } }
     get:
       operationId: listBindings
+      x-platfolio-role: private
       summary: What this platform consumes
       security:
         - bearerJwt: []
@@ -2306,6 +2375,7 @@ paths:
       - { name: capability, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 60 } }
     put:
       operationId: bindCapability
+      x-platfolio-role: private
       summary: Consume another platform's capability
       description: |
         Validated by `checkBindingPolicy` before anything is written: the offer must exist, every destination
@@ -2353,6 +2423,7 @@ paths:
           $ref: '#/components/responses/NotFound'
     delete:
       operationId: unbindCapability
+      x-platfolio-role: private
       summary: Stop consuming a capability
       description: |
         204 on success, and 404 when there was no such binding. Nothing is destroyed here -- the consumer's
@@ -2373,6 +2444,7 @@ paths:
       - { name: instanceId, in: path, required: true, schema: { type: string, minLength: 1 } }
     put:
       operationId: bindSharedIdentity
+      x-platfolio-role: private
       summary: Select a Shared Identity instance for a consumer
       description: |
         Selects the same team's reviewed Shared Identity instance with a compatible offer. The server
@@ -2409,6 +2481,7 @@ paths:
       - { name: environment, in: path, required: true, schema: { type: string, enum: [production, staging] } }
     get:
       operationId: getSharedIdentityClient
+      x-platfolio-role: private
       summary: Read the customer worker's credential placement status
       security: [{ bearerJwt: [] }]
       responses: &identity-client-responses
@@ -2429,6 +2502,7 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
     put:
       operationId: placeSharedIdentityClient
+      x-platfolio-role: private
       summary: Register a Keycloak client and deliver its configuration
       description: Uses the retained identity binding and the destination declarations in the consumer release. The customer can configure the application origins and administration grant inside OpenBao or provide a worker-encrypted initial setup. For a marketplace OCI install, the private worker delivers the configuration to the pinned Railway service and verifies a new deployment before reporting placed. Hosted placement can take several minutes.
       security: [{ bearerJwt: [] }]
@@ -2454,6 +2528,7 @@ paths:
       responses: *identity-client-responses
     delete:
       operationId: revokeSharedIdentityClient
+      x-platfolio-role: private
       summary: Disable the issued client and remove its credential placement
       description: Disables the exact client, clears the runtime configuration for a marketplace OCI install, and removes its OpenBao placement before releasing the environment reservation. The consumer binding remains until explicitly detached. Hosted revocation can take several minutes.
       security: [{ bearerJwt: [] }]
@@ -2464,6 +2539,7 @@ paths:
       - { name: instanceId, in: path, required: true, schema: { type: string, minLength: 1 } }
     get:
       operationId: listConsumers
+      x-platfolio-role: private
       summary: What breaks if this platform is removed
       description: |
         The question the teardown issues (#106, #107) were opened to ask, which was unanswerable before #177 --
@@ -2497,6 +2573,7 @@ paths:
         schema: { type: string, minLength: 1 }
     post:
       operationId: redeployInstance
+      x-platfolio-role: private
       summary: Restart a running service so it picks up configuration it does not hold
       description: |
         The capability this API did not have: a way to say "redeploy", separately from "apply this
@@ -2624,6 +2701,7 @@ paths:
       - { name: teamId, in: path, required: true, schema: { type: string } }
     get:
       operationId: getHubInstallationOffer
+      x-platfolio-role: hub
       summary: Read the available private Platfolio installer
       security: [{ bearerJwt: [] }]
       responses:
@@ -2647,6 +2725,7 @@ paths:
       - { name: teamId, in: path, required: true, schema: { type: string } }
     get:
       operationId: listHubInstallationLaunches
+      x-platfolio-role: hub
       summary: List the owner's private installation journals
       security: [{ bearerJwt: [] }]
       responses:
@@ -2662,6 +2741,7 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
     post:
       operationId: authorizeHubInstallation
+      x-platfolio-role: hub
       summary: Begin a short-lived authorization for a new or recorded installation
       security: [{ bearerJwt: [] }]
       requestBody:
@@ -2697,6 +2777,7 @@ paths:
       - { name: launchId, in: path, required: true, schema: { type: string, format: uuid } }
     get:
       operationId: getHubInstallationLaunch
+      x-platfolio-role: hub
       summary: Read the owner's installation launch progress
       security: [{ bearerJwt: [] }]
       responses:
@@ -2710,6 +2791,7 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
     put:
       operationId: startHubInstallation
+      x-platfolio-role: hub
       summary: Create the project in one approved workspace with the selected environments
       security: [{ bearerJwt: [] }]
       requestBody:
@@ -2736,6 +2818,7 @@ paths:
       - { name: launchId, in: path, required: true, schema: { type: string, format: uuid } }
     post:
       operationId: maintainHubInstallation
+      x-platfolio-role: hub
       summary: Update one installed environment or remove the recorded installation and its storage
       security: [{ bearerJwt: [] }]
       requestBody:
@@ -2772,6 +2855,7 @@ paths:
   /api/v1/hosting/installation-authorization/callback:
     get:
       operationId: completeHubInstallationAuthorization
+      x-platfolio-role: hub
       summary: Complete provider authorization for a single pending installation launch
       security: []
       parameters:
@@ -2789,6 +2873,7 @@ paths:
       - { name: teamId, in: path, required: true, schema: { type: string } }
     post:
       operationId: publishMarketplaceRelease
+      x-platfolio-role: hub
       summary: Publish an immutable free template release on the hub
       description: Restricted to owners of the configured hub publisher team. Repeating the same publication is idempotent.
       security: [{ bearerJwt: [] }]
@@ -2819,6 +2904,7 @@ paths:
       - { name: teamId, in: path, required: true, schema: { type: string } }
     post:
       operationId: createMarketplacePlatform
+      x-platfolio-role: hub
       summary: Create a marketplace platform owned by the publishing team
       description: The listing becomes public on its first release. Only a team owner can create it.
       security: [{ bearerJwt: [] }]
@@ -2845,6 +2931,7 @@ paths:
       - { name: platformId, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
     post:
       operationId: publishMarketplacePlatformRelease
+      x-platfolio-role: hub
       summary: Publish an immutable release of a team-owned platform
       description: A retry of the same version and coordinates returns the same release summary. A version cannot be repinned.
       security: [{ bearerJwt: [] }]
@@ -2871,6 +2958,7 @@ paths:
       - { name: platformId, in: path, required: true, schema: { type: string } }
     post:
       operationId: issueMarketplaceUploadGrant
+      x-platfolio-role: hub
       summary: Authorize an OCI push to a publisher release namespace
       security: [{ bearerJwt: [] }]
       requestBody: &marketplace-version-request
@@ -2898,6 +2986,7 @@ paths:
     parameters: *marketplace-publisher-params
     post:
       operationId: publishMarketplaceArtifactBundle
+      x-platfolio-role: hub
       summary: Publish an immutable deployment recipe and OCI image set
       security: [{ bearerJwt: [] }]
       requestBody:
@@ -2922,6 +3011,7 @@ paths:
     parameters: *marketplace-publisher-params
     put:
       operationId: setMarketplaceMaintenance
+      x-platfolio-role: hub
       summary: Set a buyer team's eligibility for new maintained releases
       security: [{ bearerJwt: [] }]
       requestBody:
@@ -2942,6 +3032,7 @@ paths:
       - { name: teamId, in: path, required: true, schema: { type: string } }
     get:
       operationId: listMarketplaceInstallations
+      x-platfolio-role: hub
       summary: List the team's private installation connections
       description: Exposes connection state to team owners. Enrollment codes and registry credentials are excluded.
       security: [{ bearerJwt: [] }]
@@ -2961,6 +3052,7 @@ paths:
       - { name: installationId, in: path, required: true, schema: { type: string, format: uuid } }
     put:
       operationId: connectMarketplaceInstallation
+      x-platfolio-role: hub
       summary: Link a customer installation to this team
       description: A team owner approves a link. A disconnected installation ID cannot be reactivated.
       security: [{ bearerJwt: [] }]
@@ -2972,6 +3064,7 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
     delete:
       operationId: disconnectMarketplaceInstallation
+      x-platfolio-role: hub
       summary: Disconnect an installation from marketplace access
       description: Existing deployments and acquired releases remain with the customer.
       security: [{ bearerJwt: [] }]
@@ -2987,6 +3080,7 @@ paths:
       - { name: installationId, in: path, required: true, schema: { type: string, format: uuid } }
     post:
       operationId: claimFreeMarketplaceRelease
+      x-platfolio-role: hub
       summary: Claim the pinned free starter release for a linked installation
       security: [{ bearerJwt: [] }]
       responses:
@@ -3016,6 +3110,7 @@ paths:
       - { name: installationId, in: path, required: true, schema: { type: string, format: uuid } }
     post:
       operationId: issueMarketplaceEnrollment
+      x-platfolio-role: hub
       summary: Authorize a private installation to enroll with the hub
       description: The team owner receives an expiring code once. Issuing again replaces a pending code. An enrolled or disconnected ID cannot be issued another code.
       security: [{ bearerJwt: [] }]
@@ -3041,6 +3136,7 @@ paths:
       - { name: installationId, in: path, required: true, schema: { type: string, format: uuid } }
     post:
       operationId: redeemMarketplaceEnrollment
+      x-platfolio-role: hub
       summary: Redeem a one-use hub enrollment code
       description: The installation generates and keeps its own random credential. It sends only its SHA-256 verifier when redeeming. An expired, replaced, redeemed, or disconnected code cannot authorize an installation.
       security: [{ marketplaceCredential: [] }]
@@ -3064,6 +3160,7 @@ paths:
       - { name: installationId, in: path, required: true, schema: { type: string, format: uuid } }
     post:
       operationId: claimEnrolledMarketplaceRelease
+      x-platfolio-role: hub
       summary: Claim the pinned free starter from the private installation
       description: This credential authorizes registry claims for one installation. It cannot act as a team member or authorize deployment or provider operations.
       security: [{ marketplaceCredential: [] }]
@@ -3078,6 +3175,7 @@ paths:
       - { name: format, in: query, schema: { type: string, enum: [releases] }, description: Send releases to include versions published after the bundled catalog. }
     post:
       operationId: getEnrolledMarketplaceCatalog
+      x-platfolio-role: hub
       summary: Read the pinned registry catalog using an installation grant
       security: [{ marketplaceCredential: [] }]
       responses:
@@ -3094,6 +3192,7 @@ paths:
       - { name: installationId, in: path, required: true, schema: { type: string, format: uuid } }
     post:
       operationId: acquireMarketplacePlatformRelease
+      x-platfolio-role: hub
       summary: Acquire an exact free release for an enrolled installation's team
       description: The hub resolves the team from the enrollment. A receipt includes the pinned artifact coordinates and grants no provider authority.
       security: [{ marketplaceCredential: [] }]
@@ -3122,6 +3221,7 @@ paths:
       - { name: installationId, in: path, required: true, schema: { type: string, format: uuid } }
     post:
       operationId: acquireMarketplaceArtifactRelease
+      x-platfolio-role: hub
       summary: Acquire a free or maintained OCI bundle
       security: [{ marketplaceCredential: [] }]
       requestBody:
@@ -3145,6 +3245,7 @@ paths:
       - { name: installationId, in: path, required: true, schema: { type: string, format: uuid } }
     post:
       operationId: issueMarketplacePullGrant
+      x-platfolio-role: hub
       summary: Authorize downloading the artifacts covered by a saved acquisition
       security: [{ marketplaceCredential: [] }]
       requestBody:
@@ -3163,6 +3264,7 @@ paths:
       - { name: teamId, in: path, required: true, schema: { type: string } }
     post:
       operationId: preparePrivateMarketplaceInstall
+      x-platfolio-role: private
       summary: Verify and retain an acquired release on a private installation
       description: An image install can be provisioned by applying its retained hosting plan. A starter install returns the customer repository pin for the source workflow. Retrying an exact selection under the same name returns the retained installation.
       security: [{ bearerJwt: [] }]
@@ -3193,6 +3295,7 @@ paths:
       - { name: teamId, in: path, required: true, schema: { type: string } }
     get:
       operationId: getPrivateMarketplaceConnection
+      x-platfolio-role: private
       summary: Check the private installation's marketplace connection
       security: [{ bearerJwt: [] }]
       responses:
@@ -3224,6 +3327,7 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
     post:
       operationId: enrollPrivateMarketplaceConnection
+      x-platfolio-role: private
       summary: Exchange a one-use hub handoff and acquire the pinned free release
       security: [{ bearerJwt: [] }]
       requestBody:
@@ -3258,6 +3362,7 @@ paths:
       - { name: teamId, in: path, required: true, schema: { type: string } }
     get:
       operationId: getStarterLaunchSetup
+      x-platfolio-role: private
       summary: Read the customer worker, OpenBao and Railway connection readiness
       security: [{ bearerJwt: [] }]
       responses:
@@ -3288,6 +3393,7 @@ paths:
       - { name: teamId, in: path, required: true, schema: { type: string } }
     post:
       operationId: initializeStarterOpenBao
+      x-platfolio-role: private
       summary: Initialize OpenBao and encrypt the recovery file for the owner
       security: [{ bearerJwt: [] }]
       requestBody:
@@ -3321,6 +3427,7 @@ paths:
       - { name: teamId, in: path, required: true, schema: { type: string } }
     post:
       operationId: unlockStarterOpenBao
+      x-platfolio-role: private
       summary: Restore OpenBao readiness with recovery material encrypted to the customer worker
       security: [{ bearerJwt: [] }]
       requestBody:
@@ -3345,6 +3452,7 @@ paths:
       - { name: teamId, in: path, required: true, schema: { type: string } }
     post:
       operationId: beginStarterRailwayAuthorization
+      x-platfolio-role: private
       summary: Start Railway authorization in the customer's installation
       security: [{ bearerJwt: [] }]
       responses:
@@ -3365,6 +3473,7 @@ paths:
   /api/v1/railway/callback:
     get:
       operationId: completeStarterRailwayAuthorization
+      x-platfolio-role: private
       summary: Complete the one-use Railway authorization and return to Platfolio
       description: The worker binds the provider response to the owner-initiated state and PKCE verifier.
       security: []
@@ -3386,6 +3495,7 @@ paths:
       - { name: template, in: query, schema: { type: string, enum: [shared-identity, starter-worker] } }
     get:
       operationId: getStarterLaunch
+      x-platfolio-role: private
       summary: Read the deployment timeline and troubleshooting evidence
       security: [{ bearerJwt: [] }]
       responses:
@@ -3431,6 +3541,7 @@ paths:
         '503': *launch-unavailable
     post:
       operationId: startStarterLaunch
+      x-platfolio-role: private
       summary: Launch or resume a pinned template using the connected customer runner
       description: A fresh install uses the selected release from the connected hub. Resuming setup or restoring uses the release already recorded in the private installation.
       security: [{ bearerJwt: [] }]
@@ -3461,6 +3572,7 @@ paths:
       - { name: template, in: query, schema: { type: string, enum: [shared-identity, starter-worker] } }
     post:
       operationId: removeStarterLaunch
+      x-platfolio-role: private
       summary: Remove this starter using the explicitly selected storage policy
       security: [{ bearerJwt: [] }]
       requestBody:

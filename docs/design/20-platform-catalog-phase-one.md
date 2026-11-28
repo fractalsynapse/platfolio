@@ -100,8 +100,9 @@ registry credential brokering and mirroring are outside the current free catalog
 
 Use the existing approved projects for acceptance. Starter Web or Starter Worker should produce a
 customer-owned source project that deploys a change through its workflow. Shared Identity should
-install its pinned image and pass discovery checks. Platfolio should launch from a hosted-application
-release verified through the catalog path, using its existing bootstrap contract.
+install its pinned image and pass discovery checks. The hub launches private Platfolio from its
+dedicated pinned spoke package using the installation bootstrap contract. See
+[installation roles](18-hub-and-private-installations.md#installation-roles).
 
 Local verification covers the three receipt paths with the test provider, including the starter
 artifact API, an invalid registry response, pin retention and reapply with the hub offline. The

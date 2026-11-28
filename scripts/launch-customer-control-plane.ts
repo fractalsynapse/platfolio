@@ -55,7 +55,7 @@ export async function launchCustomerControlPlane(stage: Stage, plan: Awaited<Ret
   const identity = services.find(({ name }) => name === 'identity')!;
   const issuer = `${identity.origin}/realms/platfolio`;
   const outputs = {
-    api: { PLATFOLIO_IDENTITY_ISSUER: issuer, PLATFOLIO_IDENTITY_JWKS_URI: `${issuer}/protocol/openid-connect/certs`, PLATFOLIO_ALLOWED_ORIGINS: site.origin, PLATFOLIO_DB_MIGRATE: 'true', PLATFOLIO_SCM_DRIVER: 'git', ...(launchConfig ? { PLATFOLIO_LAUNCH_WORKER_URL: 'http://installation-worker-staging.railway.internal:8080',
+    api: { PLATFOLIO_IDENTITY_ISSUER: issuer, PLATFOLIO_IDENTITY_JWKS_URI: `${issuer}/protocol/openid-connect/certs`, PLATFOLIO_ALLOWED_ORIGINS: site.origin, PLATFOLIO_DB_MIGRATE: 'true', PLATFOLIO_SCM_DRIVER: 'git', PLATFOLIO_INSTALLATION_ROLE: 'private', ...(launchConfig ? { PLATFOLIO_LAUNCH_WORKER_URL: 'http://installation-worker-staging.railway.internal:8080',
       PLATFOLIO_LAUNCH_WORKER_KEY: launchConfig.workerKey, PLATFOLIO_LAUNCH_TEAM: launchConfig.team } : {}) },
     site: { PLATFOLIO_SITE_ORIGIN: site.origin, PLATFOLIO_URL: api.origin, PLATFOLIO_IDENTITY_ISSUER: issuer },
     identity: { KC_HOSTNAME: identity.origin, KC_HOSTNAME_STRICT: 'true', ...(owner ? { PLATFOLIO_SITE_ORIGIN: site.origin } : {}) },
