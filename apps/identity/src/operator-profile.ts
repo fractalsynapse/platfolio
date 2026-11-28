@@ -1,4 +1,5 @@
 export const OPERATOR_DISPLAY_NAME_ATTRIBUTE = 'platfolioDisplayName';
+export const OPERATOR_AVATAR_ATTRIBUTE = 'platfolioAvatarUrl';
 
 const permissions = { view: ['admin', 'user'], edit: ['admin', 'user'] };
 const required = { roles: ['user'] };
@@ -7,6 +8,10 @@ const nameValidators = { length: { max: 255 }, 'person-name-prohibited-character
 export const operatorDisplayName = {
   name: OPERATOR_DISPLAY_NAME_ATTRIBUTE, displayName: 'Display name',
   validations: { length: { max: 100 } }, permissions, multivalued: false,
+};
+export const operatorAvatar = {
+  name: OPERATOR_AVATAR_ATTRIBUTE, displayName: 'Avatar image URL',
+  validations: { length: { max: 2048 } }, permissions, multivalued: false,
 };
 
 // Keycloak applies the component per realm. Keep the built-in account field validators
@@ -19,6 +24,7 @@ const profile = {
     { name: 'firstName', displayName: '${firstName}', permissions, required, validations: nameValidators },
     { name: 'lastName', displayName: '${lastName}', permissions, required, validations: nameValidators },
     operatorDisplayName,
+    operatorAvatar,
   ],
   groups: [{ name: 'user-metadata', displayHeader: 'User metadata', displayDescription: 'Attributes, which refer to user metadata' }],
 };

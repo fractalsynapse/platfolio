@@ -31,7 +31,8 @@ export function WorkspaceContent() {
 
   return <>
     <WorkspaceHeader hub={hub} teams={teams} team={team?.name} invitationCount={invitations.state.status === 'loaded' ? invitations.state.data.length : undefined}
-      displayName={profile.state.status === 'loaded' ? profile.state.data.displayName : undefined} signOut={() => navigation?.signOut()} />
+      displayName={profile.state.status === 'loaded' ? profile.state.data.displayName : undefined}
+      avatarUrl={profile.state.status === 'loaded' ? profile.state.data.avatarUrl : undefined} signOut={() => navigation?.signOut()} />
     <main id="workspace-content" className="ui-workspace-main" tabIndex={-1}>
       <OperationState status={state.status} pending="Loading your workspace…" retry={reauthenticate ? navigation?.signIn : reload}
         retryLabel={reauthenticate ? 'Sign in again' : 'Try again'}

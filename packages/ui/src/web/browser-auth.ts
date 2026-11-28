@@ -228,6 +228,7 @@ export function createTokenBag(): TokenBag {
 export type HubSignIn = Required<Pick<SuccessOf<'getHubSignIn'>, 'issuer' | 'clientId' | 'scope'>>;
 
 const hubStatePrefix = 'hub.';
+const resumeStatePrefix = 'resume.';
 
 export function isHubSignInCallback(params: URLSearchParams): boolean {
   return params.get('state')?.startsWith(hubStatePrefix) === true;
@@ -236,8 +237,9 @@ export function isHubSignInCallback(params: URLSearchParams): boolean {
 export interface BrowserAuthSource {
   /** The `AuthSource` the SDK consumes. */
   readonly token: () => Promise<string>;
-  readonly begin: (returnPath?: string, action?: 'UPDATE_PASSWORD', hub?: HubSignIn) => Promise<string>;
-  readonly complete: (params: URLSearchParams, onSignedIn?: (returnPath: string) => void, hub?: HubSignIn) => Promise<'signed-in' | 'no-handoff' | 'state-mismatch' | 'refused'>;
+  readonly begin: (returnPath?: string, action?: 'UPDATE_PASSWORD' | 'resume', hub?: HubSignIn) => Promise<string>;
+  readonly complete: (params: URLSearchParams, onReturn?: (returnPath: string) => void, hub?: HubSignIn) =>
+    Promise<'signed-in' | 'interaction-required' | 'no-handoff' | 'state-mismatch' | 'refused'>;
   readonly refresh: () => Promise<'refreshed' | 'no-refresh-token' | 'refused'>;
   readonly signedIn: () => boolean;
   /** The URL a person should land on after the issuer ends the session; the bag is emptied first. */
@@ -309,7 +311,7 @@ export function createBrowserAuthSource(
       const endpoints = hub ? endpointsForIssuer(hub.issuer) : local.endpoints;
       const verifier = createVerifierWith(deps.random);
       const pair = await pkceChallengeWith(deps.digest, verifier);
-      const state = (hub ? await hubTag(hub) : '') + base64Url(deps.random(24));
+      const state = (hub ? await hubTag(hub) : action === 'resume' ? resumeStatePrefix : '') + base64Url(deps.random(24));
       // The handoff is written, not kept: the navigation that follows discards this module's memory.
       deps.handoff.write(HANDOFF.verifier, pair.verifier);
       const destination = workspaceReturnPath(returnPath);
@@ -323,7 +325,8 @@ export function createBrowserAuthSource(
       authorize.searchParams.set('state', state);
       authorize.searchParams.set('code_challenge_method', PKCE_METHOD);
       authorize.searchParams.set('code_challenge', pair.challenge);
-      if (action) authorize.searchParams.set('kc_action', action);
+      if (action === 'resume' && !hub) authorize.searchParams.set('prompt', 'none');
+      if (action === 'UPDATE_PASSWORD') authorize.searchParams.set('kc_action', action);
       return authorize.toString();
     },
     complete: async (params, onSignedIn, hub) => {
@@ -336,13 +339,18 @@ export function createBrowserAuthSource(
       if (verifier === undefined || storedState === undefined) return 'no-handoff';
       const [nonce, returnPath] = storedState.split(':', 2);
       if (state === null || state !== nonce) return 'state-mismatch';
-      if (code === null || code === '') return 'refused';
-      const pair = await pkceChallengeWith(deps.digest, verifier);
       const isHub = nonce.startsWith(hubStatePrefix);
       if (isHub && (!hub || !nonce.startsWith(await hubTag(hub)))) return 'refused';
       const selected = isHub && hub ? { endpoints: endpointsForIssuer(hub.issuer), clientId: hub.clientId } : local;
       const returnedIssuer = params.get('iss');
       if (returnedIssuer !== null && returnedIssuer !== (isHub ? hub?.issuer : config.issuerBaseUrl)) return 'refused';
+      const destination = workspaceReturnPath(returnPath) ?? workspacePaths.home;
+      if (code === null || code === '') {
+        if (!nonce.startsWith(resumeStatePrefix) || !['login_required', 'interaction_required', 'consent_required'].includes(params.get('error') ?? '')) return 'refused';
+        onSignedIn?.(destination);
+        return 'interaction-required';
+      }
+      const pair = await pkceChallengeWith(deps.digest, verifier);
       const tokens = await post(selected.endpoints.token, {
         grant_type: 'authorization_code',
         client_id: selected.clientId,
@@ -352,7 +360,7 @@ export function createBrowserAuthSource(
       });
       bag.set(tokens, now());
       active = selected;
-      onSignedIn?.(workspaceReturnPath(returnPath) ?? workspacePaths.home);
+      onSignedIn?.(destination);
       return 'signed-in';
     },
     refresh: refreshSession,

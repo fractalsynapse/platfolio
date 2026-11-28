@@ -480,6 +480,83 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /api/v1/me/emails:
+    get:
+      operationId: getAccountEmails
+      x-platfolio-role: shared
+      summary: List the caller's addresses and enabled email features
+      security: [{ bearerJwt: [] }]
+      responses:
+        '200':
+          description: The operator's current email settings.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AccountEmails' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { description: Identity account email is unavailable. }
+    post:
+      operationId: updateAccountEmails
+      x-platfolio-role: shared
+      summary: Request or confirm a secondary address, make it primary, or remove it
+      security: [{ bearerJwt: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  additionalProperties: false
+                  required: [action, email]
+                  properties:
+                    action: { type: string, enum: [add, make-primary, remove] }
+                    email: { type: string, format: email, maxLength: 254 }
+                - type: object
+                  additionalProperties: false
+                  required: [action, email, code]
+                  properties:
+                    action: { type: string, enum: [verify] }
+                    email: { type: string, format: email, maxLength: 254 }
+                    code: { type: string, pattern: '^[A-Za-z0-9_-]{24}$', writeOnly: true }
+      responses:
+        '200':
+          description: The saved email settings and verification status.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AccountEmails' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { description: Please wait before requesting another message. }
+        '503': { description: Identity account email or SMTP is unavailable. }
+
+  /api/v1/me/email-actions:
+    post:
+      operationId: requestAccountEmailAction
+      x-platfolio-role: shared
+      summary: Send a verification or password reset link to the caller's own primary email
+      security: [{ bearerJwt: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [action]
+              properties:
+                action: { type: string, enum: [verify-primary, reset-password] }
+      responses:
+        '204': { description: The operator realm accepted the request and sent the email. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { description: A message was sent recently. Try again shortly. }
+        '503': { description: Identity email delivery is unavailable. }
+
   /api/v1/me/profile:
     get:
       operationId: getAccountProfile
@@ -500,6 +577,7 @@ paths:
                   displayName: { type: string }
                   email: { type: string }
                   emailVerified: { type: boolean }
+                  avatarUrl: { type: string, maxLength: 2048 }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '503':
@@ -524,6 +602,7 @@ paths:
               properties:
                 username: { type: string, minLength: 3, maxLength: 255 }
                 displayName: { type: string, minLength: 1, maxLength: 100 }
+                avatarUrl: { type: string, maxLength: 2048, description: HTTPS image URL or an empty string to remove it. }
       responses:
         '200': *account-profile
         '400': { $ref: '#/components/responses/BadRequest' }
@@ -3762,6 +3841,24 @@ components:
           example: 'Bearer realm="platfolio", error="invalid_token"'
 
   schemas:
+    AccountEmails:
+      type: object
+      additionalProperties: false
+      required: [selfVerification, multipleEmails, addresses]
+      properties:
+        selfVerification: { type: boolean }
+        multipleEmails: { type: boolean }
+        addresses:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [email, primary, verified]
+            properties:
+              email: { type: string }
+              primary: { type: boolean }
+              verified: { type: boolean }
+
     IdentityClientPlacement:
       # GENERATED by scripts/gen-api-spec.ts from IdentityClientPlacementSchema (packages/contracts). Do not hand-edit: pnpm run spec:check fails on a difference, and the prose lives in packages/api-contract/src/spec-annotations.ts.
       type: object

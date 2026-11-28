@@ -1,5 +1,6 @@
 import { Stack } from '../layout/index.ts';
 import * as React from 'react';
+import { AccountEmails } from './account-emails.tsx';
 import { AccountIdentity } from './account-identity.tsx';
 import { AccountPassword } from './account-password.tsx';
 import { NotificationEmailPreference } from './notification-email-preference.tsx';
@@ -32,7 +33,7 @@ export function AccountWorkspace({ tab }: { readonly tab: keyof typeof accountTa
           <NotificationEmailPreference />
           {!hub && <WorkspaceLink href={workspacePaths.notifications} className="ui-workspace-secondary ui-hit-primary">Manage notification rules</WorkspaceLink>}
         </Stack>
-      </WorkspacePanel> : tab === 'password' ? <AccountPassword /> : <AccountIdentity key={tab} tab={tab} />}
+      </WorkspacePanel> : tab === 'password' ? <AccountPassword /> : tab === 'emails' ? <AccountEmails /> : <AccountIdentity />}
       {tab === 'emails' && managesSmtp && owner && <WorkspacePanel title="Private SMTP relay" form>
         <PrivateSmtpForm teamId={owner.teamId} confirmed={() => { setSaved(true); setup.reload(); }} />
         {saved && <p role="status">SMTP relay verified and saved.</p>}

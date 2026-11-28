@@ -5,7 +5,6 @@ export interface WorkspaceNavigation {
   readonly navigate: (path: string) => void;
   readonly signIn: () => void;
   readonly signOut: () => void;
-  readonly changePassword?: () => Promise<void>;
   readonly installationRole?: 'hub' | 'private';
 }
 

@@ -34,9 +34,9 @@ The Platfolio menu groups platform links above team links. The avatar menu conta
 | `/dashboard/launch` | MVP | Show setup progress, prerequisites, and a downloadable diagnostic report. On the hub, prepare and enroll a private installation. On the private workspace, launch the pinned free app once the customer has connected Railway. |
 | `/dashboard/invitations` | Later | Show and accept invitations matched to the person's verified email before team membership exists. |
 | `/dashboard/notifications` | Private | Create and manage personal rules for apps on the signed-in person’s teams, with an event type, environment scope, and email delivery settings. |
-| `/dashboard/account` | Both | Edit the local Keycloak username and display name. The avatar shows initials from the display name. |
-| `/dashboard/account/emails` | Both | Show the primary sign-in address and Keycloak verification status. |
-| `/dashboard/account/password` | Both | Start the Keycloak password change and return to Account. |
+| `/dashboard/account` | Both | Edit your username, display name and HTTPS avatar image URL. |
+| `/dashboard/account/emails` | Both | Show your primary email. The public account policy adds self-service verification and verified secondary addresses that can be made primary. |
+| `/dashboard/account/password` | Both | Ask Keycloak to send a reset link to the verified primary address. |
 | `/dashboard/account/notifications` | Both | Show email delivery availability. Private workspaces also link to app notification rules. |
 
 Use the [published template catalog](../packages/manifest/src/template-catalog.ts) as the source for template content. The account and sign-in routes are for Platfolio operators. Tenant applications use their own configured identity systems. See the [identity architecture](design/05-identity.md).
@@ -98,7 +98,7 @@ Bring-your-own OIDC satisfies the MVP identity criterion. Preserve native authen
 ## Navigation and UI constraints
 
 - In the dashboard header, the logo opens navigation, one Team selector sets the active workspace, and the avatar opens Account, Notifications, and Log out. The page title follows the header. A Platfolio workspace is the view of a team. Railway workspaces remain provider resources.
-- Keep Astro for the site and one React island for the dashboard (D65). The static host must serve the dashboard shell for direct visits to tenant paths. After the callback exchange, open the intended in-site route without a document reload so the dashboard can use the in-memory session. A hard reload triggers sign-in again and returns to the same authorized route under D67.
+- Keep Astro for the site and one React island for the dashboard (D65). The static host serves the dashboard shell for direct visits. After the callback exchange, open the intended route without a reload so the dashboard keeps the in-memory session. On a hard reload, try one non-interactive sign-in and offer the sign-in screen if the issuer needs user interaction (D67).
 - Use full pages for durable destinations and sheets for short actions such as inviting a member or entering a secret. Use the same component contracts at every supported width. Keep secret values out of URLs, drafts, replayed signals, and page documents.
 - Compose template-specific views with the build-time component registry. A worker can omit Domains and a shared identity instance can emphasize Dependencies. The [open UI decisions](design/11-ui-components-and-page-model.md#open-decisions) still govern where template-specific page documents are authored.
 - Name actions and results in terms a first-time founder can use. Use deployment checks for the result and explain what was checked. Keep exact terms such as GitHub commit and DNS record where someone needs them to act.

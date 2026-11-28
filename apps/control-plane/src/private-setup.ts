@@ -88,6 +88,7 @@ export function privateSetup(route: typeof scoped, config?: Configuration, reque
           } finally { await smtp.close(); }
           await call('', {
             resetPasswordAllowed: true,
+            ...(realm.attributes?.['platfolio.publicAccounts'] === 'true' ? { registrationAllowed: true, verifyEmail: true } : {}),
             attributes: { ...realm.attributes, [verifiedMarker]: 'true', 'actionTokenGeneratedByUserLifespan.reset-credentials': '900' },
             smtpServer: { host: input.host, port: String(input.port), from: input.from, user: input.user, password: input.password,
               auth: 'true', ssl: String(input.port === 465), starttls: String(input.port !== 465) },

@@ -480,6 +480,13 @@ variables:
     enum: [hub, private]
     deployedTo: railway:variable
     note: "Selects the API and Cordis operation surface and the site's workspace navigation. Unset preserves the role-less legacy surface."
+  - name: PLATFOLIO_ACCOUNT_POLICY
+    kind: value
+    secret: false
+    environments: all
+    enum: [public, managed]
+    deployedTo: railway:variable
+    note: "Operator Keycloak policy. The hub selects public in each environment. New spokes default to managed and can opt into public account registration."
   - name: PLATFOLIO_MARKETPLACE_ENABLED
     kind: value
     secret: false

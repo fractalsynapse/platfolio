@@ -311,6 +311,21 @@ test('sign-in writes the handoff, asks for the enrolled parameters, and opens no
   assert.ok((authorize.searchParams.get('state') ?? '').length >= 16);
 });
 
+test('automatic resume restores the destination when the issuer requires interaction', async () => {
+  const { source, requests, store } = harness();
+  const target = '/dashboard/account/emails';
+  const authorization = new URL(await source.begin(target, 'resume'));
+  assert.equal(authorization.searchParams.get('prompt'), 'none');
+  const callback = new URLSearchParams({ state: authorization.searchParams.get('state')!, iss: ISSUER, error: 'login_required' });
+  let returned: string | undefined;
+  assert.equal(await source.complete(callback, (path) => { returned = path; }), 'interaction-required');
+  assert.equal(returned, target);
+  assert.equal(store.size, 0);
+  assert.equal(source.signedIn(), false);
+  assert.deepEqual(requests, []);
+  assert.equal(await source.complete(callback), 'no-handoff');
+});
+
 test('the callback compares state before it redeems, and spends the verifier exactly once', async () => {
   const { source, requests, store } = harness();
   await source.begin();

@@ -4,7 +4,7 @@
  * hand, because every line reproduces from the specification.
  *
  * Source: apps/control-plane/openapi.yaml (OpenAPI 3.1.0, info.version 0.1.0)
- * Input digest: sha256/3a2bc930ad70e08b
+ * Input digest: sha256/e6600375a7fd7770
  *
  * Reproduce it with `pnpm run api:types`. `pnpm run api:types:check` fails when this file stops matching
  * what the committed spec produces, which is the only way a generated type deserves to be trusted.
@@ -18,6 +18,16 @@
  * measured, not reasoned from habit). Someone who wants both should write `import type { Error as ApiError }`,
  * or reach for the whole surface with `import type * as Api` and use `Api.Error`.
  */
+
+export interface AccountEmails {
+  selfVerification: boolean;
+  multipleEmails: boolean;
+  addresses: Array<{
+    email: string;
+    primary: boolean;
+    verified: boolean;
+  }>;
+}
 
 export interface ApplyResult {
   instanceId: string;
@@ -786,6 +796,8 @@ export interface ApiParameters {
     teamId: string;
     launchId: string;
   };
+  /** GET /api/v1/me/emails */
+  getAccountEmails: Record<string, never>;
   /** GET /api/v1/me/profile */
   getAccountProfile: Record<string, never>;
   /** GET /api/v1/me */
@@ -1042,6 +1054,8 @@ export interface ApiParameters {
   reportArtifact: {
     instanceId: string;
   };
+  /** POST /api/v1/me/email-actions */
+  requestAccountEmailAction: Record<string, never>;
   /** DELETE /api/v1/instances/{instanceId}/capability/{capability}/shares/{toTeamId} */
   revokeCapabilityShare: {
     instanceId: string;
@@ -1096,6 +1110,8 @@ export interface ApiParameters {
   unlockStarterOpenBao: {
     teamId: string;
   };
+  /** POST /api/v1/me/emails */
+  updateAccountEmails: Record<string, never>;
   /** PUT /api/v1/me/profile */
   updateAccountProfile: Record<string, never>;
   /** PUT /api/v1/instances/{instanceId}/environments/{environment}/configuration/starter-brand */
@@ -1298,6 +1314,10 @@ export interface ApiRequestBodies {
     sourceRef?: string;
     version?: string;
   };
+  /** POST /api/v1/me/email-actions */
+  requestAccountEmailAction: {
+    action: 'verify-primary' | 'reset-password';
+  };
   /** PUT /api/v1/teams/{teamId}/marketplace/platforms/{platformId}/maintenance */
   setMarketplaceMaintenance: MarketplaceMaintenanceInput;
   /** PUT /api/v1/instances/{instanceId}/capability/{capability}/shares */
@@ -1324,10 +1344,21 @@ export interface ApiRequestBodies {
   unlockStarterOpenBao: {
     recovery: string;
   };
+  /** POST /api/v1/me/emails */
+  updateAccountEmails: ({
+    action: 'add' | 'make-primary' | 'remove';
+    email: string;
+  } | {
+    action: 'verify';
+    email: string;
+    code: string;
+  });
   /** PUT /api/v1/me/profile */
   updateAccountProfile: {
     username: string;
     displayName: string;
+    /** HTTPS image URL or an empty string to remove it. */
+    avatarUrl?: string;
   };
   /** PUT /api/v1/instances/{instanceId}/environments/{environment}/configuration/starter-brand */
   updateHostedStarterBrand: StarterBrandChange;
@@ -1610,6 +1641,13 @@ export interface ApiResponses {
     '404': Error;
     '409': Error;
   };
+  /** GET /api/v1/me/emails */
+  getAccountEmails: {
+    '200': AccountEmails;
+    '401': Error;
+    '403': Error;
+    '503': void;
+  };
   /** GET /api/v1/me/profile */
   getAccountProfile: {
     '200': {
@@ -1617,6 +1655,7 @@ export interface ApiResponses {
       displayName: string;
       email: string;
       emailVerified: boolean;
+      avatarUrl?: string;
     };
     '401': Error;
     '403': Error;
@@ -2311,6 +2350,16 @@ export interface ApiResponses {
     '403': Error;
     '404': Error;
   };
+  /** POST /api/v1/me/email-actions */
+  requestAccountEmailAction: {
+    '204': void;
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '409': Error;
+    '429': void;
+    '503': void;
+  };
   /** DELETE /api/v1/instances/{instanceId}/capability/{capability}/shares/{toTeamId} */
   revokeCapabilityShare: {
     '200': {
@@ -2434,6 +2483,16 @@ export interface ApiResponses {
     '404': Error;
     '503': Error;
   };
+  /** POST /api/v1/me/emails */
+  updateAccountEmails: {
+    '200': AccountEmails;
+    '400': Error;
+    '401': Error;
+    '403': Error;
+    '409': Error;
+    '429': void;
+    '503': void;
+  };
   /** PUT /api/v1/me/profile */
   updateAccountProfile: {
     '200': {
@@ -2441,6 +2500,7 @@ export interface ApiResponses {
       displayName: string;
       email: string;
       emailVerified: boolean;
+      avatarUrl?: string;
     };
     '400': Error;
     '401': Error;
@@ -2601,6 +2661,8 @@ export const ENDPOINTS = {
   enrollPrivateMarketplaceConnection: { method: 'post', path: '/api/v1/teams/{teamId}/marketplace/connection' },
   /** DELETE /api/v1/teams/{teamId}/marketplace/installation-launches/{launchId} */
   forgetHubInstallation: { method: 'delete', path: '/api/v1/teams/{teamId}/marketplace/installation-launches/{launchId}' },
+  /** GET /api/v1/me/emails */
+  getAccountEmails: { method: 'get', path: '/api/v1/me/emails' },
   /** GET /api/v1/me/profile */
   getAccountProfile: { method: 'get', path: '/api/v1/me/profile' },
   /** GET /api/v1/me */
@@ -2737,6 +2799,8 @@ export const ENDPOINTS = {
   removeTeamMember: { method: 'delete', path: '/api/v1/teams/{teamId}/members/{personId}' },
   /** POST /api/v1/instances/{instanceId}/artifacts */
   reportArtifact: { method: 'post', path: '/api/v1/instances/{instanceId}/artifacts' },
+  /** POST /api/v1/me/email-actions */
+  requestAccountEmailAction: { method: 'post', path: '/api/v1/me/email-actions' },
   /** DELETE /api/v1/instances/{instanceId}/capability/{capability}/shares/{toTeamId} */
   revokeCapabilityShare: { method: 'delete', path: '/api/v1/instances/{instanceId}/capability/{capability}/shares/{toTeamId}' },
   /** DELETE /api/v1/teams/{teamId}/invitations/{invitationId} */
@@ -2759,6 +2823,8 @@ export const ENDPOINTS = {
   unlinkMyHubIdentity: { method: 'delete', path: '/api/v1/me/hub-identity/{subject}' },
   /** POST /api/v1/teams/{teamId}/starter-launch/openbao/unlock */
   unlockStarterOpenBao: { method: 'post', path: '/api/v1/teams/{teamId}/starter-launch/openbao/unlock' },
+  /** POST /api/v1/me/emails */
+  updateAccountEmails: { method: 'post', path: '/api/v1/me/emails' },
   /** PUT /api/v1/me/profile */
   updateAccountProfile: { method: 'put', path: '/api/v1/me/profile' },
   /** PUT /api/v1/instances/{instanceId}/environments/{environment}/configuration/starter-brand */

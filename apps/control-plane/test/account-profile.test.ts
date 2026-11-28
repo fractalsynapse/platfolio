@@ -4,6 +4,7 @@ import { createIdentityFixture, defaultIdentityConfig, signToken } from '@platfo
 import { createKernel, disposeKernel, type KernelContext } from '@platfolio/kernel';
 import { buildCapabilities } from '../src/capabilities.ts';
 import { OPERATOR_DISPLAY_NAME_ATTRIBUTE } from '../src/account-profile.ts';
+import { OPERATOR_AVATAR_ATTRIBUTE } from '../../identity/src/operator-profile.ts';
 
 test('profile edits use the caller’s own issuer credential and preserve their verified email', async () => {
   const fixture = createIdentityFixture();
@@ -23,7 +24,8 @@ test('profile edits use the caller’s own issuer credential and preserve their 
     const body = JSON.parse(String(init?.body));
     assert.equal(body.email, previous.email);
     assert.equal(body.firstName, previous.firstName);
-    assert.deepEqual(body.attributes, { [OPERATOR_DISPLAY_NAME_ATTRIBUTE]: ['Operator'] });
+    assert.deepEqual(body.attributes, { [OPERATOR_DISPLAY_NAME_ATTRIBUTE]: ['Operator'],
+      [OPERATOR_AVATAR_ATTRIBUTE]: ['https://images.example.test/avatar.png'] });
     profile = { ...profile, ...body };
     return new Response(null, { status: 204 });
   };
@@ -41,11 +43,13 @@ test('profile edits use the caller’s own issuer credential and preserve their 
     const headers = { authorization: `Bearer ${bearer}`, 'content-type': 'application/json' };
     assert.equal((await fetch(api)).status, 401);
     assert.equal((await fetch(api, { method: 'PUT', headers, body: JSON.stringify({ username: 'updated', displayName: 'Operator', personId: 'other' }) })).status, 400);
+    assert.equal((await fetch(api, { method: 'PUT', headers, body: JSON.stringify({ username: 'updated', displayName: 'Operator', avatarUrl: 'http://images.example.test/avatar' }) })).status, 400);
     assert.equal(calls, 0);
-    const result = await fetch(api, { method: 'PUT', headers, body: JSON.stringify({ username: 'updated', displayName: 'Operator' }) });
+    const avatarUrl = 'https://images.example.test/avatar.png';
+    const result = await fetch(api, { method: 'PUT', headers, body: JSON.stringify({ username: 'updated', displayName: 'Operator', avatarUrl }) });
     assert.equal(result.status, 200);
     assert.equal(result.headers.get('cache-control'), 'no-store');
-    assert.deepEqual(await result.json(), { username: 'updated', displayName: 'Operator', email: previous.email, emailVerified: true });
+    assert.deepEqual(await result.json(), { username: 'updated', displayName: 'Operator', email: previous.email, emailVerified: true, avatarUrl });
     assert.equal(calls, 3);
   } finally {
     await disposeKernel(context);

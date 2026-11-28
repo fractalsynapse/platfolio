@@ -25,7 +25,7 @@ COPY --from=keycloak /opt/keycloak/lib/lib/boot /keycloak-boot
 COPY --from=private-realm /realm/platfolio-operator-profile.json ./resources/
 COPY apps/identity/providers/src/ ./src/
 RUN mkdir classes \
-    && javac --release 21 -cp '/keycloak-libs/*:/keycloak-boot/*' -d classes src/OperatorProfileMigration.java \
+    && javac --release 21 -cp '/keycloak-libs/*:/keycloak-boot/*' -d classes src/*.java \
     && jar --create --file /operator-profile.jar -C classes . -C src META-INF -C resources .
 
 FROM keycloak

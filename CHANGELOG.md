@@ -5,6 +5,14 @@ change; entries describe merged intent, not aspirations.
 
 ## [Unreleased]
 
+### Added — public account self-service (#288)
+
+Set a profile avatar URL, verify email addresses, promote a verified address to
+primary, and request a password reset link from Account. Hub deployments select
+the public policy and open registration when their realm has SMTP. Spokes default
+to administrator-managed registration. Dashboard entry attempts to resume an
+existing local identity session before offering sign-in.
+
 ### Fixed — repair Account profiles during private installation upgrades (#288)
 
 The new identity image updates the existing Keycloak operator realm in place so
